@@ -14,10 +14,15 @@ import { fileEditTool } from "./tools/definitions/file-edit.js";
 import { globTool } from "./tools/definitions/glob.js";
 import { grepTool } from "./tools/definitions/grep.js";
 import { bashTool } from "./tools/definitions/bash.js";
+import { webFetchTool } from "./tools/definitions/web-fetch.js";
+import { webSearchTool } from "./tools/definitions/web-search.js";
+import { todoWriteTool } from "./tools/definitions/todo-write.js";
+import { askUserTool } from "./tools/definitions/ask-user.js";
 import { createBrowserTools } from "./tools/definitions/browser.js";
 import { displayWelcome } from "./cli/renderer.js";
 import { REPL } from "./cli/repl.js";
 import { PROVIDER_LABELS } from "./config/types.js";
+import { getLatestSession } from "./agent/session-manager.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -40,14 +45,26 @@ async function main(): Promise<void> {
   // Create provider
   const provider = createProvider(config.mainLLM);
 
-  // Create tool registry
+  // Create tool registry with ALL tools
   const toolRegistry = new ToolRegistry();
+
+  // File tools
   toolRegistry.register(fileReadTool);
   toolRegistry.register(fileWriteTool);
   toolRegistry.register(fileEditTool);
   toolRegistry.register(globTool);
   toolRegistry.register(grepTool);
+
+  // System tools
   toolRegistry.register(bashTool);
+
+  // Web tools
+  toolRegistry.register(webFetchTool);
+  toolRegistry.register(webSearchTool);
+
+  // Interactive tools
+  toolRegistry.register(todoWriteTool);
+  toolRegistry.register(askUserTool);
 
   // Browser tools
   const playwrightManager = new PlaywrightManager();
@@ -90,6 +107,26 @@ async function main(): Promise<void> {
     config.context.compressionThreshold,
   );
 
+  // Check for --resume flag
+  const resumeIdx = args.indexOf("--resume");
+  if (resumeIdx !== -1) {
+    const sessionId = args[resumeIdx + 1];
+    if (sessionId) {
+      const { loadSession } = await import("./agent/session-manager.js");
+      const session = loadSession(sessionId);
+      if (session) {
+        agent.restoreSession(session);
+        console.log(`  Resumed session: ${sessionId}`);
+      }
+    }
+  } else if (args.includes("--continue")) {
+    const latest = getLatestSession();
+    if (latest) {
+      agent.restoreSession(latest);
+      console.log(`  Resumed latest session: ${latest.meta.id}`);
+    }
+  }
+
   // Display welcome
   displayWelcome(
     config.mainLLM.model,
@@ -99,10 +136,11 @@ async function main(): Promise<void> {
   );
 
   // Start REPL
-  const repl = new REPL(agent);
+  const repl = new REPL(agent, config);
   await repl.start();
 
   // Cleanup
+  agent.saveCurrentSession();
   await playwrightManager.close();
 }
 

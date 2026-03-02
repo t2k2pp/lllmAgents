@@ -9,6 +9,11 @@ export class PermissionManager {
   private sandbox: Sandbox;
   private autoApprove: Set<string>;
   private requireApproval: Set<string>;
+  // Session-level approvals: "tool:paramsHash" → approved
+  private sessionApprovals = new Set<string>();
+  // Always-allow for specific tools in this session
+  private alwaysAllowTools = new Set<string>();
+
   constructor(config: SecurityConfig) {
     this.sandbox = new Sandbox(config);
     this.autoApprove = new Set(config.autoApproveTools);
@@ -17,8 +22,9 @@ export class PermissionManager {
 
   getPermissionLevel(toolName: string): PermissionLevel {
     if (this.autoApprove.has(toolName)) return "auto";
+    if (this.alwaysAllowTools.has(toolName)) return "auto";
     if (this.requireApproval.has(toolName)) return "ask";
-    return "ask"; // Default: ask
+    return "ask";
   }
 
   isPathAllowed(targetPath: string): boolean {
@@ -33,7 +39,6 @@ export class PermissionManager {
 
     // Auto-approve
     if (level === "auto") {
-      // Still check sandbox for file operations
       if (toolName.startsWith("file_") || toolName === "glob" || toolName === "grep") {
         const filePath = (params.path ?? params.file_path ?? params.pattern) as string | undefined;
         if (filePath && !this.sandbox.isPathAllowed(filePath)) {
@@ -48,7 +53,13 @@ export class PermissionManager {
       return { allowed: false, reason: `ツール ${toolName} は使用が禁止されています` };
     }
 
-    // Ask: check for dangerous commands
+    // Check session approval cache
+    const cacheKey = `${toolName}:${hashParams(params)}`;
+    if (this.sessionApprovals.has(cacheKey)) {
+      return { allowed: true };
+    }
+
+    // Check for dangerous commands
     if (toolName === "bash") {
       const command = params.command as string;
       const dangerousRule = checkCommand(command);
@@ -56,12 +67,11 @@ export class PermissionManager {
         if (dangerousRule.action === "block") {
           return { allowed: false, reason: dangerousRule.message };
         }
-        // Warn: show warning and ask
         console.log(chalk.yellow(`\n  WARNING: ${dangerousRule.message}`));
       }
     }
 
-    // File operations: check sandbox
+    // File operations: sandbox check
     if (toolName === "file_write" || toolName === "file_edit") {
       const filePath = (params.file_path ?? params.path) as string;
       if (filePath && !this.sandbox.isPathAllowed(filePath)) {
@@ -69,29 +79,40 @@ export class PermissionManager {
       }
     }
 
-    // Ask user
-    return this.askUser(toolName, params);
+    return this.askUserWithScope(toolName, params, cacheKey);
   }
 
-  private async askUser(
+  private async askUserWithScope(
     toolName: string,
     params: Record<string, unknown>,
+    cacheKey: string,
   ): Promise<{ allowed: boolean; reason?: string }> {
     const summary = this.formatToolSummary(toolName, params);
     console.log(chalk.cyan(`\n  [${toolName}] ${summary}`));
 
-    const { approved } = await inquirer.prompt<{ approved: boolean }>([
+    const { action } = await inquirer.prompt<{ action: string }>([
       {
-        type: "confirm",
-        name: "approved",
-        message: "実行しますか？",
-        default: true,
+        type: "list",
+        name: "action",
+        message: "実行を許可しますか？",
+        choices: [
+          { name: "許可 (今回のみ)", value: "once" },
+          { name: `許可 (${toolName} をセッション中常に許可)`, value: "always" },
+          { name: "拒否", value: "deny" },
+        ],
       },
     ]);
 
-    if (!approved) {
+    if (action === "deny") {
       return { allowed: false, reason: "ユーザーが拒否しました" };
     }
+
+    if (action === "always") {
+      this.alwaysAllowTools.add(toolName);
+    } else {
+      this.sessionApprovals.add(cacheKey);
+    }
+
     return { allowed: true };
   }
 
@@ -109,8 +130,23 @@ export class PermissionManager {
         return `クリック: ${params.selector ?? params.ref}`;
       case "browser_type":
         return `入力: ${params.text}`;
+      case "web_fetch":
+        return `取得: ${params.url}`;
+      case "web_search":
+        return `検索: ${params.query}`;
       default:
-        return JSON.stringify(params).slice(0, 100);
+        return JSON.stringify(params).slice(0, 120);
     }
   }
+}
+
+function hashParams(params: Record<string, unknown>): string {
+  // Simple hash for caching
+  const str = JSON.stringify(params);
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash + char) | 0;
+  }
+  return hash.toString(36);
 }

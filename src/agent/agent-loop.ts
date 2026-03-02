@@ -6,34 +6,36 @@ import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager } from "../security/permission-manager.js";
 import { MessageHistory } from "./message-history.js";
 import { ContextManager } from "./context-manager.js";
+import { buildSystemPrompt } from "./system-prompt.js";
+import {
+  createSession,
+  saveSession,
+  type SessionData,
+} from "./session-manager.js";
 import * as logger from "../utils/logger.js";
 
 const MAX_TOOL_ITERATIONS = 50;
-
-const SYSTEM_PROMPT = `あなたはLocalLLM Agent - CLIベースのAIアシスタントです。
-ユーザーのPC上でファイル操作、コマンド実行、ブラウザ操作を行えます。
-
-利用可能なツールを活用して、ユーザーのタスクを遂行してください。
-セキュリティに配慮し、破壊的な操作は慎重に行ってください。
-回答は簡潔かつ正確に。
-`;
+const MAX_RETRIES = 2;
 
 export class AgentLoop {
   private history: MessageHistory;
   private contextManager: ContextManager;
   private toolExecutor: ToolExecutor;
+  private session: SessionData;
 
   constructor(
     private provider: LLMProvider,
     private model: string,
     private toolRegistry: ToolRegistry,
-    _permissions: PermissionManager,
+    permissions: PermissionManager,
     contextWindow: number,
     compressionThreshold: number,
   ) {
-    this.history = new MessageHistory(SYSTEM_PROMPT);
+    const systemPrompt = buildSystemPrompt();
+    this.history = new MessageHistory(systemPrompt);
     this.contextManager = new ContextManager(provider, model, contextWindow, compressionThreshold);
-    this.toolExecutor = new ToolExecutor(toolRegistry, _permissions);
+    this.toolExecutor = new ToolExecutor(toolRegistry, permissions);
+    this.session = createSession(model);
   }
 
   async run(userMessage: string): Promise<void> {
@@ -52,56 +54,76 @@ export class AgentLoop {
         }
       }
 
-      // Call LLM with tools
-      const toolDefs = this.toolRegistry.getDefinitions();
-      const gen = toolDefs.length > 0
-        ? this.provider.chatWithTools({
-            model: this.model,
-            messages: this.history.getMessages(),
-            tools: toolDefs,
-            stream: true,
-          })
-        : this.provider.chat({
-            model: this.model,
-            messages: this.history.getMessages(),
-            stream: true,
-          });
-
-      // Process streaming response
+      // Call LLM with retry
       let textContent = "";
       const toolCalls: ToolCall[] = [];
       let hasStartedOutput = false;
+      let success = false;
 
-      for await (const chunk of gen) {
-        switch (chunk.type) {
-          case "text":
-            if (chunk.text) {
-              if (!hasStartedOutput) {
-                hasStartedOutput = true;
-                process.stdout.write("\n");
-              }
-              process.stdout.write(chunk.text);
-              textContent += chunk.text;
+      for (let retry = 0; retry <= MAX_RETRIES; retry++) {
+        try {
+          const toolDefs = this.toolRegistry.getDefinitions();
+          const gen = toolDefs.length > 0
+            ? this.provider.chatWithTools({
+                model: this.model,
+                messages: this.history.getMessages(),
+                tools: toolDefs,
+                stream: true,
+              })
+            : this.provider.chat({
+                model: this.model,
+                messages: this.history.getMessages(),
+                stream: true,
+              });
+
+          for await (const chunk of gen) {
+            switch (chunk.type) {
+              case "text":
+                if (chunk.text) {
+                  if (!hasStartedOutput) {
+                    hasStartedOutput = true;
+                    process.stdout.write("\n");
+                  }
+                  process.stdout.write(chunk.text);
+                  textContent += chunk.text;
+                }
+                break;
+              case "tool_call":
+                if (chunk.toolCall) {
+                  toolCalls.push(chunk.toolCall);
+                }
+                break;
+              case "error":
+                throw new Error(chunk.error ?? "LLM error");
+              case "done":
+                break;
             }
-            break;
-          case "tool_call":
-            if (chunk.toolCall) {
-              toolCalls.push(chunk.toolCall);
-            }
-            break;
-          case "error":
-            console.error(chalk.red(`\n  Error: ${chunk.error}`));
+          }
+
+          success = true;
+          break;
+        } catch (e) {
+          if (retry < MAX_RETRIES) {
+            const waitMs = 1000 * (retry + 1);
+            console.log(chalk.yellow(`\n  リトライ中 (${retry + 1}/${MAX_RETRIES})...`));
+            await sleep(waitMs);
+            textContent = "";
+            toolCalls.length = 0;
+            hasStartedOutput = false;
+          } else {
+            console.error(chalk.red(`\n  Error: ${e instanceof Error ? e.message : String(e)}`));
             return;
-          case "done":
-            break;
+          }
         }
       }
+
+      if (!success) return;
 
       if (hasStartedOutput) {
         process.stdout.write("\n");
       }
 
-      // If tool calls: execute them and continue loop
+      // Tool calls: execute and continue
       if (toolCalls.length > 0) {
         this.history.addAssistantMessage(textContent, toolCalls);
 
@@ -120,11 +142,10 @@ export class AgentLoop {
             : `Error: ${result.error}\n${result.output}`;
           this.history.addToolResult(toolCall.id, resultContent);
         }
-        // Continue loop: LLM will see tool results
         continue;
       }
 
-      // No tool calls: final response
+      // Final response
       this.history.addAssistantMessage(textContent);
       return;
     }
@@ -132,7 +153,39 @@ export class AgentLoop {
     console.log(chalk.yellow("\n  Maximum tool iterations reached."));
   }
 
+  async forceCompress(): Promise<void> {
+    await this.contextManager.compress(this.history);
+  }
+
+  saveCurrentSession(): void {
+    this.session.messages = this.history.getRawMessages();
+    saveSession(this.session);
+    logger.debug(`Session saved: ${this.session.meta.id}`);
+  }
+
+  restoreSession(sessionData: SessionData): void {
+    this.session = sessionData;
+    const systemPrompt = buildSystemPrompt();
+    this.history = new MessageHistory(systemPrompt);
+    for (const msg of sessionData.messages) {
+      if (msg.role === "user") {
+        this.history.addUserMessage(typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content));
+      } else if (msg.role === "assistant") {
+        this.history.addAssistantMessage(
+          typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
+          msg.tool_calls,
+        );
+      } else if (msg.role === "tool") {
+        this.history.addToolResult(msg.tool_call_id ?? "", typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content));
+      }
+    }
+  }
+
   getHistory(): MessageHistory {
     return this.history;
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
