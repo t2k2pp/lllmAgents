@@ -145,7 +145,43 @@ stateDiagram-v2
     approved --> idle : 計画に基づき<br>実行用ツール(write等)を解禁
 ```
 
-## 3. インターフェース設計 (クラス構造例)
+## 3. サンドボックスの内部アーキテクチャ詳細
+
+本システムのサンドボックス機構は、OSレベルの仮想化（コンテナ等）ではなく、アプリケーション層（Node.js）での「パスの文字列評価」によるシンプルなアーキテクチャを採用しています。
+
+```mermaid
+sequenceDiagram
+    participant Tool as Tool (file_read 等)
+    participant PM as PermissionManager
+    participant Sandbox as Sandbox
+    participant OS as File System
+
+    Tool->>PM: 対象パス(targetPath)での操作要求
+    PM->>Sandbox: isPathAllowed(targetPath)
+    
+    Note over Sandbox: 1. パスの正規化<br/>resolved = path.resolve(targetPath)
+    Note over Sandbox: 2. 許可リストとの前方一致比較<br/>resolved.startsWith(allowedDir)
+    
+    alt 許可リストのパスから始まる場合
+        Sandbox-->>PM: true (許可)
+        PM->>OS: ファイル操作の実行
+    else 許可リスト外・不正パスの場合
+        Sandbox-->>PM: false (拒否)
+        PM-->>Tool: Error: サンドボックス外です
+    end
+```
+
+### 3.1 許可ディレクトリの初期化
+システム起動時、`Sandbox` クラスは以下の領域を安全なディレクトリリスト(`allowedDirs`)としてメモリ上に保持します。
+1. `process.cwd()` : エージェントを起動した現在の作業ディレクトリ
+2. `os.homedir() + "/.localllm"` : エージェントの挙動を管理する設定領域
+3. `config.json` の `allowedDirectories` パラメータで指定された追加パス
+
+### 3.2 評価ロジックと制約
+実際のパス解決は `path.resolve()` により相対パス表記（`../`など）を排除した絶対パス文字列を生成し、それが許可リストと前方一致（`startsWith`）するかで判定します。
+この「文字列ベースの検査機構」に依存している仕様が原因となり、OS特有のファイルシステム挙動（WindowsのショートパスやUNCパス、Linux/Macのシンボリックリンク等）に対する技術的制約やバイパスリスクを抱えています。リスクの詳細は『セキュリティ評価書 (`security_assessment.md`)』に明記しています。
+
+## 4. インターフェース設計 (クラス構造例)
 
 ```mermaid
 classDiagram
