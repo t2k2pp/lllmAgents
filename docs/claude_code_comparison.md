@@ -3,7 +3,42 @@
 本システム（LocalLLM Agent）は「Claude Code」にインスパイアされて設計・開発されていますが、利用環境や技術アプローチにおいていくつかの重要な設計の差異があります。
 本ドキュメントでは、両者の機能やアーキテクチャの対比を整理します。
 
-## 1. 基本アプローチの比較
+## 1. 構成・アーキテクチャの違い
+
+クラウドに依存するClaude Codeと、端末内で完結するLocalLLM Agentにはデータの流れに根本的な違いがあります。
+
+```mermaid
+graph TD
+    classDef claude fill:#e3f2fd,stroke:#1565c0;
+    classDef local fill:#e8f5e9,stroke:#2e7d32;
+    classDef db fill:#f5f5f5,stroke:#9e9e9e;
+
+    subgraph "Claude Code (Cloud-based)"
+        User1[User Terminal]:::claude
+        API[Anthropic API]:::claude
+        Model1[Claude 3.5 Sonnet]:::claude
+        
+        User1 <--> |Code content & Prompts via Internet| API
+        API <--> Model1
+    end
+
+    subgraph "LocalLLM Agent (On-premise)"
+        User2[User Terminal]:::local
+        Provider[Local Provider: Ollama/vLLM]:::local
+        Model2[llama3 / Qwen / etc]:::local
+        
+        User2 <--> |Localhost IPC| Provider
+        Provider <--> Model2
+    end
+    
+    note_claude[⚠️ コー​​ドやプロンプトは外部流出する]:::db
+    note_local[✅ データの完全な秘匿性・エアギャップ可能]:::db
+    
+    API -.-> note_claude
+    Provider -.-> note_local
+```
+
+## 2. 基本アプローチと機能の比較詳細
 
 | 比較項目 | Claude Code (Anthropic) | LocalLLM Agent (本システム) |
 | :--- | :--- | :--- |
@@ -11,8 +46,6 @@
 | **運用コスト** | 従量課金 (APIトークン消費) | **無料** (マシンの電気代などのみ) |
 | **プライバシー・<br>機密保持** | ソースコードが外部(Anthropic等)のAPIサーバに送信される | **完全オフライン動作可能**。機密性の高いコードや社外秘データを外部に送信しない |
 | **環境構築** | `npm install -g @anthropic-ai/claude-code` | Node.js + ローカルLLM環境(Ollama等)の事前セットアップが必要 |
-
-## 2. アーキテクチャと機能の差異
 
 ### 2.1 コンテキスト管理
 - **Claude Code**: 基盤モデル側で長大なコンテキストウインドウ (200K トークンなど) がサポートされており、基本的にはAPI任せのコンテキスト保持を採用しています（大規模なプロジェクト全体の理解が得意）。
