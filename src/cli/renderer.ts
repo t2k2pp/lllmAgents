@@ -1,10 +1,10 @@
 import chalk from "chalk";
 
-export function displayWelcome(model: string, baseUrl: string, providerType: string, contextWindow: number): void {
+export function displayWelcome(model: string, baseUrl: string, providerType: string, contextWindow: number, skillCount: number): void {
   const ctxLabel = contextWindow >= 1000 ? `${Math.round(contextWindow / 1000)}K` : `${contextWindow}`;
-  console.log(chalk.bold(`\n  LocalLLM Agent v0.1.0`));
+  console.log(chalk.bold(`\n  LocalLLM Agent v0.2.0`));
   console.log(chalk.dim(`  Model: ${model} @ ${baseUrl} (${providerType})`));
-  console.log(chalk.dim(`  Context: ${ctxLabel} tokens`));
+  console.log(chalk.dim(`  Context: ${ctxLabel} tokens | Skills: ${skillCount}`));
   console.log(chalk.dim(`  CWD: ${process.cwd()}`));
   console.log(chalk.dim(`  Type /help for commands, /quit to exit.`));
   console.log(chalk.dim(`  マルチライン入力: \`\`\` で開始・終了\n`));
@@ -13,18 +13,27 @@ export function displayWelcome(model: string, baseUrl: string, providerType: str
 export function displayHelp(): void {
   console.log(`
   ${chalk.bold("コマンド:")}
-    ${chalk.cyan("/help")}        このヘルプを表示
-    ${chalk.cyan("/quit")}        終了
-    ${chalk.cyan("/clear")}       会話履歴をクリア
-    ${chalk.cyan("/context")}     コンテキスト使用状況 (プログレスバー付き)
-    ${chalk.cyan("/compact")}     コンテキストを手動圧縮
-    ${chalk.cyan("/model")}       現在のモデル情報
-    ${chalk.cyan("/todo")}        タスクリスト表示
-    ${chalk.cyan("/sessions")}    保存済みセッション一覧
-    ${chalk.cyan("/resume <id>")} セッション復元
-    ${chalk.cyan("/memory")}      自動メモリ表示
-    ${chalk.cyan("/remember")}    メモリに追記
-    ${chalk.cyan("/diff")}        git diff表示
+    ${chalk.cyan("/help")}           このヘルプを表示
+    ${chalk.cyan("/quit")}           終了
+    ${chalk.cyan("/clear")}          会話履歴をクリア
+    ${chalk.cyan("/context")}        コンテキスト使用状況
+    ${chalk.cyan("/compact")}        コンテキストを手動圧縮
+    ${chalk.cyan("/model")}          現在のモデル情報
+    ${chalk.cyan("/todo")}           タスクリスト表示
+    ${chalk.cyan("/sessions")}       保存済みセッション一覧
+    ${chalk.cyan("/resume <id>")}    セッション復元
+    ${chalk.cyan("/memory")}         自動メモリ表示
+    ${chalk.cyan("/remember <text>")} メモリに追記
+    ${chalk.cyan("/diff")}           git diff表示
+    ${chalk.cyan("/plan")}           プランモードに入る
+    ${chalk.cyan("/skills")}         利用可能なスキル一覧
+    ${chalk.cyan("/status")}         全体ステータス
+
+  ${chalk.bold("スキル (直接呼び出し可能):")}
+    ${chalk.cyan("/commit")}         コミットワークフロー
+    ${chalk.cyan("/pr-review")}      PRコードレビュー
+    ${chalk.cyan("/tdd")}            テスト駆動開発
+    ${chalk.cyan("/build-fix")}      ビルドエラー修正
 
   ${chalk.bold("入力:")}
     \`\`\`  マルチライン入力モード開始/終了
@@ -43,7 +52,6 @@ export function displayDiff(oldText: string, newText: string, filePath: string):
   console.log(chalk.bold(`\n  --- ${filePath}`));
   console.log(chalk.bold(`  +++ ${filePath} (modified)`));
 
-  // Simple line-level diff
   const maxLen = Math.max(oldLines.length, newLines.length);
   for (let i = 0; i < maxLen; i++) {
     const oldLine = oldLines[i];

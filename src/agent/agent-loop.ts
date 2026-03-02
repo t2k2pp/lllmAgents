@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import ora from "ora";
-import type { LLMProvider, ToolCall } from "../providers/base-provider.js";
+import type { LLMProvider, ToolCall, ToolDefinition } from "../providers/base-provider.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager } from "../security/permission-manager.js";
@@ -12,6 +12,7 @@ import {
   saveSession,
   type SessionData,
 } from "./session-manager.js";
+import { PlanManager } from "./plan-mode.js";
 import * as logger from "../utils/logger.js";
 
 const MAX_TOOL_ITERATIONS = 50;
@@ -22,12 +23,13 @@ export class AgentLoop {
   private contextManager: ContextManager;
   private toolExecutor: ToolExecutor;
   private session: SessionData;
+  private planManager: PlanManager | null = null;
 
   constructor(
     private provider: LLMProvider,
     private model: string,
     private toolRegistry: ToolRegistry,
-    permissions: PermissionManager,
+    private permissions: PermissionManager,
     contextWindow: number,
     compressionThreshold: number,
   ) {
@@ -36,6 +38,10 @@ export class AgentLoop {
     this.contextManager = new ContextManager(provider, model, contextWindow, compressionThreshold);
     this.toolExecutor = new ToolExecutor(toolRegistry, permissions);
     this.session = createSession(model);
+  }
+
+  setPlanManager(pm: PlanManager): void {
+    this.planManager = pm;
   }
 
   async run(userMessage: string): Promise<void> {
@@ -62,7 +68,7 @@ export class AgentLoop {
 
       for (let retry = 0; retry <= MAX_RETRIES; retry++) {
         try {
-          const toolDefs = this.toolRegistry.getDefinitions();
+          const toolDefs = this.getFilteredToolDefs();
           const gen = toolDefs.length > 0
             ? this.provider.chatWithTools({
                 model: this.model,
@@ -123,24 +129,14 @@ export class AgentLoop {
         process.stdout.write("\n");
       }
 
-      // Tool calls: execute and continue
+      // Tool calls: execute (parallel when multiple) and continue
       if (toolCalls.length > 0) {
         this.history.addAssistantMessage(textContent, toolCalls);
 
-        for (const toolCall of toolCalls) {
-          const spinner = ora(chalk.dim(`  ${toolCall.function.name}...`)).start();
-          const result = await this.toolExecutor.execute(toolCall);
-
-          if (result.success) {
-            spinner.succeed(chalk.dim(`  ${toolCall.function.name}`));
-          } else {
-            spinner.fail(chalk.dim(`  ${toolCall.function.name}: ${result.error}`));
-          }
-
-          const resultContent = result.success
-            ? result.output
-            : `Error: ${result.error}\n${result.output}`;
-          this.history.addToolResult(toolCall.id, resultContent);
+        if (toolCalls.length === 1) {
+          await this.executeSingleTool(toolCalls[0]);
+        } else {
+          await this.executeToolsParallel(toolCalls);
         }
         continue;
       }
@@ -151,6 +147,62 @@ export class AgentLoop {
     }
 
     console.log(chalk.yellow("\n  Maximum tool iterations reached."));
+  }
+
+  /** Get tool definitions, filtered by plan mode if active */
+  private getFilteredToolDefs(): ToolDefinition[] {
+    const allDefs = this.toolRegistry.getDefinitions();
+
+    if (this.planManager?.isInPlanMode()) {
+      const allowed = PlanManager.getPlanModeAllowedTools();
+      return allDefs.filter((d) => allowed.has(d.function.name));
+    }
+
+    return allDefs;
+  }
+
+  /** Execute a single tool call */
+  private async executeSingleTool(toolCall: ToolCall): Promise<void> {
+    const spinner = ora(chalk.dim(`  ${toolCall.function.name}...`)).start();
+    const result = await this.toolExecutor.execute(toolCall);
+
+    if (result.success) {
+      spinner.succeed(chalk.dim(`  ${toolCall.function.name}`));
+    } else {
+      spinner.fail(chalk.dim(`  ${toolCall.function.name}: ${result.error}`));
+    }
+
+    const resultContent = result.success
+      ? result.output
+      : `Error: ${result.error}\n${result.output}`;
+    this.history.addToolResult(toolCall.id, resultContent);
+  }
+
+  /** Execute multiple tool calls in parallel with Promise.allSettled */
+  private async executeToolsParallel(toolCalls: ToolCall[]): Promise<void> {
+    console.log(chalk.dim(`\n  ⟹ ${toolCalls.length} tools in parallel...`));
+
+    const promises = toolCalls.map(async (toolCall) => {
+      const result = await this.toolExecutor.execute(toolCall);
+      const icon = result.success ? chalk.green("✓") : chalk.red("✗");
+      const suffix = result.success ? "" : `: ${result.error}`;
+      console.log(chalk.dim(`  ${icon} ${toolCall.function.name}${suffix}`));
+      return { toolCall, result };
+    });
+
+    const settled = await Promise.allSettled(promises);
+
+    for (const entry of settled) {
+      if (entry.status === "fulfilled") {
+        const { toolCall, result } = entry.value;
+        const resultContent = result.success
+          ? result.output
+          : `Error: ${result.error}\n${result.output}`;
+        this.history.addToolResult(toolCall.id, resultContent);
+      } else {
+        logger.error("Parallel tool execution error:", entry.reason);
+      }
+    }
   }
 
   async forceCompress(): Promise<void> {
@@ -183,6 +235,22 @@ export class AgentLoop {
 
   getHistory(): MessageHistory {
     return this.history;
+  }
+
+  getProvider(): LLMProvider {
+    return this.provider;
+  }
+
+  getModel(): string {
+    return this.model;
+  }
+
+  getToolRegistry(): ToolRegistry {
+    return this.toolRegistry;
+  }
+
+  getPermissions(): PermissionManager {
+    return this.permissions;
   }
 }
 

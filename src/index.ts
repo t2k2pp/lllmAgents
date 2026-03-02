@@ -8,6 +8,12 @@ import { ToolRegistry } from "./tools/tool-registry.js";
 import { PermissionManager } from "./security/permission-manager.js";
 import { PlaywrightManager } from "./browser/playwright-manager.js";
 import { VisionService, createVisionTool } from "./tools/definitions/vision.js";
+import { PlanManager } from "./agent/plan-mode.js";
+import { SubAgentManager } from "./agent/sub-agent.js";
+import { SkillRegistry } from "./skills/skill-registry.js";
+import { loadAllSkills } from "./skills/skill-loader.js";
+
+// Tool imports
 import { fileReadTool } from "./tools/definitions/file-read.js";
 import { fileWriteTool } from "./tools/definitions/file-write.js";
 import { fileEditTool } from "./tools/definitions/file-edit.js";
@@ -19,6 +25,10 @@ import { webSearchTool } from "./tools/definitions/web-search.js";
 import { todoWriteTool } from "./tools/definitions/todo-write.js";
 import { askUserTool } from "./tools/definitions/ask-user.js";
 import { createBrowserTools } from "./tools/definitions/browser.js";
+import { taskTool, taskOutputTool, setSubAgentManager } from "./tools/definitions/task.js";
+import { enterPlanModeTool, exitPlanModeTool, setPlanManager } from "./tools/definitions/plan-mode.js";
+import { skillTool, setSkillRegistry } from "./tools/definitions/skill.js";
+
 import { displayWelcome } from "./cli/renderer.js";
 import { REPL } from "./cli/repl.js";
 import { PROVIDER_LABELS } from "./config/types.js";
@@ -66,6 +76,17 @@ async function main(): Promise<void> {
   toolRegistry.register(todoWriteTool);
   toolRegistry.register(askUserTool);
 
+  // Plan mode tools
+  toolRegistry.register(enterPlanModeTool);
+  toolRegistry.register(exitPlanModeTool);
+
+  // Sub-agent tools
+  toolRegistry.register(taskTool);
+  toolRegistry.register(taskOutputTool);
+
+  // Skill tool
+  toolRegistry.register(skillTool);
+
   // Browser tools
   const playwrightManager = new PlaywrightManager();
   const browserTools = createBrowserTools(playwrightManager);
@@ -107,6 +128,23 @@ async function main(): Promise<void> {
     config.context.compressionThreshold,
   );
 
+  // Plan manager
+  const planManager = new PlanManager();
+  agent.setPlanManager(planManager);
+  setPlanManager(planManager);
+
+  // Sub-agent manager
+  const subAgentManager = new SubAgentManager(provider, config.mainLLM.model, toolRegistry, permissions);
+  setSubAgentManager(subAgentManager);
+
+  // Skill registry
+  const skillRegistry = new SkillRegistry();
+  const skills = loadAllSkills();
+  for (const skill of skills) {
+    skillRegistry.register(skill);
+  }
+  setSkillRegistry(skillRegistry);
+
   // Check for --resume flag
   const resumeIdx = args.indexOf("--resume");
   if (resumeIdx !== -1) {
@@ -133,10 +171,11 @@ async function main(): Promise<void> {
     config.mainLLM.baseUrl,
     PROVIDER_LABELS[config.mainLLM.providerType],
     contextWindow,
+    skills.length,
   );
 
   // Start REPL
-  const repl = new REPL(agent, config);
+  const repl = new REPL(agent, config, skillRegistry, planManager);
   await repl.start();
 
   // Cleanup

@@ -7,15 +7,20 @@ import { formatTodos } from "../tools/definitions/todo-write.js";
 import { listSessions, loadSession } from "../agent/session-manager.js";
 import { loadMemory, saveMemory } from "../agent/memory.js";
 import type { Config } from "../config/types.js";
+import type { SkillRegistry } from "../skills/skill-registry.js";
+import type { PlanManager } from "../agent/plan-mode.js";
 
 export class REPL {
   private rl: readline.Interface;
   private multilineBuffer: string[] = [];
   private isMultiline = false;
+  private lineNumber = 0;
 
   constructor(
     private agent: AgentLoop,
     private config: Config,
+    private skillRegistry?: SkillRegistry,
+    private planManager?: PlanManager,
   ) {
     this.rl = readline.createInterface({
       input: process.stdin,
@@ -25,12 +30,23 @@ export class REPL {
 
   async start(): Promise<void> {
     const prompt = () => {
-      const prefix = this.isMultiline ? chalk.dim("... ") : chalk.green("> ");
+      let prefix: string;
+      if (this.isMultiline) {
+        this.lineNumber++;
+        prefix = chalk.dim(`${String(this.lineNumber).padStart(3)}| `);
+      } else if (this.planManager?.isInPlanMode()) {
+        prefix = chalk.yellow("[plan] > ");
+      } else {
+        prefix = chalk.green("> ");
+      }
+
       this.rl.question(prefix, async (input) => {
         // Multi-line mode: triple backtick to start/end
         if (input.trim() === "```" && !this.isMultiline) {
           this.isMultiline = true;
           this.multilineBuffer = [];
+          this.lineNumber = 0;
+          console.log(chalk.dim("  マルチライン入力モード (``` で終了)"));
           prompt();
           return;
         }
@@ -38,6 +54,7 @@ export class REPL {
           this.isMultiline = false;
           const fullInput = this.multilineBuffer.join("\n");
           this.multilineBuffer = [];
+          this.lineNumber = 0;
           if (fullInput.trim()) {
             await this.processInput(fullInput);
           }
@@ -75,6 +92,7 @@ export class REPL {
       if (this.isMultiline) {
         this.isMultiline = false;
         this.multilineBuffer = [];
+        this.lineNumber = 0;
         console.log(chalk.dim("\n  (マルチライン入力をキャンセル)"));
       } else {
         console.log(chalk.dim("\n  (Ctrl+C) /quit で終了"));
@@ -83,7 +101,6 @@ export class REPL {
     });
 
     this.rl.on("close", () => {
-      // Save session on exit
       this.agent.saveCurrentSession();
     });
   }
@@ -97,7 +114,20 @@ export class REPL {
   }
 
   private async handleCommand(cmd: string): Promise<string | void> {
-    const [command, ...args] = cmd.toLowerCase().split(/\s+/);
+    const parts = cmd.split(/\s+/);
+    const command = parts[0].toLowerCase();
+    const args = parts.slice(1);
+
+    // Check if it's a skill trigger
+    if (this.skillRegistry) {
+      const skill = this.skillRegistry.get(command);
+      if (skill) {
+        console.log(chalk.dim(`\n  [Skill] ${skill.name}: ${skill.description}`));
+        const skillPrompt = `${skill.content}\n\n${args.length > 0 ? `引数: ${args.join(" ")}` : "上記のスキル指示に従ってタスクを実行してください。"}`;
+        await this.processInput(skillPrompt);
+        return;
+      }
+    }
 
     switch (command) {
       case "/help":
@@ -211,9 +241,56 @@ export class REPL {
         break;
       }
 
+      case "/plan":
+        if (this.planManager?.isInPlanMode()) {
+          console.log(chalk.yellow("  既にプランモードです。"));
+        } else {
+          await this.processInput("このタスクの実装計画を立てたい。enter_plan_modeを使ってプランモードに入ってください。");
+        }
+        break;
+
+      case "/skills": {
+        if (!this.skillRegistry) {
+          console.log(chalk.dim("  スキルシステムが初期化されていません。"));
+          break;
+        }
+        const skills = this.skillRegistry.list();
+        if (skills.length === 0) {
+          console.log(chalk.dim("  利用可能なスキルはありません。"));
+        } else {
+          console.log(chalk.dim("  利用可能なスキル:"));
+          for (const s of skills) {
+            const tag = s.builtIn ? chalk.dim("[builtin]") : chalk.dim("[custom]");
+            console.log(chalk.dim(`    ${chalk.cyan(s.trigger)}  ${s.description}  ${tag}`));
+          }
+        }
+        break;
+      }
+
+      case "/status": {
+        const messages = this.agent.getHistory().getMessages();
+        const tokens = estimateMessageTokens(messages);
+        const ctxWindow = this.config.mainLLM.contextWindow ?? 4096;
+        const pct = Math.round((tokens / ctxWindow) * 100);
+        const planState = this.planManager?.getState() ?? "idle";
+        const todoSummary = formatTodos();
+
+        console.log(chalk.bold("\n  === Status ==="));
+        console.log(chalk.dim(`  Model: ${this.config.mainLLM.model}`));
+        console.log(chalk.dim(`  Context: ${progressBar(pct)}`));
+        console.log(chalk.dim(`  Plan mode: ${planState}`));
+        console.log(chalk.dim(`  Messages: ${messages.length}`));
+        if (todoSummary.includes("pending") || todoSummary.includes("in_progress")) {
+          console.log(chalk.dim(`\n  --- Tasks ---`));
+          console.log(chalk.dim(todoSummary));
+        }
+        console.log();
+        break;
+      }
+
       default:
         console.log(chalk.yellow(`  Unknown command: ${cmd}`));
-        displayHelp();
+        console.log(chalk.dim("  /help でコマンド一覧を表示"));
     }
   }
 }
