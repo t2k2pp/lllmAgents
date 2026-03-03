@@ -1,0 +1,4 @@
+## 2025-03-03 - [Command Injection in grepTool]
+**Vulnerability:** The `grep` tool in `src/tools/definitions/grep.ts` constructed a shell command by concatenating strings and executing it using `execSync`. This allowed arbitrary command execution via maliciously crafted search patterns or file paths.
+**Learning:** Using `execSync` with `join(" ")` on arguments directly exposes the application to command injection if any argument contains shell metacharacters. Even tools that seem internal can be exploited if they process untrusted input (like AI-generated patterns). Furthermore, `execFileSync` throws on non-zero exit codes, so handling `ripgrep`'s standard exit code 1 (no matches) is necessary to prevent unnecessary fallbacks.
+**Prevention:** Always use `execFileSync` or `spawnSync` and pass arguments as an array rather than a single concatenated string. This ensures arguments are passed directly to the executable without shell interpretation.
