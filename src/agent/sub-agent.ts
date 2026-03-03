@@ -4,19 +4,24 @@ import type { PermissionManager } from "../security/permission-manager.js";
 import { MessageHistory } from "./message-history.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import { collectResponse } from "../providers/base-provider.js";
+import { AgentDefinitionLoader } from "../agents/agent-loader.js";
+import type { AgentDefinition } from "../agents/agent-loader.js";
+import * as logger from "../utils/logger.js";
 
 const MAX_SUB_ITERATIONS = 30;
 
-export type SubAgentType = "explore" | "plan" | "general-purpose" | "bash";
+export type SubAgentType = "explore" | "plan" | "general-purpose" | "bash" | (string & {});
 
 interface SubAgentConfig {
   type: SubAgentType;
   description: string;
   systemPrompt: string;
   maxTurns?: number;
+  allowedTools?: string[];
 }
 
-const SUB_AGENT_CONFIGS: Record<SubAgentType, Omit<SubAgentConfig, "description">> = {
+// Hardcoded fallback configs for backward compatibility
+const FALLBACK_CONFIGS: Record<string, Omit<SubAgentConfig, "description">> = {
   explore: {
     type: "explore",
     systemPrompt: `あなたはコードベース探索に特化したエージェントです。
@@ -25,6 +30,7 @@ const SUB_AGENT_CONFIGS: Record<SubAgentType, Omit<SubAgentConfig, "description"
 ファイルの編集や書き込みは行わないでください。
 調査結果を簡潔にまとめて報告してください。`,
     maxTurns: 20,
+    allowedTools: ["file_read", "glob", "grep", "web_fetch", "web_search"],
   },
   plan: {
     type: "plan",
@@ -35,6 +41,7 @@ const SUB_AGENT_CONFIGS: Record<SubAgentType, Omit<SubAgentConfig, "description"
 ファイルの編集や書き込みは行わないでください。
 計画は具体的なファイルパスと変更内容を含めてください。`,
     maxTurns: 15,
+    allowedTools: ["file_read", "glob", "grep", "web_fetch", "web_search"],
   },
   "general-purpose": {
     type: "general-purpose",
@@ -51,8 +58,53 @@ bashツールを使ってシェルコマンドを実行してください。
 git操作、ビルド、テスト実行などのターミナルタスクを処理します。
 結果を簡潔に報告してください。`,
     maxTurns: 15,
+    allowedTools: ["bash", "file_read", "glob", "grep"],
   },
 };
+
+// Shared loader instance (lazy-initialized)
+let sharedLoader: AgentDefinitionLoader | null = null;
+
+function getLoader(): AgentDefinitionLoader {
+  if (!sharedLoader) {
+    sharedLoader = new AgentDefinitionLoader();
+    sharedLoader.loadAll();
+  }
+  return sharedLoader;
+}
+
+/**
+ * Resolve agent configuration by name.
+ * Priority: external definition file > hardcoded fallback.
+ */
+function resolveAgentConfig(type: SubAgentType): Omit<SubAgentConfig, "description"> | null {
+  const loader = getLoader();
+  const externalDef = loader.get(type);
+
+  if (externalDef) {
+    logger.debug(`Using external agent definition for '${type}' from ${externalDef.source}`);
+    return agentDefToConfig(externalDef);
+  }
+
+  const fallback = FALLBACK_CONFIGS[type];
+  if (fallback) {
+    logger.debug(`Using fallback config for agent type '${type}'`);
+    return fallback;
+  }
+
+  return null;
+}
+
+/**
+ * Convert an AgentDefinition (from .md file) to a SubAgentConfig.
+ */
+function agentDefToConfig(def: AgentDefinition): Omit<SubAgentConfig, "description"> {
+  return {
+    type: def.name,
+    systemPrompt: def.systemPrompt,
+    allowedTools: def.allowedTools.length > 0 ? def.allowedTools : undefined,
+  };
+}
 
 export interface SubAgentResult {
   agentId: string;
@@ -78,48 +130,46 @@ export class SubAgent {
     description: string,
   ) {
     this.agentId = `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const resolved = resolveAgentConfig(type);
+    if (!resolved) {
+      throw new Error(`Unknown sub-agent type: '${type}'. No definition file or fallback found.`);
+    }
+
     this.config = {
-      ...SUB_AGENT_CONFIGS[type],
+      ...resolved,
       description,
     };
 
-    this.filteredRegistry = this.createFilteredRegistry(toolRegistry, type);
+    this.filteredRegistry = this.createFilteredRegistry(toolRegistry, this.config);
     this.history = new MessageHistory(this.config.systemPrompt);
     this.toolExecutor = new ToolExecutor(this.filteredRegistry, permissions);
   }
 
-  private createFilteredRegistry(registry: ToolRegistry, type: SubAgentType): ToolRegistry {
+  private createFilteredRegistry(registry: ToolRegistry, config: SubAgentConfig): ToolRegistry {
     const filtered = new ToolRegistry();
-    const readOnlyTools = new Set(["file_read", "glob", "grep", "web_fetch", "web_search"]);
-    const bashOnlyTools = new Set(["bash", "file_read", "glob", "grep"]);
-
     const allTools = registry.getToolNames();
 
-    for (const name of allTools) {
-      const handler = registry.get(name);
-      if (!handler) continue;
+    // If allowedTools is specified, use it as a whitelist
+    if (config.allowedTools && config.allowedTools.length > 0) {
+      const allowed = new Set(config.allowedTools);
+      for (const name of allTools) {
+        if (allowed.has(name)) {
+          const handler = registry.get(name);
+          if (handler) {
+            filtered.register(handler);
+          }
+        }
+      }
+      return filtered;
+    }
 
-      switch (type) {
-        case "explore":
-          if (readOnlyTools.has(name)) {
-            filtered.register(handler);
-          }
-          break;
-        case "plan":
-          if (readOnlyTools.has(name)) {
-            filtered.register(handler);
-          }
-          break;
-        case "bash":
-          if (bashOnlyTools.has(name)) {
-            filtered.register(handler);
-          }
-          break;
-        case "general-purpose":
-          if (name !== "task") {
-            filtered.register(handler);
-          }
-          break;
+    // No allowedTools specified: register all tools except "task" (prevent recursion)
+    for (const name of allTools) {
+      if (name === "task") continue;
+      const handler = registry.get(name);
+      if (handler) {
+        filtered.register(handler);
       }
     }
 
