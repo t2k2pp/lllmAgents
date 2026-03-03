@@ -13,6 +13,7 @@ import {
   type SessionData,
 } from "./session-manager.js";
 import { PlanManager } from "./plan-mode.js";
+import type { ContextModeManager } from "../context/context-mode.js";
 import * as logger from "../utils/logger.js";
 
 const MAX_TOOL_ITERATIONS = 50;
@@ -24,6 +25,7 @@ export class AgentLoop {
   private toolExecutor: ToolExecutor;
   private session: SessionData;
   private planManager: PlanManager | null = null;
+  private contextModeManager: ContextModeManager | null = null;
 
   constructor(
     private provider: LLMProvider,
@@ -32,8 +34,10 @@ export class AgentLoop {
     private permissions: PermissionManager,
     contextWindow: number,
     compressionThreshold: number,
+    contextModeManager?: ContextModeManager,
   ) {
-    const systemPrompt = buildSystemPrompt();
+    this.contextModeManager = contextModeManager ?? null;
+    const systemPrompt = buildSystemPrompt(contextModeManager);
     this.history = new MessageHistory(systemPrompt);
     this.contextManager = new ContextManager(provider, model, contextWindow, compressionThreshold);
     this.toolExecutor = new ToolExecutor(toolRegistry, permissions);
@@ -217,7 +221,7 @@ export class AgentLoop {
 
   restoreSession(sessionData: SessionData): void {
     this.session = sessionData;
-    const systemPrompt = buildSystemPrompt();
+    const systemPrompt = buildSystemPrompt(this.contextModeManager ?? undefined);
     this.history = new MessageHistory(systemPrompt);
     for (const msg of sessionData.messages) {
       if (msg.role === "user") {

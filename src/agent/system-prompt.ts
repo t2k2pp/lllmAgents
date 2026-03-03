@@ -2,8 +2,10 @@ import * as os from "node:os";
 import { loadMemory } from "./memory.js";
 import { loadProjectInstructions, getGitInfo } from "./project-context.js";
 import { isWindows } from "../utils/platform.js";
+import { RuleLoader } from "../rules/rule-loader.js";
+import type { ContextModeManager } from "../context/context-mode.js";
 
-export function buildSystemPrompt(): string {
+export function buildSystemPrompt(contextModeManager?: ContextModeManager): string {
   const memory = loadMemory();
   const projectInstructions = loadProjectInstructions();
   const gitInfo = getGitInfo();
@@ -101,6 +103,18 @@ ${projectInstructions}`);
 前回のセッションから引き継がれたメモ:
 
 ${memory}`);
+  }
+
+  // Rules
+  const ruleLoader = new RuleLoader();
+  const rulesSection = ruleLoader.formatForSystemPrompt();
+  if (rulesSection) {
+    parts.push(rulesSection);
+  }
+
+  // Context mode
+  if (contextModeManager) {
+    parts.push(contextModeManager.getPromptSection());
   }
 
   return parts.join("\n");

@@ -33,6 +33,7 @@ import { displayWelcome } from "./cli/renderer.js";
 import { REPL } from "./cli/repl.js";
 import { PROVIDER_LABELS } from "./config/types.js";
 import { getLatestSession } from "./agent/session-manager.js";
+import { ContextModeManager } from "./context/context-mode.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -118,6 +119,9 @@ async function main(): Promise<void> {
     }
   }
 
+  // Context mode
+  const contextModeManager = new ContextModeManager();
+
   // Agent loop
   const agent = new AgentLoop(
     provider,
@@ -126,6 +130,7 @@ async function main(): Promise<void> {
     permissions,
     contextWindow,
     config.context.compressionThreshold,
+    contextModeManager,
   );
 
   // Plan manager
@@ -175,7 +180,7 @@ async function main(): Promise<void> {
   );
 
   // Start REPL
-  const repl = new REPL(agent, config, skillRegistry, planManager);
+  const repl = new REPL(agent, config, skillRegistry, planManager, contextModeManager);
   await repl.start();
 
   // Cleanup

@@ -9,6 +9,7 @@ import { loadMemory, saveMemory } from "../agent/memory.js";
 import type { Config } from "../config/types.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { PlanManager } from "../agent/plan-mode.js";
+import type { ContextModeManager, ContextMode } from "../context/context-mode.js";
 
 export class REPL {
   private rl: readline.Interface;
@@ -21,6 +22,7 @@ export class REPL {
     private config: Config,
     private skillRegistry?: SkillRegistry,
     private planManager?: PlanManager,
+    private contextModeManager?: ContextModeManager,
   ) {
     this.rl = readline.createInterface({
       input: process.stdin,
@@ -285,6 +287,29 @@ export class REPL {
           console.log(chalk.dim(todoSummary));
         }
         console.log();
+        break;
+      }
+
+      case "/mode": {
+        if (!this.contextModeManager) {
+          console.log(chalk.dim("  コンテキストモードシステムが初期化されていません。"));
+          break;
+        }
+        const modeArg = args[0] as ContextMode | undefined;
+        if (!modeArg) {
+          const info = this.contextModeManager.getModeInfo();
+          console.log(chalk.dim(`  Current mode: ${chalk.cyan(this.contextModeManager.currentMode)} (${info.name})`));
+          console.log(chalk.dim(`  ${info.description}`));
+          console.log(chalk.dim(`  Priority: ${info.priority}`));
+        } else if (modeArg === "dev" || modeArg === "review" || modeArg === "research") {
+          this.contextModeManager.switchMode(modeArg);
+          const info = this.contextModeManager.getModeInfo();
+          console.log(chalk.dim(`  Switched to ${chalk.cyan(modeArg)} mode (${info.name})`));
+          console.log(chalk.dim(`  Priority: ${info.priority}`));
+        } else {
+          console.log(chalk.yellow(`  Unknown mode: ${modeArg}`));
+          console.log(chalk.dim("  Available modes: dev, review, research"));
+        }
         break;
       }
 
