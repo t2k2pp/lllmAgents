@@ -166,13 +166,46 @@ export class REPL {
         console.log(chalk.dim("  完了。"));
         break;
 
-      case "/model":
-        console.log(chalk.dim(`  現在のモデル: ${this.config.mainLLM.model}`));
-        console.log(chalk.dim(`  プロバイダー: ${this.config.mainLLM.providerType} @ ${this.config.mainLLM.baseUrl}`));
-        if (this.config.visionLLM) {
-          console.log(chalk.dim(`  Vision: ${this.config.visionLLM.model} @ ${this.config.visionLLM.baseUrl}`));
+      case "/model": {
+        if (args.length === 0) {
+          // /model (no args) - show current model info
+          console.log(chalk.dim(`  現在のモデル: ${this.agent.getModel()}`));
+          console.log(chalk.dim(`  プロバイダー: ${this.config.mainLLM.providerType} @ ${this.config.mainLLM.baseUrl}`));
+          if (this.config.visionLLM) {
+            console.log(chalk.dim(`  Vision: ${this.config.visionLLM.model} @ ${this.config.visionLLM.baseUrl}`));
+          }
+        } else if (args[0] === "list") {
+          // /model list - list available models from the provider
+          try {
+            const models = await this.agent.getProvider().listModels();
+            if (models.length === 0) {
+              console.log(chalk.dim("  利用可能なモデルはありません。"));
+            } else {
+              console.log(chalk.dim("  利用可能なモデル:"));
+              const currentModel = this.agent.getModel();
+              for (const m of models) {
+                const marker = m.name === currentModel ? chalk.green(" ← current") : "";
+                const sizeLabel = m.size > 0 ? chalk.dim(` (${(m.size / 1e9).toFixed(1)}GB)`) : "";
+                console.log(chalk.dim(`    ${chalk.cyan(m.name)}${sizeLabel}${marker}`));
+              }
+            }
+          } catch (e) {
+            console.log(chalk.red(`  モデル一覧の取得に失敗しました: ${e instanceof Error ? e.message : String(e)}`));
+          }
+        } else {
+          // /model <name> - switch to a different model
+          const newModel = args[0];
+          const oldModel = this.agent.getModel();
+          if (newModel === oldModel) {
+            console.log(chalk.dim(`  既に ${newModel} を使用中です。`));
+          } else {
+            this.agent.setModel(newModel);
+            this.config.mainLLM.model = newModel;
+            console.log(chalk.dim(`  モデルを ${chalk.yellow(oldModel)} から ${chalk.cyan(newModel)} に切り替えました`));
+          }
         }
         break;
+      }
 
       case "/todo":
         console.log(chalk.dim(formatTodos()));

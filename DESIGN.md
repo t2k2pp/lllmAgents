@@ -7,7 +7,8 @@
 │                    CLI (REPL)                    │
 │  - readline ベース                              │
 │  - マルチライン入力 (``` で囲む)                │
-│  - スラッシュコマンド (/help, /plan, /skill...)  │
+│  - スラッシュコマンド (/help, /plan, /skill,     │
+│    /mode, ...)                                    │
 │  - Ctrl+C でキャンセル                          │
 └──────────────────┬─────────────────────────────┘
                    │
@@ -25,14 +26,45 @@
 ┌──────▼──┐ ┌───▼────┐ ┌──▼──────────────┐
 │ToolExec │ │Context │ │  SubAgentManager │
 │         │ │Manager │ │  - explore       │
-│ 22 tools│ │- 80%   │ │  - plan          │
+│ 21 tools│ │- 80%   │ │  - plan          │
 │(下記参照)│ │  圧縮  │ │  - general       │
 │         │ │- LLM   │ │  - bash          │
-│         │ │  要約  │ │  - 並列実行      │
+│+ Hooks  │ │  要約  │ │  - 並列実行      │
 └──────┬──┘ └────────┘ └──────────────────┘
        │
+       ├──┬──────────────────────────────────────┐
+       │  │  HookManager                          │
+       │  │  - PreToolUse / PostToolUse            │
+       │  │  - SessionStart / SessionStop          │
+       │  │  - hooks.json (project / global)       │
+       │  └──────────────────────────────────────┘
+       │
+       ├──┬──────────────────────────────────────┐
+       │  │  RuleLoader                            │
+       │  │  - builtin: security, coding-style,    │
+       │  │    git-workflow                         │
+       │  │  - ~/.localllm/rules/, .claude/rules/  │
+       │  │  - システムプロンプトに注入             │
+       │  └──────────────────────────────────────┘
+       │
+       ├──┬──────────────────────────────────────┐
+       │  │  ContextModeManager                    │
+       │  │  - dev / review / research             │
+       │  │  - /mode コマンドで切替                 │
+       │  │  - システムプロンプトに注入             │
+       │  └──────────────────────────────────────┘
+       │
+       ├──┬──────────────────────────────────────┐
+       │  │  AgentDefinitionLoader                 │
+       │  │  - .md + YAML frontmatter              │
+       │  │  - builtin: explore, plan,             │
+       │  │    general-purpose, code-reviewer       │
+       │  │  - ~/.localllm/agents/ (override)       │
+       │  │  - .localllm/agents/ (override)         │
+       │  └──────────────────────────────────────┘
+       │
 ┌──────▼──────────────────────────────────────────┐
-│               ToolRegistry (22 tools)            │
+│               ToolRegistry (21 tools)            │
 ├─────────────────────────────────────────────────┤
 │ ファイル系:                                      │
 │   file_read    - ファイル読取(行番号付き)         │
@@ -53,14 +85,15 @@
 │   ask_user     - ユーザーへの質問                 │
 │                                                  │
 │ プランモード:                                    │
-│   enter_plan_mode - プランモード開始             │  ← NEW
-│   exit_plan_mode  - プランモード終了(承認依頼)    │  ← NEW
+│   enter_plan_mode - プランモード開始             │
+│   exit_plan_mode  - プランモード終了(承認依頼)    │
 │                                                  │
 │ サブエージェント:                                 │
-│   task         - サブエージェント起動             │  ← NEW
+│   task         - サブエージェント起動             │
+│   task_output  - サブエージェント結果取得         │
 │                                                  │
 │ スキル:                                          │
-│   skill        - スキル実行                      │  ← NEW
+│   skill        - スキル実行                      │
 │                                                  │
 │ ブラウザ系:                                      │
 │   browser_navigate  - ページ遷移                 │
@@ -179,9 +212,9 @@ const results = await Promise.allSettled(
 
 **追加コマンド**:
 - `/plan` - プランモードに手動で入る
-- `/skill` - 利用可能なスキル一覧
-- `/agents` - 実行中のサブエージェント一覧
+- `/skills` - 利用可能なスキル一覧
 - `/status` - 全体ステータス (コンテキスト + タスク + エージェント)
+- `/mode` - コンテキストモード切替 (dev / review / research)
 
 **UX改善**:
 - マルチライン入力時に行番号表示
@@ -193,18 +226,34 @@ const results = await Promise.allSettled(
 ```
 src/
 ├── agent/
-│   ├── agent-loop.ts        # メインエージェントループ (並列ツール追加)
-│   ├── sub-agent.ts         # サブエージェント (実装済)
-│   ├── plan-mode.ts         # プランモード管理 (NEW)
+│   ├── agent-loop.ts        # メインエージェントループ (並列ツール実行)
+│   ├── sub-agent.ts         # サブエージェント
+│   ├── plan-mode.ts         # プランモード管理
 │   ├── message-history.ts   # メッセージ履歴
 │   ├── token-counter.ts     # トークン推定
 │   ├── context-manager.ts   # コンテキスト圧縮
 │   ├── session-manager.ts   # セッション永続化
 │   ├── memory.ts            # 自動メモリ
 │   ├── project-context.ts   # CLAUDE.md等読み込み
-│   ├── system-prompt.ts     # システムプロンプト構築 (更新)
-│   └── hooks.ts             # フックシステム
-├── skills/                   # NEW ディレクトリ
+│   └── system-prompt.ts     # システムプロンプト構築 (Rules/ContextMode注入)
+├── agents/                   # エージェント定義ファイル
+│   ├── agent-loader.ts      # AgentDefinitionLoader
+│   └── builtin/             # 組み込みエージェント定義
+│       ├── explore.md
+│       ├── plan.md
+│       ├── general-purpose.md
+│       └── code-reviewer.md
+├── hooks/                    # フックシステム
+│   └── hook-manager.ts      # HookManager (PreToolUse/PostToolUse/Session)
+├── rules/                    # 常時適用ルール
+│   ├── rule-loader.ts       # RuleLoader
+│   └── builtin/             # 組み込みルール
+│       ├── security.md
+│       ├── coding-style.md
+│       └── git-workflow.md
+├── context/                  # コンテキストモード
+│   └── context-mode.ts      # ContextModeManager (dev/review/research)
+├── skills/                   # スキルシステム
 │   ├── skill-registry.ts    # スキル登録・検索
 │   ├── skill-loader.ts      # スキルファイル読み込み
 │   └── builtin/             # 組み込みスキル
@@ -214,7 +263,7 @@ src/
 │       └── build-fix.md
 ├── tools/
 │   ├── tool-registry.ts
-│   ├── tool-executor.ts
+│   ├── tool-executor.ts     # ToolExecutor (HookManager統合)
 │   └── definitions/
 │       ├── file-read.ts
 │       ├── file-write.ts
@@ -228,12 +277,12 @@ src/
 │       ├── ask-user.ts
 │       ├── browser.ts
 │       ├── vision.ts
-│       ├── task.ts           # NEW - サブエージェント起動ツール
-│       ├── plan-mode.ts      # NEW - プランモードツール
-│       └── skill.ts          # NEW - スキル実行ツール
+│       ├── task.ts           # サブエージェント起動/結果取得ツール
+│       ├── plan-mode.ts      # プランモードツール
+│       └── skill.ts          # スキル実行ツール
 ├── cli/
-│   ├── repl.ts              # 強化 (追加コマンド)
-│   └── renderer.ts          # 強化 (マークダウンレンダリング)
+│   ├── repl.ts              # REPL (/mode, /plan, /skills 等)
+│   └── renderer.ts          # 出力レンダリング
 ├── security/
 │   ├── rules.ts
 │   ├── sandbox.ts
@@ -302,7 +351,40 @@ REPL.processInput()
                             │     ├─ ask → inquirerで確認
                             │     └─ deny → ブロック
                             │
-                            └─ ToolHandler.execute()
-                                  │
-                                  └─ 結果 → history → LLMループ継続
+                            ├─ HookManager.runPreToolHooks()
+                            │     ├─ proceed → 続行
+                            │     └─ blocked (code≠0) → 中止
+                            │
+                            ├─ ToolHandler.execute()
+                            │
+                            ├─ HookManager.runPostToolHooks()
+                            │
+                            └─ 結果 → history → LLMループ継続
 ```
+
+## 6. 拡張システム
+
+### 6.1 Hooksシステム (`src/hooks/hook-manager.ts`)
+- フックタイプ: `PreToolUse`, `PostToolUse`, `SessionStart`, `SessionStop`
+- 定義ファイル: `hooks.json`（プロジェクト `.claude/`, `.localllm/` およびグローバル `~/.localllm/`）
+- `PreToolUse` は非ゼロ終了コードでツール実行をブロック可能
+- 環境変数: `TOOL_NAME`, `FILE_PATH`, `TOOL_OUTPUT`, `TOOL_SUCCESS`, `TOOL_ERROR`
+- `ToolExecutor` のコンストラクタに `HookManager` を注入して統合
+
+### 6.2 Rulesシステム (`src/rules/rule-loader.ts`)
+- 常時適用ルールを `.md` ファイルで定義
+- 組み込み3種: `security.md`, `coding-style.md`, `git-workflow.md`
+- ロード順: builtin → `~/.localllm/rules/` → `.claude/rules/` → `.localllm/rules/`
+- `buildSystemPrompt()` 内で `RuleLoader.formatForSystemPrompt()` を呼び出してシステムプロンプトに注入
+
+### 6.3 コンテキストモード (`src/context/context-mode.ts`)
+- 3モード: `dev`（開発）, `review`（コードレビュー）, `research`（リサーチ）
+- 各モードに `priority`, `behavior`, `preferredTools` を定義
+- `/mode` コマンドで REPL から切替
+- `buildSystemPrompt()` 内でシステムプロンプトに注入
+
+### 6.4 エージェント定義ファイル (`src/agents/agent-loader.ts`)
+- `.md` + YAML フロントマター形式（`name`, `description`, `tools`, `allowedTools`）
+- 組み込み4種: `explore`, `plan`, `general-purpose`, `code-reviewer`
+- ロード順: `src/agents/builtin/` → `~/.localllm/agents/` → `.localllm/agents/`（同名は後から上書き）
+- 遅延ロード: `get(name)` 初回呼び出し時に全定義を読み込み

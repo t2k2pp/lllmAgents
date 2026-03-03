@@ -228,8 +228,10 @@ classDiagram
         -toolExecutor: ToolExecutor
         -planManager: PlanManager
         -permissions: PermissionManager
+        -contextModeManager: ContextModeManager
         +run(userMessage) Promise~void~
         -executeToolsParallel(toolCalls) Promise~void~
+        -executeSingleTool(toolCall) Promise~void~
         -getFilteredToolDefs() ToolDefinition[]
         +getProvider() BaseProvider
         +getModel() string
@@ -241,7 +243,36 @@ classDiagram
     class ToolExecutor {
         -registry: ToolRegistry
         -permissions: PermissionManager
+        -hookManager: HookManager
         +execute(ToolCall) Promise~ToolResult~
+    }
+
+    class HookManager {
+        -hooks: HookDefinition[]
+        -loaded: boolean
+        +loadHooks(projectDir?) void
+        +runPreToolHooks(toolName, params) Promise~PreHookResult~
+        +runPostToolHooks(toolName, params, result) Promise~void~
+        +runSessionHooks(type) Promise~void~
+    }
+
+    class RuleLoader {
+        +loadAllRules() Rule[]
+        +formatForSystemPrompt() string
+    }
+
+    class ContextModeManager {
+        +currentMode: ContextMode
+        +switchMode(mode) void
+        +getPromptSection() string
+        +getModeInfo() ModeInfo
+    }
+
+    class AgentDefinitionLoader {
+        -definitions: Map
+        -loaded: boolean
+        +loadAll() AgentDefinition[]
+        +get(name) AgentDefinition
     }
 
     class SubAgentManager {
@@ -280,6 +311,296 @@ classDiagram
     AgentLoop --> ToolExecutor
     AgentLoop --> BaseProvider
     AgentLoop --> PlanManager
+    AgentLoop --> ContextModeManager
+    ToolExecutor --> HookManager
     SubAgentManager --> AgentLoop : creates child
     AgentLoop ..> SkillRegistry
+    AgentLoop ..> RuleLoader : via buildSystemPrompt
+    SubAgentManager ..> AgentDefinitionLoader
 ```
+
+## 5. HookManager アーキテクチャ
+
+### 概要
+`HookManager`（`src/hooks/hook-manager.ts`）は、ツール実行のライフサイクルとセッションのライフサイクルにユーザー定義のシェルコマンドを差し込む機構です。`ToolExecutor` に注入され、ツール実行の前後にフックコマンドを実行します。
+
+### クラス構造
+
+```mermaid
+classDiagram
+    class HookManager {
+        -hooks: HookDefinition[]
+        -loaded: boolean
+        +loadHooks(projectDir?: string) void
+        +runPreToolHooks(toolName, params) Promise~PreHookResult~
+        +runPostToolHooks(toolName, params, result) Promise~void~
+        +runSessionHooks(type: "start"|"stop") Promise~void~
+        +count: number
+        +isLoaded: boolean
+        -loadFromFile(filePath) void
+        -getMatching(type, toolName, params) HookDefinition[]
+        -buildEnv(toolName, params, result?) Record~string, string~
+        -extractFilePath(params) string|undefined
+    }
+
+    class HookDefinition {
+        type: HookType
+        matcher?: HookMatcher
+        command: string
+        description?: string
+    }
+
+    class HookMatcher {
+        tool?: string
+        filePattern?: string
+    }
+
+    class PreHookResult {
+        proceed: boolean
+        message?: string
+    }
+
+    HookManager --> HookDefinition
+    HookDefinition --> HookMatcher
+    HookManager --> PreHookResult
+```
+
+### ToolExecutor との統合
+
+`ToolExecutor`（`src/tools/tool-executor.ts`）のコンストラクタにオプショナルな `hookManager` パラメータが渡されます。`execute()` メソッド内で以下の順序で処理が行われます。
+
+```mermaid
+sequenceDiagram
+    participant TE as ToolExecutor
+    participant PM as PermissionManager
+    participant HM as HookManager
+    participant Tool as ToolHandler
+
+    TE->>PM: checkToolPermission(toolName, params)
+    alt 権限拒否
+        PM-->>TE: {allowed: false}
+        TE-->>TE: return Error
+    end
+    PM-->>TE: {allowed: true}
+
+    TE->>HM: runPreToolHooks(toolName, params)
+    alt PreHookがブロック (code !== 0)
+        HM-->>TE: {proceed: false, message}
+        TE-->>TE: return Error("Blocked by pre-tool hook")
+    end
+    HM-->>TE: {proceed: true}
+
+    TE->>Tool: execute(params)
+    Tool-->>TE: ToolResult
+
+    TE->>HM: runPostToolHooks(toolName, params, result)
+    HM-->>TE: (完了)
+```
+
+### 環境変数の構築 (`buildEnv`)
+
+`buildEnv` メソッドは、ツールのパラメータから環境変数を構築します。
+- `TOOL_NAME`: 常に設定
+- `FILE_PATH`: `params.file_path ?? params.path ?? params.pattern ?? params.command` から抽出（`extractFilePath` メソッド）
+- `TOOL_OUTPUT`, `TOOL_SUCCESS`, `TOOL_ERROR`: PostToolUse 時のみ `ToolResult` から設定
+
+### フックのロード順序
+
+`loadHooks(projectDir)` メソッドは以下の順序でファイルを読み込み、すべてのフックを `this.hooks` 配列に追加します。
+
+1. `{projectDir}/.claude/hooks.json`
+2. `{projectDir}/.localllm/hooks.json`
+3. `~/.localllm/hooks.json`
+
+### マッチングロジック (`getMatching`)
+
+`matcher` が未指定のフックは、同じ `type` のすべてのツール実行にマッチします。
+`matcher.tool` が指定されている場合はツール名の完全一致、`matcher.filePattern` が指定されている場合は glob パターンマッチ（`*` と `**` をサポート）で判定します。
+
+### index.ts での初期化
+
+```typescript
+const hookManager = new HookManager();
+hookManager.loadHooks(process.cwd());
+
+// AgentLoop コンストラクタに渡される
+const agent = new AgentLoop(
+  provider, model, toolRegistry, permissions,
+  contextWindow, compressionThreshold,
+  contextModeManager, hookManager
+);
+
+// セッションフックの実行
+await hookManager.runSessionHooks("start");
+// ... REPL実行 ...
+await hookManager.runSessionHooks("stop");
+```
+
+## 6. RuleLoader アーキテクチャ
+
+### 概要
+`RuleLoader`（`src/rules/rule-loader.ts`）は、Markdown 形式のルールファイルを複数のソースから読み込み、システムプロンプトに注入する機構です。
+
+### クラス構造
+
+```mermaid
+classDiagram
+    class RuleLoader {
+        +loadAllRules() Rule[]
+        +formatForSystemPrompt() string
+    }
+
+    class Rule {
+        name: string
+        content: string
+        source: string
+    }
+
+    RuleLoader --> Rule
+```
+
+### ロード順序
+
+`loadAllRules()` メソッドは以下の順序でルールを読み込みます。すべてのルールが結合されます（上書きではなく追加）。
+
+1. **builtin** (`src/rules/builtin/`): `import.meta.url` から相対パスで解決。組み込み3種（security.md, coding-style.md, git-workflow.md）
+2. **user** (`~/.localllm/rules/`): `os.homedir()` ベース
+3. **project** (`.claude/rules/`): `process.cwd()` ベース
+4. **project** (`.localllm/rules/`): `process.cwd()` ベース
+
+各ディレクトリから `.md` 拡張子のファイルのみを読み込み、ファイル名（拡張子除く）を `name`、ファイル内容を `content`、ソース種別（`"builtin"`, `"user"`, `"project"`）を `source` として `Rule` オブジェクトを生成します。
+
+### システムプロンプトへの注入
+
+`formatForSystemPrompt()` メソッドは `loadAllRules()` を呼び出し、結果を以下の形式で文字列化します。
+
+```
+# ルール
+以下のルールに常に従ってください。
+
+{rule1.content}
+
+{rule2.content}
+...
+```
+
+この文字列は `buildSystemPrompt()`（`src/agent/system-prompt.ts`）の中で呼び出され、システムプロンプトの末尾付近に追加されます。
+
+## 7. ContextModeManager アーキテクチャ
+
+### 概要
+`ContextModeManager`（`src/context/context-mode.ts`）は、エージェントの動作モード（dev/review/research）を管理し、モードに応じたシステムプロンプトセクションを生成します。
+
+### クラス構造
+
+```mermaid
+classDiagram
+    class ContextModeManager {
+        +currentMode: ContextMode
+        +switchMode(mode: ContextMode) void
+        +getPromptSection() string
+        +getModeInfo() ModeInfo
+    }
+
+    class ModeDefinition {
+        name: string
+        description: string
+        priority: string
+        behavior: string
+        preferredTools: string[]
+    }
+```
+
+### モード定義（`MODE_DEFINITIONS`）
+
+`ContextMode` 型は `"dev" | "review" | "research"` のユニオン型です。各モードは `ModeDefinition` インターフェースで定義されています。
+
+| フィールド | dev | review | research |
+|:---|:---|:---|:---|
+| `name` | Development | Code Review | Research |
+| `description` | Active development mode | Code review mode | Research and exploration mode |
+| `priority` | Work -> Correct -> Clean | Critical > High > Medium > Low | Understand -> Verify -> Document |
+| `behavior` | Write code first, test after, commit atomically | Thorough analysis, severity-based prioritization, provide solutions | Explore and learn, read broadly, summarize findings |
+| `preferredTools` | file_write, file_edit, bash, task | file_read, grep, glob | file_read, grep, glob, web_fetch, web_search |
+
+### 状態管理
+
+- `currentMode` プロパティでパブリックに現在のモードを保持（デフォルト: `"dev"`）
+- `switchMode()` で切り替え
+- REPL の `/mode` コマンドから `switchMode()` が呼ばれる
+
+### システムプロンプトセクション
+
+`getPromptSection()` は以下の形式の文字列を返し、`buildSystemPrompt()` 内でシステムプロンプトの末尾に追加されます。
+
+```
+# Context Mode: {def.name}
+- Priority: {def.priority}
+- Behavior: {def.behavior}
+- Preferred tools: {def.preferredTools.join(", ")}
+```
+
+## 8. AgentDefinitionLoader アーキテクチャ
+
+### 概要
+`AgentDefinitionLoader`（`src/agents/agent-loader.ts`）は、Markdown + YAML フロントマター形式のエージェント定義ファイルを読み込み、サブエージェントの設定を提供します。
+
+### クラス構造
+
+```mermaid
+classDiagram
+    class AgentDefinitionLoader {
+        -definitions: Map~string, AgentDefinition~
+        -loaded: boolean
+        +loadAll() AgentDefinition[]
+        +get(name: string) AgentDefinition|undefined
+        -getSearchPaths() string[]
+    }
+
+    class AgentDefinition {
+        name: string
+        description: string
+        tools: string[]
+        allowedTools: string[]
+        systemPrompt: string
+        source: string
+    }
+
+    AgentDefinitionLoader --> AgentDefinition
+```
+
+### ロードの仕組み
+
+#### 遅延ロード（Lazy Loading）
+`get(name)` メソッドは内部で `this.loaded` フラグをチェックし、未ロードの場合は `loadAll()` を自動的に呼び出します。`loadAll()` も `this.loaded` が true の場合はキャッシュを返却します。
+
+#### ロード順序とオーバーライド
+`getSearchPaths()` が返すパスの順序で読み込み、**同名のエージェントは後のパスで上書き**されます（`Map.set()` による上書き）。
+
+1. `src/agents/builtin/` （`import.meta.url` から `fileURLToPath` で解決 + `"builtin"` ディレクトリ）
+2. `~/.localllm/agents/` （`getHomedir()` ベース）
+3. `.localllm/agents/` （`path.resolve` = CWD相対）
+
+#### フロントマターの解析（`parseFrontmatter`）
+独自の簡易 YAML パーサーで以下をサポートします。
+- 文字列値（クォート有無どちらも対応）
+- フロースタイル配列: `[a, b, c]`
+- `---` で囲まれたフロントマターブロック
+- 本文はフロントマター以降のテキスト全体が `systemPrompt` として使用
+
+#### AgentDefinition の属性
+- `name`: フロントマターの `name`（必須。未指定の場合はスキップ）
+- `description`: フロントマターの `description`（デフォルト: `""`）
+- `tools`: フロントマターの `tools`（デフォルト: `[]`）
+- `allowedTools`: フロントマターの `allowedTools`（未指定の場合は `tools` と同一）
+- `systemPrompt`: フロントマター以降の本文
+- `source`: ファイルの絶対パス
+
+### 組み込みエージェント（4種）
+
+| ファイル | name | tools |
+|:---|:---|:---|
+| `explore.md` | explore | file_read, glob, grep, web_fetch, web_search |
+| `plan.md` | plan | file_read, glob, grep, web_fetch, web_search |
+| `general-purpose.md` | general-purpose | file_read, file_write, file_edit, glob, grep, bash, web_fetch, web_search, todo_write, ask_user |
+| `code-reviewer.md` | code-reviewer | file_read, glob, grep, bash |

@@ -19,6 +19,8 @@ export function displayHelp(): void {
     ${chalk.cyan("/context")}        コンテキスト使用状況
     ${chalk.cyan("/compact")}        コンテキストを手動圧縮
     ${chalk.cyan("/model")}          現在のモデル情報
+    ${chalk.cyan("/model <name>")}   モデルを切り替え
+    ${chalk.cyan("/model list")}     利用可能なモデル一覧
     ${chalk.cyan("/todo")}           タスクリスト表示
     ${chalk.cyan("/sessions")}       保存済みセッション一覧
     ${chalk.cyan("/resume <id>")}    セッション復元

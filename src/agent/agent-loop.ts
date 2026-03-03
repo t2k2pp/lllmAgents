@@ -251,6 +251,10 @@ export class AgentLoop {
     return this.model;
   }
 
+  setModel(model: string): void {
+    this.model = model;
+  }
+
   getToolRegistry(): ToolRegistry {
     return this.toolRegistry;
   }
