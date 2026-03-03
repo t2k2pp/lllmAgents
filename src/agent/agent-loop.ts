@@ -4,6 +4,7 @@ import type { LLMProvider, ToolCall, ToolDefinition } from "../providers/base-pr
 import type { ToolRegistry } from "../tools/tool-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager } from "../security/permission-manager.js";
+import type { HookManager } from "../hooks/hook-manager.js";
 import { MessageHistory } from "./message-history.js";
 import { ContextManager } from "./context-manager.js";
 import { buildSystemPrompt } from "./system-prompt.js";
@@ -35,12 +36,13 @@ export class AgentLoop {
     contextWindow: number,
     compressionThreshold: number,
     contextModeManager?: ContextModeManager,
+    hookManager?: HookManager,
   ) {
     this.contextModeManager = contextModeManager ?? null;
     const systemPrompt = buildSystemPrompt(contextModeManager);
     this.history = new MessageHistory(systemPrompt);
     this.contextManager = new ContextManager(provider, model, contextWindow, compressionThreshold);
-    this.toolExecutor = new ToolExecutor(toolRegistry, permissions);
+    this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager);
     this.session = createSession(model);
   }
 

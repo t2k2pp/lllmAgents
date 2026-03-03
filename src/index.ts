@@ -34,6 +34,7 @@ import { REPL } from "./cli/repl.js";
 import { PROVIDER_LABELS } from "./config/types.js";
 import { getLatestSession } from "./agent/session-manager.js";
 import { ContextModeManager } from "./context/context-mode.js";
+import { HookManager } from "./hooks/hook-manager.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -106,6 +107,10 @@ async function main(): Promise<void> {
   // Permissions
   const permissions = new PermissionManager(config.security);
 
+  // Hooks
+  const hookManager = new HookManager();
+  hookManager.loadHooks(process.cwd());
+
   // Context window
   let contextWindow = config.mainLLM.contextWindow ?? 4096;
   if (!config.mainLLM.contextWindow) {
@@ -131,6 +136,7 @@ async function main(): Promise<void> {
     contextWindow,
     config.context.compressionThreshold,
     contextModeManager,
+    hookManager,
   );
 
   // Plan manager
@@ -170,6 +176,9 @@ async function main(): Promise<void> {
     }
   }
 
+  // Run session start hooks
+  await hookManager.runSessionHooks("start");
+
   // Display welcome
   displayWelcome(
     config.mainLLM.model,
@@ -184,6 +193,7 @@ async function main(): Promise<void> {
   await repl.start();
 
   // Cleanup
+  await hookManager.runSessionHooks("stop");
   agent.saveCurrentSession();
   await playwrightManager.close();
 }
