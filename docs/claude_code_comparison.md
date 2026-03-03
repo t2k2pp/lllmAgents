@@ -46,6 +46,10 @@ graph TD
 | **運用コスト** | 従量課金 (APIトークン消費) | **無料** (マシンの電気代などのみ) |
 | **プライバシー・<br>機密保持** | ソースコードが外部(Anthropic等)のAPIサーバに送信される | **完全オフライン動作可能**。機密性の高いコードや社外秘データを外部に送信しない |
 | **環境構築** | `npm install -g @anthropic-ai/claude-code` | Node.js + ローカルLLM環境(Ollama等)の事前セットアップが必要 |
+| **ツール数** | 30以上 (ファイル操作, bash, ブラウザ, Task/SubAgent等) | **21種** (ファイル5, bash, Web2, ブラウザ5, vision, タスク管理6, ask_user) |
+| **サブエージェント** | Task tool による4タイプ (explore, plan, general-purpose, bash) | **4タイプ** (explore, plan, general-purpose, bash) を独自実装 |
+| **プランモード** | 組み込み (EnterPlanMode / ExitPlanMode) | **組み込み** (idle→planning→awaiting_approval→approved/rejected の状態遷移) |
+| **スキルシステム** | Skill tool + `/command` トリガー | **対応** (builtin 4スキル + ユーザー定義 `~/.localllm/skills/`, `.claude/skills/`) |
 
 ### 2.1 コンテキスト管理
 - **Claude Code**: 基盤モデル側で長大なコンテキストウインドウ (200K トークンなど) がサポートされており、基本的にはAPI任せのコンテキスト保持を採用しています（大規模なプロジェクト全体の理解が得意）。
@@ -57,7 +61,12 @@ graph TD
 
 ### 2.3 拡張性とカスタマイズ性
 - **Claude Code**: 提供される機能セットはベンダー(Anthropic)のアップデートに依存します。
-- **LocalLLM Agent**: OSSライクなアプローチを採用し、**スキル (`.localllm/skills/*.md`)**  や **ツール定義** を独自のMarkdownやTypeScriptで拡張することが容易です。また、LLMプロバイダを柔軟に切り替えられるため（Ollamaからllama.cpp、vLLMへ等）、ハードウェアの進化に併せて任意のモデルを利用できます。
+- **LocalLLM Agent**: OSSライクなアプローチを採用し、**スキル** を独自のMarkdownで拡張することが容易です。スキルは以下の3箇所から自動ロードされます:
+  - `~/.localllm/skills/` (ユーザーグローバル)
+  - `.claude/skills/` (プロジェクト固有・Claude Code互換)
+  - `.localllm/skills/` (プロジェクト固有)
+
+  また、LLMプロバイダを柔軟に切り替えられるため（Ollama, LM Studio, llama.cpp, vLLM）、ハードウェアの進化に併せて任意のモデルを利用できます。
 
 ### 2.4 ブラウザテスト自動化
 - **Claude Code**: 一般的なCLI上のファイル操作やコマンド実行が主用途です。

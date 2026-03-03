@@ -91,48 +91,75 @@ stateDiagram-v2
 | コマンド | 説明 |
 |----------|------|
 | `/help` | ヘルプや使用可能なコマンド一覧を表示します |
-| `/quit` | エージェントを終了します |
+| `/quit`, `/exit` | エージェントを終了します |
 | `/clear` | 現在の会話履歴とコンテキストをクリアします |
 | `/context` | 現在のコンテキスト（トークン）使用状況を表示します |
-| `/setup` | 設定ウィザードを再実行し、LLMプロバイダーやモデルを変更します |
+| `/compact` | コンテキストの手動圧縮を実行します |
+| `/model` | 使用中のLLMモデルを変更します |
 | `/plan` | タスクを事前に分析・設計する「プランモード」を手動で開始します |
-| `/skill` | 追加ロードされているスキル（builtin含む）の一覧を表示します |
-| `/agents` | バックグラウンド等で稼働しているサブエージェントの一覧・状態を表示します |
+| `/skills` | 追加ロードされているスキル（builtin含む）の一覧を表示します |
 | `/status` | 全体の稼働ステータス（コンテキスト・タスク・エージェント）を一括表示します |
+| `/todo` | 現在のTODOリストを表示します |
+| `/sessions` | 保存されたセッション一覧を表示します |
+| `/resume` | 過去のセッションを再開します |
+| `/memory` | 永続メモリの内容を表示します |
+| `/remember` | 指定した情報を永続メモリに記録します |
+| `/diff` | 現在のセッションでの変更差分を表示します |
+
+※ `/setup` は REPL コマンドではなく、CLI起動時のフラグ `--setup` で実行します。
 
 ## 3. 提供機能とツール群
 
-エージェントはLLMの推論結果に基づき、以下の機能（ツール）を抽象化された関数(Function Calling)として呼び出します。
+エージェントはLLMの推論結果に基づき、以下の **21種の機能（ツール）** を抽象化された関数(Function Calling)として呼び出します。
 
 ```mermaid
 graph TD
     classDef safe fill:#d4edda,stroke:#28a745,color:#155724;
     classDef ask fill:#fff3cd,stroke:#ffc107,color:#856404;
-    
-    subgraph Filesystem [ファイル操作]
+
+    subgraph Filesystem [ファイル操作 - 5ツール]
         F1(file_read):::safe
-        F2(glob / grep):::safe
-        F3(file_write):::ask
-        F4(file_edit):::ask
+        F2(glob):::safe
+        F3(grep):::safe
+        F4(file_write):::ask
+        F5(file_edit):::ask
     end
-    
-    subgraph System [システム操作]
+
+    subgraph System [システム操作 - 1ツール]
         S1(bash):::ask
     end
-    
-    subgraph Web_Browser [Web・ブラウザ操作]
-        W1(web_search / web_fetch):::ask
-        W2(browser_navigate / click / type):::ask
-        W3(browser_snapshot):::ask
+
+    subgraph Web [Web検索 - 2ツール]
+        W1(web_search):::ask
+        W2(web_fetch):::ask
     end
-    
-    subgraph SubAgents [タスク・エージェント管理]
-        A1(todo_write):::safe
+
+    subgraph Browser [ブラウザ操作 - 5ツール]
+        B1(browser_navigate):::ask
+        B2(browser_click):::ask
+        B3(browser_type):::ask
+        B4(browser_snapshot):::safe
+        B5(browser_screenshot):::ask
+    end
+
+    subgraph Vision [画像解析 - 1ツール]
+        V1(vision_analyze):::safe
+    end
+
+    subgraph AgentTools [タスク・エージェント管理 - 7ツール]
+        A1(todo_write):::ask
         A2(task):::ask
-        A3(skill):::ask
+        A3(task_output):::ask
+        A4(enter_plan_mode):::ask
+        A5(exit_plan_mode):::ask
+        A6(skill):::ask
+        A7(ask_user):::ask
     end
 ```
 ※緑色: 自動許可(`auto`)、黄色: 確認必須(`ask`)
+
+デフォルトで `auto`（自動許可）に設定されているツール: `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`。
+その他のツールはすべて `ask`（実行前にユーザーの承認が必要）です。
 
 ## 4. セキュリティ・権限モデルのUXフロー
 
@@ -170,6 +197,8 @@ sequenceDiagram
 - **LLM**: ローカルLLM環境（Ollama等）の起動
 - **設定ロケーション**: `~/.localllm/config.json`
 - **主要な設定値**:
-  - `providerType`: `ollama`, `lmstudio`, `llamacpp`, `vllm`, `openai-compat`
+  - `providerType`: `ollama`, `lmstudio`, `llamacpp`, `vllm` (4種のローカルLLMプロバイダ。内部的にはすべて OpenAI互換APIで通信)
   - `contextWindow`: トークン上限。これの80%(デフォルト)に達すると自動圧縮。
   - `allowedDirectories`: サンドボックスでアクセスを許可する追加のディレクトリリスト。
+  - `autoApproveTools`: 自動承認するツールのリスト (デフォルト: `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`)
+  - `requireApprovalTools`: 承認が必要なツールのリスト

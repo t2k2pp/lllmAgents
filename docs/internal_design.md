@@ -156,7 +156,7 @@ stateDiagram-v2
   会話コンテキストとは独立した永続記憶 (`~/.localllm/memory/MEMORY.md`) を操作します。エージェント自身が必要と判断した知識やユーザーの好みを永続化します。
 
 ### 2.5 ツール群の詳細仕様 (Tool Definitions)
-本システムには、LLMが自律的に呼び出せる15種類の機能(Function Calling)群が実装されています。
+本システムには、LLMが自律的に呼び出せる**21種類**の機能(Function Calling)群が実装されています。
 
 | カテゴリ | ツール名 | 権限 | 機能詳細と動作ロジック |
 | :--- | :--- | :--- | :--- |
@@ -168,13 +168,21 @@ stateDiagram-v2
 | **システム** | `bash` | ask | シェルコマンドを実行し、標準出力/標準エラー出力を取得します。無限ループ等のタイムアウト(標準120秒)が設けられています。 |
 | **Web検索** | `web_search` | ask | DuckDuckGo等の検索エンジンAPIを用いて、インターネットから最新情報を検索しサマリーを取得します。 |
 | | `web_fetch` | ask | 指定されたURLのWebページをダウンロードし、HTMLからプレーンテキスト(Markdown等)を抽出して読み取りやすく整形した結果を返却します。 |
-| **ブラウザ操作** | `browser` | ask | **Playwright**プロセスを起動し、指定された操作(`navigate`, `click`, `type`, `snapshot`)を実行します。JavaScriptを多用したSPA等での動作確認やスクレイピングに用いられます。 |
-| | `vision` | auto | ブラウザ操作で取得したスクリーンショットやローカル画像を、画像解析専用のサブLLM(OllamaのLlava等)に渡して状態を視覚的に説明させます。 |
-| **タスク・補助** | `todo_write` | safe | エージェント自身が行動計画を整理するためのTODOリストをワークスペースに作成・更新します。 |
+| **ブラウザ操作** | `browser_navigate` | ask | **Playwright**プロセスを起動し、指定されたURLに遷移します。 |
+| | `browser_click` | ask | ブラウザ上のアクセシビリティツリーから特定の要素をクリックします。 |
+| | `browser_type` | ask | ブラウザ上の入力フィールドにテキストを入力します。 |
+| | `browser_snapshot` | auto | ページのアクセシビリティツリー（テキスト形式）を取得します。Vision APIが不要なため軽量です。 |
+| | `browser_screenshot` | ask | ページのスクリーンショット（base64画像）を取得します。`vision_analyze` と組み合わせて視覚的な状態確認に使用します。 |
+| **画像解析** | `vision_analyze` | auto | ブラウザ操作で取得したスクリーンショットやローカル画像を、画像解析専用のサブLLM(OllamaのLlava等)に渡して状態を視覚的に説明させます。 |
+| **タスク・補助** | `todo_write` | ask | エージェント自身が行動計画を整理するためのTODOリストをワークスペースに作成・更新します。 |
 | | `task` | ask | 自身とは別の独立したコンテキストを持つ**子エージェント (SubAgent)** を生成し、「調査専門」や「コマンド実行専門」などスコープを限定したタスクを裏側(並列)で実行・委譲します。 |
-| | `plan_mode` | ask | 破壊的なツール実行を封印し、システムの調査・設計のみを行う「プランモード」に入ります。結果は `.localllm/plans/` に保存されユーザー承認を待ちます。 |
-| | `skill` | ask | ユーザーが `.localllm/skills/` 等に配置した独自Markdown形式のスキル（例: git commit, pr review 等の一連の事前定義された操作フロー）を実行します。 |
-| | `ask_user` | auto | エージェント単独で判断できない問題や、致命的なエラーが発生した場合にコンソール経由でユーザーに直接質問を投げかけ回答を待ちます。 |
+| | `task_output` | ask | バックグラウンドで起動したサブエージェントの実行結果を取得します。 |
+| | `enter_plan_mode` | ask | 破壊的なツール実行を封印し、システムの調査・設計のみを行う「プランモード」に入ります。 |
+| | `exit_plan_mode` | ask | プランモードを終了し、計画内容を `~/.localllm/plans/` に保存してユーザー承認を待ちます。 |
+| | `skill` | ask | ユーザーが `~/.localllm/skills/`、`.claude/skills/`、`.localllm/skills/` に配置した独自Markdown形式のスキル（例: git commit, pr review 等の一連の事前定義された操作フロー）を実行します。内蔵スキル (commit, pr-review, tdd, build-fix) も含みます。 |
+| | `ask_user` | ask | エージェント単独で判断できない問題や、致命的なエラーが発生した場合にコンソール経由でユーザーに直接質問を投げかけ回答を待ちます。 |
+
+※ **権限のデフォルト設定**: `auto`（自動許可）は `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze` の5ツールのみ。その他はすべて `ask`（要ユーザー承認）。
 
 本システムのサンドボックス機構は、OSレベルの仮想化（コンテナ等）ではなく、アプリケーション層（Node.js）での「パスの文字列評価」によるシンプルなアーキテクチャを採用しています。
 
@@ -210,7 +218,7 @@ sequenceDiagram
 実際のパス解決は `path.resolve()` により相対パス表記（`../`など）を排除した絶対パス文字列を生成し、それが許可リストと前方一致（`startsWith`）するかで判定します。
 この「文字列ベースの検査機構」に依存している仕様が原因となり、OS特有のファイルシステム挙動（WindowsのショートパスやUNCパス、Linux/Macのシンボリックリンク等）に対する技術的制約やバイパスリスクを抱えています。リスクの詳細は『セキュリティ評価書 (`security_assessment.md`)』に明記しています。
 
-## 4. インターフェース設計 (クラス構造例)
+## 4. インターフェース設計 (クラス構造)
 
 ```mermaid
 classDiagram
@@ -218,14 +226,49 @@ classDiagram
         -history: MessageHistory
         -contextManager: ContextManager
         -toolExecutor: ToolExecutor
+        -planManager: PlanManager
+        -permissions: PermissionManager
         +run(userMessage) Promise~void~
         -executeToolsParallel(toolCalls) Promise~void~
+        -getFilteredToolDefs() ToolDefinition[]
+        +getProvider() BaseProvider
+        +getModel() string
+        +getToolRegistry() ToolRegistry
+        +getPermissions() PermissionManager
+        +setPlanManager(pm) void
     }
-    
+
     class ToolExecutor {
         -registry: ToolRegistry
         -permissions: PermissionManager
         +execute(ToolCall) Promise~ToolResult~
+    }
+
+    class SubAgentManager {
+        -parentAgent: AgentLoop
+        -backgroundTasks: Map
+        +launchForeground(type, desc, prompt) Promise~SubAgentResult~
+        +launchBackground(type, desc, prompt) string
+        +launchParallel(tasks) Promise~SubAgentResult[]~
+        +getResult(taskId) SubAgentResult
+    }
+
+    class PlanManager {
+        -state: PlanState
+        -plansDir: string
+        +enterPlanMode() void
+        +exitPlanMode(planContent) void
+        +requestApproval(planContent) Promise~boolean~
+        +getState() PlanState
+        +isInPlanMode() boolean
+    }
+
+    class SkillRegistry {
+        -skills: Map
+        +register(skill) void
+        +get(name) Skill
+        +list() Skill[]
+        +getTriggers() Map
     }
 
     class BaseProvider {
@@ -236,4 +279,7 @@ classDiagram
 
     AgentLoop --> ToolExecutor
     AgentLoop --> BaseProvider
+    AgentLoop --> PlanManager
+    SubAgentManager --> AgentLoop : creates child
+    AgentLoop ..> SkillRegistry
 ```
