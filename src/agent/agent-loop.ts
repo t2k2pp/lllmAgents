@@ -18,7 +18,7 @@ import type { ContextModeManager } from "../context/context-mode.js";
 import * as logger from "../utils/logger.js";
 
 const MAX_TOOL_ITERATIONS = 50;
-const MAX_RETRIES = 2;
+const MAX_CONNECTION_RETRIES = 3;
 
 export class AgentLoop {
   private history: MessageHistory;
@@ -72,7 +72,7 @@ export class AgentLoop {
       let hasStartedOutput = false;
       let success = false;
 
-      for (let retry = 0; retry <= MAX_RETRIES; retry++) {
+      for (let retry = 0; retry <= MAX_CONNECTION_RETRIES; retry++) {
         try {
           const toolDefs = this.getFilteredToolDefs();
           const gen = toolDefs.length > 0
@@ -115,15 +115,20 @@ export class AgentLoop {
           success = true;
           break;
         } catch (e) {
-          if (retry < MAX_RETRIES) {
-            const waitMs = 1000 * (retry + 1);
-            console.log(chalk.yellow(`\n  リトライ中 (${retry + 1}/${MAX_RETRIES})...`));
+          const err = e instanceof Error ? e : new Error(String(e));
+
+          // 接続エラー（ECONNREFUSED, ECONNRESET, fetch failed等）の場合のみリトライ
+          // タイムアウトやLLMエラーではリトライしない（輻輳悪化を防止）
+          if (isConnectionError(err) && retry < MAX_CONNECTION_RETRIES) {
+            const waitMs = 2000 * (retry + 1); // 2s, 4s, 6s
+            console.log(chalk.yellow(`\n  接続エラー: ${err.message}`));
+            console.log(chalk.yellow(`  サーバー復帰を待機中... (${retry + 1}/${MAX_CONNECTION_RETRIES})`));
             await sleep(waitMs);
             textContent = "";
             toolCalls.length = 0;
             hasStartedOutput = false;
           } else {
-            console.error(chalk.red(`\n  Error: ${e instanceof Error ? e.message : String(e)}`));
+            console.error(chalk.red(`\n  Error: ${err.message}`));
             return;
           }
         }
@@ -266,4 +271,30 @@ export class AgentLoop {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * 接続エラーかどうかを判定する。
+ *
+ * リトライすべきエラー（サーバーが一時的に不到達）:
+ * - ECONNREFUSED: サーバーが起動していない/再起動中
+ * - ECONNRESET: 接続がリセットされた
+ * - ENOTFOUND: DNS解決できない
+ * - fetch failed: ネットワーク到達不能
+ *
+ * リトライすべきでないエラー（待っても変わらない/輻輳悪化）:
+ * - タイムアウト（AbortError）: LLMが処理中なのに打ち切ってリトライしても輻輳するだけ
+ * - HTTP 4xx/5xx: サーバーは到達できているがリクエストに問題あり
+ * - LLMレスポンスエラー: パースエラー等
+ */
+function isConnectionError(err: Error): boolean {
+  const msg = err.message.toLowerCase();
+  return (
+    msg.includes("econnrefused") ||
+    msg.includes("econnreset") ||
+    msg.includes("enotfound") ||
+    msg.includes("fetch failed") ||
+    msg.includes("network") ||
+    msg.includes("socket hang up")
+  );
 }

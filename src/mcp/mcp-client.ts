@@ -21,7 +21,8 @@ import type {
 const PROTOCOL_VERSION = "2024-11-05";
 const CLIENT_NAME = "localllm-agent";
 const CLIENT_VERSION = "0.1.0";
-const REQUEST_TIMEOUT_MS = 30000;
+/** MCPツール呼び出しのタイムアウト。外部ツールも時間がかかりうるため余裕を持たせる */
+const REQUEST_TIMEOUT_MS = 300_000; // 5分
 
 export class MCPClient {
   private config: MCPServerConfig;
