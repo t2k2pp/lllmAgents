@@ -324,25 +324,39 @@ export class InteractiveInput {
         // ── Enter ──
         if (key.name === "return") {
           if (menuVisible && menuItems.length > 0) {
-            // メニューから選択 → 入力に反映（確定はしない）
+            const selectedValue = menuItems[selectedIndex].value;
             selectItem();
             renderLine();
-            // 選択後にさらに候補があるか確認（ディレクトリ→中身）
-            updateMenu();
-            renderMenu();
+
+            if (buffer.startsWith("/")) {
+              // /コマンド: 選択 → 即確定（Claude Codeと同じ動作）
+              finish(buffer);
+            } else if (selectedValue.endsWith("/")) {
+              // @ディレクトリ: さらに中身を展開
+              updateMenu();
+              if (menuVisible) {
+                renderMenu();
+              }
+            } else {
+              // @ファイル: 選択完了、続けてメッセージ入力可能
+              // (selectItem内でdismissMenu済み)
+            }
           } else {
             finish(buffer);
           }
           return;
         }
 
-        // ── Tab → メニューから選択 ──
+        // ── Tab → メニューから選択（確定しない） ──
         if (key.name === "tab") {
           if (menuVisible && menuItems.length > 0) {
             selectItem();
             renderLine();
+            // Tab は選択のみ。ディレクトリなら中身を展開
             updateMenu();
-            renderMenu();
+            if (menuVisible) {
+              renderMenu();
+            }
           }
           return;
         }
