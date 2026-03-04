@@ -7,6 +7,7 @@ import { formatTodos } from "../tools/definitions/todo-write.js";
 import { listSessions, loadSession, getLatestSession } from "../agent/session-manager.js";
 import { loadMemory, saveMemory } from "../agent/memory.js";
 import { resolveAtMentions, printMentionFeedback } from "./input-resolver.js";
+import { createCompleter } from "./completer.js";
 import type { Config } from "../config/types.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { PlanManager } from "../agent/plan-mode.js";
@@ -25,9 +26,17 @@ export class REPL {
     private planManager?: PlanManager,
     private contextModeManager?: ContextModeManager,
   ) {
+    // スキルのトリガー一覧を取得してTab補完に渡す
+    const skillTriggers = skillRegistry
+      ? skillRegistry.list().map((s) => s.trigger)
+      : [];
+
+    const completer = createCompleter({ skillTriggers });
+
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
+      completer,
     });
   }
 
