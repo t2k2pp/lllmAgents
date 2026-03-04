@@ -6,6 +6,7 @@ import { estimateMessageTokens } from "../agent/token-counter.js";
 import { formatTodos } from "../tools/definitions/todo-write.js";
 import { listSessions, loadSession, getLatestSession } from "../agent/session-manager.js";
 import { loadMemory, saveMemory } from "../agent/memory.js";
+import { resolveAtMentions, printMentionFeedback } from "./input-resolver.js";
 import type { Config } from "../config/types.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { PlanManager } from "../agent/plan-mode.js";
@@ -119,7 +120,12 @@ export class REPL {
 
   private async processInput(input: string): Promise<void> {
     try {
-      await this.agent.run(input);
+      // @ファイル/フォルダ参照を解決してコンテキストに展開
+      const { resolved, mentions } = resolveAtMentions(input);
+      if (mentions.length > 0) {
+        printMentionFeedback(mentions);
+      }
+      await this.agent.run(resolved);
     } catch (e) {
       console.error(chalk.red(`\n  Error: ${e instanceof Error ? e.message : String(e)}\n`));
     }
