@@ -24,6 +24,7 @@ export function displayHelp(): void {
     ${chalk.cyan("/todo")}           タスクリスト表示
     ${chalk.cyan("/sessions")}       保存済みセッション一覧
     ${chalk.cyan("/resume <id>")}    セッション復元
+    ${chalk.cyan("/continue")}       最新セッションを復元
     ${chalk.cyan("/memory")}         自動メモリ表示
     ${chalk.cyan("/remember <text>")} メモリに追記
     ${chalk.cyan("/diff")}           git diff表示

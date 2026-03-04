@@ -4,7 +4,7 @@ import type { AgentLoop } from "../agent/agent-loop.js";
 import { displayHelp } from "./renderer.js";
 import { estimateMessageTokens } from "../agent/token-counter.js";
 import { formatTodos } from "../tools/definitions/todo-write.js";
-import { listSessions, loadSession } from "../agent/session-manager.js";
+import { listSessions, loadSession, getLatestSession } from "../agent/session-manager.js";
 import { loadMemory, saveMemory } from "../agent/memory.js";
 import type { Config } from "../config/types.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
@@ -238,6 +238,17 @@ export class REPL {
         }
         this.agent.restoreSession(session);
         console.log(chalk.dim(`  セッション ${sessionId} を復元しました (${session.meta.messageCount} messages)`));
+        break;
+      }
+
+      case "/continue": {
+        const latest = getLatestSession();
+        if (!latest) {
+          console.log(chalk.yellow("  復元可能なセッションがありません。"));
+          break;
+        }
+        this.agent.restoreSession(latest);
+        console.log(chalk.dim(`  最新セッションを復元しました: ${latest.meta.id} (${latest.meta.messageCount} messages)`));
         break;
       }
 

@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import ora from "ora";
+import inquirer from "inquirer";
 import type { LLMProvider, ToolCall, ToolDefinition } from "../providers/base-provider.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
@@ -72,7 +73,10 @@ export class AgentLoop {
       let hasStartedOutput = false;
       let success = false;
 
-      for (let retry = 0; retry <= MAX_CONNECTION_RETRIES; retry++) {
+      // LLM呼び出しループ: 接続エラー時は自動リトライ、その他はユーザーに判断を委ねる
+      let connectionRetries = 0;
+
+      while (!success) {
         try {
           const toolDefs = this.getFilteredToolDefs();
           const gen = toolDefs.length > 0
@@ -113,22 +117,36 @@ export class AgentLoop {
           }
 
           success = true;
-          break;
+          connectionRetries = 0;
         } catch (e) {
           const err = e instanceof Error ? e : new Error(String(e));
 
-          // 接続エラー（ECONNREFUSED, ECONNRESET, fetch failed等）の場合のみリトライ
-          // タイムアウトやLLMエラーではリトライしない（輻輳悪化を防止）
-          if (isConnectionError(err) && retry < MAX_CONNECTION_RETRIES) {
-            const waitMs = 2000 * (retry + 1); // 2s, 4s, 6s
+          // 接続エラー（ECONNREFUSED等）の場合: 自動リトライ（上限あり）
+          if (isConnectionError(err) && connectionRetries < MAX_CONNECTION_RETRIES) {
+            connectionRetries++;
+            const waitMs = 2000 * connectionRetries; // 2s, 4s, 6s
             console.log(chalk.yellow(`\n  接続エラー: ${err.message}`));
-            console.log(chalk.yellow(`  サーバー復帰を待機中... (${retry + 1}/${MAX_CONNECTION_RETRIES})`));
+            console.log(chalk.yellow(`  サーバー復帰を待機中... (${connectionRetries}/${MAX_CONNECTION_RETRIES})`));
             await sleep(waitMs);
             textContent = "";
             toolCalls.length = 0;
             hasStartedOutput = false;
+            continue;
+          }
+
+          // その他のエラー or 接続リトライ上限: ユーザーに判断を委ねる
+          console.error(chalk.red(`\n  エラー: ${err.message}`));
+          const action = await askUserOnError(err);
+
+          if (action === "retry") {
+            // ユーザーが明示的にリトライを選択
+            connectionRetries = 0;
+            textContent = "";
+            toolCalls.length = 0;
+            hasStartedOutput = false;
+            continue;
           } else {
-            console.error(chalk.red(`\n  Error: ${err.message}`));
+            // "abort" → この発話を中止してREPLに戻る（プロセスは終了しない）
             return;
           }
         }
@@ -271,6 +289,32 @@ export class AgentLoop {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * エラー発生時にユーザーに判断を委ねる。
+ * プロセスは終了しない。ユーザーが /quit するまで REPL は動き続ける。
+ */
+async function askUserOnError(err: Error): Promise<"retry" | "abort"> {
+  const hint = isConnectionError(err)
+    ? "サーバーに接続できません。サーバーの状態を確認してください。"
+    : "LLMからの応答でエラーが発生しました。";
+
+  console.log(chalk.dim(`  ${hint}`));
+
+  const { action } = await inquirer.prompt<{ action: "retry" | "abort" }>([
+    {
+      type: "list",
+      name: "action",
+      message: "どうしますか？",
+      choices: [
+        { name: "リトライ (同じリクエストを再送信)", value: "retry" },
+        { name: "中止 (プロンプトに戻る)", value: "abort" },
+      ],
+    },
+  ]);
+
+  return action;
 }
 
 /**
