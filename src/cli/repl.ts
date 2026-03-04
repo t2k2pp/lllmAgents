@@ -30,80 +30,90 @@ export class REPL {
     });
   }
 
+  /**
+   * REPLを起動し、ユーザーが /quit するまで resolve しない。
+   * index.ts の await repl.start() はユーザーが終了を選ぶまでブロックされる。
+   */
   async start(): Promise<void> {
-    const prompt = () => {
-      let prefix: string;
-      if (this.isMultiline) {
-        this.lineNumber++;
-        prefix = chalk.dim(`${String(this.lineNumber).padStart(3)}| `);
-      } else if (this.planManager?.isInPlanMode()) {
-        prefix = chalk.yellow("[plan] > ");
-      } else {
-        prefix = chalk.green("> ");
-      }
-
-      this.rl.question(prefix, async (input) => {
-        // Multi-line mode: triple backtick to start/end
-        if (input.trim() === "```" && !this.isMultiline) {
-          this.isMultiline = true;
-          this.multilineBuffer = [];
-          this.lineNumber = 0;
-          console.log(chalk.dim("  マルチライン入力モード (``` で終了)"));
-          prompt();
-          return;
-        }
-        if (input.trim() === "```" && this.isMultiline) {
-          this.isMultiline = false;
-          const fullInput = this.multilineBuffer.join("\n");
-          this.multilineBuffer = [];
-          this.lineNumber = 0;
-          if (fullInput.trim()) {
-            await this.processInput(fullInput);
-          }
-          prompt();
-          return;
-        }
+    return new Promise<void>((resolveRepl) => {
+      const prompt = () => {
+        let prefix: string;
         if (this.isMultiline) {
-          this.multilineBuffer.push(input);
-          prompt();
-          return;
+          this.lineNumber++;
+          prefix = chalk.dim(`${String(this.lineNumber).padStart(3)}| `);
+        } else if (this.planManager?.isInPlanMode()) {
+          prefix = chalk.yellow("[plan] > ");
+        } else {
+          prefix = chalk.green("> ");
         }
 
-        const trimmed = input.trim();
-        if (!trimmed) {
-          prompt();
-          return;
-        }
+        this.rl.question(prefix, async (input) => {
+          // Multi-line mode: triple backtick to start/end
+          if (input.trim() === "```" && !this.isMultiline) {
+            this.isMultiline = true;
+            this.multilineBuffer = [];
+            this.lineNumber = 0;
+            console.log(chalk.dim("  マルチライン入力モード (``` で終了)"));
+            prompt();
+            return;
+          }
+          if (input.trim() === "```" && this.isMultiline) {
+            this.isMultiline = false;
+            const fullInput = this.multilineBuffer.join("\n");
+            this.multilineBuffer = [];
+            this.lineNumber = 0;
+            if (fullInput.trim()) {
+              await this.processInput(fullInput);
+            }
+            prompt();
+            return;
+          }
+          if (this.isMultiline) {
+            this.multilineBuffer.push(input);
+            prompt();
+            return;
+          }
 
-        // Handle commands
-        if (trimmed.startsWith("/")) {
-          const handled = await this.handleCommand(trimmed);
-          if (handled === "quit") return;
-          prompt();
-          return;
-        }
+          const trimmed = input.trim();
+          if (!trimmed) {
+            prompt();
+            return;
+          }
 
-        await this.processInput(trimmed);
+          // Handle commands
+          if (trimmed.startsWith("/")) {
+            const handled = await this.handleCommand(trimmed);
+            if (handled === "quit") {
+              resolveRepl();
+              return;
+            }
+            prompt();
+            return;
+          }
+
+          await this.processInput(trimmed);
+          prompt();
+        });
+      };
+
+      prompt();
+
+      this.rl.on("SIGINT", () => {
+        if (this.isMultiline) {
+          this.isMultiline = false;
+          this.multilineBuffer = [];
+          this.lineNumber = 0;
+          console.log(chalk.dim("\n  (マルチライン入力をキャンセル)"));
+        } else {
+          console.log(chalk.dim("\n  (Ctrl+C) /quit で終了"));
+        }
         prompt();
       });
-    };
 
-    prompt();
-
-    this.rl.on("SIGINT", () => {
-      if (this.isMultiline) {
-        this.isMultiline = false;
-        this.multilineBuffer = [];
-        this.lineNumber = 0;
-        console.log(chalk.dim("\n  (マルチライン入力をキャンセル)"));
-      } else {
-        console.log(chalk.dim("\n  (Ctrl+C) /quit で終了"));
-      }
-      prompt();
-    });
-
-    this.rl.on("close", () => {
-      this.agent.saveCurrentSession();
+      this.rl.on("close", () => {
+        this.agent.saveCurrentSession();
+        resolveRepl();
+      });
     });
   }
 
