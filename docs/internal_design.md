@@ -604,3 +604,125 @@ classDiagram
 | `plan.md` | plan | file_read, glob, grep, web_fetch, web_search |
 | `general-purpose.md` | general-purpose | file_read, file_write, file_edit, glob, grep, bash, web_fetch, web_search, todo_write, ask_user |
 | `code-reviewer.md` | code-reviewer | file_read, glob, grep, bash |
+
+## 9. MCPManager アーキテクチャ
+
+`MCPManager`（`src/mcp/mcp-manager.ts`）は、MCP（Model Context Protocol）サーバーのライフサイクル管理と、発見されたツールの `ToolRegistry` への統合を担います。
+
+### クラス図
+
+```mermaid
+classDiagram
+    class MCPManager {
+        -clients: Map~string, MCPClient~
+        -configPaths: string[]
+        +loadConfig() Record~string, MCPServerConfig~
+        +connectAll(registry: ToolRegistry) Promise~number~
+        +getConnectedServers() ServerInfo[]
+        +disconnectAll() Promise~void~
+        -createToolHandlers(client) ToolHandler[]
+        -mcpToolToHandler(client, mcpTool) ToolHandler
+    }
+
+    class MCPClient {
+        -config: MCPServerConfig
+        -process: ChildProcess|null
+        -pendingRequests: Map
+        -buffer: string
+        +name: string
+        +connected: boolean
+        +tools: MCPTool[]
+        +serverInfo: MCPInitializeResult|null
+        +connect() Promise~void~
+        +callTool(params) Promise~MCPToolCallResult~
+        +disconnect() Promise~void~
+        -connectStdio() Promise~void~
+        -connectSSE() Promise~void~
+        -sendRequest(method, params) Promise~T~
+        -sendNotification(method, params) void
+        -handleResponse(msg) void
+    }
+
+    class MCPServerConfig {
+        +name: string
+        +transport: "stdio"|"sse"
+        +command?: string
+        +args?: string[]
+        +env?: Record~string,string~
+        +url?: string
+    }
+
+    MCPManager --> MCPClient
+    MCPClient --> MCPServerConfig
+    MCPManager ..> ToolRegistry : registers tools
+    MCPManager ..> ToolHandler : creates
+```
+
+### 通信シーケンス（stdio トランスポート）
+
+```mermaid
+sequenceDiagram
+    participant App as index.ts
+    participant MM as MCPManager
+    participant MC as MCPClient
+    participant SP as MCP Server (子プロセス)
+    participant TR as ToolRegistry
+
+    App->>MM: connectAll(registry)
+    MM->>MM: loadConfig()
+
+    loop 各MCPサーバー
+        MM->>MC: new MCPClient(config)
+        MC->>SP: spawn(command, args)
+        MC->>SP: {"method":"initialize",...}
+        SP-->>MC: {"result":{"protocolVersion":...}}
+        MC->>SP: {"method":"notifications/initialized"}
+        MC->>SP: {"method":"tools/list"}
+        SP-->>MC: {"result":{"tools":[...]}}
+        MM->>MM: createToolHandlers(client)
+        MM->>TR: register(toolHandler) ×N
+    end
+
+    Note over App,TR: LLMがMCPツールを呼び出す時
+
+    App->>TR: get("mcp__server__tool")
+    TR-->>App: ToolHandler
+    App->>MC: callTool({name, arguments})
+    MC->>SP: {"method":"tools/call","params":{...}}
+    SP-->>MC: {"result":{"content":[...]}}
+    MC-->>App: MCPToolCallResult
+
+    Note over App,SP: セッション終了時
+    App->>MM: disconnectAll()
+    MM->>MC: disconnect()
+    MC->>SP: SIGTERM
+```
+
+### 設定ファイルの読み込み順序
+
+`loadConfig()` メソッドは以下の順序でファイルを読み込み、同名サーバーは後のパスで上書きされます。
+
+1. `~/.localllm/mcp-servers.json`（ユーザーグローバル）
+2. `{projectDir}/.localllm/mcp-servers.json`（プロジェクトローカル）
+3. `{projectDir}/.claude/mcp-servers.json`（Claude Code互換）
+
+### ツール命名規則と変換
+
+MCPサーバーから取得したツールは `mcp__<サーバー名>__<ツール名>` の形式で `ToolHandler` に変換されます。LLMにはプレフィックス付きの名前で提示され、MCPサーバーへの呼び出し時にはオリジナルのツール名が使用されます。
+
+```
+MCPTool { name: "read_file", inputSchema: {...} }
+  ↓ mcpToolToHandler()
+ToolHandler { name: "mcp__filesystem__read_file", definition: {...}, execute: async (params) => ... }
+```
+
+### index.ts での統合
+
+```typescript
+// 起動時
+const mcpManager = new MCPManager(process.cwd());
+await mcpManager.connectAll(toolRegistry);
+
+// 終了時
+await mcpManager.disconnectAll();
+```

@@ -253,6 +253,10 @@ src/
 │       └── git-workflow.md
 ├── context/                  # コンテキストモード
 │   └── context-mode.ts      # ContextModeManager (dev/review/research)
+├── mcp/                      # MCP (Model Context Protocol)
+│   ├── types.ts             # JSON-RPC 2.0 / MCPプロトコル型定義
+│   ├── mcp-client.ts        # MCPClient (stdio/SSEトランスポート)
+│   └── mcp-manager.ts       # MCPManager (ライフサイクル管理・ツール登録)
 ├── skills/                   # スキルシステム
 │   ├── skill-registry.ts    # スキル登録・検索
 │   ├── skill-loader.ts      # スキルファイル読み込み
@@ -388,3 +392,13 @@ REPL.processInput()
 - 組み込み4種: `explore`, `plan`, `general-purpose`, `code-reviewer`
 - ロード順: `src/agents/builtin/` → `~/.localllm/agents/` → `.localllm/agents/`（同名は後から上書き）
 - 遅延ロード: `get(name)` 初回呼び出し時に全定義を読み込み
+
+### 6.5 MCP (Model Context Protocol) (`src/mcp/`)
+- JSON-RPC 2.0ベースのプロトコルで外部ツールサーバーと通信
+- トランスポート: `stdio`（子プロセス stdin/stdout）, `sse`（HTTP SSE + POST）
+- **MCPClient** (`mcp-client.ts`): 接続管理、`initialize` → `tools/list` → `tools/call` のプロトコルフロー
+- **MCPManager** (`mcp-manager.ts`): 設定ロード、全サーバー接続、MCPツール→ToolHandler変換・ToolRegistry登録
+- 設定ファイル: `~/.localllm/mcp-servers.json` → `.localllm/mcp-servers.json` → `.claude/mcp-servers.json`
+- ツール命名規則: `mcp__<サーバー名>__<ツール名>`
+- ライフサイクル: アプリ起動時 `connectAll()` → ToolRegistry登録 → 利用 → 終了時 `disconnectAll()`
+- 既存のPermissionManager・HookManagerと統合済み（MCPツールにも同じセキュリティポリシー適用）
