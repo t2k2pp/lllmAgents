@@ -370,3 +370,60 @@ You are a codebase exploration specialist. Your job is to quickly find files, se
 1. `src/agents/builtin/` （組み込み定義）
 2. `~/.localllm/agents/` （ユーザーグローバルオーバーライド）
 3. `.localllm/agents/` （プロジェクトローカルオーバーライド）
+
+## 10. MCP（Model Context Protocol）対応
+
+MCPは外部ツールサーバーと通信するためのJSON-RPC 2.0ベースのプロトコルです。これにより、サードパーティ製のツール（データベース、API、ファイルシステム拡張等）を動的に統合できます。
+
+### 10.1 MCP設定ファイル
+
+`mcp-servers.json` にMCPサーバー定義を記述します。以下の順序で読み込まれ、同名サーバーは後のパスで上書きされます。
+
+| 優先度 | パス | スコープ |
+|:---|:---|:---|
+| 1 | `~/.localllm/mcp-servers.json` | ユーザーグローバル |
+| 2 | `.localllm/mcp-servers.json` | プロジェクトローカル |
+| 3 | `.claude/mcp-servers.json` | Claude Code互換 |
+
+### 10.2 設定ファイル形式
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "name": "filesystem",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"],
+      "env": {}
+    },
+    "remote-db": {
+      "name": "remote-db",
+      "transport": "sse",
+      "url": "http://localhost:3001/sse"
+    }
+  }
+}
+```
+
+### 10.3 トランスポート
+
+| トランスポート | 説明 | 必須設定 |
+|:---|:---|:---|
+| `stdio` | 子プロセスのstdin/stdoutでJSON-RPCメッセージを送受信 | `command`, `args`(任意), `env`(任意) |
+| `sse` | HTTP SSE接続でイベント受信、POSTでリクエスト送信 | `url` |
+
+### 10.4 MCPツールの利用
+
+MCPサーバーが提供するツールは起動時に自動検出され、`mcp__<サーバー名>__<ツール名>` の命名規則でLLMに提示されます。既存のパーミッションシステム・フックシステムと統合されるため、MCP経由のツールにも同じセキュリティポリシーが適用されます。
+
+### 10.5 ライフサイクル
+
+```
+アプリ起動
+  → mcp-servers.json 読み込み
+  → 各MCPサーバーに接続 (initialize → tools/list)
+  → 発見されたツールをToolRegistryに登録
+  → LLMがツールを使用 (tools/call)
+  → アプリ終了時に全MCPサーバーを切断
+```

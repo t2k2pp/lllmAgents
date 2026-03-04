@@ -35,6 +35,7 @@ import { PROVIDER_LABELS } from "./config/types.js";
 import { getLatestSession } from "./agent/session-manager.js";
 import { ContextModeManager } from "./context/context-mode.js";
 import { HookManager } from "./hooks/hook-manager.js";
+import { MCPManager } from "./mcp/mcp-manager.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -103,6 +104,10 @@ async function main(): Promise<void> {
   const visionModel = config.visionLLM?.model ?? config.mainLLM.model;
   const visionService = new VisionService(visionProvider, visionModel);
   toolRegistry.register(createVisionTool(visionService));
+
+  // MCP servers
+  const mcpManager = new MCPManager(process.cwd());
+  await mcpManager.connectAll(toolRegistry);
 
   // Permissions
   const permissions = new PermissionManager(config.security);
@@ -195,6 +200,7 @@ async function main(): Promise<void> {
   // Cleanup
   await hookManager.runSessionHooks("stop");
   agent.saveCurrentSession();
+  await mcpManager.disconnectAll();
   await playwrightManager.close();
 }
 
