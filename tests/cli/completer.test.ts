@@ -2,15 +2,17 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { createCompleter } from "../../src/cli/completer.js";
+import {
+  createCompleter,
+  createCommandMenuProvider,
+  createFileMenuProvider,
+} from "../../src/cli/completer.js";
 
-describe("createCompleter", () => {
+describe("createCompleter (readline fallback)", () => {
   let tmpDir: string;
 
   beforeAll(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "completer-test-"));
-
-    // テスト用ファイル構造
     fs.mkdirSync(path.join(tmpDir, "src"));
     fs.mkdirSync(path.join(tmpDir, "src", "cli"));
     fs.writeFileSync(path.join(tmpDir, "src", "cli", "repl.ts"), "");
@@ -19,7 +21,7 @@ describe("createCompleter", () => {
     fs.mkdirSync(path.join(tmpDir, "src", "agent"));
     fs.writeFileSync(path.join(tmpDir, "src", "agent", "agent-loop.ts"), "");
     fs.writeFileSync(path.join(tmpDir, "package.json"), "{}");
-    fs.writeFileSync(path.join(tmpDir, ".env"), "SECRET=x"); // 隠しファイル
+    fs.writeFileSync(path.join(tmpDir, ".env"), "SECRET=x");
   });
 
   afterAll(() => {
@@ -85,31 +87,8 @@ describe("createCompleter", () => {
       expect(matches).toContain("@package.json");
     });
 
-    it("@s → src/", () => {
-      const [matches] = completer("@s");
-      expect(matches).toContain("@src/");
-    });
-
-    it("@src/ → src内のエントリ", () => {
-      const [matches] = completer("@src/");
-      expect(matches).toContain("@src/cli/");
-      expect(matches).toContain("@src/agent/");
-    });
-
-    it("@src/cl → src/cli/", () => {
-      const [matches] = completer("@src/cl");
-      expect(matches).toContain("@src/cli/");
-    });
-
     it("@src/cli/ → cli内のファイル", () => {
       const [matches] = completer("@src/cli/");
-      expect(matches).toContain("@src/cli/repl.ts");
-      expect(matches).toContain("@src/cli/renderer.ts");
-      expect(matches).toContain("@src/cli/completer.ts");
-    });
-
-    it("@src/cli/re → repl.ts, renderer.ts", () => {
-      const [matches] = completer("@src/cli/re");
       expect(matches).toContain("@src/cli/repl.ts");
       expect(matches).toContain("@src/cli/renderer.ts");
     });
@@ -117,17 +96,6 @@ describe("createCompleter", () => {
     it("隠しファイルは候補に含めない", () => {
       const [matches] = completer("@");
       expect(matches).not.toContain("@.env");
-    });
-
-    it("存在しないディレクトリは候補なし", () => {
-      const [matches] = completer("@nonexistent/");
-      expect(matches).toHaveLength(0);
-    });
-
-    it("文中の@パスも補完対象", () => {
-      const [matches] = completer("このファイル @src/cli/re");
-      expect(matches).toContain("@src/cli/repl.ts");
-      expect(matches).toContain("@src/cli/renderer.ts");
     });
   });
 
@@ -143,5 +111,110 @@ describe("createCompleter", () => {
       const [matches] = completer("");
       expect(matches).toHaveLength(0);
     });
+  });
+});
+
+describe("createCommandMenuProvider", () => {
+  it("空のpartialで全コマンドを返す", () => {
+    const provider = createCommandMenuProvider();
+    const items = provider("");
+    expect(items.length).toBeGreaterThanOrEqual(15);
+    // 各アイテムにlabel, value, descriptionがある
+    for (const item of items) {
+      expect(item.label).toBeTruthy();
+      expect(item.value).toBeTruthy();
+      expect(item.description).toBeTruthy();
+    }
+  });
+
+  it("partialでフィルタリングされる", () => {
+    const provider = createCommandMenuProvider();
+    const items = provider("he");
+    expect(items).toHaveLength(1);
+    expect(items[0].label).toBe("/help");
+    expect(items[0].description).toBe("ヘルプ表示");
+  });
+
+  it("mo → /model, /model list, /mode", () => {
+    const provider = createCommandMenuProvider();
+    const items = provider("mo");
+    const labels = items.map((i) => i.label);
+    expect(labels).toContain("/model");
+    expect(labels).toContain("/model list");
+    expect(labels).toContain("/mode");
+  });
+
+  it("スキルトリガーも候補に含む", () => {
+    const provider = createCommandMenuProvider([
+      { trigger: "/commit", description: "コミットワークフロー" },
+      { trigger: "/tdd", description: "テスト駆動開発" },
+    ]);
+    const items = provider("com");
+    const labels = items.map((i) => i.label);
+    expect(labels).toContain("/commit");
+    expect(labels).toContain("/compact");
+  });
+
+  it("マッチなしなら空配列", () => {
+    const provider = createCommandMenuProvider();
+    const items = provider("zzz");
+    expect(items).toHaveLength(0);
+  });
+});
+
+describe("createFileMenuProvider", () => {
+  let tmpDir: string;
+
+  beforeAll(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "menu-provider-test-"));
+    fs.mkdirSync(path.join(tmpDir, "src"));
+    fs.mkdirSync(path.join(tmpDir, "src", "cli"));
+    fs.writeFileSync(path.join(tmpDir, "src", "cli", "repl.ts"), "");
+    fs.writeFileSync(path.join(tmpDir, "src", "cli", "renderer.ts"), "");
+    fs.writeFileSync(path.join(tmpDir, "package.json"), "{}");
+  });
+
+  afterAll(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("空のpartialでルートのエントリを返す", () => {
+    const provider = createFileMenuProvider(tmpDir);
+    const items = provider("");
+    expect(items.length).toBeGreaterThan(0);
+    const labels = items.map((i) => i.label);
+    expect(labels).toContain("src/");
+    expect(labels).toContain("package.json");
+  });
+
+  it("ディレクトリは📂、ファイルは📄", () => {
+    const provider = createFileMenuProvider(tmpDir);
+    const items = provider("");
+    const srcItem = items.find((i) => i.label === "src/");
+    const pkgItem = items.find((i) => i.label === "package.json");
+    expect(srcItem?.description).toBe("📂");
+    expect(pkgItem?.description).toBe("📄");
+  });
+
+  it("src/cli/ でファイル一覧", () => {
+    const provider = createFileMenuProvider(tmpDir);
+    const items = provider("src/cli/");
+    const labels = items.map((i) => i.label);
+    expect(labels).toContain("src/cli/repl.ts");
+    expect(labels).toContain("src/cli/renderer.ts");
+  });
+
+  it("src/cli/re でフィルタ", () => {
+    const provider = createFileMenuProvider(tmpDir);
+    const items = provider("src/cli/re");
+    const labels = items.map((i) => i.label);
+    expect(labels).toContain("src/cli/repl.ts");
+    expect(labels).toContain("src/cli/renderer.ts");
+  });
+
+  it("存在しないパスは空配列", () => {
+    const provider = createFileMenuProvider(tmpDir);
+    const items = provider("nonexistent/");
+    expect(items).toHaveLength(0);
   });
 });

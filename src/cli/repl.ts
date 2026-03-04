@@ -1,4 +1,3 @@
-import * as readline from "node:readline";
 import chalk from "chalk";
 import type { AgentLoop } from "../agent/agent-loop.js";
 import { displayHelp } from "./renderer.js";
@@ -7,14 +6,21 @@ import { formatTodos } from "../tools/definitions/todo-write.js";
 import { listSessions, loadSession, getLatestSession } from "../agent/session-manager.js";
 import { loadMemory, saveMemory } from "../agent/memory.js";
 import { resolveAtMentions, printMentionFeedback } from "./input-resolver.js";
-import { createCompleter } from "./completer.js";
+import {
+  InteractiveInput,
+  SIGINT_SIGNAL,
+} from "./interactive-input.js";
+import {
+  createCommandMenuProvider,
+  createFileMenuProvider,
+} from "./completer.js";
 import type { Config } from "../config/types.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { PlanManager } from "../agent/plan-mode.js";
 import type { ContextModeManager, ContextMode } from "../context/context-mode.js";
 
 export class REPL {
-  private rl: readline.Interface;
+  private input: InteractiveInput;
   private multilineBuffer: string[] = [];
   private isMultiline = false;
   private lineNumber = 0;
@@ -26,106 +32,105 @@ export class REPL {
     private planManager?: PlanManager,
     private contextModeManager?: ContextModeManager,
   ) {
-    // スキルのトリガー一覧を取得してTab補完に渡す
-    const skillTriggers = skillRegistry
-      ? skillRegistry.list().map((s) => s.trigger)
+    // スキル情報を取得してメニュープロバイダーに渡す
+    const skillInfos = skillRegistry
+      ? skillRegistry.list().map((s) => ({
+          trigger: s.trigger,
+          description: s.description,
+        }))
       : [];
 
-    const completer = createCompleter({ skillTriggers });
-
-    this.rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      completer,
+    this.input = new InteractiveInput({
+      commandProvider: createCommandMenuProvider(skillInfos),
+      filePathProvider: createFileMenuProvider(),
     });
   }
 
   /**
-   * REPLを起動し、ユーザーが /quit するまで resolve しない。
-   * index.ts の await repl.start() はユーザーが終了を選ぶまでブロックされる。
+   * REPLメインループ。ユーザーが /quit するまで resolve しない。
    */
   async start(): Promise<void> {
-    return new Promise<void>((resolveRepl) => {
-      const prompt = () => {
-        let prefix: string;
-        if (this.isMultiline) {
-          this.lineNumber++;
-          prefix = chalk.dim(`${String(this.lineNumber).padStart(3)}| `);
-        } else if (this.planManager?.isInPlanMode()) {
-          prefix = chalk.yellow("[plan] > ");
-        } else {
-          prefix = chalk.green("> ");
+    try {
+      while (true) {
+        const prefix = this.getPromptPrefix();
+        // マルチラインモード中はドロップダウンを抑制
+        const raw = await this.input.question(prefix, {
+          disableMenu: this.isMultiline,
+        });
+
+        // ── Ctrl+C ──
+        if (raw === SIGINT_SIGNAL) {
+          if (this.isMultiline) {
+            this.isMultiline = false;
+            this.multilineBuffer = [];
+            this.lineNumber = 0;
+            console.log(chalk.dim("  (マルチライン入力をキャンセル)"));
+          } else {
+            console.log(chalk.dim("  (Ctrl+C) /quit で終了"));
+          }
+          continue;
         }
 
-        this.rl.question(prefix, async (input) => {
-          // Multi-line mode: triple backtick to start/end
-          if (input.trim() === "```" && !this.isMultiline) {
-            this.isMultiline = true;
-            this.multilineBuffer = [];
-            this.lineNumber = 0;
-            console.log(chalk.dim("  マルチライン入力モード (``` で終了)"));
-            prompt();
-            return;
-          }
-          if (input.trim() === "```" && this.isMultiline) {
-            this.isMultiline = false;
-            const fullInput = this.multilineBuffer.join("\n");
-            this.multilineBuffer = [];
-            this.lineNumber = 0;
-            if (fullInput.trim()) {
-              await this.processInput(fullInput);
-            }
-            prompt();
-            return;
-          }
-          if (this.isMultiline) {
-            this.multilineBuffer.push(input);
-            prompt();
-            return;
-          }
+        // ── EOF (Ctrl+D on empty / stdin closed) ──
+        if (raw === "" && !this.isMultiline) {
+          continue;
+        }
 
-          const trimmed = input.trim();
-          if (!trimmed) {
-            prompt();
-            return;
-          }
-
-          // Handle commands
-          if (trimmed.startsWith("/")) {
-            const handled = await this.handleCommand(trimmed);
-            if (handled === "quit") {
-              resolveRepl();
-              return;
-            }
-            prompt();
-            return;
-          }
-
-          await this.processInput(trimmed);
-          prompt();
-        });
-      };
-
-      prompt();
-
-      this.rl.on("SIGINT", () => {
-        if (this.isMultiline) {
-          this.isMultiline = false;
+        // ── マルチライン: ``` で開始/終了 ──
+        if (raw.trim() === "```" && !this.isMultiline) {
+          this.isMultiline = true;
           this.multilineBuffer = [];
           this.lineNumber = 0;
-          console.log(chalk.dim("\n  (マルチライン入力をキャンセル)"));
-        } else {
-          console.log(chalk.dim("\n  (Ctrl+C) /quit で終了"));
+          console.log(chalk.dim("  マルチライン入力モード (``` で終了)"));
+          continue;
         }
-        prompt();
-      });
+        if (raw.trim() === "```" && this.isMultiline) {
+          this.isMultiline = false;
+          const fullInput = this.multilineBuffer.join("\n");
+          this.multilineBuffer = [];
+          this.lineNumber = 0;
+          if (fullInput.trim()) {
+            await this.processInput(fullInput);
+          }
+          continue;
+        }
+        if (this.isMultiline) {
+          this.multilineBuffer.push(raw);
+          continue;
+        }
 
-      this.rl.on("close", () => {
-        this.agent.saveCurrentSession();
-        resolveRepl();
-      });
-    });
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
+
+        // ── スラッシュコマンド ──
+        if (trimmed.startsWith("/")) {
+          const result = await this.handleCommand(trimmed);
+          if (result === "quit") break;
+          continue;
+        }
+
+        // ── 通常入力 → エージェントへ ──
+        await this.processInput(trimmed);
+      }
+    } finally {
+      this.agent.saveCurrentSession();
+    }
   }
+
+  // ─── プロンプトプレフィックス ────────────────────────
+
+  private getPromptPrefix(): string {
+    if (this.isMultiline) {
+      this.lineNumber++;
+      return chalk.dim(`${String(this.lineNumber).padStart(3)}| `);
+    }
+    if (this.planManager?.isInPlanMode()) {
+      return chalk.yellow("[plan] > ");
+    }
+    return chalk.green("> ");
+  }
+
+  // ─── 入力処理 ──────────────────────────────────────
 
   private async processInput(input: string): Promise<void> {
     try {
@@ -136,20 +141,26 @@ export class REPL {
       }
       await this.agent.run(resolved);
     } catch (e) {
-      console.error(chalk.red(`\n  Error: ${e instanceof Error ? e.message : String(e)}\n`));
+      console.error(
+        chalk.red(`\n  Error: ${e instanceof Error ? e.message : String(e)}\n`),
+      );
     }
   }
+
+  // ─── コマンドハンドラ ──────────────────────────────
 
   private async handleCommand(cmd: string): Promise<string | void> {
     const parts = cmd.split(/\s+/);
     const command = parts[0].toLowerCase();
     const args = parts.slice(1);
 
-    // Check if it's a skill trigger
+    // スキルトリガーチェック
     if (this.skillRegistry) {
       const skill = this.skillRegistry.get(command);
       if (skill) {
-        console.log(chalk.dim(`\n  [Skill] ${skill.name}: ${skill.description}`));
+        console.log(
+          chalk.dim(`\n  [Skill] ${skill.name}: ${skill.description}`),
+        );
         const skillPrompt = `${skill.content}\n\n${args.length > 0 ? `引数: ${args.join(" ")}` : "上記のスキル指示に従ってタスクを実行してください。"}`;
         await this.processInput(skillPrompt);
         return;
@@ -165,7 +176,6 @@ export class REPL {
       case "/exit":
         this.agent.saveCurrentSession();
         console.log(chalk.dim("\n  Goodbye!\n"));
-        this.rl.close();
         return "quit";
 
       case "/clear":
@@ -193,14 +203,22 @@ export class REPL {
 
       case "/model": {
         if (args.length === 0) {
-          // /model (no args) - show current model info
-          console.log(chalk.dim(`  現在のモデル: ${this.agent.getModel()}`));
-          console.log(chalk.dim(`  プロバイダー: ${this.config.mainLLM.providerType} @ ${this.config.mainLLM.baseUrl}`));
+          console.log(
+            chalk.dim(`  現在のモデル: ${this.agent.getModel()}`),
+          );
+          console.log(
+            chalk.dim(
+              `  プロバイダー: ${this.config.mainLLM.providerType} @ ${this.config.mainLLM.baseUrl}`,
+            ),
+          );
           if (this.config.visionLLM) {
-            console.log(chalk.dim(`  Vision: ${this.config.visionLLM.model} @ ${this.config.visionLLM.baseUrl}`));
+            console.log(
+              chalk.dim(
+                `  Vision: ${this.config.visionLLM.model} @ ${this.config.visionLLM.baseUrl}`,
+              ),
+            );
           }
         } else if (args[0] === "list") {
-          // /model list - list available models from the provider
           try {
             const models = await this.agent.getProvider().listModels();
             if (models.length === 0) {
@@ -209,16 +227,27 @@ export class REPL {
               console.log(chalk.dim("  利用可能なモデル:"));
               const currentModel = this.agent.getModel();
               for (const m of models) {
-                const marker = m.name === currentModel ? chalk.green(" ← current") : "";
-                const sizeLabel = m.size > 0 ? chalk.dim(` (${(m.size / 1e9).toFixed(1)}GB)`) : "";
-                console.log(chalk.dim(`    ${chalk.cyan(m.name)}${sizeLabel}${marker}`));
+                const marker =
+                  m.name === currentModel ? chalk.green(" ← current") : "";
+                const sizeLabel =
+                  m.size > 0
+                    ? chalk.dim(` (${(m.size / 1e9).toFixed(1)}GB)`)
+                    : "";
+                console.log(
+                  chalk.dim(
+                    `    ${chalk.cyan(m.name)}${sizeLabel}${marker}`,
+                  ),
+                );
               }
             }
           } catch (e) {
-            console.log(chalk.red(`  モデル一覧の取得に失敗しました: ${e instanceof Error ? e.message : String(e)}`));
+            console.log(
+              chalk.red(
+                `  モデル一覧の取得に失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+              ),
+            );
           }
         } else {
-          // /model <name> - switch to a different model
           const newModel = args[0];
           const oldModel = this.agent.getModel();
           if (newModel === oldModel) {
@@ -226,7 +255,11 @@ export class REPL {
           } else {
             this.agent.setModel(newModel);
             this.config.mainLLM.model = newModel;
-            console.log(chalk.dim(`  モデルを ${chalk.yellow(oldModel)} から ${chalk.cyan(newModel)} に切り替えました`));
+            console.log(
+              chalk.dim(
+                `  モデルを ${chalk.yellow(oldModel)} から ${chalk.cyan(newModel)} に切り替えました`,
+              ),
+            );
           }
         }
         break;
@@ -244,7 +277,9 @@ export class REPL {
           console.log(chalk.dim("  保存されたセッション:"));
           for (const s of sessions) {
             const date = new Date(s.updatedAt).toLocaleString();
-            console.log(chalk.dim(`    ${s.id}  ${date}  ${s.title.slice(0, 50)}`));
+            console.log(
+              chalk.dim(`    ${s.id}  ${date}  ${s.title.slice(0, 50)}`),
+            );
           }
         }
         break;
@@ -258,11 +293,17 @@ export class REPL {
         }
         const session = loadSession(sessionId);
         if (!session) {
-          console.log(chalk.red(`  セッション ${sessionId} が見つかりません。`));
+          console.log(
+            chalk.red(`  セッション ${sessionId} が見つかりません。`),
+          );
           break;
         }
         this.agent.restoreSession(session);
-        console.log(chalk.dim(`  セッション ${sessionId} を復元しました (${session.meta.messageCount} messages)`));
+        console.log(
+          chalk.dim(
+            `  セッション ${sessionId} を復元しました (${session.meta.messageCount} messages)`,
+          ),
+        );
         break;
       }
 
@@ -273,7 +314,11 @@ export class REPL {
           break;
         }
         this.agent.restoreSession(latest);
-        console.log(chalk.dim(`  最新セッションを復元しました: ${latest.meta.id} (${latest.meta.messageCount} messages)`));
+        console.log(
+          chalk.dim(
+            `  最新セッションを復元しました: ${latest.meta.id} (${latest.meta.messageCount} messages)`,
+          ),
+        );
         break;
       }
 
@@ -304,10 +349,17 @@ export class REPL {
         console.log(chalk.dim("  直近のgit diffを表示..."));
         const { execSync } = await import("node:child_process");
         try {
-          const diff = execSync("git diff --stat", { encoding: "utf-8", cwd: process.cwd() });
+          const diff = execSync("git diff --stat", {
+            encoding: "utf-8",
+            cwd: process.cwd(),
+          });
           console.log(diff || "  変更なし");
         } catch {
-          console.log(chalk.yellow("  gitリポジトリではないか、git diffの実行に失敗しました。"));
+          console.log(
+            chalk.yellow(
+              "  gitリポジトリではないか、git diffの実行に失敗しました。",
+            ),
+          );
         }
         break;
       }
@@ -316,13 +368,17 @@ export class REPL {
         if (this.planManager?.isInPlanMode()) {
           console.log(chalk.yellow("  既にプランモードです。"));
         } else {
-          await this.processInput("このタスクの実装計画を立てたい。enter_plan_modeを使ってプランモードに入ってください。");
+          await this.processInput(
+            "このタスクの実装計画を立てたい。enter_plan_modeを使ってプランモードに入ってください。",
+          );
         }
         break;
 
       case "/skills": {
         if (!this.skillRegistry) {
-          console.log(chalk.dim("  スキルシステムが初期化されていません。"));
+          console.log(
+            chalk.dim("  スキルシステムが初期化されていません。"),
+          );
           break;
         }
         const skills = this.skillRegistry.list();
@@ -331,8 +387,14 @@ export class REPL {
         } else {
           console.log(chalk.dim("  利用可能なスキル:"));
           for (const s of skills) {
-            const tag = s.builtIn ? chalk.dim("[builtin]") : chalk.dim("[custom]");
-            console.log(chalk.dim(`    ${chalk.cyan(s.trigger)}  ${s.description}  ${tag}`));
+            const tag = s.builtIn
+              ? chalk.dim("[builtin]")
+              : chalk.dim("[custom]");
+            console.log(
+              chalk.dim(
+                `    ${chalk.cyan(s.trigger)}  ${s.description}  ${tag}`,
+              ),
+            );
           }
         }
         break;
@@ -351,7 +413,10 @@ export class REPL {
         console.log(chalk.dim(`  Context: ${progressBar(pct)}`));
         console.log(chalk.dim(`  Plan mode: ${planState}`));
         console.log(chalk.dim(`  Messages: ${messages.length}`));
-        if (todoSummary.includes("pending") || todoSummary.includes("in_progress")) {
+        if (
+          todoSummary.includes("pending") ||
+          todoSummary.includes("in_progress")
+        ) {
           console.log(chalk.dim(`\n  --- Tasks ---`));
           console.log(chalk.dim(todoSummary));
         }
@@ -361,19 +426,33 @@ export class REPL {
 
       case "/mode": {
         if (!this.contextModeManager) {
-          console.log(chalk.dim("  コンテキストモードシステムが初期化されていません。"));
+          console.log(
+            chalk.dim("  コンテキストモードシステムが初期化されていません。"),
+          );
           break;
         }
         const modeArg = args[0] as ContextMode | undefined;
         if (!modeArg) {
           const info = this.contextModeManager.getModeInfo();
-          console.log(chalk.dim(`  Current mode: ${chalk.cyan(this.contextModeManager.currentMode)} (${info.name})`));
+          console.log(
+            chalk.dim(
+              `  Current mode: ${chalk.cyan(this.contextModeManager.currentMode)} (${info.name})`,
+            ),
+          );
           console.log(chalk.dim(`  ${info.description}`));
           console.log(chalk.dim(`  Priority: ${info.priority}`));
-        } else if (modeArg === "dev" || modeArg === "review" || modeArg === "research") {
+        } else if (
+          modeArg === "dev" ||
+          modeArg === "review" ||
+          modeArg === "research"
+        ) {
           this.contextModeManager.switchMode(modeArg);
           const info = this.contextModeManager.getModeInfo();
-          console.log(chalk.dim(`  Switched to ${chalk.cyan(modeArg)} mode (${info.name})`));
+          console.log(
+            chalk.dim(
+              `  Switched to ${chalk.cyan(modeArg)} mode (${info.name})`,
+            ),
+          );
           console.log(chalk.dim(`  Priority: ${info.priority}`));
         } else {
           console.log(chalk.yellow(`  Unknown mode: ${modeArg}`));
@@ -393,6 +472,7 @@ function progressBar(pct: number): string {
   const width = 30;
   const filled = Math.round((pct / 100) * width);
   const empty = width - filled;
-  const color = pct > 80 ? chalk.red : pct > 60 ? chalk.yellow : chalk.green;
+  const color =
+    pct > 80 ? chalk.red : pct > 60 ? chalk.yellow : chalk.green;
   return `[${color("█".repeat(filled))}${chalk.dim("░".repeat(empty))}] ${pct}%`;
 }
