@@ -114,6 +114,8 @@ export class REPL {
       }
     } finally {
       this.agent.saveCurrentSession();
+      // stdin を pause してイベントループを解放し、プロセスを終了可能にする
+      process.stdin.pause();
     }
   }
 
