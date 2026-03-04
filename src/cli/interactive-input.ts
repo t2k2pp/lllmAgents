@@ -175,6 +175,11 @@ export class InteractiveInput {
       };
 
       // ─── 描画 ─────────────────────────────────
+      //
+      // 重要: メニュー行の移動に \n を使うとターミナルがスクロールする。
+      // - 初回描画(行が存在しない): \n で行を作成（スクロール発生）
+      // - 再描画(行が既に存在):     \x1b[1B (CUD) で既存行に移動（スクロールしない）
+      // - 入力行への復帰:           \x1b[{N}A (CUU) で相対的に上に戻る
 
       const renderLine = (): void => {
         stdout.cursorTo(0);
@@ -183,9 +188,30 @@ export class InteractiveInput {
         stdout.cursorTo(prefixLen + cursorPos);
       };
 
+      /** 1行下に移動する。既存行があればCUD、なければ\nで新規作成 */
+      const moveDown = (lineIndex: number): void => {
+        if (lineIndex < renderedMenuLines) {
+          // 既存行へ移動（スクロールしない）
+          stdout.write("\x1b[1B");
+        } else {
+          // 新しい行を作成（スクロールする可能性あり）
+          stdout.write("\n");
+        }
+      };
+
+      /** N行上に戻り、入力行のカーソル位置を復元 */
+      const moveBackToInput = (linesBelow: number): void => {
+        if (linesBelow > 0) {
+          stdout.write(`\x1b[${linesBelow}A`);
+        }
+        stdout.cursorTo(prefixLen + cursorPos);
+      };
+
       const renderMenu = (): void => {
-        clearMenuDisplay();
-        if (!menuVisible || menuItems.length === 0) return;
+        if (!menuVisible || menuItems.length === 0) {
+          clearMenuDisplay();
+          return;
+        }
 
         const maxVisible = Math.min(menuItems.length, 8);
 
@@ -195,52 +221,51 @@ export class InteractiveInput {
           startIdx = selectedIndex - maxVisible + 1;
         }
 
-        // カーソル位置を保存
-        stdout.write("\x1b7");
+        const hasScroll = menuItems.length > maxVisible;
+        const newLineCount = maxVisible + (hasScroll ? 1 : 0);
 
-        for (let i = 0; i < maxVisible; i++) {
-          const idx = startIdx + i;
-          const item = menuItems[idx];
+        // 描画対象: 新メニュー行 + 旧メニューの余剰行（クリアが必要）
+        const totalToVisit = Math.max(newLineCount, renderedMenuLines);
 
-          stdout.write("\n\r");
+        for (let i = 0; i < totalToVisit; i++) {
+          moveDown(i);
+          stdout.write("\r");
           stdout.clearLine(0);
 
-          if (idx === selectedIndex) {
-            // 選択中のアイテム: 反転表示
-            stdout.write(`  ${chalk.bgBlue.white(` ${item.label} `)}`);
-            if (item.description) {
-              stdout.write(chalk.dim(` ${item.description}`));
+          // 新メニューの範囲内ならコンテンツを描画
+          if (i < maxVisible) {
+            const idx = startIdx + i;
+            const item = menuItems[idx];
+
+            if (idx === selectedIndex) {
+              stdout.write(`  ${chalk.bgBlue.white(` ${item.label} `)}`);
+              if (item.description) {
+                stdout.write(chalk.dim(` ${item.description}`));
+              }
+            } else {
+              stdout.write(chalk.dim(`   ${item.label} `));
+              if (item.description) {
+                stdout.write(chalk.dim(` ${item.description}`));
+              }
             }
-          } else {
-            stdout.write(chalk.dim(`   ${item.label} `));
-            if (item.description) {
-              stdout.write(chalk.dim(` ${item.description}`));
-            }
+          } else if (i === maxVisible && hasScroll) {
+            stdout.write(chalk.dim(`  ↕ ${selectedIndex + 1}/${menuItems.length}`));
           }
+          // else: 旧メニューの余剰行 → clearLine で消去済み
         }
 
-        // スクロールインジケータ
-        if (menuItems.length > maxVisible) {
-          stdout.write("\n\r");
-          stdout.clearLine(0);
-          stdout.write(chalk.dim(`  ↕ ${selectedIndex + 1}/${menuItems.length}`));
-          renderedMenuLines = maxVisible + 1;
-        } else {
-          renderedMenuLines = maxVisible;
-        }
-
-        // カーソル位置を復元
-        stdout.write("\x1b8");
+        moveBackToInput(totalToVisit);
+        renderedMenuLines = newLineCount;
       };
 
       const clearMenuDisplay = (): void => {
         if (renderedMenuLines === 0) return;
-        stdout.write("\x1b7"); // Save
         for (let i = 0; i < renderedMenuLines; i++) {
-          stdout.write("\n\r");
+          // 既存行なので CUD で移動（スクロールしない）
+          stdout.write("\x1b[1B\r");
           stdout.clearLine(0);
         }
-        stdout.write("\x1b8"); // Restore
+        moveBackToInput(renderedMenuLines);
         renderedMenuLines = 0;
       };
 
