@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
@@ -42,12 +42,12 @@ export const grepTool: ToolHandler = {
 
     // Try to use ripgrep first, fall back to node-native search
     try {
-      const args = ["rg", "--no-heading", "--line-number", "--max-count", "100"];
+      const args = ["--no-heading", "--line-number", "--max-count", "100"];
       if (caseInsensitive) args.push("-i");
       if (fileGlob) args.push("--glob", fileGlob);
       args.push("--", pattern, searchPath);
 
-      const output = execSync(args.join(" "), {
+      const output = execFileSync("rg", args, {
         encoding: "utf-8",
         maxBuffer: 1024 * 1024,
         timeout: 30000,
