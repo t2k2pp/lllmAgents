@@ -113,7 +113,7 @@ export class InteractiveInput {
       let cursorTermRow = 0;
       let savedHistoryBuffer = "";
 
-      const prefixLen = stripAnsi(prefix).length;
+      const prefixLen = getDisplayWidth(stripAnsi(prefix));
       // 継続行のプレフィックス（プロンプトと同じ幅のスペース）
       const contPrefixStr = " ".repeat(prefixLen);
       const contPrefixLen = prefixLen;
@@ -138,6 +138,14 @@ export class InteractiveInput {
 
       const getLinePrefixWidth = (i: number): number =>
         i === 0 ? prefixLen : contPrefixLen;
+
+      /** バッファの行・列からターミナル上のカラム位置を計算 */
+      const getTerminalColumn = (row: number, col: number): number => {
+        const lines = buffer.split("\n");
+        const line = lines[row] ?? "";
+        // 行頭からcol文字分の表示幅を計算
+        return getLinePrefixWidth(row) + getDisplayWidth(line.slice(0, col));
+      };
 
       /** cursorTermRow から targetRow へターミナル行を移動 */
       const moveToRow = (targetRow: number): void => {
@@ -278,7 +286,7 @@ export class InteractiveInput {
         // Step 3: カーソルを正しい入力位置に配置
         // 現在 cursorTermRow は maxLines - 1 にいる
         moveToRow(cRow);
-        stdout.cursorTo(getLinePrefixWidth(cRow) + cCol);
+        stdout.cursorTo(getTerminalColumn(cRow, cCol));
       };
 
       /** ドロップダウンメニューを描画 */
@@ -342,7 +350,7 @@ export class InteractiveInput {
 
         // カーソルを入力位置に戻す
         moveToRow(cRow);
-        stdout.cursorTo(getLinePrefixWidth(cRow) + cCol);
+        stdout.cursorTo(getTerminalColumn(cRow, cCol));
       };
 
       /** メニュー表示をクリア */
@@ -362,7 +370,7 @@ export class InteractiveInput {
 
         // カーソルを入力位置に戻す
         moveToRow(cRow);
-        stdout.cursorTo(getLinePrefixWidth(cRow) + cCol);
+        stdout.cursorTo(getTerminalColumn(cRow, cCol));
         renderedMenuLines = 0;
       };
 
@@ -679,4 +687,44 @@ export class InteractiveInput {
 function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
   return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+/**
+ * Unicode East Asian Width に基づく全角判定。
+ * CJK統合漢字、ひらがな、カタカナ、全角記号、ハングル等を検出。
+ */
+function isFullwidthCodePoint(code: number): boolean {
+  return (
+    code >= 0x1100 &&
+    (code <= 0x115f || // Hangul Jamo
+      code === 0x2329 ||
+      code === 0x232a ||
+      (code >= 0x2e80 && code <= 0x303e) || // CJK Radicals, Kangxi, Symbols
+      (code >= 0x3040 && code <= 0x33bf) || // Hiragana, Katakana, CJK Compat
+      (code >= 0x3400 && code <= 0x4dbf) || // CJK Extension A
+      (code >= 0x4e00 && code <= 0xa4cf) || // CJK Unified + Yi
+      (code >= 0xac00 && code <= 0xd7af) || // Hangul Syllables
+      (code >= 0xf900 && code <= 0xfaff) || // CJK Compat Ideographs
+      (code >= 0xfe10 && code <= 0xfe19) || // Vertical forms
+      (code >= 0xfe30 && code <= 0xfe6f) || // CJK Compat Forms
+      (code >= 0xff01 && code <= 0xff60) || // Fullwidth ASCII
+      (code >= 0xffe0 && code <= 0xffe6) || // Fullwidth Signs
+      (code >= 0x1f000 && code <= 0x1faff) || // Emoticons, Symbols
+      (code >= 0x20000 && code <= 0x2fffd) || // CJK Extension B+
+      (code >= 0x30000 && code <= 0x3fffd))
+  );
+}
+
+/**
+ * 文字列のターミナル表示幅を計算する。
+ * 全角文字(CJK, ひらがな, カタカナ等) = 2カラム、半角 = 1カラム。
+ */
+export function getDisplayWidth(str: string): number {
+  let width = 0;
+  for (const char of str) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code < 32) continue; // 制御文字は幅0
+    width += isFullwidthCodePoint(code) ? 2 : 1;
+  }
+  return width;
 }
