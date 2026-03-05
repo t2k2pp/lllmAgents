@@ -431,7 +431,12 @@ export class InteractiveInput {
         }
 
         // ── Shift+Enter → 改行挿入（マルチライン入力） ──
-        if (key.name === "return" && key.shift) {
+        // Shift+Enter: モダンターミナル (Windows Terminal + CSI u, iTerm2, kitty)
+        // Ctrl+J:      ユニバーサルフォールバック (\n = 0x0A → key.name="enter")
+        if (
+          (key.name === "return" && key.shift) ||
+          key.name === "enter"
+        ) {
           // メニューが表示中なら先に閉じる
           if (menuVisible) {
             dismissMenu();

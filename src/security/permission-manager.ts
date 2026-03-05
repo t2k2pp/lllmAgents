@@ -5,6 +5,16 @@ import type { PermissionLevel } from "./rules.js";
 import { checkCommand } from "./rules.js";
 import { Sandbox } from "./sandbox.js";
 
+// ユーザーに質問する・タスク管理するなど本質的に安全なツール
+// configに関わらず常にauto-approve
+const INHERENTLY_SAFE_TOOLS = new Set([
+  "ask_user",
+  "todo_write",
+  "enter_plan_mode",
+  "exit_plan_mode",
+  "task_output",
+]);
+
 export class PermissionManager {
   private sandbox: Sandbox;
   private autoApprove: Set<string>;
@@ -21,6 +31,7 @@ export class PermissionManager {
   }
 
   getPermissionLevel(toolName: string): PermissionLevel {
+    if (INHERENTLY_SAFE_TOOLS.has(toolName)) return "auto";
     if (this.autoApprove.has(toolName)) return "auto";
     if (this.alwaysAllowTools.has(toolName)) return "auto";
     if (this.requireApproval.has(toolName)) return "ask";

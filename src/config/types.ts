@@ -69,7 +69,10 @@ export function getDefaultConfig(): Config {
     security: {
       allowedDirectories: [],
       blockedCommands: [],
-      autoApproveTools: ["file_read", "glob", "grep", "browser_snapshot", "vision_analyze"],
+      autoApproveTools: [
+        "file_read", "glob", "grep", "browser_snapshot", "vision_analyze",
+        "ask_user", "todo_write", "enter_plan_mode", "exit_plan_mode", "task_output",
+      ],
       requireApprovalTools: ["file_write", "file_edit", "bash", "browser_navigate", "browser_click", "browser_type"],
     },
     context: {
