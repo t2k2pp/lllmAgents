@@ -402,3 +402,22 @@ REPL.processInput()
 - ツール命名規則: `mcp__<サーバー名>__<ツール名>`
 - ライフサイクル: アプリ起動時 `connectAll()` → ToolRegistry登録 → 利用 → 終了時 `disconnectAll()`
 - 既存のPermissionManager・HookManagerと統合済み（MCPツールにも同じセキュリティポリシー適用）
+
+### 6.6 HTTP通信レイヤーのタイムアウト戦略 (`src/utils/http-client.ts`)
+
+ローカルLLMは応答に数分〜数十分を要するため、一般的なWebアプリケーションとは異なるタイムアウト設計を採用。
+
+**タイムアウト値:**
+| 関数 | 用途 | デフォルト |
+|------|------|-----------|
+| `httpGet` | 接続確認 | 10秒 |
+| `httpPost` | 非ストリーミングPOST | 5分 |
+| `httpPostStream` (接続) | ストリーミング接続確立 | 1時間 |
+| `httpPostStream` (アイドル) | チャンク間の無通信判定 | 10分 |
+
+**3層タイムアウトアーキテクチャ:**
+1. **undici bodyTimeout 無効化**: Node.js `fetch()` 内部の undici デフォルト `bodyTimeout` (300秒) がローカルLLMにとって短すぎるため、カスタム `Agent({bodyTimeout:0, headersTimeout:0})` を `dispatcher` オプションで注入して無効化
+2. **接続タイムアウト**: `AbortController` + `setTimeout` で `fetch()` 〜レスポンスヘッダー受信まで（1時間）を制限
+3. **アイドルタイムアウト**: `wrapWithIdleTimeout()` がストリームをラップし、チャンク受信ごとにタイマーリセット。10分間データ受信なしで `AbortController.abort()` を発動
+
+**エラー処理**: `openai-compat.ts` でストリーム中の `AbortError` を検出し「ストリーム読み取りタイムアウト」として報告

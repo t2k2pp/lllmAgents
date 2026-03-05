@@ -726,3 +726,97 @@ await mcpManager.connectAll(toolRegistry);
 // 終了時
 await mcpManager.disconnectAll();
 ```
+
+## 10. HTTP通信レイヤーのタイムアウト戦略
+
+### 概要
+
+`src/utils/http-client.ts` は、すべてのLLMプロバイダーおよびWeb系ツールが使用するHTTP通信の基盤モジュールです。
+ローカルLLMは応答に数分〜数十分を要するため、一般的なWebアプリケーションとは異なるタイムアウト設計が必要です。
+
+### タイムアウト設計
+
+本システムでは、用途に応じて3つのタイムアウト値を使い分けています。
+
+| 関数 | 用途 | デフォルト | 説明 |
+|:---|:---|:---|:---|
+| `httpGet` | 接続確認（モデル一覧等） | 10秒 | サーバー起動確認のみなので短い |
+| `httpPost` | 非ストリーミングPOST | 5分 | モデル情報クエリ等 |
+| `httpPostStream` (接続) | ストリーミング接続確立 | 1時間 | `fetch()`〜レスポンスヘッダー受信まで |
+| `httpPostStream` (アイドル) | ストリーム読み取り | 10分 | チャンク間の最大無通信時間 |
+
+### ストリーミングのタイムアウトアーキテクチャ
+
+ストリーミング応答（LLMチャット）のタイムアウトは、以下の3層で構成されています。
+
+```mermaid
+sequenceDiagram
+    participant App as httpPostStream
+    participant Undici as Node.js fetch (undici)
+    participant LLM as ローカルLLMサーバー
+
+    Note over App: 接続タイマー開始（1時間）
+    App->>Undici: fetch(url, {dispatcher: streamAgent})
+    Note over Undici: undici Agent:<br/>bodyTimeout=0<br/>headersTimeout=0
+    Undici->>LLM: POST /v1/chat/completions
+    LLM-->>Undici: HTTP 200 (ヘッダー)
+    Undici-->>App: Response
+    Note over App: 接続タイマーをクリア
+
+    App->>App: wrapWithIdleTimeout(stream, 10分)
+    Note over App: アイドルタイマー開始（10分）
+
+    loop ストリーム読み取りループ
+        LLM-->>App: SSE data chunk
+        Note over App: アイドルタイマーリセット
+    end
+
+    alt 10分間データ受信なし
+        Note over App: アイドルタイムアウト発動
+        App->>App: AbortController.abort()
+        Note over App: エラー: "ストリーム読み取り<br/>タイムアウト"
+    end
+```
+
+#### 第1層: undici bodyTimeout の無効化
+
+Node.js の `fetch()` は内部で `undici` ライブラリを使用しており、デフォルトで `bodyTimeout: 300_000`（5分）が設定されています。
+この内部タイムアウトはアプリケーション側から直接制御できないため、カスタム `Agent` インスタンスを `dispatcher` オプション経由で注入し、`bodyTimeout: 0` / `headersTimeout: 0` で無効化しています。
+
+```typescript
+const streamAgent = new Agent({
+  bodyTimeout: 0,
+  headersTimeout: 0,
+});
+```
+
+#### 第2層: 接続タイムアウト
+
+`fetch()` 呼び出しからレスポンスヘッダー受信までの最大待機時間（デフォルト1時間）。
+`AbortController` + `setTimeout` で実装し、レスポンスヘッダー受信後にタイマーをクリアします。
+
+#### 第3層: アイドルタイムアウト
+
+`wrapWithIdleTimeout()` 関数が `ReadableStream` をラップし、チャンク受信ごとにタイマーをリセットします。
+一定時間（デフォルト10分）データが一切受信されない場合にのみストリームを中断します。
+
+- **LLMが推論中**（最初のトークン生成待ち）の場合でもタイムアウトしない設計ではない点に注意。10分以内に最初のトークンが到着しなければタイムアウトする。
+- 完全なハング（サーバーダウン等）の検出が主目的。
+
+### エラーハンドリング
+
+`openai-compat.ts` の `doChat` メソッドにおいて、ストリーム読み取り中のエラーを以下のように分類して処理します。
+
+| エラー種別 | 判定条件 | ユーザーへのメッセージ |
+|:---|:---|:---|
+| アイドルタイムアウト | `AbortError` or `message.includes("abort")` | 「ストリーム読み取りタイムアウト: LLMサーバーから一定時間データが受信できませんでした」 |
+| その他のエラー | 上記以外 | エラーメッセージをそのまま表示 |
+
+### 設計判断の根拠
+
+| 判断 | 理由 |
+|:---|:---|
+| アイドルタイムアウト10分 | 大型モデル（27B+）の最初のトークン生成に数分かかることがある。余裕を持たせつつ、完全なハングを検出 |
+| 全体タイムアウトではなくアイドル | ストリーミング中はデータが断続的に到着する。全体時間で制限すると長い応答が途中で切れる |
+| undici Agent をシングルトン化 | リクエストごとにAgentを生成すると接続プールが無駄になるため |
+| bodyTimeout=0 で無効化 | undiciのデフォルト300秒がローカルLLMの応答時間と合わず、早期切断の原因になっていた |
