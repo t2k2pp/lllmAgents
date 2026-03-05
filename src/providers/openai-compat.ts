@@ -232,6 +232,18 @@ export class OpenAICompatProvider implements LLMProvider {
           }
         }
       }
+    } catch (e) {
+      // アイドルタイムアウトやAbortによるストリーム切断をわかりやすいエラーに変換
+      const err = e instanceof Error ? e : new Error(String(e));
+      if (err.name === "AbortError" || err.message.includes("abort")) {
+        yield {
+          type: "error",
+          error: "ストリーム読み取りタイムアウト: LLMサーバーから一定時間データが受信できませんでした。サーバーの状態を確認してください。",
+        };
+      } else {
+        yield { type: "error", error: err.message };
+      }
+      return;
     } finally {
       reader.releaseLock();
     }
