@@ -7,6 +7,7 @@
  * 特徴:
  * - raw stdinでキーストロークを1つずつ処理
  * - ANSI エスケープシーケンスでドロップダウンを描画
+ * - Shift+Enter でマルチライン入力（モダンターミナル対応）
  * - 入力履歴 (↑↓)
  * - マルチバイト文字（日本語）対応
  * - TTY非対応時はreadlineフォールバック
@@ -51,8 +52,9 @@ export class InteractiveInput {
 
   /**
    * プロンプトを表示しユーザー入力を返す。
+   * Shift+Enter で改行を挿入し、Enter で確定。
    * @param prefix  プロンプト文字列 (例: "> ")
-   * @param options.disableMenu  trueならドロップダウンを抑制（マルチラインモード用）
+   * @param options.disableMenu  trueならドロップダウンを抑制
    */
   async question(
     prefix: string,
@@ -106,17 +108,69 @@ export class InteractiveInput {
       let selectedIndex = 0;
       let menuVisible = false;
       let renderedMenuLines = 0;
+      let renderedInputLines = 1;
+      /** カーソルが現在いるターミナル行 (入力行0からの相対) */
+      let cursorTermRow = 0;
       let savedHistoryBuffer = "";
 
       const prefixLen = stripAnsi(prefix).length;
+      // 継続行のプレフィックス（プロンプトと同じ幅のスペース）
+      const contPrefixStr = " ".repeat(prefixLen);
+      const contPrefixLen = prefixLen;
 
       // 初期プロンプト描画
       stdout.write(prefix);
+
+      // ─── レイアウトヘルパー ─────────────────────
+
+      /** バッファの行分割とカーソル位置(行,列)を返す */
+      const getLayout = () => {
+        const lines = buffer.split("\n");
+        const before = buffer.slice(0, cursorPos);
+        const beforeLines = before.split("\n");
+        const row = beforeLines.length - 1;
+        const col = beforeLines[beforeLines.length - 1].length;
+        return { lines, row, col };
+      };
+
+      const getLinePrefix = (i: number): string =>
+        i === 0 ? prefix : contPrefixStr;
+
+      const getLinePrefixWidth = (i: number): number =>
+        i === 0 ? prefixLen : contPrefixLen;
+
+      /** cursorTermRow から targetRow へターミナル行を移動 */
+      const moveToRow = (targetRow: number): void => {
+        if (targetRow > cursorTermRow) {
+          stdout.write(`\x1b[${targetRow - cursorTermRow}B`);
+        } else if (targetRow < cursorTermRow) {
+          stdout.write(`\x1b[${cursorTermRow - targetRow}A`);
+        }
+        cursorTermRow = targetRow;
+      };
+
+      /** バッファの(row, col)からフラットなcursorPosを計算 */
+      const rowColToPos = (row: number, col: number): number => {
+        const lines = buffer.split("\n");
+        let pos = 0;
+        for (let i = 0; i < row && i < lines.length; i++) {
+          pos += lines[i].length + 1; // +1 for \n
+        }
+        return pos + Math.min(col, (lines[row] ?? "").length);
+      };
 
       // ─── メニューロジック ──────────────────────
 
       const updateMenu = (): void => {
         if (disableMenu) return;
+
+        // マルチライン入力中はメニュー無効
+        if (buffer.includes("\n")) {
+          menuItems = [];
+          menuVisible = false;
+          selectedIndex = 0;
+          return;
+        }
 
         let items: MenuItem[] = [];
 
@@ -176,43 +230,65 @@ export class InteractiveInput {
 
       // ─── 描画 ─────────────────────────────────
       //
-      // 重要: メニュー行の移動に \n を使うとターミナルがスクロールする。
-      // - 初回描画(行が存在しない): \n で行を作成（スクロール発生）
-      // - 再描画(行が既に存在):     \x1b[1B (CUD) で既存行に移動（スクロールしない）
-      // - 入力行への復帰:           \x1b[{N}A (CUU) で相対的に上に戻る
+      // ターミナルレイアウト:
+      //   Row 0:   [prompt prefix][input line 0]
+      //   Row 1:   [cont prefix  ][input line 1]  ← Shift+Enterで追加
+      //   ...
+      //   Row N-1: [cont prefix  ][input line N-1]
+      //   Row N:   [menu item 0]                   ← メニュー（単一行入力時のみ）
+      //   Row N+1: [menu item 1]
+      //   ...
+      //
+      // renderedInputLines: 画面上の入力行数
+      // renderedMenuLines:  画面上のメニュー行数
+      // cursorTermRow:      カーソルがいるターミナル行 (Row 0 基準)
 
-      const renderLine = (): void => {
-        stdout.cursorTo(0);
-        stdout.clearLine(0);
-        stdout.write(prefix + buffer);
-        stdout.cursorTo(prefixLen + cursorPos);
-      };
+      /** 入力バッファ全行を再描画 */
+      const renderInput = (): void => {
+        const { lines, row: cRow, col: cCol } = getLayout();
 
-      /** 1行下に移動する。既存行があればCUD、なければ\nで新規作成 */
-      const moveDown = (lineIndex: number): void => {
-        if (lineIndex < renderedMenuLines) {
-          // 既存行へ移動（スクロールしない）
-          stdout.write("\x1b[1B");
-        } else {
-          // 新しい行を作成（スクロールする可能性あり）
-          stdout.write("\n");
+        // Step 1: 入力行0へ移動
+        moveToRow(0);
+
+        // Step 2: 全入力行を描画（旧行の余剰もクリア）
+        const oldInputLines = renderedInputLines;
+        const newInputLines = lines.length;
+        const maxLines = Math.max(oldInputLines, newInputLines);
+
+        for (let i = 0; i < maxLines; i++) {
+          stdout.write("\r");
+          stdout.clearLine(0);
+          if (i < newInputLines) {
+            stdout.write(getLinePrefix(i) + lines[i]);
+          }
+          if (i < maxLines - 1) {
+            if (i < oldInputLines - 1) {
+              // 既存行へ移動（スクロールしない）
+              stdout.write("\x1b[1B");
+            } else {
+              // 新規行作成（スクロールする可能性あり）
+              stdout.write("\n");
+            }
+            cursorTermRow = i + 1;
+          }
         }
+
+        renderedInputLines = newInputLines;
+
+        // Step 3: カーソルを正しい入力位置に配置
+        // 現在 cursorTermRow は maxLines - 1 にいる
+        moveToRow(cRow);
+        stdout.cursorTo(getLinePrefixWidth(cRow) + cCol);
       };
 
-      /** N行上に戻り、入力行のカーソル位置を復元 */
-      const moveBackToInput = (linesBelow: number): void => {
-        if (linesBelow > 0) {
-          stdout.write(`\x1b[${linesBelow}A`);
-        }
-        stdout.cursorTo(prefixLen + cursorPos);
-      };
-
+      /** ドロップダウンメニューを描画 */
       const renderMenu = (): void => {
         if (!menuVisible || menuItems.length === 0) {
           clearMenuDisplay();
           return;
         }
 
+        const { row: cRow, col: cCol } = getLayout();
         const maxVisible = Math.min(menuItems.length, 8);
 
         // スクロールウィンドウ
@@ -222,17 +298,25 @@ export class InteractiveInput {
         }
 
         const hasScroll = menuItems.length > maxVisible;
-        const newLineCount = maxVisible + (hasScroll ? 1 : 0);
+        const newMenuLineCount = maxVisible + (hasScroll ? 1 : 0);
 
-        // 描画対象: 新メニュー行 + 旧メニューの余剰行（クリアが必要）
-        const totalToVisit = Math.max(newLineCount, renderedMenuLines);
+        // メニュー領域へ移動（最後の入力行の1行下から）
+        moveToRow(renderedInputLines - 1);
+
+        const totalToVisit = Math.max(newMenuLineCount, renderedMenuLines);
 
         for (let i = 0; i < totalToVisit; i++) {
-          moveDown(i);
+          // 1行下へ移動
+          if (i < renderedMenuLines) {
+            stdout.write("\x1b[1B");
+          } else {
+            stdout.write("\n");
+          }
+          cursorTermRow = renderedInputLines + i;
+
           stdout.write("\r");
           stdout.clearLine(0);
 
-          // 新メニューの範囲内ならコンテンツを描画
           if (i < maxVisible) {
             const idx = startIdx + i;
             const item = menuItems[idx];
@@ -254,18 +338,31 @@ export class InteractiveInput {
           // else: 旧メニューの余剰行 → clearLine で消去済み
         }
 
-        moveBackToInput(totalToVisit);
-        renderedMenuLines = newLineCount;
+        renderedMenuLines = newMenuLineCount;
+
+        // カーソルを入力位置に戻す
+        moveToRow(cRow);
+        stdout.cursorTo(getLinePrefixWidth(cRow) + cCol);
       };
 
+      /** メニュー表示をクリア */
       const clearMenuDisplay = (): void => {
         if (renderedMenuLines === 0) return;
+
+        const { row: cRow, col: cCol } = getLayout();
+
+        // メニュー領域へ移動してクリア
+        moveToRow(renderedInputLines - 1);
+
         for (let i = 0; i < renderedMenuLines; i++) {
-          // 既存行なので CUD で移動（スクロールしない）
           stdout.write("\x1b[1B\r");
           stdout.clearLine(0);
+          cursorTermRow = renderedInputLines + i;
         }
-        moveBackToInput(renderedMenuLines);
+
+        // カーソルを入力位置に戻す
+        moveToRow(cRow);
+        stdout.cursorTo(getLinePrefixWidth(cRow) + cCol);
         renderedMenuLines = 0;
       };
 
@@ -280,9 +377,21 @@ export class InteractiveInput {
         stdin.removeListener("end", onEnd);
       };
 
+      /** カーソルを最終入力行の下まで移動してから改行 */
+      const moveToEndAndNewline = (): void => {
+        if (renderedInputLines > 1) {
+          const { row: cRow } = getLayout();
+          const linesToBottom = renderedInputLines - 1 - cRow;
+          if (linesToBottom > 0) {
+            stdout.write(`\x1b[${linesToBottom}B`);
+          }
+        }
+        stdout.write("\n");
+      };
+
       const finish = (result: string): void => {
         cleanup();
-        stdout.write("\n");
+        moveToEndAndNewline();
         if (result.trim()) {
           this.history.push(result);
         }
@@ -308,7 +417,7 @@ export class InteractiveInput {
         // ── Ctrl+C ──
         if (key.ctrl && key.name === "c") {
           cleanup();
-          stdout.write("\n");
+          moveToEndAndNewline();
           resolve(SIGINT_SIGNAL);
           return;
         }
@@ -321,12 +430,25 @@ export class InteractiveInput {
           return;
         }
 
+        // ── Shift+Enter → 改行挿入（マルチライン入力） ──
+        if (key.name === "return" && key.shift) {
+          // メニューが表示中なら先に閉じる
+          if (menuVisible) {
+            dismissMenu();
+          }
+          // バッファに改行を挿入
+          buffer = buffer.slice(0, cursorPos) + "\n" + buffer.slice(cursorPos);
+          cursorPos++;
+          renderInput();
+          return;
+        }
+
         // ── Enter ──
         if (key.name === "return") {
           if (menuVisible && menuItems.length > 0) {
             const selectedValue = menuItems[selectedIndex].value;
             selectItem();
-            renderLine();
+            renderInput();
 
             if (buffer.startsWith("/")) {
               // /コマンド: 選択 → 即確定（Claude Codeと同じ動作）
@@ -351,8 +473,7 @@ export class InteractiveInput {
         if (key.name === "tab") {
           if (menuVisible && menuItems.length > 0) {
             selectItem();
-            renderLine();
-            // Tab は選択のみ。ディレクトリなら中身を展開
+            renderInput();
             updateMenu();
             if (menuVisible) {
               renderMenu();
@@ -374,16 +495,26 @@ export class InteractiveInput {
           if (menuVisible) {
             selectedIndex = Math.max(0, selectedIndex - 1);
             renderMenu();
-          } else if (this.history.length > 0) {
-            if (this.historyIndex < 0) {
-              savedHistoryBuffer = buffer;
-              this.historyIndex = this.history.length - 1;
-            } else if (this.historyIndex > 0) {
-              this.historyIndex--;
+          } else {
+            const { row, col } = getLayout();
+            if (row > 0) {
+              // マルチライン: 1行上へカーソル移動
+              const lines = buffer.split("\n");
+              const targetCol = Math.min(col, lines[row - 1].length);
+              cursorPos = rowColToPos(row - 1, targetCol);
+              renderInput();
+            } else if (this.history.length > 0) {
+              // 履歴ナビゲーション
+              if (this.historyIndex < 0) {
+                savedHistoryBuffer = buffer;
+                this.historyIndex = this.history.length - 1;
+              } else if (this.historyIndex > 0) {
+                this.historyIndex--;
+              }
+              buffer = this.history[this.historyIndex];
+              cursorPos = buffer.length;
+              renderInput();
             }
-            buffer = this.history[this.historyIndex];
-            cursorPos = buffer.length;
-            renderLine();
           }
           return;
         }
@@ -393,16 +524,25 @@ export class InteractiveInput {
           if (menuVisible) {
             selectedIndex = Math.min(menuItems.length - 1, selectedIndex + 1);
             renderMenu();
-          } else if (this.historyIndex >= 0) {
-            this.historyIndex++;
-            if (this.historyIndex >= this.history.length) {
-              this.historyIndex = -1;
-              buffer = savedHistoryBuffer;
-            } else {
-              buffer = this.history[this.historyIndex];
+          } else {
+            const { row, col, lines } = getLayout();
+            if (row < lines.length - 1) {
+              // マルチライン: 1行下へカーソル移動
+              const targetCol = Math.min(col, lines[row + 1].length);
+              cursorPos = rowColToPos(row + 1, targetCol);
+              renderInput();
+            } else if (this.historyIndex >= 0) {
+              // 履歴ナビゲーション
+              this.historyIndex++;
+              if (this.historyIndex >= this.history.length) {
+                this.historyIndex = -1;
+                buffer = savedHistoryBuffer;
+              } else {
+                buffer = this.history[this.historyIndex];
+              }
+              cursorPos = buffer.length;
+              renderInput();
             }
-            cursorPos = buffer.length;
-            renderLine();
           }
           return;
         }
@@ -411,7 +551,7 @@ export class InteractiveInput {
         if (key.name === "left") {
           if (cursorPos > 0) {
             cursorPos--;
-            renderLine();
+            renderInput();
             if (menuVisible) {
               updateMenu();
               renderMenu();
@@ -424,7 +564,7 @@ export class InteractiveInput {
         if (key.name === "right") {
           if (cursorPos < buffer.length) {
             cursorPos++;
-            renderLine();
+            renderInput();
             if (menuVisible) {
               updateMenu();
               renderMenu();
@@ -433,18 +573,20 @@ export class InteractiveInput {
           return;
         }
 
-        // ── Home / Ctrl+A ──
+        // ── Home / Ctrl+A → 現在行の先頭 ──
         if (key.name === "home" || (key.ctrl && key.name === "a")) {
-          cursorPos = 0;
-          renderLine();
+          const { row } = getLayout();
+          cursorPos = rowColToPos(row, 0);
+          renderInput();
           if (menuVisible) dismissMenu();
           return;
         }
 
-        // ── End / Ctrl+E ──
+        // ── End / Ctrl+E → 現在行の末尾 ──
         if (key.name === "end" || (key.ctrl && key.name === "e")) {
-          cursorPos = buffer.length;
-          renderLine();
+          const { row, lines } = getLayout();
+          cursorPos = rowColToPos(row, lines[row].length);
+          renderInput();
           if (menuVisible) {
             updateMenu();
             renderMenu();
@@ -457,10 +599,10 @@ export class InteractiveInput {
           if (cursorPos > 0) {
             buffer = buffer.slice(0, cursorPos - 1) + buffer.slice(cursorPos);
             cursorPos--;
-            renderLine();
+            renderInput();
             if (buffer.length === 0) {
               dismissMenu();
-            } else {
+            } else if (!buffer.includes("\n")) {
               updateMenu();
               renderMenu();
             }
@@ -472,18 +614,20 @@ export class InteractiveInput {
         if (key.name === "delete") {
           if (cursorPos < buffer.length) {
             buffer = buffer.slice(0, cursorPos) + buffer.slice(cursorPos + 1);
-            renderLine();
-            updateMenu();
-            renderMenu();
+            renderInput();
+            if (!buffer.includes("\n")) {
+              updateMenu();
+              renderMenu();
+            }
           }
           return;
         }
 
-        // ── Ctrl+U → 行クリア ──
+        // ── Ctrl+U → 全クリア ──
         if (key.ctrl && key.name === "u") {
           buffer = "";
           cursorPos = 0;
-          renderLine();
+          renderInput();
           dismissMenu();
           return;
         }
@@ -495,9 +639,11 @@ export class InteractiveInput {
             const trimmed = before.replace(/\S+\s*$/, "");
             buffer = trimmed + buffer.slice(cursorPos);
             cursorPos = trimmed.length;
-            renderLine();
-            updateMenu();
-            renderMenu();
+            renderInput();
+            if (!buffer.includes("\n")) {
+              updateMenu();
+              renderMenu();
+            }
           }
           return;
         }
@@ -509,9 +655,11 @@ export class InteractiveInput {
           if (ch.length > 0 && ch.charCodeAt(0) >= 32) {
             buffer = buffer.slice(0, cursorPos) + ch + buffer.slice(cursorPos);
             cursorPos += ch.length;
-            renderLine();
-            updateMenu();
-            renderMenu();
+            renderInput();
+            if (!buffer.includes("\n")) {
+              updateMenu();
+              renderMenu();
+            }
           }
         }
       };

@@ -7,7 +7,7 @@ export function displayWelcome(model: string, baseUrl: string, providerType: str
   console.log(chalk.dim(`  Context: ${ctxLabel} tokens | Skills: ${skillCount}`));
   console.log(chalk.dim(`  CWD: ${process.cwd()}`));
   console.log(chalk.dim(`  Type /help for commands, /quit to exit.`));
-  console.log(chalk.dim(`  マルチライン入力: \`\`\` で開始・終了\n`));
+  console.log(chalk.dim(`  マルチライン入力: Shift+Enter (フォールバック: \`\`\`)\n`));
 }
 
 export function displayHelp(): void {
@@ -39,8 +39,10 @@ export function displayHelp(): void {
     ${chalk.cyan("/build-fix")}      ビルドエラー修正
 
   ${chalk.bold("入力:")}
-    \`\`\`  マルチライン入力モード開始/終了
-    Ctrl+C  現在の操作をキャンセル
+    Shift+Enter  改行を挿入（マルチライン入力）
+    \`\`\`          マルチライン入力モード（フォールバック）
+    @path        ファイル/フォルダの内容を参照
+    Ctrl+C       現在の操作をキャンセル
 `);
 }
 
