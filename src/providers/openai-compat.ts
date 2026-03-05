@@ -16,6 +16,8 @@ interface OpenAIModelResponse {
 
 interface SSEDelta {
   content?: string;
+  /** Qwen3等のthinkingモデルが思考トークンを送信するフィールド */
+  reasoning_content?: string;
   tool_calls?: Array<{
     index: number;
     id?: string;
@@ -185,6 +187,11 @@ export class OpenAICompatProvider implements LLMProvider {
 
           for (const choice of chunk.choices) {
             const delta = choice.delta;
+
+            // Thinking content (Qwen3等のthinkingモデル)
+            if (delta.reasoning_content) {
+              yield { type: "thinking", text: delta.reasoning_content };
+            }
 
             // Text content
             if (delta.content) {

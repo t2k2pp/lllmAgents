@@ -49,7 +49,7 @@ export interface VisionChatParams extends ChatParams {
 }
 
 export interface ChatChunk {
-  type: "text" | "tool_call" | "done" | "error";
+  type: "text" | "thinking" | "tool_call" | "done" | "error";
   text?: string;
   toolCall?: ToolCall;
   finishReason?: string;

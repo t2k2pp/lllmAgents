@@ -53,6 +53,8 @@ export class AgentLoop {
 
   async run(userMessage: string): Promise<void> {
     this.history.addUserMessage(userMessage);
+    // <think>タグフィルター（古いOllama向け、ストリーム跨ぎ対応）
+    const filterThinkingTags = createThinkingFilter();
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       // Context compression check
@@ -69,8 +71,10 @@ export class AgentLoop {
 
       // Call LLM with retry
       let textContent = "";
+      let thinkingContent = "";
       const toolCalls: ToolCall[] = [];
       let hasStartedOutput = false;
+      let thinkingSpinner: ReturnType<typeof ora> | null = null;
       let success = false;
 
       // LLM呼び出しループ: 接続エラー時は自動リトライ、その他はユーザーに判断を委ねる
@@ -94,24 +98,55 @@ export class AgentLoop {
 
           for await (const chunk of gen) {
             switch (chunk.type) {
+              case "thinking":
+                // Qwen3等のthinkingモデル: reasoning_content を受信
+                if (chunk.text) {
+                  if (!thinkingSpinner) {
+                    thinkingSpinner = ora(chalk.dim("  考え中...")).start();
+                  }
+                  thinkingContent += chunk.text;
+                }
+                break;
               case "text":
                 if (chunk.text) {
-                  if (!hasStartedOutput) {
-                    hasStartedOutput = true;
-                    process.stdout.write("\n");
+                  // thinkingスピナーが動いていたら停止
+                  if (thinkingSpinner) {
+                    thinkingSpinner.stop();
+                    thinkingSpinner = null;
                   }
-                  process.stdout.write(chunk.text);
+                  // <think>...</think> タグをフィルタリング（古いOllamaの場合contentに含まれる）
+                  const displayText = filterThinkingTags(chunk.text);
+                  if (displayText) {
+                    if (!hasStartedOutput) {
+                      hasStartedOutput = true;
+                      process.stdout.write("\n");
+                    }
+                    process.stdout.write(displayText);
+                  }
                   textContent += chunk.text;
                 }
                 break;
               case "tool_call":
+                // thinkingスピナーが動いていたら停止
+                if (thinkingSpinner) {
+                  thinkingSpinner.stop();
+                  thinkingSpinner = null;
+                }
                 if (chunk.toolCall) {
                   toolCalls.push(chunk.toolCall);
                 }
                 break;
               case "error":
+                if (thinkingSpinner) {
+                  thinkingSpinner.fail("エラー");
+                  thinkingSpinner = null;
+                }
                 throw new Error(chunk.error ?? "LLM error");
               case "done":
+                if (thinkingSpinner) {
+                  thinkingSpinner.stop();
+                  thinkingSpinner = null;
+                }
                 break;
             }
           }
@@ -129,8 +164,10 @@ export class AgentLoop {
             console.log(chalk.yellow(`  サーバー復帰を待機中... (${connectionRetries}/${MAX_CONNECTION_RETRIES})`));
             await sleep(waitMs);
             textContent = "";
+            thinkingContent = "";
             toolCalls.length = 0;
             hasStartedOutput = false;
+            thinkingSpinner = null;
             continue;
           }
 
@@ -142,8 +179,10 @@ export class AgentLoop {
             // ユーザーが明示的にリトライを選択
             connectionRetries = 0;
             textContent = "";
+            thinkingContent = "";
             toolCalls.length = 0;
             hasStartedOutput = false;
+            thinkingSpinner = null;
             continue;
           } else {
             // "abort" → この発話を中止してREPLに戻る（プロセスは終了しない）
@@ -171,6 +210,16 @@ export class AgentLoop {
       }
 
       // Final response
+      if (!hasStartedOutput && toolCalls.length === 0) {
+        // ユーザーに見える出力がゼロ（thinking onlyや空レスポンス）
+        const hasThinking = thinkingContent.length > 0 || textContent.includes("<think>");
+        const hint = hasThinking
+          ? "（モデルは考えましたが、応答が生成されませんでした。プロンプトを変えて再度お試しください）"
+          : "（モデルから空のレスポンスが返されました。再度お試しください）";
+        console.log(chalk.yellow(`\n  ${hint}`));
+        // 空メッセージは履歴に入れない
+        return;
+      }
       this.history.addAssistantMessage(textContent);
       return;
     }
@@ -331,6 +380,49 @@ async function askUserOnError(err: Error): Promise<"retry" | "abort"> {
  * - HTTP 4xx/5xx: サーバーは到達できているがリクエストに問題あり
  * - LLMレスポンスエラー: パースエラー等
  */
+
+/**
+ * ストリーミング中の <think>...</think> タグをフィルタリングする。
+ *
+ * 古いOllama（<0.6）ではthinking contentがdelta.contentに
+ * <think>...</think>タグとして含まれる。
+ * ストリーミングではタグが複数チャンクに跨がるため、
+ * 状態を持つクロージャで処理する。
+ */
+function createThinkingFilter(): (text: string) => string {
+  let insideThink = false;
+
+  return (text: string): string => {
+    let result = "";
+    let i = 0;
+
+    while (i < text.length) {
+      if (!insideThink) {
+        // <think> の開始を検出
+        const openIdx = text.indexOf("<think>", i);
+        if (openIdx === -1) {
+          result += text.slice(i);
+          break;
+        }
+        result += text.slice(i, openIdx);
+        insideThink = true;
+        i = openIdx + 7; // "<think>".length
+      } else {
+        // </think> の終了を検出
+        const closeIdx = text.indexOf("</think>", i);
+        if (closeIdx === -1) {
+          // タグが閉じていない → 残りは全部thinking
+          break;
+        }
+        insideThink = false;
+        i = closeIdx + 8; // "</think>".length
+      }
+    }
+
+    return result;
+  };
+}
+
 function isConnectionError(err: Error): boolean {
   const msg = err.message.toLowerCase();
   return (
