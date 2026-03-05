@@ -89,8 +89,10 @@ sequenceDiagram
     end
 
     loop Max Iterations (50)
+        Note over Loop: 🔄 LLM待機スピナー開始<br/>(経過時間を1秒ごとに更新)
         Loop->>LLM: chatWithTools(History)
         LLM-->>Loop: Stream Response (Text + ToolCalls)
+        Note over Loop: ✔ スピナー停止<br/>(2秒以上なら経過時間表示)
         
         alt ToolCallsあり
             Loop->>Exec: execute(ToolCall 1) (Parallel)

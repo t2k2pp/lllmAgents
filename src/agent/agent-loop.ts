@@ -85,22 +85,53 @@ export class AgentLoop {
           const toolDefs = this.getFilteredToolDefs();
           const gen = toolDefs.length > 0
             ? this.provider.chatWithTools({
-                model: this.model,
-                messages: this.history.getMessages(),
-                tools: toolDefs,
-                stream: true,
-              })
+              model: this.model,
+              messages: this.history.getMessages(),
+              tools: toolDefs,
+              stream: true,
+            })
             : this.provider.chat({
-                model: this.model,
-                messages: this.history.getMessages(),
-                stream: true,
-              });
+              model: this.model,
+              messages: this.history.getMessages(),
+              stream: true,
+            });
+
+          // LLM待機スピナー: リクエスト送信〜最初のチャンク受信まで
+          const waitingStartTime = Date.now();
+          let waitingSpinner: ReturnType<typeof ora> | null = ora({
+            text: chalk.dim("  LLM処理中..."),
+            spinner: "dots",
+          }).start();
+
+          // 経過時間の定期更新（1秒ごと）
+          const waitingTimer = setInterval(() => {
+            if (waitingSpinner) {
+              const elapsed = Math.floor((Date.now() - waitingStartTime) / 1000);
+              waitingSpinner.text = chalk.dim(`  LLM処理中... (${formatElapsed(elapsed)})`);
+            }
+          }, 1000);
+
+          const stopWaitingSpinner = (): void => {
+            if (waitingTimer) clearInterval(waitingTimer);
+            if (waitingSpinner) {
+              const elapsed = Math.floor((Date.now() - waitingStartTime) / 1000);
+              if (elapsed >= 2) {
+                // 2秒以上待った場合のみ経過時間を表示
+                waitingSpinner.succeed(chalk.dim(`  LLM応答開始 (${formatElapsed(elapsed)})`));
+              } else {
+                waitingSpinner.stop();
+              }
+              waitingSpinner = null;
+            }
+          };
 
           for await (const chunk of gen) {
             switch (chunk.type) {
               case "thinking":
                 // Qwen3等のthinkingモデル: reasoning_content を受信
                 if (chunk.text) {
+                  // 待機スピナーが動いていたら停止
+                  stopWaitingSpinner();
                   if (!thinkingSpinner) {
                     thinkingSpinner = ora(chalk.dim("  考え中...")).start();
                   }
@@ -109,6 +140,8 @@ export class AgentLoop {
                 break;
               case "text":
                 if (chunk.text) {
+                  // 待機スピナーが動いていたら停止
+                  stopWaitingSpinner();
                   // thinkingスピナーが動いていたら停止
                   if (thinkingSpinner) {
                     thinkingSpinner.stop();
@@ -127,6 +160,8 @@ export class AgentLoop {
                 }
                 break;
               case "tool_call":
+                // 待機スピナーが動いていたら停止
+                stopWaitingSpinner();
                 // thinkingスピナーが動いていたら停止
                 if (thinkingSpinner) {
                   thinkingSpinner.stop();
@@ -137,12 +172,14 @@ export class AgentLoop {
                 }
                 break;
               case "error":
+                stopWaitingSpinner();
                 if (thinkingSpinner) {
                   thinkingSpinner.fail("エラー");
                   thinkingSpinner = null;
                 }
                 throw new Error(chunk.error ?? "LLM error");
               case "done":
+                stopWaitingSpinner();
                 if (thinkingSpinner) {
                   thinkingSpinner.stop();
                   thinkingSpinner = null;
@@ -150,6 +187,9 @@ export class AgentLoop {
                 break;
             }
           }
+
+          // ストリーム完了後もスピナーが残っていたらクリーンアップ
+          stopWaitingSpinner();
 
           success = true;
           connectionRetries = 0;
@@ -433,4 +473,11 @@ function isConnectionError(err: Error): boolean {
     msg.includes("network") ||
     msg.includes("socket hang up")
   );
+}
+
+/** 経過秒数を "0:05" や "1:23" 形式にフォーマットする */
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
