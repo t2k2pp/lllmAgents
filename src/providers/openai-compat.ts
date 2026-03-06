@@ -1,4 +1,4 @@
-import type { ModelInfo, ModelDetail, ProviderType } from "../config/types.js";
+import type { ModelInfo, ModelDetail, SecondLLMProviderType } from "../config/types.js";
 import type {
   LLMProvider,
   ChatParams,
@@ -45,10 +45,10 @@ interface SSEChunk {
 }
 
 export class OpenAICompatProvider implements LLMProvider {
-  readonly providerType: ProviderType;
+  readonly providerType: SecondLLMProviderType;
   protected baseUrl: string;
 
-  constructor(providerType: ProviderType, baseUrl: string) {
+  constructor(providerType: SecondLLMProviderType, baseUrl: string) {
     this.providerType = providerType;
     // Remove trailing slash
     this.baseUrl = baseUrl.replace(/\/+$/, "");
@@ -60,6 +60,10 @@ export class OpenAICompatProvider implements LLMProvider {
 
   protected getChatUrl(): string {
     return `${this.baseUrl}/v1/chat/completions`;
+  }
+
+  protected async getRequestHeaders(): Promise<Record<string, string>> {
+    return {};
   }
 
   async testConnection(): Promise<boolean> {
@@ -121,7 +125,7 @@ export class OpenAICompatProvider implements LLMProvider {
     yield* this.chat(params);
   }
 
-  private async *doChat(
+  protected async *doChat(
     model: string,
     messages: Message[],
     temperature?: number,
@@ -146,7 +150,8 @@ export class OpenAICompatProvider implements LLMProvider {
 
     let streamBody: ReadableStream<Uint8Array>;
     try {
-      streamBody = await httpPostStream(this.getChatUrl(), body);
+      const headers = await this.getRequestHeaders();
+      streamBody = await httpPostStream(this.getChatUrl(), body, undefined, undefined, headers);
     } catch (e) {
       yield { type: "error", error: String(e) };
       return;

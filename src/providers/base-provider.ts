@@ -1,4 +1,4 @@
-import type { ModelInfo, ModelDetail, ProviderType } from "../config/types.js";
+import type { ModelInfo, ModelDetail, SecondLLMProviderType } from "../config/types.js";
 
 export interface Message {
   role: "system" | "user" | "assistant" | "tool";
@@ -70,7 +70,7 @@ export interface ChatResponse {
 }
 
 export interface LLMProvider {
-  readonly providerType: ProviderType;
+  readonly providerType: SecondLLMProviderType;
 
   testConnection(): Promise<boolean>;
   listModels(): Promise<ModelInfo[]>;

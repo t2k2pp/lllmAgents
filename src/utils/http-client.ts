@@ -86,19 +86,24 @@ export async function httpPost<T = unknown>(
  * @param body - リクエストボディ
  * @param connectTimeoutMs - 接続タイムアウト（fetch〜ヘッダー受信まで）
  * @param idleTimeoutMs - アイドルタイムアウト（チャンク間の最大無通信時間）
+ * @param additionalHeaders - 追加のHTTPリクエストヘッダ
  */
 export async function httpPostStream(
   url: string,
   body: unknown,
   connectTimeoutMs = DEFAULT_STREAM_CONNECT_TIMEOUT,
   idleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT,
+  additionalHeaders?: Record<string, string>,
 ): Promise<ReadableStream<Uint8Array>> {
   const controller = new AbortController();
   const connectTimer = setTimeout(() => controller.abort(), connectTimeoutMs);
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...additionalHeaders,
+    },
     body: JSON.stringify(body),
     signal: controller.signal,
     // @ts-expect-error -- Node.js undici dispatcher option（型定義にないがランタイムで有効）
