@@ -48,12 +48,19 @@ export interface VisionChatParams extends ChatParams {
   // Messages already contain image content parts
 }
 
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  cachedTokens?: number;
+}
+
 export interface ChatChunk {
   type: "text" | "thinking" | "tool_call" | "done" | "error";
   text?: string;
   toolCall?: ToolCall;
   finishReason?: string;
   error?: string;
+  usage?: TokenUsage;
 }
 
 export interface ChatResponse {

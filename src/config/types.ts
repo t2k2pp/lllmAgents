@@ -1,11 +1,47 @@
 export type ProviderType = "ollama" | "lmstudio" | "llamacpp" | "vllm";
 
+export type CloudProviderType = "vertex-ai" | "azure-openai" | "azure-claude";
+
+// セカンドLLMはローカルまたはクラウドのいずれかを指定可能
+export type SecondLLMProviderType = ProviderType | CloudProviderType;
+
 export interface LLMEndpoint {
   providerType: ProviderType;
   baseUrl: string;
   model: string;
   contextWindow?: number;
   temperature?: number;
+}
+
+export interface SecondLLMEndpoint {
+  providerType: SecondLLMProviderType;
+  model: string;
+  // ローカルLLM用
+  baseUrl?: string;
+  // Vertex AI用
+  projectId?: string;
+  region?: string;
+  // Azure用
+  endpoint?: string;
+  apiKey?: string;
+  deploymentName?: string;
+}
+
+export interface BudgetConfig {
+  limitUsd: number;          // 予算上限 (USD)
+  warningThreshold: number;  // 警告閾値 (0.0〜1.0、デフォルト0.8)
+  stopThreshold: number;     // 停止閾値 (0.0〜1.0、デフォルト0.95)
+}
+
+export interface CostConfig {
+  referenceModels: string[];  // ローカルLLM利用時の参考コスト比較対象
+}
+
+export interface SecondLLMConfig {
+  enabled: boolean;
+  endpoint: SecondLLMEndpoint;
+  budget: BudgetConfig | null;  // ローカルLLMの場合は null（予算不要）
+  cost: CostConfig;
 }
 
 export interface SecurityConfig {
@@ -23,8 +59,14 @@ export interface ContextConfig {
 export interface Config {
   mainLLM: LLMEndpoint;
   visionLLM: LLMEndpoint | null;
+  secondLLM: SecondLLMConfig | null;
   security: SecurityConfig;
   context: ContextConfig;
+}
+
+// ヘルパー: セカンドLLMがクラウドかローカルかを判定
+export function isCloudProvider(type: SecondLLMProviderType): boolean {
+  return (["vertex-ai", "azure-openai", "azure-claude"] as string[]).includes(type);
 }
 
 export interface ModelInfo {
@@ -66,6 +108,7 @@ export function getDefaultConfig(): Config {
       temperature: 0.7,
     },
     visionLLM: null,
+    secondLLM: null,
     security: {
       allowedDirectories: [],
       blockedCommands: [],

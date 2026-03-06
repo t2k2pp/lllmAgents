@@ -7,6 +7,7 @@ import type {
   ChatChunk,
   Message,
   ToolDefinition,
+  TokenUsage,
 } from "./base-provider.js";
 import { httpGet, httpPostStream } from "../utils/http-client.js";
 
@@ -32,8 +33,15 @@ interface SSEChoice {
   finish_reason: string | null;
 }
 
+interface SSEUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
 interface SSEChunk {
   choices: SSEChoice[];
+  usage?: SSEUsage;
 }
 
 export class OpenAICompatProvider implements LLMProvider {
@@ -127,6 +135,8 @@ export class OpenAICompatProvider implements LLMProvider {
       messages: messages.map((m) => this.formatMessage(m)),
       stream: true,
       temperature: temperature ?? 0.7,
+      // ストリーミングでusage情報を取得するためのオプション
+      stream_options: { include_usage: true },
     };
     if (maxTokens) body.max_tokens = maxTokens;
     if (tools && tools.length > 0) {
@@ -144,6 +154,8 @@ export class OpenAICompatProvider implements LLMProvider {
 
     // Track partial tool calls across SSE chunks
     const partialToolCalls = new Map<number, { id: string; name: string; args: string }>();
+    // Track usage from streaming response
+    let lastUsage: TokenUsage | undefined;
 
     const reader = streamBody.getReader();
     const decoder = new TextDecoder();
@@ -174,7 +186,7 @@ export class OpenAICompatProvider implements LLMProvider {
                 },
               };
             }
-            yield { type: "done", finishReason: "stop" };
+            yield { type: "done", finishReason: "stop", usage: lastUsage };
             return;
           }
 
@@ -185,7 +197,15 @@ export class OpenAICompatProvider implements LLMProvider {
             continue;
           }
 
-          for (const choice of chunk.choices) {
+          // ストリームからusage情報を抽出
+          if (chunk.usage) {
+            lastUsage = {
+              promptTokens: chunk.usage.prompt_tokens,
+              completionTokens: chunk.usage.completion_tokens,
+            };
+          }
+
+          for (const choice of chunk.choices ?? []) {
             const delta = choice.delta;
 
             // Thinking content (Qwen3等のthinkingモデル)
@@ -227,7 +247,7 @@ export class OpenAICompatProvider implements LLMProvider {
                 }
                 partialToolCalls.clear();
               }
-              yield { type: "done", finishReason: choice.finish_reason };
+              yield { type: "done", finishReason: choice.finish_reason, usage: lastUsage };
             }
           }
         }
