@@ -1,5 +1,7 @@
 import chalk from "chalk";
 import ora from "ora";
+import { globalTokenTracker } from "../cost/token-tracker.js";
+import { globalCostCalculator } from "../cost/cost-calculator.js";
 import inquirer from "inquirer";
 import type { LLMProvider, ToolCall, ToolDefinition } from "../providers/base-provider.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
@@ -179,6 +181,23 @@ export class AgentLoop {
                 }
                 throw new Error(chunk.error ?? "LLM error");
               case "done":
+                if (chunk.usage) {
+                  const cost = globalCostCalculator.calculateForModel(
+                    this.model,
+                    chunk.usage.promptTokens ?? 0,
+                    chunk.usage.completionTokens ?? 0
+                  );
+                  globalTokenTracker.record({
+                    timestamp: new Date().toISOString(),
+                    provider: this.provider.providerType,
+                    model: this.model,
+                    inputTokens: chunk.usage.promptTokens ?? 0,
+                    outputTokens: chunk.usage.completionTokens ?? 0,
+                    cachedTokens: 0,
+                    estimatedCostUsd: cost,
+                    sessionId: this.session.meta.id
+                  });
+                }
                 stopWaitingSpinner();
                 if (thinkingSpinner) {
                   thinkingSpinner.stop();

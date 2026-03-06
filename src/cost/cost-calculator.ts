@@ -19,6 +19,16 @@ export class CostCalculator {
          + (outputTokens * pricing.outputPerMToken / 1_000_000);
   }
 
+  calculateForModel(
+    model: string,
+    inputTokens: number,
+    outputTokens: number,
+  ): number {
+    const pricing = getModelPricing(model);
+    if (!pricing) return 0;
+    return this.calculate(inputTokens, outputTokens, pricing);
+  }
+
   /**
    * キャッシュ考慮のコスト計算
    */
@@ -55,3 +65,5 @@ export class CostCalculator {
       .filter((r): r is ReferenceCost => r !== null);
   }
 }
+
+export const globalCostCalculator = new CostCalculator();

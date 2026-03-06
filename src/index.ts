@@ -28,14 +28,17 @@ import { createBrowserTools } from "./tools/definitions/browser.js";
 import { taskTool, taskOutputTool, setSubAgentManager } from "./tools/definitions/task.js";
 import { enterPlanModeTool, exitPlanModeTool, setPlanManager } from "./tools/definitions/plan-mode.js";
 import { skillTool, setSkillRegistry } from "./tools/definitions/skill.js";
+import { secondLLMConsultTool, secondLLMAgentTool, setSecondLLMManager } from "./tools/definitions/second-llm.js";
 
 import { displayWelcome } from "./cli/renderer.js";
 import { REPL } from "./cli/repl.js";
 import { PROVIDER_LABELS } from "./config/types.js";
+import { CredentialVault } from "./security/credential-vault.js";
 import { getLatestSession } from "./agent/session-manager.js";
 import { ContextModeManager } from "./context/context-mode.js";
 import { HookManager } from "./hooks/hook-manager.js";
 import { MCPManager } from "./mcp/mcp-manager.js";
+import { SecondLLMManager } from "./second-llm/second-llm-manager.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -161,6 +164,35 @@ async function main(): Promise<void> {
   }
   setSkillRegistry(skillRegistry);
 
+  // Second LLM
+  const secondLLMManager = new SecondLLMManager(toolRegistry, permissions);
+  const secondLlmConfig = config.secondLLM ?? undefined;
+  if (secondLlmConfig && secondLlmConfig.enabled && secondLlmConfig.endpoint) {
+    let passphrase: string | undefined = undefined;
+    if (secondLlmConfig.endpoint.apiKey && CredentialVault.isEncrypted(secondLlmConfig.endpoint.apiKey)) {
+      const { default: inquirer } = await import("inquirer");
+      const { secret } = await inquirer.prompt([
+        {
+          type: "password",
+          name: "secret",
+          message: `Second LLM (${secondLlmConfig.endpoint.providerType})の暗号化キーを復号するための合言葉:\n >`,
+          mask: "*",
+        },
+      ]);
+      passphrase = secret;
+    }
+    if (passphrase) {
+      secondLLMManager.initialize(secondLlmConfig, passphrase);
+    } else {
+      secondLLMManager.initialize(secondLlmConfig);
+    }
+    if (secondLLMManager.isAvailable()) {
+      setSecondLLMManager(secondLLMManager);
+      toolRegistry.register(secondLLMConsultTool);
+      toolRegistry.register(secondLLMAgentTool);
+    }
+  }
+
   // Check for --resume flag
   const resumeIdx = args.indexOf("--resume");
   if (resumeIdx !== -1) {
@@ -191,10 +223,11 @@ async function main(): Promise<void> {
     PROVIDER_LABELS[config.mainLLM.providerType],
     contextWindow,
     skills.length,
+    secondLlmConfig
   );
 
   // Start REPL
-  const repl = new REPL(agent, config, skillRegistry, planManager, contextModeManager);
+  const repl = new REPL(agent, config, skillRegistry, planManager, contextModeManager, secondLLMManager);
   await repl.start();
 
   // Cleanup

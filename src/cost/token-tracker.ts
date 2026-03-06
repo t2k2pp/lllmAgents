@@ -78,3 +78,5 @@ export class TokenTracker {
     }
   }
 }
+
+export const globalTokenTracker = new TokenTracker();

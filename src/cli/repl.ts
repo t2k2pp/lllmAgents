@@ -1,5 +1,7 @@
 import chalk from "chalk";
 import type { AgentLoop } from "../agent/agent-loop.js";
+import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";
+import { globalTokenTracker } from "../cost/token-tracker.js";
 import { displayHelp } from "./renderer.js";
 import { estimateMessageTokens } from "../agent/token-counter.js";
 import { formatTodos } from "../tools/definitions/todo-write.js";
@@ -31,6 +33,7 @@ export class REPL {
     private skillRegistry?: SkillRegistry,
     private planManager?: PlanManager,
     private contextModeManager?: ContextModeManager,
+    private secondLLMManager?: SecondLLMManager,
   ) {
     // スキル情報を取得してメニュープロバイダーに渡す
     const skillInfos = skillRegistry
@@ -136,6 +139,18 @@ export class REPL {
 
   private async processInput(input: string): Promise<void> {
     try {
+      if (input.startsWith("@second ")) {
+         if (!this.secondLLMManager || !this.secondLLMManager.isAvailable()) {
+           console.log(chalk.red("  Second LLM is not configured or enabled."));
+           return;
+         }
+         const prompt = input.slice("@second ".length).trim();
+         console.log(chalk.dim("  Delegating to Second LLM..."));
+         const result = await this.secondLLMManager.runAsAgent(prompt);
+         console.log(chalk.cyan(`\n${result}\n`));
+         return;
+      }
+
       // @ファイル/フォルダ参照を解決してコンテキストに展開
       const { resolved, mentions } = resolveAtMentions(input);
       if (mentions.length > 0) {
@@ -270,6 +285,53 @@ export class REPL {
       case "/todo":
         console.log(chalk.dim(formatTodos()));
         break;
+
+      case "/cost": {
+        const stats = globalTokenTracker.getSessionTotal();
+        console.log(chalk.bold("\n  === Session Cost & Usage ==="));
+        console.log(chalk.dim(`  Requests: ${stats.recordCount}`));
+        console.log(chalk.dim(`  Input Tokens: ${stats.totalInputTokens.toLocaleString()}`));
+        console.log(chalk.dim(`  Output Tokens: ${stats.totalOutputTokens.toLocaleString()}`));
+        console.log(chalk.dim(`  Total Cost: $${stats.totalCostUsd.toFixed(4)}`));
+        console.log();
+        break;
+      }
+
+      case "/second": {
+        if (!this.secondLLMManager) {
+          console.log(chalk.dim("  セカンドLLMマネージャが初期化されていません。"));
+          break;
+        }
+        
+        const subCmd = args[0];
+        if (!subCmd || subCmd === "status") {
+          const isAvail = this.secondLLMManager.isAvailable();
+          const p = this.secondLLMManager.getProvider();
+          console.log(chalk.bold("\n  === Second LLM Status ==="));
+          console.log(chalk.dim(`  Status: ${isAvail ? chalk.green("Available") : chalk.red("Disabled or Not Configured")}`));
+          if (p) {
+             const ep = this.secondLLMManager.getEndpoint();
+             console.log(chalk.dim(`  Provider: ${ep?.providerType}`));
+             console.log(chalk.dim(`  Model: ${ep?.model}`));
+          }
+          console.log();
+        } else if (subCmd === "enable") {
+           if (this.config.secondLLM) {
+             this.config.secondLLM.enabled = true;
+             console.log(chalk.green("  Second LLM を有効化しました。（再起動後に完全適用される場合があります）"));
+           } else {
+             console.log(chalk.red("  Second LLM の設定が config.json に存在しません。"));
+           }
+        } else if (subCmd === "disable") {
+           if (this.config.secondLLM) {
+             this.config.secondLLM.enabled = false;
+             console.log(chalk.yellow("  Second LLM を無効化しました。"));
+           }
+        } else {
+           console.log(chalk.yellow("  使い方: /second [status|enable|disable]"));
+        }
+        break;
+      }
 
       case "/sessions": {
         const sessions = listSessions(10);

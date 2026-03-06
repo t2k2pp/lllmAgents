@@ -1,7 +1,7 @@
 {
-  "name": "localllm-agent",
-  "version": "0.2.0",
-  "description": "CLI-based AI agent powered by local LLMs (Ollama, LM Studio, llama.cpp, vLLM)",
+  "name": "localllm-agents",
+  "version": "0.3.0",
+  "description": "Multi-Agent System for Local LLMs (Ollama, LM Studio, llama.cpp, vLLM)",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

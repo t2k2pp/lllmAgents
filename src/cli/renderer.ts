@@ -1,9 +1,14 @@
 import chalk from "chalk";
 
-export function displayWelcome(model: string, baseUrl: string, providerType: string, contextWindow: number, skillCount: number): void {
+import type { SecondLLMConfig } from "../config/types.js";
+
+export function displayWelcome(model: string, baseUrl: string, providerType: string, contextWindow: number, skillCount: number, secondLlmConfig?: SecondLLMConfig): void {
   const ctxLabel = contextWindow >= 1000 ? `${Math.round(contextWindow / 1000)}K` : `${contextWindow}`;
   console.log(chalk.bold(`\n  LocalLLM Agent v0.2.0`));
   console.log(chalk.dim(`  Model: ${model} @ ${baseUrl} (${providerType})`));
+  if (secondLlmConfig && secondLlmConfig.enabled && secondLlmConfig.endpoint) {
+    console.log(chalk.dim(`  Second LLM: ${secondLlmConfig.endpoint.model} (${secondLlmConfig.endpoint.providerType})`));
+  }
   console.log(chalk.dim(`  Context: ${ctxLabel} tokens | Skills: ${skillCount}`));
   console.log(chalk.dim(`  CWD: ${process.cwd()}`));
   console.log(chalk.dim(`  Type /help for commands, /quit to exit.`));

@@ -1,9 +1,11 @@
 import ora from "ora";
 import chalk from "chalk";
+import { globalTokenTracker } from "../cost/token-tracker.js";
+import { globalCostCalculator } from "../cost/cost-calculator.js";
 import { DelegationGuard } from "./delegation-guard.js";
 import { createSecondLLMProvider } from "../providers/provider-factory.js";
 import type { SecondLLMConfig, SecondLLMEndpoint } from "../config/types.js";
-import type { LLMProvider, ChatResponse, ChatChunk, Message, ToolDefinition, ToolCall } from "../providers/base-provider.js";
+import type { LLMProvider, Message, ToolCall } from "../providers/base-provider.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager } from "../security/permission-manager.js";
@@ -116,15 +118,7 @@ export class SecondLLMManager {
     }
     this.checkDelegation();
 
-    const allowedTools = this.toolRegistry.getTools().filter(t => !EXCLUDED_TOOLS.includes(t.name));
-    const toolDefs: ToolDefinition[] = allowedTools.map(t => ({
-      type: "function",
-      function: {
-        name: t.name,
-        description: t.description,
-        parameters: t.parameters as Record<string, unknown>
-      }
-    }));
+    const toolDefs = this.toolRegistry.getDefinitions().filter(d => !EXCLUDED_TOOLS.includes(d.function.name));
 
     const spinner = ora(chalk.magenta("Second LLM working as Agent...")).start();
     try {
@@ -156,6 +150,21 @@ export class SecondLLMManager {
             if (chunk.toolCall) toolCalls.push(chunk.toolCall);
           } else if (chunk.type === "error") {
             throw new Error(chunk.error);
+          } else if (chunk.type === "done" && chunk.usage) {
+            const cost = globalCostCalculator.calculateForModel(
+              this.endpoint.model,
+              chunk.usage.promptTokens ?? 0,
+              chunk.usage.completionTokens ?? 0,
+            );
+            globalTokenTracker.record({
+              timestamp: new Date().toISOString(),
+              provider: this.provider.providerType,
+              model: this.endpoint.model,
+              inputTokens: chunk.usage.promptTokens ?? 0,
+              outputTokens: chunk.usage.completionTokens ?? 0,
+              cachedTokens: 0,
+              estimatedCostUsd: cost,
+            });
           }
         }
 
@@ -176,12 +185,11 @@ export class SecondLLMManager {
 
           for (const tc of toolCalls) {
             const toolName = tc.function.name;
-            const args = tc.function.arguments;
             spinner.text = chalk.magenta(`Second LLM executing tool: ${toolName}`);
             
             try {
-              const res = await toolExecutor.executeTool(toolName, args);
-              messages.push({ role: "tool", content: res, tool_call_id: tc.id });
+              const res = await toolExecutor.execute(tc);
+              messages.push({ role: "tool", content: res.output || res.error || "", tool_call_id: tc.id });
             } catch (e) {
               messages.push({ role: "tool", content: `Error: ${String(e)}`, tool_call_id: tc.id });
             }
