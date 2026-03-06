@@ -14,7 +14,7 @@ export interface HttpResponse<T = unknown> {
  *
  * ストリーミング応答のタイムアウト戦略:
  * 1. 接続タイムアウト: fetch()の接続〜レスポンスヘッダー受信まで（1時間）
- * 2. アイドルタイムアウト: チャンク間の無通信時間で判定（10分）
+ * 2. アイドルタイムアウト: チャンク間の無通信時間で判定（60分）
  *    → LLMが推論中でも最初のトークンが来るまで待つ
  *    → 完全なハングだけを検出する
  * 3. undici bodyTimeout: 無効化（デフォルト300秒が原因で早期切断される）
@@ -30,7 +30,7 @@ const DEFAULT_POST_TIMEOUT = 300_000; // 5分
 const DEFAULT_STREAM_CONNECT_TIMEOUT = 3_600_000; // 1時間
 
 /** ストリーム読み取りのアイドルタイムアウト。チャンク間の最大無通信時間 */
-const DEFAULT_STREAM_IDLE_TIMEOUT = 600_000; // 10分
+const DEFAULT_STREAM_IDLE_TIMEOUT = 3_600_000; // 60分
 
 /**
  * undici Agentのシングルトン。bodyTimeout/headersTimeoutを無効化して

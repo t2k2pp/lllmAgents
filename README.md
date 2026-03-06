@@ -48,7 +48,7 @@ npm start
 ```
 $ npm start
 
-  LocalLLM Agent v0.2.0
+  LocalLLM Agent v0.3.0
   Model: qwen3.5:27b @ http://192.168.1.33:11434 (Ollama)
   Context: 130K tokens | Skills: 4
   CWD: /home/user/my-project
