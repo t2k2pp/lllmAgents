@@ -50,7 +50,15 @@ export async function httpGet<T = unknown>(
 
   try {
     const res = await fetch(url, { signal: controller.signal });
-    const data = (await res.json()) as T;
+    const text = await res.text();
+    let data = undefined as unknown as T;
+    if (text) {
+      try {
+        data = JSON.parse(text) as T;
+      } catch {
+        data = text as unknown as T;
+      }
+    }
     return { ok: res.ok, status: res.status, data };
   } finally {
     clearTimeout(timer);
@@ -72,7 +80,15 @@ export async function httpPost<T = unknown>(
       body: JSON.stringify(body),
       signal: controller.signal,
     });
-    const data = (await res.json()) as T;
+    const text = await res.text();
+    let data = undefined as unknown as T;
+    if (text) {
+      try {
+        data = JSON.parse(text) as T;
+      } catch {
+        data = text as unknown as T;
+      }
+    }
     return { ok: res.ok, status: res.status, data };
   } finally {
     clearTimeout(timer);

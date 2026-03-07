@@ -11,9 +11,12 @@ export async function sendDiscordNotification(webhookUrl: string, content: strin
     const chunks = splitIntoChunks(content, DISCORD_MAX_LENGTH);
     for (const chunk of chunks) {
       // http-client.tsのhttpPostを利用する
-      await httpPost(webhookUrl, {
+      const res = await httpPost(webhookUrl, {
         content: chunk,
       });
+      if (!res.ok) {
+        logger.error(`Discord webhook failed with status ${res.status}: ${res.data}`);
+      }
     }
   } catch (error) {
     logger.error("Failed to send message to Discord webhook:", error);
