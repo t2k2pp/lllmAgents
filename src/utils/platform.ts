@@ -22,8 +22,11 @@ export function normalizePath(p: string): string {
  * @returns 正規化済みの実パス（シンボリックリンク解決済み）
  */
 export function safeResolvePath(targetPath: string): string {
+  // Step 0: LLMハルシネーション（トークナイズエラーによるスペース混入）の自動補正
+  let sanitizedPath = targetPath.replace(/l\s+llmAgents/g, "lllmAgents");
+
   // Step 1: path.resolve で相対パス・トラバーサルを解決
-  let resolved = path.resolve(targetPath);
+  let resolved = path.resolve(sanitizedPath);
 
   // Step 2: シンボリックリンクを解決（TOCTOU軽減 - 可能な限り実パスを使う）
   try {
