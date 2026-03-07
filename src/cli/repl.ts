@@ -21,6 +21,7 @@ import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { PlanManager } from "../agent/plan-mode.js";
 import type { ContextModeManager, ContextMode } from "../context/context-mode.js";
 import { sendDiscordNotification } from "../utils/discord.js";
+import { saveConfig } from "../config/config-manager.js";
 
 export class REPL {
   private input: InteractiveInput;
@@ -342,6 +343,44 @@ export class REPL {
            }
         } else {
            console.log(chalk.yellow("  使い方: /second [status|enable|disable]"));
+        }
+        break;
+      }
+
+      case "/discord": {
+        const subCmd = args[0];
+        if (!subCmd || subCmd === "status") {
+          const dEnabled = this.config.discord?.enabled ?? false;
+          const dUrl = this.config.discord?.webhookUrl ?? "Not configured";
+          console.log(chalk.bold("\n  === Discord Notification Status ==="));
+          console.log(chalk.dim(`  Status: ${dEnabled ? chalk.green("Enabled") : chalk.yellow("Disabled")}`));
+          console.log(chalk.dim(`  Webhook URL: ${dUrl}`));
+          console.log();
+        } else if (subCmd === "enable") {
+          if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
+          if (!this.config.discord.webhookUrl) {
+            console.log(chalk.yellow("  注意: Webhook URL が設定されていません。先に '/discord url <URL>' を実行してください。"));
+          }
+          this.config.discord.enabled = true;
+          saveConfig(this.config);
+          console.log(chalk.green("  Discord 通知を有効化しました。"));
+        } else if (subCmd === "disable") {
+          if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
+          this.config.discord.enabled = false;
+          saveConfig(this.config);
+          console.log(chalk.yellow("  Discord 通知を無効化しました。"));
+        } else if (subCmd === "url") {
+          const urlStr = args[1];
+          if (!urlStr) {
+            console.log(chalk.yellow("  使い方: /discord url <webhook-url>"));
+          } else {
+            if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
+            this.config.discord.webhookUrl = urlStr;
+            saveConfig(this.config);
+            console.log(chalk.green(`  Discord Webhook URL を設定しました: ${urlStr}`));
+          }
+        } else {
+          console.log(chalk.yellow("  使い方: /discord [status|enable|disable|url <URL>]"));
         }
         break;
       }

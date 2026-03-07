@@ -106,6 +106,7 @@ stateDiagram-v2
 | `/remember` | 指定した情報を永続メモリに記録します |
 | `/diff` | 現在のセッションでの変更差分を表示します |
 | `/mode` | コンテキストモード（dev/review/research）の表示・切替を行います |
+| `/discord` | Discord通知設定の確認・有効化・無効化・URL設定を行います |
 
 ※ `/setup` は REPL コマンドではなく、CLI起動時のフラグ `--setup` で実行します。
 
@@ -204,6 +205,13 @@ sequenceDiagram
   - `autoApproveTools`: 自動承認するツールのリスト (デフォルト: `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`)
   - `requireApprovalTools`: 承認が必要なツールのリスト
   - `discord`: Discord連携の設定 (有効化フラグ `enabled` と 通知先URL `webhookUrl`)
+
+#### Discord Webhook URL の取得と設定手順
+
+DiscordのWebhookを用いて、エージェントからの応答を任意のチャンネルへ送信できます。
+1. **Webhookの作成**: Discordの該当サーバーで、通知先チャンネルの「チャンネルの編集」→「連携サービス」→「ウェブフックを見る/作成」を開き、新しいWebhookを作成します。
+2. **URLの取得**: 作成したWebhookの「ウェブフックURLをコピー」をクリックしてURLを取得します。
+3. **設定の反映**: `~/.localllm/config.json` 内の `"discord"` ブロックに対し、`"enabled": true` とし、`"webhookUrl": "取得したURL"` を文字列として貼り付けます。設定は次回のアクション実行時に即座に反映されます。
 
 ## 6. Hooksシステム
 

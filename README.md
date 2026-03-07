@@ -97,6 +97,7 @@ $ npm start
 | `/skills` | 利用可能なスキル一覧 |
 | `/status` | 全体ステータス（モデル・コンテキスト・タスク等） |
 | `/mode <dev\|review\|research>` | コンテキストモード切り替え |
+| `/discord` | Discord通知のステータス確認・設定 (`status` / `enable` / `disable` / `url <URL>`) |
 
 ### スキル（直接呼び出し）
 
@@ -309,9 +310,32 @@ Markdownファイルで定義するコーディング規約・ガイドライン
   },
   "context": {
     "compressionThreshold": 0.8
+  },
+  "discord": {
+    "enabled": false,
+    "webhookUrl": ""
   }
 }
 ```
+
+### Discord 通知の設定方法
+
+エージェントの応答完了時に、その内容を Discord へ自動的に通知することができます。以下の手順で Webhook URL を取得し、設定ファイルに記載してください。
+
+1. **Discord サーバー設定を開く**
+   通知を送りたいサーバーで、対象チャンネルの「チャンネルの編集（歯車アイコン）」を開きます。
+2. **連携サービス (Integrations) を選択**
+   左側のメニューから「連携サービス」を選択し、「ウェブフックの作成 (Create Webhook)」をクリックします。
+3. **Webhook URL のコピー**
+   作成されたWebhookの「ウェブフックURLをコピー」ボタンを押し、URLを取得します。
+4. **config.json の編集**
+   `~/.localllm/config.json` を開き、以下の設定を追加・編集します。
+   ```json
+   "discord": {
+     "enabled": true,
+     "webhookUrl": "ここにコピーしたURLを貼り付けます"
+   }
+   ```
 
 ### データディレクトリ
 

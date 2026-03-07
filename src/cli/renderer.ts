@@ -36,6 +36,7 @@ export function displayHelp(): void {
     ${chalk.cyan("/plan")}           プランモードに入る
     ${chalk.cyan("/skills")}         利用可能なスキル一覧
     ${chalk.cyan("/status")}         全体ステータス
+    ${chalk.cyan("/discord")}        Discord通知の設定
 
   ${chalk.bold("スキル (直接呼び出し可能):")}
     ${chalk.cyan("/commit")}         コミットワークフロー
