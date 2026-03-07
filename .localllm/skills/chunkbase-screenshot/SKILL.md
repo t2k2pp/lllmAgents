@@ -1,5 +1,5 @@
 ---
-name: Chunkbase Seed Map Screenshot
+name: chunkbase-screenshot
 description: Chunkbaseのシードマップの指定領域をスクリーンショットして保存します。シード値を受け取り、確実にキャプチャを実行します。
 trigger: /chunkbase
 ---

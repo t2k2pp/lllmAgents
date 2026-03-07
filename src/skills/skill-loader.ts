@@ -21,12 +21,13 @@ function parseSkillFile(content: string, filePath: string, builtIn: boolean): Sk
     meta[key] = value;
   }
 
-  if (!meta.name || !meta.description || !meta.trigger) return null;
+  if (!meta.name || !meta.description) return null;
+  const trigger = meta.trigger || `/${meta.name}`;
 
   return {
     name: meta.name,
     description: meta.description,
-    trigger: meta.trigger,
+    trigger: trigger,
     content: body.trim(),
     filePath,
     builtIn,
