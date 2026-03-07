@@ -14,7 +14,7 @@ export const fileEditTool: ToolHandler = {
         properties: {
           file_path: {
             type: "string",
-            description: "編集するファイルの絶対パス",
+            description: "編集するファイルのパス（相対パスを推奨）",
           },
           old_string: {
             type: "string",

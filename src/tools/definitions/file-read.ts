@@ -14,7 +14,7 @@ export const fileReadTool: ToolHandler = {
         properties: {
           file_path: {
             type: "string",
-            description: "読み取るファイルの絶対パス",
+            description: "読み取るファイルのパス（相対パスを推奨）",
           },
           offset: {
             type: "number",

@@ -14,7 +14,7 @@ export const fileWriteTool: ToolHandler = {
         properties: {
           file_path: {
             type: "string",
-            description: "書き込むファイルの絶対パス",
+            description: "書き込むファイルのパス（相対パスを推奨）",
           },
           content: {
             type: "string",
