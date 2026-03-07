@@ -22,6 +22,7 @@ import { grepTool } from "./tools/definitions/grep.js";
 import { bashTool } from "./tools/definitions/bash.js";
 import { webFetchTool } from "./tools/definitions/web-fetch.js";
 import { webSearchTool } from "./tools/definitions/web-search.js";
+import { currentDatetimeTool } from "./tools/definitions/current-datetime.js";
 import { todoWriteTool } from "./tools/definitions/todo-write.js";
 import { askUserTool } from "./tools/definitions/ask-user.js";
 import { createBrowserTools } from "./tools/definitions/browser.js";
@@ -74,9 +75,10 @@ async function main(): Promise<void> {
   // System tools
   toolRegistry.register(bashTool);
 
-  // Web tools
+  // Web & Utility tools
   toolRegistry.register(webFetchTool);
   toolRegistry.register(webSearchTool);
+  toolRegistry.register(currentDatetimeTool);
 
   // Interactive tools
   toolRegistry.register(todoWriteTool);
