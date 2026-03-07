@@ -822,3 +822,36 @@ const streamAgent = new Agent({
 | 全体タイムアウトではなくアイドル | ストリーミング中はデータが断続的に到着する。全体時間で制限すると長い応答が途中で切れる |
 | undici Agent をシングルトン化 | リクエストごとにAgentを生成すると接続プールが無駄になるため |
 | bodyTimeout=0 で無効化 | undiciのデフォルト300秒がローカルLLMの応答時間と合わず、早期切断の原因になっていた |
+
+## 11. Discord通知統合 (Discord Notification Integration)
+
+### 概要
+
+LLM（特にローカルLLM）は応答生成に時間がかかる場合があるため、生成完了時にその応答内容を自動的にDiscordへ通知する機能を提供します。これにより、ユーザーはターミナルを監視し続けることなく、別作業をしながら応答結果を受け取ることができます。
+
+### アーキテクチャ
+
+通知処理は、エージェントループが完了してREPLに制御が戻るタイミング（`src/cli/repl.ts`）で実行されます。これにより、既存のAgentCoreやProviderといった重い処理ロジックに影響を与えず、オプショナルな機能として疎結合に保たれています。
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant REPL as CLI (repl.ts)
+    participant Loop as AgentLoop
+    participant Config as ConfigManager
+    participant Discord as Discord Webhook
+
+    User->>REPL: メッセージを入力
+    REPL->>Loop: run(userMessage)
+    Loop-->>REPL: 実行完了 (History 更新)
+    
+    REPL->>Config: Discord設定の確認 (enabled && webhookUrl)
+    alt 設定有効
+        REPL->>REPL: Historyから最後のAssistantメッセージを抽出
+        REPL->>Discord: sendDiscordNotification() <br/> HTTP POST (メッセージ転送)
+    end
+```
+
+### Discord 2000文字制限への対応
+
+DiscordのWebhookAPIは1リクエストあたりのメッセージ長に **2000文字の制限** があります。LLMの応答がこれを超える場合、`src/utils/discord.ts` 内の `sendDiscordNotification` メソッドが自動的に文字列をチャンクに分割し、複数回の POST リクエストとして順次送信します。分割時は、なるべくキリの良い場所（改行など）で区切るような配慮が組み込まれています。

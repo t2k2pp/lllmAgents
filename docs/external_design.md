@@ -203,6 +203,7 @@ sequenceDiagram
   - `allowedDirectories`: サンドボックスでアクセスを許可する追加のディレクトリリスト。
   - `autoApproveTools`: 自動承認するツールのリスト (デフォルト: `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`)
   - `requireApprovalTools`: 承認が必要なツールのリスト
+  - `discord`: Discord連携の設定 (有効化フラグ `enabled` と 通知先URL `webhookUrl`)
 
 ## 6. Hooksシステム
 
