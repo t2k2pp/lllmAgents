@@ -39,17 +39,34 @@ function loadSkillsFromDir(dir: string, builtIn: boolean): SkillDefinition[] {
 
   if (!fs.existsSync(dir)) return skills;
 
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith(".md"));
-  for (const file of files) {
-    try {
-      const filePath = path.join(dir, file);
-      const content = fs.readFileSync(filePath, "utf-8");
-      const skill = parseSkillFile(content, filePath, builtIn);
-      if (skill) {
-        skills.push(skill);
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.endsWith(".md")) {
+      // Standalone .md files (legacy format)
+      try {
+        const filePath = path.join(dir, entry.name);
+        const content = fs.readFileSync(filePath, "utf-8");
+        const skill = parseSkillFile(content, filePath, builtIn);
+        if (skill) {
+          skills.push(skill);
+        }
+      } catch {
+        // Skip invalid files
       }
-    } catch {
-      // Skip invalid files
+    } else if (entry.isDirectory()) {
+      // Subdirectory containing SKILL.md (Anthropic standard format)
+      const skillMdPath = path.join(dir, entry.name, "SKILL.md");
+      if (fs.existsSync(skillMdPath)) {
+        try {
+          const content = fs.readFileSync(skillMdPath, "utf-8");
+          const skill = parseSkillFile(content, skillMdPath, builtIn);
+          if (skill) {
+            skills.push(skill);
+          }
+        } catch {
+          // Skip invalid files
+        }
+      }
     }
   }
 
