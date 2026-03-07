@@ -185,14 +185,15 @@ export class REPL {
     const command = parts[0].toLowerCase();
     const args = parts.slice(1);
 
-    // スキルトリガーチェック
+    // スキルトリガーチェック（/chunkbaseシード値 のようにスペースなしで引数が続くケースに対応）
     if (this.skillRegistry) {
-      const skill = this.skillRegistry.get(command);
-      if (skill) {
+      const prefixMatch = this.skillRegistry.getByPrefix(cmd);
+      if (prefixMatch) {
+        const { skill, remainingArgs } = prefixMatch;
         console.log(
           chalk.dim(`\n  [Skill] ${skill.name}: ${skill.description}`),
         );
-        const skillPrompt = `${skill.content}\n\n${args.length > 0 ? `引数: ${args.join(" ")}` : "上記のスキル指示に従ってタスクを実行してください。"}`;
+        const skillPrompt = `${skill.content}\n\n${remainingArgs ? `引数: ${remainingArgs}` : "上記のスキル指示に従ってタスクを実行してください。"}`;
         await this.processInput(skillPrompt);
         return;
       }

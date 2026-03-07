@@ -31,6 +31,29 @@ export class SkillRegistry {
     return undefined;
   }
 
+  getByPrefix(input: string): { skill: SkillDefinition; remainingArgs: string } | undefined {
+    let bestMatch: SkillDefinition | undefined = undefined;
+    
+    // skillsマップには name と trigger(スラッシュなし) が両方入っているため、
+    // 重複を弾くために values() からユニークなskillを取り出して検査する
+    const uniqueSkills = this.list();
+    
+    for (const skill of uniqueSkills) {
+      // トリガー (例: /chunkbase) で前方一致するか確認
+      if (input.startsWith(skill.trigger)) {
+        if (!bestMatch || skill.trigger.length > bestMatch.trigger.length) {
+          bestMatch = skill;
+        }
+      }
+    }
+    
+    if (bestMatch) {
+      const remainingArgs = input.slice(bestMatch.trigger.length).trim();
+      return { skill: bestMatch, remainingArgs };
+    }
+    return undefined;
+  }
+
   list(): SkillDefinition[] {
     // Deduplicate (skills are stored by name and trigger)
     const seen = new Set<string>();
