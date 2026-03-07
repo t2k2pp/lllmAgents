@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space Shooter</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>SPACE SHOOTER</h1>
+        <div class="game-wrapper">
+            <div class="info-panel">
+                <div class="score-box">
+                    <div class="label">Score</div>
+                    <div id="score">0</div>
+                </div>
+                <div class="score-box">
+                    <div class="label">High Score</div>
+                    <div id="high-score">0</div>
+                </div>
+                <div class="score-box">
+                    <div class="label">Lives</div>
+                    <div id="lives">♥♥♥</div>
+                </div>
+                <div class="score-box">
+                    <div class="label">Wave</div>
+                    <div id="wave">1</div>
+                </div>
+            </div>
+            <canvas id="game-canvas" width="480" height="640"></canvas>
+        </div>
+        <div class="controls">
+            <div class="control-group">
+                <span>← →</span>
+                <span>Move</span>
+            </div>
+            <div class="control-group">
+                <span>Z</span>
+                <span>Shoot</span>
+            </div>
+            <div class="control-group">
+                <span>X</span>
+                <span>Bomb</span>
+            </div>
+            <div class="control-group">
+                <span>P</span>
+                <span>Pause</span>
+            </div>
+        </div>
+        <button id="start-btn" class="start-btn">Start Game</button>
+    </div>
+    <script src="game.js"></script>
+</body>
+</html>

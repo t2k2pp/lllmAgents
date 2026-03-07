@@ -44,6 +44,10 @@ import { SecondLLMManager } from "./second-llm/second-llm-manager.js";
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
+  // イベントリスナーのメモリリーク警告対策 (inquirer等が多用されるため)
+  process.stdin.setMaxListeners(100);
+  process.stdout.setMaxListeners(100);
+
   // Setup wizard
   if (args.includes("--setup") || !configExists()) {
     await runSetupWizard();
