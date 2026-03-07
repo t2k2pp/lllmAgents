@@ -80,6 +80,8 @@ export function loadAllSkills(): SkillDefinition[] {
   // 1. Built-in skills (bundled with the app)
   const builtinDir = path.join(
     path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")),
+    "..",
+    "..",
     "builtin",
   );
   skills.push(...loadSkillsFromDir(builtinDir, true));
