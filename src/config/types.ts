@@ -56,12 +56,18 @@ export interface ContextConfig {
   maxHistoryMessages: number;
 }
 
+export interface DiscordConfig {
+  enabled: boolean;
+  webhookUrl: string;
+}
+
 export interface Config {
   mainLLM: LLMEndpoint;
   visionLLM: LLMEndpoint | null;
   secondLLM: SecondLLMConfig | null;
   security: SecurityConfig;
   context: ContextConfig;
+  discord?: DiscordConfig;
 }
 
 // ヘルパー: セカンドLLMがクラウドかローカルかを判定
@@ -121,6 +127,10 @@ export function getDefaultConfig(): Config {
     context: {
       compressionThreshold: 0.8,
       maxHistoryMessages: 100,
+    },
+    discord: {
+      enabled: false,
+      webhookUrl: "",
     },
   };
 }

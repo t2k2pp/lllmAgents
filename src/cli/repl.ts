@@ -20,6 +20,7 @@ import type { Config } from "../config/types.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { PlanManager } from "../agent/plan-mode.js";
 import type { ContextModeManager, ContextMode } from "../context/context-mode.js";
+import { sendDiscordNotification } from "../utils/discord.js";
 
 export class REPL {
   private input: InteractiveInput;
@@ -157,6 +158,18 @@ export class REPL {
         printMentionFeedback(mentions);
       }
       await this.agent.run(resolved);
+
+      // LLMの応答が完了した後、Discord通知設定が有効なら送信する
+      if (this.config.discord?.enabled && this.config.discord?.webhookUrl) {
+        const historyMsgs = this.agent.getHistory().getMessages();
+        // 直近のメッセージ（大抵はassistantのもの）を探す
+        const lastMsg = historyMsgs[historyMsgs.length - 1];
+        if (lastMsg && lastMsg.role === "assistant" && typeof lastMsg.content === "string" && lastMsg.content.trim() !== "") {
+          console.log(chalk.dim("  Sending response to Discord..."));
+          await sendDiscordNotification(this.config.discord.webhookUrl, lastMsg.content);
+        }
+      }
+
     } catch (e) {
       console.error(
         chalk.red(`\n  Error: ${e instanceof Error ? e.message : String(e)}\n`),

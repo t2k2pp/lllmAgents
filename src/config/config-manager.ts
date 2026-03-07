@@ -30,6 +30,7 @@ export function loadConfig(): Config {
     ...parsed,
     security: { ...defaults.security, ...parsed.security },
     context: { ...defaults.context, ...parsed.context },
+    discord: { ...(defaults.discord ?? { enabled: false, webhookUrl: "" }), ...parsed.discord },
   };
 }
 
