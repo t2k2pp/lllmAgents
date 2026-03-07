@@ -1,8 +1,7 @@
-# TODOリスト
+# 現在日時取得ツール (current_datetime) 実装 TODO
 
-- [x] ドキュメント構成の設計と計画の承認
-- [x] `docs` フォルダの作成
-- [x] `docs/external_design.md` (外部設計書) の作成
-- [x] `docs/internal_design.md` (内部設計書) の作成
-- [x] `docs/security_assessment.md` (セキュリティ評価) の作成
-- [x] `docs/claude_code_comparison.md` (Claude Code との対比) の作成
+- [x] 1. 設計書 (`docs/current_datetime_tool_design.md`) の作成
+- [ ] 2. `src/tools/definitions/current-datetime.ts` の実装
+- [ ] 3. `src/index.ts` へのツール登録処理の追加
+- [ ] 4. ビルドの実行 (`npm run build`) とツールの動作確認
+- [ ] 5. 完了報告とドキュメント整理
