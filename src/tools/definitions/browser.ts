@@ -109,12 +109,27 @@ export function createBrowserTools(manager: PlaywrightManager): ToolHandler[] {
       function: {
         name: "browser_screenshot",
         description: "現在のページのスクリーンショットを取得します。画像認識LLMで分析されます。",
-        parameters: { type: "object", properties: {} },
+        parameters: {
+          type: "object",
+          properties: {
+            save_path: { type: "string", description: "指定された場合、スクリーンショットを指定したローカルパスの画像ファイル(PNG)として保存します。ファイルに保存したい場合はこの引数を使用してください。" },
+          },
+        },
       },
     },
-    async execute(): Promise<ToolResult> {
+    async execute(params): Promise<ToolResult> {
       try {
         const buf = await manager.screenshot();
+        const savePath = params?.save_path as string | undefined;
+        if (savePath) {
+          const fs = await import("fs/promises");
+          await fs.writeFile(savePath, buf);
+          return {
+            success: true,
+            output: `Screenshot successfully saved to: ${savePath}`,
+          };
+        }
+
         return {
           success: true,
           output: `Screenshot captured (${buf.length} bytes, base64: ${buf.toString("base64").slice(0, 100)}...).`,
