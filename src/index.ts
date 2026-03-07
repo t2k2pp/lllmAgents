@@ -23,6 +23,7 @@ import { bashTool } from "./tools/definitions/bash.js";
 import { webFetchTool } from "./tools/definitions/web-fetch.js";
 import { webSearchTool } from "./tools/definitions/web-search.js";
 import { currentDatetimeTool } from "./tools/definitions/current-datetime.js";
+import { sandboxInfoTool } from "./tools/definitions/sandbox-info.js";
 import { todoWriteTool } from "./tools/definitions/todo-write.js";
 import { askUserTool } from "./tools/definitions/ask-user.js";
 import { createBrowserTools } from "./tools/definitions/browser.js";
@@ -80,6 +81,7 @@ async function main(): Promise<void> {
   toolRegistry.register(bashTool);
 
   // Web & Utility tools
+  toolRegistry.register(sandboxInfoTool);
   toolRegistry.register(webFetchTool);
   toolRegistry.register(webSearchTool);
   toolRegistry.register(currentDatetimeTool);

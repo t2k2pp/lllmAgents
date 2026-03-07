@@ -14,6 +14,7 @@ const INHERENTLY_SAFE_TOOLS = new Set([
   "exit_plan_mode",
   "task_output",
   "current_datetime",
+  "sandbox_info",
 ]);
 
 export class PermissionManager {
