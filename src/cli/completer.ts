@@ -38,6 +38,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/skills", description: "スキル一覧" },
   { command: "/status", description: "ステータス" },
   { command: "/mode", description: "コンテキストモード" },
+  { command: "/discord", description: "Discord通知の設定" },
 ];
 
 // ─── MenuProvider（InteractiveInput用ドロップダウン） ────
