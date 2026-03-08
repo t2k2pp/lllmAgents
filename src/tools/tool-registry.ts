@@ -4,6 +4,7 @@ export interface ToolResult {
   success: boolean;
   output: string;
   error?: string;
+  abortExecution?: boolean;
 }
 
 export interface ToolHandler {

@@ -43,6 +43,7 @@ export class ToolExecutor {
         success: false,
         output: "",
         error: permission.reason ?? "Permission denied",
+        abortExecution: permission.abortExecution,
       };
     }
 

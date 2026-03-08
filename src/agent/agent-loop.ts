@@ -262,11 +262,17 @@ export class AgentLoop {
       if (toolCalls.length > 0) {
         this.history.addAssistantMessage(textContent, toolCalls);
 
+        let shouldAbort = false;
         if (toolCalls.length === 1) {
-          await this.executeSingleTool(toolCalls[0]);
+          shouldAbort = await this.executeSingleTool(toolCalls[0]);
         } else {
-          await this.executeToolsParallel(toolCalls);
+          shouldAbort = await this.executeToolsParallel(toolCalls);
         }
+
+        if (shouldAbort) {
+          return;
+        }
+
         continue;
       }
 
@@ -306,8 +312,8 @@ export class AgentLoop {
     return allDefs;
   }
 
-  /** Execute a single tool call */
-  private async executeSingleTool(toolCall: ToolCall): Promise<void> {
+  /** Execute a single tool call, returning whether to abort the rest of the run loop */
+  private async executeSingleTool(toolCall: ToolCall): Promise<boolean> {
     const spinner = ora(chalk.dim(`  ${toolCall.function.name}...`)).start();
     const result = await this.toolExecutor.execute(toolCall);
 
@@ -321,10 +327,12 @@ export class AgentLoop {
       ? result.output
       : `Error: ${result.error}\n${result.output}`;
     this.history.addToolResult(toolCall.id, resultContent);
+    
+    return result.abortExecution === true;
   }
 
-  /** Execute multiple tool calls in parallel with Promise.allSettled */
-  private async executeToolsParallel(toolCalls: ToolCall[]): Promise<void> {
+  /** Execute multiple tool calls in parallel with Promise.allSettled, returning whether to abort the run loop */
+  private async executeToolsParallel(toolCalls: ToolCall[]): Promise<boolean> {
     console.log(chalk.dim(`\n  ⟹ ${toolCalls.length} tools in parallel...`));
 
     const promises = toolCalls.map(async (toolCall) => {
@@ -336,6 +344,7 @@ export class AgentLoop {
     });
 
     const settled = await Promise.allSettled(promises);
+    let shouldAbort = false;
 
     for (const entry of settled) {
       if (entry.status === "fulfilled") {
@@ -344,10 +353,16 @@ export class AgentLoop {
           ? result.output
           : `Error: ${result.error}\n${result.output}`;
         this.history.addToolResult(toolCall.id, resultContent);
+
+        if (result.abortExecution) {
+          shouldAbort = true;
+        }
       } else {
         logger.error("Parallel tool execution error:", entry.reason);
       }
     }
+
+    return shouldAbort;
   }
 
   async forceCompress(): Promise<void> {

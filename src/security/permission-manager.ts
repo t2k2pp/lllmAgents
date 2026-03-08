@@ -47,7 +47,7 @@ export class PermissionManager {
   async checkToolPermission(
     toolName: string,
     params: Record<string, unknown>,
-  ): Promise<{ allowed: boolean; reason?: string }> {
+  ): Promise<{ allowed: boolean; reason?: string; abortExecution?: boolean }> {
     const level = this.getPermissionLevel(toolName);
 
     // Auto-approve
@@ -99,7 +99,7 @@ export class PermissionManager {
     toolName: string,
     params: Record<string, unknown>,
     cacheKey: string,
-  ): Promise<{ allowed: boolean; reason?: string }> {
+  ): Promise<{ allowed: boolean; reason?: string; abortExecution?: boolean }> {
     const summary = this.formatToolSummary(toolName, params);
     console.log(chalk.cyan(`\n  [${toolName}] ${summary}`));
 
@@ -112,9 +112,14 @@ export class PermissionManager {
           { name: "許可 (今回のみ)", value: "once" },
           { name: `許可 (${toolName} をセッション中常に許可)`, value: "always" },
           { name: "拒否", value: "deny" },
+          { name: "中止 (Agentを中断してプロンプトに戻る)", value: "abort" },
         ],
       },
     ]);
+
+    if (action === "abort") {
+      return { allowed: false, reason: "ユーザーが中止しました", abortExecution: true };
+    }
 
     if (action === "deny") {
       return { allowed: false, reason: "ユーザーが拒否しました" };
