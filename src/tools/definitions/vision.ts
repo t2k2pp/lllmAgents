@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import type { LLMProvider } from "../../providers/base-provider.js";
 import { collectResponse } from "../../providers/base-provider.js";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
@@ -40,23 +41,30 @@ export function createVisionTool(visionService: VisionService): ToolHandler {
         parameters: {
           type: "object",
           properties: {
-            image_base64: {
+            image_path: {
               type: "string",
-              description: "Base64エンコードされた画像データ",
+              description: "分析する画像ファイルの絶対パス",
             },
             prompt: {
               type: "string",
               description: "画像について質問するプロンプト",
             },
           },
-          required: ["image_base64", "prompt"],
+          required: ["image_path", "prompt"],
         },
       },
     },
     async execute(params: Record<string, unknown>): Promise<ToolResult> {
       try {
+        const imagePath = params.image_path as string;
+        if (!fs.existsSync(imagePath)) {
+          return { success: false, output: "", error: `ファイルが見つかりません: ${imagePath}` };
+        }
+        
+        const base64 = fs.readFileSync(imagePath, "base64");
+        
         const result = await visionService.analyzeImage(
-          params.image_base64 as string,
+          base64,
           params.prompt as string,
         );
         return { success: true, output: result };

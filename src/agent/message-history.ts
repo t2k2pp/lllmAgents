@@ -1,4 +1,4 @@
-import type { Message, ToolCall } from "../providers/base-provider.js";
+import type { Message, ToolCall, ContentPart } from "../providers/base-provider.js";
 
 export class MessageHistory {
   private messages: Message[] = [];
@@ -20,7 +20,7 @@ export class MessageHistory {
     return this.messages.length;
   }
 
-  addUserMessage(content: string): void {
+  addUserMessage(content: string | ContentPart[]): void {
     this.messages.push({ role: "user", content });
   }
 

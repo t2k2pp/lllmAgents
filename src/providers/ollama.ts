@@ -33,7 +33,7 @@ interface OllamaShowResponse {
   model_info?: Record<string, unknown>;
 }
 
-const VISION_FAMILIES = ["llava", "bakllava", "moondream", "minicpm-v", "llama3.2-vision"];
+const VISION_FAMILIES = ["llava", "bakllava", "moondream", "minicpm-v", "llama3.2-vision", "llama-3.2-vision", "qwen"];
 
 export class OllamaProvider extends OpenAICompatProvider {
   constructor(baseUrl: string) {

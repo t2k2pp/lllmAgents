@@ -3,7 +3,7 @@ import ora from "ora";
 import { globalTokenTracker } from "../cost/token-tracker.js";
 import { globalCostCalculator } from "../cost/cost-calculator.js";
 import inquirer from "inquirer";
-import type { LLMProvider, ToolCall, ToolDefinition } from "../providers/base-provider.js";
+import type { LLMProvider, ToolCall, ToolDefinition, ContentPart } from "../providers/base-provider.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager } from "../security/permission-manager.js";
@@ -53,7 +53,7 @@ export class AgentLoop {
     this.planManager = pm;
   }
 
-  async run(userMessage: string): Promise<void> {
+  async run(userMessage: string | ContentPart[]): Promise<void> {
     this.history.addUserMessage(userMessage);
     // <think>タグフィルター（古いOllama向け、ストリーム跨ぎ対応）
     const filterThinkingTags = createThinkingFilter();

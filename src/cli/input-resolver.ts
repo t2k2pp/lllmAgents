@@ -24,20 +24,24 @@ export interface ResolvedMention {
   original: string;
   /** 解決された絶対パス */
   absolutePath: string;
-  /** ファイルかディレクトリか */
-  type: "file" | "directory" | "not_found";
-  /** 展開されたコンテンツ */
+  /** ファイルかディレクトリか。画像ファイルの場合は file_image */
+  type: "file" | "file_image" | "directory" | "not_found";
+  /** 展開されたコンテンツ (テキストまたは画像Base64情報) */
   content: string;
+  /** 画像の場合はmime-type */
+  mimeType?: string;
 }
 
+import type { ContentPart } from "../providers/base-provider.js";
+
 /**
- * ユーザー入力中の @path 参照をすべて解決して展開済みテキストを返す。
+ * ユーザー入力中の @path 参照をすべて解決して展開済みテキスト（または ContentPart配列）を返す。
  * 見つからないパスはそのまま残す。
  */
 export function resolveAtMentions(
   input: string,
   cwd: string = process.cwd(),
-): { resolved: string; mentions: ResolvedMention[] } {
+): { resolved: string | ContentPart[]; mentions: ResolvedMention[] } {
   const mentions: ResolvedMention[] = [];
   const seen = new Set<string>();
 
@@ -58,27 +62,84 @@ export function resolveAtMentions(
     return { resolved: input, mentions };
   }
 
-  // テキスト末尾にファイル内容を付与する形式（Claude Code方式）
-  let resolved = input;
-  const attachments: string[] = [];
+  // 画像が含まれているかどうかで戻り値の型（string | ContentPart[]）を変える
+  const hasImage = mentions.some((m) => m.type === "file_image");
 
-  for (const m of mentions) {
-    if (m.type === "not_found") {
-      // 見つからない場合はそのまま残す（LLMに「見つかりませんでした」は伝えない）
-      continue;
+  if (!hasImage) {
+    // 従来のテキストのみの展開（Claude Code方式）
+    let resolved = input;
+    const attachments: string[] = [];
+
+    for (const m of mentions) {
+      if (m.type === "not_found") continue;
+
+      const rawPath = m.original.slice(1);
+      resolved = resolved.split(m.original).join(rawPath);
+      attachments.push(formatAttachment(m));
     }
 
-    // 元の @path の `@` を除去したパス名に置換することで、LLM が「先頭文字が @ である」と誤認するのを防ぐ
-    const rawPath = m.original.slice(1);
-    resolved = resolved.split(m.original).join(rawPath);
-    attachments.push(formatAttachment(m));
-  }
+    if (attachments.length > 0) {
+      resolved = resolved + "\n\n" + attachments.join("\n\n");
+    }
 
-  if (attachments.length > 0) {
-    resolved = resolved + "\n\n" + attachments.join("\n\n");
-  }
+    return { resolved, mentions };
+  } else {
+    // 画像が含まれる場合は ContentPart[] を構築する
+    const parts: ContentPart[] = [];
+    let remainingInput = input;
 
-  return { resolved, mentions };
+    for (const m of mentions) {
+      if (m.type === "not_found") continue;
+
+      // メンションの位置を探して分割
+      const idx = remainingInput.indexOf(m.original);
+      if (idx !== -1) {
+        const textBefore = remainingInput.slice(0, idx);
+        if (textBefore.trim()) {
+          parts.push({ type: "text", text: textBefore });
+        }
+        
+        const rawPath = m.original.slice(1);
+        if (m.type === "file_image") {
+          parts.push({
+            type: "image_url",
+            image_url: { url: `data:${m.mimeType};base64,${m.content}` }
+          });
+          // ファイル名テキストもちょっと挟んでおく
+          parts.push({ type: "text", text: ` [Image: ${rawPath}] ` });
+        } else {
+          // 画像以外のファイル/フォルダをテキストパーツとして追加する
+          parts.push({
+            type: "text",
+            text: `\n\n--- ${m.type === "file" ? "File" : "Directory"}: ${rawPath} ---\n${m.content}\n--- end ---\n`
+          });
+        }
+        
+        remainingInput = remainingInput.slice(idx + m.original.length);
+      }
+    }
+
+    if (remainingInput.trim()) {
+      parts.push({ type: "text", text: remainingInput });
+    }
+
+    // 連続するテキストパーツを結合してきれいに保つ（必要であれば）
+    const mergedParts: ContentPart[] = [];
+    for (const p of parts) {
+      if (p.type === "text") {
+        const last = mergedParts[mergedParts.length - 1];
+        if (last && last.type === "text" && last.text !== undefined && p.text !== undefined) {
+          last.text += p.text;
+        } else {
+          mergedParts.push({ ...p });
+        }
+      } else {
+        mergedParts.push(p);
+      }
+    }
+    
+    return { resolved: mergedParts, mentions };
+  }
 }
 
 function resolveSingleMention(rawPath: string, absolutePath: string): ResolvedMention {
@@ -86,6 +147,20 @@ function resolveSingleMention(rawPath: string, absolutePath: string): ResolvedMe
     const stat = fs.statSync(absolutePath);
 
     if (stat.isFile()) {
+      const ext = path.extname(absolutePath).toLowerCase();
+      if ([".png", ".jpg", ".jpeg", ".gif", ".webp"].includes(ext)) {
+        // 画像はBase64で読む
+        const base64 = readFileAsBase64Safe(absolutePath);
+        const mimeType = ext === ".jpg" ? "image/jpeg" : `image/${ext.slice(1)}`;
+        return {
+          original: `@${rawPath}`,
+          absolutePath,
+          type: "file_image",
+          content: base64,
+          mimeType,
+        };
+      }
+
       const content = readFileSafe(absolutePath);
       return {
         original: `@${rawPath}`,
@@ -134,6 +209,18 @@ function readFileSafe(filePath: string, maxBytes: number = 100_000): string {
   }
 }
 
+function readFileAsBase64Safe(filePath: string, maxBytes: number = 10 * 1024 * 1024): string {
+  try {
+    const stat = fs.statSync(filePath);
+    if (stat.size > maxBytes) {
+      return ""; // 10MBを超える画像は無視（エラーで返すより安全）
+    }
+    return fs.readFileSync(filePath, "base64");
+  } catch {
+    return "";
+  }
+}
+
 function readDirectorySafe(dirPath: string, maxEntries: number = 100): string {
   try {
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
@@ -176,6 +263,8 @@ export function printMentionFeedback(mentions: ResolvedMention[]): void {
   for (const m of mentions) {
     if (m.type === "file") {
       console.log(chalk.dim(`  📎 ${m.original} (file)`));
+    } else if (m.type === "file_image") {
+      console.log(chalk.dim(`  🖼️  ${m.original} (image)`));
     } else if (m.type === "directory") {
       console.log(chalk.dim(`  📂 ${m.original} (directory)`));
     } else {
