@@ -123,28 +123,85 @@ export class InteractiveInput {
 
       // ─── レイアウトヘルパー ─────────────────────
 
-      /** バッファの行分割とカーソル位置(行,列)を返す */
+      /** 
+       * ターミナルの幅に合わせて物理行（スクリーン行）へ分割し、
+       * それぞれの行に対するテキスト、開始インデックス、およびカーソルの(物理行, 列)を算出する
+       */
       const getLayout = () => {
-        const lines = buffer.split("\n");
-        const before = buffer.slice(0, cursorPos);
-        const beforeLines = before.split("\n");
-        const row = beforeLines.length - 1;
-        const col = beforeLines[beforeLines.length - 1].length;
-        return { lines, row, col };
+        const columns = process.stdout.columns || 80;
+        const logicalLines = buffer.split("\n");
+        const screenLines: { text: string; startIndex: number }[] = [];
+        
+        let cRow = 0;
+        let cCol = 0;
+        let currentPos = 0;
+
+        for (let i = 0; i < logicalLines.length; i++) {
+          const logicalLine = logicalLines[i];
+          let currentScreenLine = "";
+          let lineStartIndex = currentPos;
+          let currentLineWidth = (i === 0 && screenLines.length === 0) ? prefixLen : contPrefixLen;
+          
+          if (logicalLine.length === 0) {
+             if (currentPos === cursorPos) {
+                cRow = screenLines.length;
+                cCol = 0;
+             }
+             screenLines.push({ text: "", startIndex: lineStartIndex });
+             currentPos++; // \n
+             continue;
+          }
+
+          const chars = Array.from(logicalLine);
+          for (let charIdx = 0; charIdx < chars.length; charIdx++) {
+            if (currentPos === cursorPos) {
+               cRow = screenLines.length;
+               cCol = currentScreenLine.length;
+            }
+
+            const char = chars[charIdx];
+            const charW = getDisplayWidth(char);
+            
+            // ターミナル幅を超過する場合、そこで行を折り返す（ハードラップ）
+            if (currentLineWidth + charW > columns) {
+               screenLines.push({ text: currentScreenLine, startIndex: lineStartIndex });
+               currentScreenLine = char;
+               lineStartIndex = currentPos;
+               currentLineWidth = contPrefixLen + charW;
+            } else {
+               currentScreenLine += char;
+               currentLineWidth += charW;
+            }
+            currentPos += char.length;
+          }
+          
+          if (currentPos === cursorPos) {
+             cRow = screenLines.length;
+             cCol = currentScreenLine.length;
+          }
+          
+          screenLines.push({ text: currentScreenLine, startIndex: lineStartIndex });
+          currentPos++; // \n
+        }
+
+        if (cursorPos === buffer.length) {
+            cRow = Math.max(0, screenLines.length - 1);
+            cCol = screenLines.length > 0 ? screenLines[cRow].text.length : 0;
+        }
+
+        return { screenLines, row: cRow, col: cCol };
       };
 
-      const getLinePrefix = (i: number): string =>
-        i === 0 ? prefix : contPrefixStr;
+      const getLinePrefixLayout = (screenIndex: number): string =>
+        screenIndex === 0 ? prefix : contPrefixStr;
 
-      const getLinePrefixWidth = (i: number): number =>
-        i === 0 ? prefixLen : contPrefixLen;
+      const getLinePrefixWidthLayout = (screenIndex: number): number =>
+        screenIndex === 0 ? prefixLen : contPrefixLen;
 
       /** バッファの行・列からターミナル上のカラム位置を計算 */
-      const getTerminalColumn = (row: number, col: number): number => {
-        const lines = buffer.split("\n");
-        const line = lines[row] ?? "";
-        // 行頭からcol文字分の表示幅を計算
-        return getLinePrefixWidth(row) + getDisplayWidth(line.slice(0, col));
+      const getTerminalColumn = (row: number, col: number, screenLines: {text: string}[]): number => {
+        const lineText = screenLines[row]?.text || "";
+        return getLinePrefixWidthLayout(row) + getDisplayWidth(lineText.slice(0, col));
       };
 
       /** cursorTermRow から targetRow へターミナル行を移動 */
@@ -158,13 +215,10 @@ export class InteractiveInput {
       };
 
       /** バッファの(row, col)からフラットなcursorPosを計算 */
-      const rowColToPos = (row: number, col: number): number => {
-        const lines = buffer.split("\n");
-        let pos = 0;
-        for (let i = 0; i < row && i < lines.length; i++) {
-          pos += lines[i].length + 1; // +1 for \n
-        }
-        return pos + Math.min(col, (lines[row] ?? "").length);
+      const rowColToPos = (row: number, col: number, screenLines: {text: string; startIndex: number}[]): number => {
+        if (screenLines.length === 0) return 0;
+        const line = screenLines[row];
+        return line.startIndex + col;
       };
 
       // ─── メニューロジック ──────────────────────
@@ -189,7 +243,8 @@ export class InteractiveInput {
         } else {
           // 最後の @ トリガーを探す（先頭 or スペースの直後）
           const beforeCursor = buffer.slice(0, cursorPos);
-          const atMatch = beforeCursor.match(/(?:^|\s)@([^\s]*)$/);
+          // パスにスペースを含まない、一般的なファイルパス構成文字のみを対象にする
+          const atMatch = beforeCursor.match(/(?:^|\s)@([a-zA-Z0-9_./\\-]*)$/);
           if (atMatch) {
             const partial = atMatch[1];
             items = this.filePathProvider(partial);
@@ -253,22 +308,26 @@ export class InteractiveInput {
 
       /** 入力バッファ全行を再描画 */
       const renderInput = (): void => {
-        const { lines, row: cRow, col: cCol } = getLayout();
+        const { screenLines, row: cRow, col: cCol } = getLayout();
 
         // Step 1: 入力行0へ移動
         moveToRow(0);
 
         // Step 2: 全入力行を描画（旧行の余剰もクリア）
         const oldInputLines = renderedInputLines;
-        const newInputLines = lines.length;
+        // screenLines が空でも1行は描画する
+        const newInputLines = Math.max(1, screenLines.length);
         const maxLines = Math.max(oldInputLines, newInputLines);
 
         for (let i = 0; i < maxLines; i++) {
           stdout.write("\r");
           stdout.clearLine(0);
-          if (i < newInputLines) {
-            stdout.write(getLinePrefix(i) + lines[i]);
+          if (i < screenLines.length) {
+            stdout.write(getLinePrefixLayout(i) + screenLines[i].text);
+          } else if (i === 0 && screenLines.length === 0) {
+            stdout.write(prefix);
           }
+          
           if (i < maxLines - 1) {
             if (i < oldInputLines - 1) {
               // 既存行へ移動（スクロールしない）
@@ -286,7 +345,7 @@ export class InteractiveInput {
         // Step 3: カーソルを正しい入力位置に配置
         // 現在 cursorTermRow は maxLines - 1 にいる
         moveToRow(cRow);
-        stdout.cursorTo(getTerminalColumn(cRow, cCol));
+        stdout.cursorTo(getTerminalColumn(cRow, cCol, screenLines));
       };
 
       /** ドロップダウンメニューを描画 */
@@ -296,7 +355,7 @@ export class InteractiveInput {
           return;
         }
 
-        const { row: cRow, col: cCol } = getLayout();
+        const { row: cRow, col: cCol, screenLines } = getLayout();
         const maxVisible = Math.min(menuItems.length, 8);
 
         // スクロールウィンドウ
@@ -350,14 +409,14 @@ export class InteractiveInput {
 
         // カーソルを入力位置に戻す
         moveToRow(cRow);
-        stdout.cursorTo(getTerminalColumn(cRow, cCol));
+        stdout.cursorTo(getTerminalColumn(cRow, cCol, screenLines));
       };
 
       /** メニュー表示をクリア */
       const clearMenuDisplay = (): void => {
         if (renderedMenuLines === 0) return;
 
-        const { row: cRow, col: cCol } = getLayout();
+        const { row: cRow, col: cCol, screenLines } = getLayout();
 
         // メニュー領域へ移動してクリア
         moveToRow(renderedInputLines - 1);
@@ -370,7 +429,7 @@ export class InteractiveInput {
 
         // カーソルを入力位置に戻す
         moveToRow(cRow);
-        stdout.cursorTo(getTerminalColumn(cRow, cCol));
+        stdout.cursorTo(getTerminalColumn(cRow, cCol, screenLines));
         renderedMenuLines = 0;
       };
 
@@ -509,12 +568,11 @@ export class InteractiveInput {
             selectedIndex = Math.max(0, selectedIndex - 1);
             renderMenu();
           } else {
-            const { row, col } = getLayout();
+            const { row, col, screenLines } = getLayout();
             if (row > 0) {
               // マルチライン: 1行上へカーソル移動
-              const lines = buffer.split("\n");
-              const targetCol = Math.min(col, lines[row - 1].length);
-              cursorPos = rowColToPos(row - 1, targetCol);
+              const targetCol = Math.min(col, screenLines[row - 1].text.length);
+              cursorPos = rowColToPos(row - 1, targetCol, screenLines);
               renderInput();
             } else if (this.history.length > 0) {
               // 履歴ナビゲーション
@@ -538,11 +596,11 @@ export class InteractiveInput {
             selectedIndex = Math.min(menuItems.length - 1, selectedIndex + 1);
             renderMenu();
           } else {
-            const { row, col, lines } = getLayout();
-            if (row < lines.length - 1) {
+            const { row, col, screenLines } = getLayout();
+            if (row < screenLines.length - 1) {
               // マルチライン: 1行下へカーソル移動
-              const targetCol = Math.min(col, lines[row + 1].length);
-              cursorPos = rowColToPos(row + 1, targetCol);
+              const targetCol = Math.min(col, screenLines[row + 1].text.length);
+              cursorPos = rowColToPos(row + 1, targetCol, screenLines);
               renderInput();
             } else if (this.historyIndex >= 0) {
               // 履歴ナビゲーション
@@ -588,8 +646,8 @@ export class InteractiveInput {
 
         // ── Home / Ctrl+A → 現在行の先頭 ──
         if (key.name === "home" || (key.ctrl && key.name === "a")) {
-          const { row } = getLayout();
-          cursorPos = rowColToPos(row, 0);
+          const { row, screenLines } = getLayout();
+          cursorPos = rowColToPos(row, 0, screenLines);
           renderInput();
           if (menuVisible) dismissMenu();
           return;
@@ -597,8 +655,8 @@ export class InteractiveInput {
 
         // ── End / Ctrl+E → 現在行の末尾 ──
         if (key.name === "end" || (key.ctrl && key.name === "e")) {
-          const { row, lines } = getLayout();
-          cursorPos = rowColToPos(row, lines[row].length);
+          const { row, screenLines } = getLayout();
+          cursorPos = rowColToPos(row, screenLines[row].text.length, screenLines);
           renderInput();
           if (menuVisible) {
             updateMenu();

@@ -107,7 +107,7 @@ export function createCompleter(
       return [matches, line];
     }
 
-    const atMatch = line.match(/@([^\s]*)$/);
+    const atMatch = line.match(/@([a-zA-Z0-9_./\\-]*)$/);
     if (atMatch) {
       const partial = atMatch[1];
       const completions = completeFilePath(partial, cwd);

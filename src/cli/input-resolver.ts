@@ -16,8 +16,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import chalk from "chalk";
 
-/** @mention にマッチする正規表現。@ の直後に . / または英数字で始まるパスを検出 */
-const AT_MENTION_RE = /(?:^|\s)@((?:\.{1,2}\/|[a-zA-Z0-9_])[^\s]*)/g;
+/** @mention にマッチする正規表現。@ の直後に . / または英数字で始まるパスを検出。不正な空白含みパスを避けるため厳密化 */
+const AT_MENTION_RE = /(?:^|\s)@((?:\.{1,2}\/|[a-zA-Z0-9_])[a-zA-Z0-9_./\\-]*)/g;
 
 export interface ResolvedMention {
   /** 元のマッチ文字列 (例: "@src/cli/repl.ts") */
