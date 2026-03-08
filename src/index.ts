@@ -78,6 +78,9 @@ async function main(): Promise<void> {
   toolRegistry.register(grepTool);
 
   // System tools
+  if (config.security.streamCommandOutput !== false) {
+    bashTool.setStreamOutput(true);
+  }
   toolRegistry.register(bashTool);
 
   // Web & Utility tools

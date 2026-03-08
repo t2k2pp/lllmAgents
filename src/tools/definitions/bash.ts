@@ -4,7 +4,13 @@ import type { ToolHandler, ToolResult } from "../tool-registry.js";
 
 const DEFAULT_TIMEOUT = 120_000; // 2 minutes
 
-export const bashTool: ToolHandler = {
+let streamOutputEnabled = false;
+
+interface BashToolHandler extends ToolHandler {
+  setStreamOutput(enabled: boolean): void;
+}
+
+export const bashTool: BashToolHandler = {
   name: "bash",
   definition: {
     type: "function",
@@ -27,6 +33,9 @@ export const bashTool: ToolHandler = {
       },
     },
   },
+  setStreamOutput(enabled: boolean): void {
+    streamOutputEnabled = enabled;
+  },
   async execute(params: Record<string, unknown>): Promise<ToolResult> {
     const command = params.command as string;
     const timeout = (params.timeout as number) ?? DEFAULT_TIMEOUT;
@@ -46,10 +55,18 @@ export const bashTool: ToolHandler = {
       let stderr = "";
 
       proc.stdout.on("data", (data: Buffer) => {
-        stdout += data.toString();
+        const text = data.toString();
+        stdout += text;
+        if (streamOutputEnabled) {
+          process.stdout.write(text);
+        }
       });
       proc.stderr.on("data", (data: Buffer) => {
-        stderr += data.toString();
+        const text = data.toString();
+        stderr += text;
+        if (streamOutputEnabled) {
+          process.stderr.write(text); // stderrもそのまま出す
+        }
       });
 
       proc.on("close", (code) => {
