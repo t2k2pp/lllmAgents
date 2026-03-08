@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
@@ -47,7 +47,7 @@ export const grepTool: ToolHandler = {
       if (fileGlob) args.push("--glob", fileGlob);
       args.push("--", pattern, searchPath);
 
-      const output = execSync(args.join(" "), {
+      const output = execFileSync(args[0], args.slice(1), {
         encoding: "utf-8",
         maxBuffer: 1024 * 1024,
         timeout: 30000,
