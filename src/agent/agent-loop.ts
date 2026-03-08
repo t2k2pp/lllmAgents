@@ -57,6 +57,8 @@ export class AgentLoop {
     this.history.addUserMessage(userMessage);
     // <think>タグフィルター（古いOllama向け、ストリーム跨ぎ対応）
     const filterThinkingTags = createThinkingFilter();
+    let emptyResponseRetries = 0;
+    const MAX_EMPTY_RETRIES = 3;
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       // Context compression check
@@ -271,6 +273,12 @@ export class AgentLoop {
       // Final response
       if (!hasStartedOutput && toolCalls.length === 0) {
         // ユーザーに見える出力がゼロ（thinking onlyや空レスポンス）
+        if (emptyResponseRetries < MAX_EMPTY_RETRIES) {
+          emptyResponseRetries++;
+          console.log(chalk.yellow(`\n  空のレスポンスを受信したため再試行します (${emptyResponseRetries}/${MAX_EMPTY_RETRIES})...`));
+          continue;
+        }
+
         const hasThinking = thinkingContent.length > 0 || textContent.includes("<think>");
         const hint = hasThinking
           ? "（モデルは考えましたが、応答が生成されませんでした。プロンプトを変えて再度お試しください）"

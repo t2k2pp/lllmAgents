@@ -36,7 +36,7 @@ describe("resolveAtMentions", () => {
     expect(mentions[0].type).toBe("file");
     expect(mentions[0].original).toBe("@hello.ts");
     expect(resolved).toContain('console.log("hello")');
-    expect(resolved).toContain("--- File: @hello.ts ---");
+    expect(resolved).toContain("--- File: hello.ts ---");
     expect(resolved).toContain("--- end ---");
   });
 
@@ -44,7 +44,7 @@ describe("resolveAtMentions", () => {
     const { resolved, mentions } = resolveAtMentions("@src/ の構成は？", tmpDir);
     expect(mentions).toHaveLength(1);
     expect(mentions[0].type).toBe("directory");
-    expect(resolved).toContain("--- Directory: @src/ ---");
+    expect(resolved).toContain("--- Directory: src/ ---");
     expect(resolved).toContain("main.ts");
     expect(resolved).toContain("util.ts");
     expect(resolved).toContain("sub/");
@@ -66,8 +66,8 @@ describe("resolveAtMentions", () => {
     expect(mentions).toHaveLength(2);
     expect(mentions[0].type).toBe("file");
     expect(mentions[1].type).toBe("file");
-    expect(resolved).toContain("--- File: @hello.ts ---");
-    expect(resolved).toContain("--- File: @config.json ---");
+    expect(resolved).toContain("--- File: hello.ts ---");
+    expect(resolved).toContain("--- File: config.json ---");
   });
 
   it("サブディレクトリのファイルを参照できる", () => {
@@ -91,7 +91,7 @@ describe("resolveAtMentions", () => {
     );
     expect(mentions).toHaveLength(1);
     // attachmentは1つだけ
-    const fileHeaders = resolved.match(/--- File: @hello\.ts ---/g);
+    const fileHeaders = resolved.match(/--- File: hello\.ts ---/g);
     expect(fileHeaders).toHaveLength(1);
   });
 
@@ -129,9 +129,9 @@ describe("resolveAtMentions", () => {
     expect(resolved).toContain("のみ表示");
   });
 
-  it("元のテキストは維持される", () => {
+  it("元のテキストに含まれる `@` を除去したパス名に置換される", () => {
     const { resolved } = resolveAtMentions("このファイル @hello.ts を修正して", tmpDir);
-    expect(resolved).toContain("このファイル @hello.ts を修正して");
+    expect(resolved).toContain("このファイル hello.ts を修正して");
   });
 
   it("隠しファイルはディレクトリ一覧に含めない", () => {

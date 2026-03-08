@@ -68,8 +68,9 @@ export function resolveAtMentions(
       continue;
     }
 
-    // 元の @path をテキストから除去 (元テキストは読みづらくなるだけ)
-    // → 残すほうが自然。ユーザーが「@repl.ts を修正して」と言ったら、その文脈は残す
+    // 元の @path の `@` を除去したパス名に置換することで、LLM が「先頭文字が @ である」と誤認するのを防ぐ
+    const rawPath = m.original.slice(1);
+    resolved = resolved.split(m.original).join(rawPath);
     attachments.push(formatAttachment(m));
   }
 
@@ -164,7 +165,8 @@ function readDirectorySafe(dirPath: string, maxEntries: number = 100): string {
 
 function formatAttachment(mention: ResolvedMention): string {
   const label = mention.type === "file" ? "File" : "Directory";
-  return `--- ${label}: ${mention.original} ---\n${mention.content}\n--- end ---`;
+  const rawPath = mention.original.slice(1);
+  return `--- ${label}: ${rawPath} ---\n${mention.content}\n--- end ---`;
 }
 
 /**
