@@ -1,13 +1,9 @@
 ---
 name: pr-review
-description: Pull Request のコードレビュー
-trigger: /pr-review
+description: Pull Requestのコードレビュー。ユーザーがPRレビュー、コードレビュー、変更のレビュー、またはプルリクエストの確認を要求したときに使用する。
 ---
 
 # PR Review Skill
-
-## When to Use
-ユーザーがコードレビューを要求したとき
 
 ## How It Works
 

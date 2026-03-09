@@ -9,13 +9,41 @@
 ### 2.1 ディレクトリ構造とProgressive Disclosure
 Anthropicのベストプラクティス構造をそのまま採用し、コンテキスト肥大化を防ぐ Progressive Disclosure パターンを導入する。
 
+各スキルはサブディレクトリ単位で管理し、エントリポイントは `SKILL.md` とする。
+
 ```text
-.localllm/skills/<skill-name>/
-  ├── SKILL.md       (必須: YAMLフロントマター、トリガー条件、基礎的な実行手順のみを記す)
+<skill-name>/
+  ├── SKILL.md       (必須: YAMLフロントマター + Markdown本文)
   ├── scripts/       (推奨: 決定論的処理を行うスクリプト。要件に応じ Python / JS などを使い分ける)
   ├── references/    (任意: スキーマ、API仕様、フロー詳細などの分割Markdown)
   └── assets/        (任意: ひな形ファイルや画像など静的ファイル)
 ```
+
+#### SKILL.md フロントマター仕様（Anthropic標準）
+
+```yaml
+---
+name: skill-name          # 必須: スキル名（スラッシュコマンド /skill-name として機能）
+description: ...          # 必須: スキルの説明とトリガー条件（いつ使うかをここに書く）
+---
+```
+
+- `trigger:` フィールドは **使用しない**（`name` から `/name` が自動生成される）
+- `description` にトリガー条件を含めること（本文はトリガー後にのみロードされる）
+
+### 2.2 スキル格納場所とロード優先順位
+
+スキルは以下の5か所からロードされ、**後からロードされるものが同名スキルを上書きする**。
+
+| 優先順位 | パス | 用途 |
+|----------|------|------|
+| 1（低） | `src/skills/builtin/` | アプリ同梱の基本スキル。開発時に追加すれば即有効化 |
+| 2 | `builtin/` (プロジェクトルート) | Anthropic公式配布スキル（`skill-creator`等） |
+| 3 | `~/.localllm/skills/` | ユーザーグローバルスキル |
+| 4 | `.claude/skills/` (CWD) | プロジェクト固有スキル |
+| 5（高） | `.localllm/skills/` (CWD) | プロジェクト固有スキル（代替パス） |
+
+**新しい組み込みスキルを追加する場合**: `src/skills/builtin/<skill-name>/SKILL.md` を作成するだけで有効化される。
 
 ### 2.2 LLMによるスキルの実行とエンジン選択の原則
 - **Low Freedom**: LLMはツールを直接叩いての試行錯誤を避け、`scripts/` にカプセル化された処理を引数付きで呼び出す。

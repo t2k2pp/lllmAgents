@@ -1,13 +1,9 @@
 ---
 name: build-fix
-description: ビルドエラーを診断して修正する
-trigger: /build-fix
+description: ビルドエラーを診断して修正する。ユーザーがビルドエラー、コンパイルエラー、TypeScriptエラー、またはビルドの失敗を修正することを要求したときに使用する。
 ---
 
 # Build Fix Skill
-
-## When to Use
-ユーザーがビルドエラーの修正を要求したとき
 
 ## How It Works
 

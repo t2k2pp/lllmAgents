@@ -1,13 +1,9 @@
 ---
 name: tdd
-description: テスト駆動開発ワークフロー
-trigger: /tdd
+description: テスト駆動開発ワークフロー（Red-Green-Refactorサイクル）。ユーザーがTDD、テスト駆動開発、またはテストを先に書くことを要求したときに使用する。
 ---
 
 # TDD Skill
-
-## When to Use
-ユーザーがテスト駆動開発を要求したとき
 
 ## How It Works
 

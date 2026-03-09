@@ -78,24 +78,27 @@ function loadSkillsFromDir(dir: string, builtIn: boolean): SkillDefinition[] {
 export function loadAllSkills(): SkillDefinition[] {
   const skills: SkillDefinition[] = [];
 
-  // 1. Built-in skills (bundled with the app)
-  const builtinDir = path.join(
-    path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")),
-    "..",
-    "..",
-    "builtin",
-  );
-  skills.push(...loadSkillsFromDir(builtinDir, true));
+  const selfDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"));
 
-  // 2. User-global skills (~/.localllm/skills/)
+  // 1. Source built-in skills (src/skills/builtin/ in dev, dist/skills/builtin/ in prod)
+  //    新しいスキルをソースツリーに追加すれば即座に有効化される
+  const srcBuiltinDir = path.join(selfDir, "builtin");
+  skills.push(...loadSkillsFromDir(srcBuiltinDir, true));
+
+  // 2. Root built-in skills (builtin/ at project root)
+  //    Anthropic公式配布スキルの格納場所。同名スキルはこちらが優先される
+  const rootBuiltinDir = path.join(selfDir, "..", "..", "builtin");
+  skills.push(...loadSkillsFromDir(rootBuiltinDir, true));
+
+  // 3. User-global skills (~/.localllm/skills/)
   const userSkillsDir = path.join(os.homedir(), ".localllm", "skills");
   skills.push(...loadSkillsFromDir(userSkillsDir, false));
 
-  // 3. Project skills (.claude/skills/ in CWD)
+  // 4. Project skills (.claude/skills/ in CWD)
   const projectSkillsDir = path.join(process.cwd(), ".claude", "skills");
   skills.push(...loadSkillsFromDir(projectSkillsDir, false));
 
-  // 4. Project skills (LOCALLLM_SKILLS/ in CWD)
+  // 5. Project skills (.localllm/skills/ in CWD)
   const localSkillsDir = path.join(process.cwd(), ".localllm", "skills");
   skills.push(...loadSkillsFromDir(localSkillsDir, false));
 

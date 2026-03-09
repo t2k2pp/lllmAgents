@@ -1,13 +1,9 @@
 ---
 name: commit
-description: Git commit workflow - 変更を確認してコミットメッセージを生成する
-trigger: /commit
+description: Git commit workflow - 変更を確認してコミットメッセージを生成する。ユーザーがgitコミット、変更の保存、git addやgit commitを要求したときに使用する。
 ---
 
 # Commit Skill
-
-## When to Use
-ユーザーがgitコミットを要求したとき
 
 ## How It Works
 
