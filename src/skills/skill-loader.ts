@@ -86,7 +86,8 @@ export function loadAllSkills(): SkillDefinition[] {
   skills.push(...loadSkillsFromDir(srcBuiltinDir, true));
 
   // 2. Root built-in skills (builtin/ at project root)
-  //    Anthropic公式配布スキルの格納場所。同名スキルはこちらが優先される
+  //    .skill パッケージとして外部からインストールされたスキルの格納場所
+  //    src/skills/builtin/ と同名のスキルがある場合はこちらが優先される
   const rootBuiltinDir = path.join(selfDir, "..", "..", "builtin");
   skills.push(...loadSkillsFromDir(rootBuiltinDir, true));
 

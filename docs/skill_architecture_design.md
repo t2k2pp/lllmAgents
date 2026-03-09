@@ -37,8 +37,8 @@ description: ...          # 必須: スキルの説明とトリガー条件（�
 
 | 優先順位 | パス | 用途 |
 |----------|------|------|
-| 1（低） | `src/skills/builtin/` | アプリ同梱の基本スキル。開発時に追加すれば即有効化 |
-| 2 | `builtin/` (プロジェクトルート) | Anthropic公式配布スキル（`skill-creator`等） |
+| 1（低） | `src/skills/builtin/` | アプリ同梱の基本スキル（commit, tdd, skill-creator等）。追加するだけで即有効化 |
+| 2 | `builtin/` (プロジェクトルート) | 外部から `.skill` パッケージとしてインストールされたスキルの格納場所 |
 | 3 | `~/.localllm/skills/` | ユーザーグローバルスキル |
 | 4 | `.claude/skills/` (CWD) | プロジェクト固有スキル |
 | 5（高） | `.localllm/skills/` (CWD) | プロジェクト固有スキル（代替パス） |
@@ -56,13 +56,13 @@ description: ...          # 必須: スキルの説明とトリガー条件（�
 
 本家の `skill-creator` が提供する優れたPythonスクリプトによるバリデーションや初期化の恩恵を受けるため、メタツール群は公式のPython実装を標準として維持する。同時に、`SKILL.md` のガイドライン内で、Node.jsも選択肢として使えることをLLMに明示する。
 
-### 3.1 同梱スクリプト群 (`builtin/skill-creator/scripts/ *.py`)
+### 3.1 同梱スクリプト群 (`src/skills/builtin/skill-creator/scripts/ *.py`)
 公式のリポジトリ構造をそのまま利用する。
 1. **`init_skill.py`**: スキルの雛形生成
 2. **`package_skill.py`**: スキルディレクトリのパッケージ化
 3. **`quick_validate.py`**: `SKILL.md` のフロントマターや構造の静的検証
 
-### 3.2 ガイドとリファレンス (`builtin/skill-creator/SKILL.md` 等)
+### 3.2 ガイドとリファレンス (`src/skills/builtin/skill-creator/SKILL.md` 等)
 - **`SKILL.md`**: メタプロンプト。LLMがスキルを作成する際、`init_skill.py` や `quick_validate.py` などの公式Pythonツールを呼び出す手順を明記する。また、「スクリプトの実装にはPythonとNode.jsのどちらを用いても良い（ブラウザならNode/Playwright, 一般ツールならPython等）」旨を追記する。
 
 ## 4. 既存スキルの移行 (Chunkbase Screenshot)
