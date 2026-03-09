@@ -1,0 +1,4 @@
+## 2024-03-09 - Command Injection in Tool Definitions
+**Vulnerability:** The `grep` tool in `src/tools/definitions/grep.ts` used `execSync(args.join(" "))` to execute ripgrep. This pattern joined command arguments into a single string evaluated by a shell, allowing arbitrary command execution if an attacker could control the `pattern`, `glob`, or `path` parameters (e.g., via `"; rm -rf /; #"`).
+**Learning:** Tool execution definitions must never rely on shell evaluation for user-provided input, even when running seemingly safe tools like ripgrep. The `args.join(" ")` pattern with `execSync` is inherently unsafe as it implicitly uses a shell context (`/bin/sh -c`).
+**Prevention:** Always use `execFileSync(command, args)` or `spawn(command, args)` where arguments are passed as a distinct array. This ensures the operating system passes arguments directly to the executable without shell interpretation.
