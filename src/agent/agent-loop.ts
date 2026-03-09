@@ -3,6 +3,8 @@ import ora from "ora";
 import { globalTokenTracker } from "../cost/token-tracker.js";
 import { globalCostCalculator } from "../cost/cost-calculator.js";
 import inquirer from "inquirer";
+import { marked } from "marked";
+import { markedTerminal } from "marked-terminal";
 import type { LLMProvider, ToolCall, ToolDefinition, ContentPart } from "../providers/base-provider.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
@@ -10,7 +12,7 @@ import type { PermissionManager } from "../security/permission-manager.js";
 import type { HookManager } from "../hooks/hook-manager.js";
 import { MessageHistory } from "./message-history.js";
 import { ContextManager } from "./context-manager.js";
-import { buildSystemPrompt } from "./system-prompt.js";
+import { buildSystemPrompt, type SkillInfo } from "./system-prompt.js";
 import {
   createSession,
   saveSession,
@@ -19,6 +21,21 @@ import {
 import { PlanManager } from "./plan-mode.js";
 import type { ContextModeManager } from "../context/context-mode.js";
 import * as logger from "../utils/logger.js";
+
+// marked-terminal でMarkdownをターミナル向けにレンダリング
+marked.use(markedTerminal() as Parameters<typeof marked.use>[0]);
+
+function hasMarkdown(text: string): boolean {
+  return /^#{1,6}\s|```|\*\*|__|\[.+\]\(.+\)|^\s*[-*+]\s/m.test(text);
+}
+
+function renderMarkdown(text: string): string {
+  try {
+    return marked(text) as string;
+  } catch {
+    return text;
+  }
+}
 
 const MAX_TOOL_ITERATIONS = 50;
 const MAX_CONNECTION_RETRIES = 3;
@@ -40,9 +57,10 @@ export class AgentLoop {
     compressionThreshold: number,
     contextModeManager?: ContextModeManager,
     hookManager?: HookManager,
+    skills?: SkillInfo[],
   ) {
     this.contextModeManager = contextModeManager ?? null;
-    const systemPrompt = buildSystemPrompt(contextModeManager);
+    const systemPrompt = buildSystemPrompt(contextModeManager, skills);
     this.history = new MessageHistory(systemPrompt);
     this.contextManager = new ContextManager(provider, model, contextWindow, compressionThreshold);
     this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager);
@@ -81,6 +99,8 @@ export class AgentLoop {
       let thinkingSpinner: ReturnType<typeof ora> | null = null;
       let success = false;
 
+      // 受信トークン数（スピナー表示用）
+      let receivedTokens = 0;
       // LLM呼び出しループ: 接続エラー時は自動リトライ、その他はユーザーに判断を委ねる
       let connectionRetries = 0;
 
@@ -154,11 +174,17 @@ export class AgentLoop {
                   // <think>...</think> タグをフィルタリング（古いOllamaの場合contentに含まれる）
                   const displayText = filterThinkingTags(chunk.text);
                   if (displayText) {
+                    // トークン受信中: スピナーでカウンター表示（生テキストはバッファリング）
+                    receivedTokens += displayText.split(/\s+/).length;
                     if (!hasStartedOutput) {
                       hasStartedOutput = true;
-                      process.stdout.write("\n");
+                      // 受信中スピナーを開始
+                      thinkingSpinner = ora({ text: chalk.dim(`  受信中... (${receivedTokens} トークン)`), spinner: "dots" }).start();
                     }
-                    process.stdout.write(displayText);
+                    // 既存スピナーのテキストを更新
+                    if (thinkingSpinner !== null) {
+                      thinkingSpinner.text = chalk.dim(`  受信中... (${receivedTokens} トークン)`);
+                    }
                   }
                   textContent += chunk.text;
                 }
@@ -211,6 +237,10 @@ export class AgentLoop {
 
           // ストリーム完了後もスピナーが残っていたらクリーンアップ
           stopWaitingSpinner();
+          if (thinkingSpinner) {
+            thinkingSpinner.stop();
+            thinkingSpinner = null;
+          }
 
           success = true;
           connectionRetries = 0;
@@ -229,6 +259,7 @@ export class AgentLoop {
             toolCalls.length = 0;
             hasStartedOutput = false;
             thinkingSpinner = null;
+            receivedTokens = 0;
             continue;
           }
 
@@ -244,6 +275,7 @@ export class AgentLoop {
             toolCalls.length = 0;
             hasStartedOutput = false;
             thinkingSpinner = null;
+            receivedTokens = 0;
             continue;
           } else {
             // "abort" → この発話を中止してREPLに戻る（プロセスは終了しない）
@@ -255,7 +287,16 @@ export class AgentLoop {
       if (!success) return;
 
       if (hasStartedOutput) {
-        process.stdout.write("\n");
+        // ストリーミングで収集した全テキストをフィルター・レンダリングして表示
+        // (新しいフィルターインスタンスを使い、完全なtextContentに適用)
+        const filteredText = createThinkingFilter()(textContent);
+        if (filteredText.trim()) {
+          if (hasMarkdown(filteredText)) {
+            console.log(renderMarkdown(filteredText));
+          } else {
+            console.log("\n" + filteredText);
+          }
+        }
       }
 
       // Tool calls: execute (parallel when multiple) and continue

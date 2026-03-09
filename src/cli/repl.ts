@@ -2,7 +2,7 @@ import chalk from "chalk";
 import type { AgentLoop } from "../agent/agent-loop.js";
 import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";
 import { globalTokenTracker } from "../cost/token-tracker.js";
-import { displayHelp } from "./renderer.js";
+import { displayHelp, type SkillSummary } from "./renderer.js";
 import { estimateMessageTokens } from "../agent/token-counter.js";
 import { formatTodos } from "../tools/definitions/todo-write.js";
 import { listSessions, loadSession, getLatestSession } from "../agent/session-manager.js";
@@ -20,7 +20,7 @@ import type { Config } from "../config/types.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { PlanManager } from "../agent/plan-mode.js";
 import type { ContextModeManager, ContextMode } from "../context/context-mode.js";
-import { sendDiscordNotification } from "../utils/discord.js";
+import { sendDiscordNotification, isValidDiscordWebhookUrl } from "../utils/discord.js";
 import { saveConfig } from "../config/config-manager.js";
 
 export class REPL {
@@ -200,9 +200,16 @@ export class REPL {
     }
 
     switch (command) {
-      case "/help":
-        displayHelp();
+      case "/help": {
+        const helpSkills: SkillSummary[] | undefined = this.skillRegistry
+          ? this.skillRegistry.list().map((s) => ({
+              name: s.trigger.replace(/^\//, ""),
+              description: s.description,
+            }))
+          : undefined;
+        displayHelp(helpSkills);
         break;
+      }
 
       case "/quit":
       case "/exit":
@@ -374,14 +381,36 @@ export class REPL {
           const urlStr = args[1];
           if (!urlStr) {
             console.log(chalk.yellow("  使い方: /discord url <webhook-url>"));
+            console.log(chalk.dim("  例: /discord url https://discord.com/api/webhooks/123456/abcdef"));
+          } else if (!isValidDiscordWebhookUrl(urlStr)) {
+            console.log(chalk.red("  ❌ 無効なWebhook URLです。"));
+            console.log(chalk.yellow("  正しい形式: https://discord.com/api/webhooks/<id>/<token>"));
+            console.log(chalk.dim("  Discordサーバー設定 → 連携サービス → ウェブフック で取得してください。"));
           } else {
             if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
             this.config.discord.webhookUrl = urlStr;
             saveConfig(this.config);
-            console.log(chalk.green(`  Discord Webhook URL を設定しました: ${urlStr}`));
+            console.log(chalk.green(`  ✅ Discord Webhook URL を設定しました。`));
+            console.log(chalk.dim(`  URL: ${urlStr}`));
+            console.log(chalk.dim("  /discord test でテスト送信できます。"));
+          }
+        } else if (subCmd === "test") {
+          const webhookUrl = this.config.discord?.webhookUrl ?? "";
+          if (!webhookUrl) {
+            console.log(chalk.yellow("  Webhook URL が設定されていません。先に '/discord url <URL>' を実行してください。"));
+          } else if (!isValidDiscordWebhookUrl(webhookUrl)) {
+            console.log(chalk.red("  ❌ 設定されているURLが無効です。'/discord url <URL>' で正しいWebhook URLを設定してください。"));
+          } else {
+            console.log(chalk.dim("  Discord にテストメッセージを送信中..."));
+            const result = await sendDiscordNotification(webhookUrl, "🤖 lllmAgents テスト通知\nDiscord通知が正常に動作しています！");
+            if (result.success) {
+              console.log(chalk.green("  ✅ テストメッセージを送信しました。Discordを確認してください。"));
+            } else {
+              console.log(chalk.red(`  ❌ 送信失敗: ${result.error}`));
+            }
           }
         } else {
-          console.log(chalk.yellow("  使い方: /discord [status|enable|disable|url <URL>]"));
+          console.log(chalk.yellow("  使い方: /discord [status|enable|disable|url <URL>|test]"));
         }
         break;
       }

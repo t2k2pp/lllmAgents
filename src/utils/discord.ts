@@ -3,8 +3,23 @@ import * as logger from "./logger.js";
 
 const DISCORD_MAX_LENGTH = 2000;
 
-export async function sendDiscordNotification(webhookUrl: string, content: string): Promise<void> {
-  if (!webhookUrl || !content) return;
+/**
+ * Discord Webhook URLの形式を検証する。
+ * 正しい形式: https://discord.com/api/webhooks/<id>/<token>
+ */
+export function isValidDiscordWebhookUrl(url: string): boolean {
+  return /^https:\/\/discord\.com\/api\/webhooks\/\d+\/.+$/.test(url);
+}
+
+export async function sendDiscordNotification(webhookUrl: string, content: string): Promise<{ success: boolean; error?: string }> {
+  if (!webhookUrl || !content) return { success: false, error: "URL or content is empty" };
+
+  if (!isValidDiscordWebhookUrl(webhookUrl)) {
+    const msg = `Discord Webhook URL が無効です: "${webhookUrl}"\n正しい形式: https://discord.com/api/webhooks/<id>/<token>\nDiscordサーバー設定 → 連携サービス → ウェブフック で取得してください。`;
+    console.warn(`\n  ⚠️  ${msg}\n`);
+    logger.warn(msg);
+    return { success: false, error: "Invalid webhook URL format" };
+  }
 
   try {
     // 2000文字の制限があるため、内容を分割して送信する
@@ -15,11 +30,18 @@ export async function sendDiscordNotification(webhookUrl: string, content: strin
         content: chunk,
       });
       if (!res.ok) {
-        logger.error(`Discord webhook failed with status ${res.status}: ${res.data}`);
+        const msg = `Discord webhook failed with status ${res.status}: ${res.data}`;
+        logger.error(msg);
+        console.warn(`\n  ⚠️  Discord通知の送信に失敗しました (HTTP ${res.status})\n`);
+        return { success: false, error: msg };
       }
     }
+    return { success: true };
   } catch (error) {
-    logger.error("Failed to send message to Discord webhook:", error);
+    const msg = `Failed to send message to Discord webhook: ${error}`;
+    logger.error(msg);
+    console.warn(`\n  ⚠️  Discord通知の送信に失敗しました: ${error}\n`);
+    return { success: false, error: String(error) };
   }
 }
 

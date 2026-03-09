@@ -15,7 +15,29 @@ export function displayWelcome(model: string, baseUrl: string, providerType: str
   console.log(chalk.dim(`  マルチライン: Shift+Enter / Ctrl+J (フォールバック: \`\`\`)\n`));
 }
 
-export function displayHelp(): void {
+export interface SkillSummary {
+  name: string;
+  description: string;
+}
+
+export function displayHelp(skills?: SkillSummary[]): void {
+  let skillSection: string;
+  if (skills && skills.length > 0) {
+    const lines = skills.map((s) => {
+      const padded = `/${s.name}`.padEnd(20);
+      return `    ${chalk.cyan(padded)} ${s.description}`;
+    }).join("\n");
+    skillSection = `\n  ${chalk.bold("スキル (直接呼び出し可能):")}\n${lines}\n`;
+  } else {
+    skillSection = `
+  ${chalk.bold("スキル (直接呼び出し可能):")}
+    ${chalk.cyan("/commit")}             コミットワークフロー
+    ${chalk.cyan("/pr-review")}          PRコードレビュー
+    ${chalk.cyan("/tdd")}                テスト駆動開発
+    ${chalk.cyan("/build-fix")}          ビルドエラー修正
+`;
+  }
+
   console.log(`
   ${chalk.bold("コマンド:")}
     ${chalk.cyan("/help")}           このヘルプを表示
@@ -37,13 +59,7 @@ export function displayHelp(): void {
     ${chalk.cyan("/skills")}         利用可能なスキル一覧
     ${chalk.cyan("/status")}         全体ステータス
     ${chalk.cyan("/discord")}        Discord通知の設定
-
-  ${chalk.bold("スキル (直接呼び出し可能):")}
-    ${chalk.cyan("/commit")}         コミットワークフロー
-    ${chalk.cyan("/pr-review")}      PRコードレビュー
-    ${chalk.cyan("/tdd")}            テスト駆動開発
-    ${chalk.cyan("/build-fix")}      ビルドエラー修正
-
+${skillSection}
   ${chalk.bold("入力:")}
     Shift+Enter  改行を挿入（マルチライン入力）
     Ctrl+J       改行を挿入（Shift+Enter非対応ターミナル用）

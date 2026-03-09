@@ -51,12 +51,13 @@ export const webFetchTool: ToolHandler = {
         text = JSON.stringify(json, null, 2);
       } else {
         const html = await res.text();
-        text = stripHtml(html);
+        text = stripHtml(html, url);
       }
 
       // Truncate if too large
       const maxLen = 30000;
-      if (text.length > maxLen) {
+      const truncated = text.length > maxLen;
+      if (truncated) {
         text = text.slice(0, maxLen) + "\n... (truncated)";
       }
 
@@ -72,23 +73,49 @@ export const webFetchTool: ToolHandler = {
   },
 };
 
-function stripHtml(html: string): string {
-  // Remove scripts, styles, and non-visible elements
+function resolveUrl(href: string, baseUrl: string): string {
+  try {
+    return new URL(href, baseUrl).href;
+  } catch {
+    return href;
+  }
+}
+
+function stripHtml(html: string, baseUrl?: string): string {
+  // Remove non-content elements (scripts, styles, SVG, JSON-LD)
+  // Note: <header>, <nav>, <footer> are intentionally NOT removed,
+  // as they may contain important content on some sites (e.g. NHK News).
   let text = html
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
-    .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
-    .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "");
+    .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, "")
+    .replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, "")
+    .replace(/<script[^>]*type="application\/ld\+json"[^>]*>[\s\S]*?<\/script>/gi, "");
+
+  // Resolve relative URLs to absolute before converting links to text
+  if (baseUrl) {
+    text = text.replace(/<a([^>]*)\shref="([^"]*)"([^>]*)>/gi, (_match, before, href, after) => {
+      const resolved = resolveUrl(href, baseUrl);
+      return `<a${before} href="${resolved}"${after}>`;
+    });
+    text = text.replace(/<img([^>]*)\ssrc="([^"]*)"([^>]*)>/gi, (_match, before, src, after) => {
+      const resolved = resolveUrl(src, baseUrl);
+      return `<img${before} src="${resolved}"${after}>`;
+    });
+  }
 
   // Convert block elements to newlines
   text = text
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|h[1-6]|li|tr|blockquote)>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li|tr|blockquote|header|footer|nav|section|article|main)>/gi, "\n")
     .replace(/<(hr)\s*\/?>/gi, "\n---\n");
 
-  // Convert links to markdown-ish format
-  text = text.replace(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, "$2 ($1)");
+  // Convert links: "text [→URL]" format (avoids duplication)
+  text = text.replace(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_match, href, linkText) => {
+    const cleanText = linkText.replace(/<[^>]+>/g, "").trim();
+    if (!cleanText || cleanText === href) return href;
+    return `${cleanText} [→${href}]`;
+  });
 
   // Strip remaining tags
   text = text.replace(/<[^>]+>/g, "");

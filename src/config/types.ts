@@ -122,6 +122,7 @@ export function getDefaultConfig(): Config {
       autoApproveTools: [
         "file_read", "glob", "grep", "browser_snapshot", "vision_analyze",
         "ask_user", "todo_write", "enter_plan_mode", "exit_plan_mode", "task_output",
+        "web_search", "web_fetch",
       ],
       requireApprovalTools: ["file_write", "file_edit", "bash", "browser_navigate", "browser_click", "browser_type"],
       streamCommandOutput: true,

@@ -1,3 +1,5 @@
+import * as os from "node:os";
+import * as path from "node:path";
 import type { PlaywrightManager } from "../../browser/playwright-manager.js";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
 
@@ -121,18 +123,16 @@ export function createBrowserTools(manager: PlaywrightManager): ToolHandler[] {
       try {
         const buf = await manager.screenshot();
         const savePath = params?.save_path as string | undefined;
-        if (savePath) {
-          const fs = await import("fs/promises");
-          await fs.writeFile(savePath, buf);
-          return {
-            success: true,
-            output: `Screenshot successfully saved to: ${savePath}`,
-          };
-        }
+
+        // 保存先が指定されていない場合はOSの一時ディレクトリへ保存
+        const targetPath = savePath ?? path.join(os.tmpdir(), `lllmagent-screenshot-${Date.now()}.png`);
+
+        const fs = await import("fs/promises");
+        await fs.writeFile(targetPath, buf);
 
         return {
           success: true,
-          output: `Screenshot captured (${buf.length} bytes, base64: ${buf.toString("base64").slice(0, 100)}...).`,
+          output: `Screenshot saved to: ${targetPath}\nYou can use vision_analyze with image_path="${targetPath}" to analyze this screenshot.`,
         };
       } catch (e) {
         return { success: false, output: "", error: String(e) };

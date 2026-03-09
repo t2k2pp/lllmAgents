@@ -5,7 +5,13 @@ import { isWindows } from "../utils/platform.js";
 import { RuleLoader } from "../rules/rule-loader.js";
 import type { ContextModeManager } from "../context/context-mode.js";
 
-export function buildSystemPrompt(contextModeManager?: ContextModeManager): string {
+export interface SkillInfo {
+  name: string;
+  trigger: string;
+  description: string;
+}
+
+export function buildSystemPrompt(contextModeManager?: ContextModeManager, skills?: SkillInfo[]): string {
   const memory = loadMemory();
   const projectInstructions = loadProjectInstructions();
   const gitInfo = getGitInfo();
@@ -61,8 +67,7 @@ run_in_background=trueでバックグラウンド実行し、task_outputで結�
 5. 承認後に実装を開始
 
 # スキル
-/commit, /pr-review, /tdd, /build-fix 等の定義済みワークフロー。
-skillツールで実行する。
+skillツールで定義済みワークフローを実行できる。適切な場面で積極的に活用すること。
 
 # セキュリティ
 - サンドボックス外のファイルアクセスは禁止
@@ -103,6 +108,16 @@ ${projectInstructions}`);
 前回のセッションから引き継がれたメモ:
 
 ${memory}`);
+  }
+
+  // Skills (dynamic list)
+  if (skills && skills.length > 0) {
+    const skillLines = skills.map((s) => `- ${s.trigger}: ${s.description}`).join("\n");
+    parts.push(`
+# 利用可能なスキル一覧
+以下のスキルをskillツールで呼び出せる。ユーザーの要求に合致する場面では積極的に使用すること:
+
+${skillLines}`);
   }
 
   // Rules

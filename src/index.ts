@@ -146,6 +146,21 @@ async function main(): Promise<void> {
   // Context mode
   const contextModeManager = new ContextModeManager();
 
+  // Skill registry (before AgentLoop to inject into system prompt)
+  const skillRegistry = new SkillRegistry();
+  const skills = loadAllSkills();
+  for (const skill of skills) {
+    skillRegistry.register(skill);
+  }
+  setSkillRegistry(skillRegistry);
+
+  // Build skill infos for system prompt
+  const skillInfos = skillRegistry.list().map((s) => ({
+    name: s.name,
+    trigger: s.trigger,
+    description: s.description,
+  }));
+
   // Agent loop
   const agent = new AgentLoop(
     provider,
@@ -156,6 +171,7 @@ async function main(): Promise<void> {
     config.context.compressionThreshold,
     contextModeManager,
     hookManager,
+    skillInfos,
   );
 
   // Plan manager
@@ -166,14 +182,6 @@ async function main(): Promise<void> {
   // Sub-agent manager
   const subAgentManager = new SubAgentManager(provider, config.mainLLM.model, toolRegistry, permissions);
   setSubAgentManager(subAgentManager);
-
-  // Skill registry
-  const skillRegistry = new SkillRegistry();
-  const skills = loadAllSkills();
-  for (const skill of skills) {
-    skillRegistry.register(skill);
-  }
-  setSkillRegistry(skillRegistry);
 
   // Second LLM
   const secondLLMManager = new SecondLLMManager(toolRegistry, permissions);
