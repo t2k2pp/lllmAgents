@@ -4,32 +4,50 @@
 
 ## 1. 攻撃と防御モデルの概要
 
-システムには3つの防御層が存在しますが、それぞれに限界があります。
+システムには4つの防御層が存在しますが、それぞれに限界があります。
 
 ```mermaid
 graph TD
     classDef safe fill:#d4edda,stroke:#28a745,color:#155724;
     classDef danger fill:#f8d7da,stroke:#dc3545,color:#721c24;
-    
+    classDef warn fill:#fff3cd,stroke:#ffc107,color:#856404;
+
     Attacker[LLMのハルシネーション / 悪意あるプロンプト]:::danger
-    
+
     subgraph "Defense Layers"
-        L1(Layer 1: PermissionManagerの3層権限)
+        L0(Layer 0: パターンルールエンジン deny/allow/ask):::warn
+        L1(Layer 1: PermissionManagerの権限チェック)
         L2(Layer 2: SecurityRulesの正規表現)
         L3(Layer 3: Sandboxによるパス制限)
     end
-    
+
     Target[(ホストOSのファイル・システム)]:::safe
-    
-    Attacker --> L1
+
+    Attacker --> L0
+    L0 --> L1
     L1 --> L2
     L2 --> L3
     L3 --> Target
-    
+
+    note_L0[CLIとDiscord両方に適用。denyは強制ブロック] -.-> L0
     note_L1[迂回リスク: ユーザーが盲目的に許可(always)してしまう] -.-> L1
     note_L2[迂回リスク: 難読化コマンド、エイリアス等] -.-> L2
     note_L3[迂回リスク: シンボリックリンク、ディレクトリトラバーサル] -.-> L3
 ```
+
+### 1.1 パターンルールエンジン（Layer 0）
+
+`src/security/rule-engine.ts` に実装された Claude Code 互換のパターンルールエンジンです。ツール名リストより高い優先度で評価され、**CLI・Discord 双方に適用**されます。
+
+**評価順序**: `deny` → `allow` → `ask` → ツール名リスト（autoApproveTools/requireApprovalTools）
+
+| ルールタイプ | 動作 | 適用チャネル |
+|---|---|---|
+| `deny` | 強制ブロック（ユーザー確認なし） | CLI + Discord |
+| `allow` | 強制許可（ユーザー確認なし） | CLI のみ |
+| `ask` | 必ず確認ダイアログ表示 | CLI のみ |
+
+`deny` ルールを Discord にも適用することで、Discord 経由の悪意ある操作を防止します。
 
 ## 2. 潜在的なリスクと技術的限界
 

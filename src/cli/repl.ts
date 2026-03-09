@@ -21,6 +21,9 @@ import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { PlanManager } from "../agent/plan-mode.js";
 import type { ContextModeManager, ContextMode } from "../context/context-mode.js";
 import { sendDiscordNotification, isValidDiscordWebhookUrl } from "../utils/discord.js";
+import { DiscordInteractionServer } from "../discord/interaction-server.js";
+import { registerAskCommand } from "../discord/slash-commands.js";
+import { select } from "@inquirer/prompts";
 import { saveConfig } from "../config/config-manager.js";
 
 export class REPL {
@@ -28,6 +31,7 @@ export class REPL {
   private multilineBuffer: string[] = [];
   private isMultiline = false;
   private lineNumber = 0;
+  private interactionServer: DiscordInteractionServer | null = null;
 
   constructor(
     private agent: AgentLoop,
@@ -45,8 +49,11 @@ export class REPL {
         }))
       : [];
 
+    // 登録済みツール名を取得（/permission auto-add 等の補完用）
+    const toolNames = agent.getToolRegistry().getDefinitions().map((d) => d.function.name);
+
     this.input = new InteractiveInput({
-      commandProvider: createCommandMenuProvider(skillInfos),
+      commandProvider: createCommandMenuProvider(skillInfos, toolNames),
       filePathProvider: createFileMenuProvider(),
     });
   }
@@ -55,6 +62,10 @@ export class REPL {
    * REPLメインループ。ユーザーが /quit するまで resolve しない。
    */
   async start(): Promise<void> {
+    // listenEnabled が有効なら起動時に Interaction Server を自動起動
+    if (this.config.discord?.listenEnabled && this.config.discord.publicKey) {
+      await this.startInteractionServer();
+    }
     try {
       while (true) {
         const prefix = this.getPromptPrefix();
@@ -121,6 +132,32 @@ export class REPL {
       this.agent.saveCurrentSession();
       // stdin を pause してイベントループを解放し、プロセスを終了可能にする
       process.stdin.pause();
+    }
+  }
+
+  // ─── Discord Interaction Server ──────────────────────
+
+  private async startInteractionServer(): Promise<void> {
+    const d = this.config.discord;
+    if (!d?.applicationId) {
+      console.log(chalk.yellow("  Application ID が未設定です。'/discord app-id <id>' で設定してください。"));
+      return;
+    }
+    if (!d.publicKey) {
+      console.log(chalk.yellow("  Public Key が未設定です。'/discord public-key <key>' で設定してください。"));
+      return;
+    }
+    try {
+      this.interactionServer = new DiscordInteractionServer(d, this.agent);
+      await this.interactionServer.start();
+      const port = d.interactionPort ?? 3003;
+      console.log(chalk.green(`  ✅ Discord Interaction Server を起動しました (port ${port})`));
+      console.log(chalk.dim(`  Discord Developer Portal の Interactions Endpoint URL を:`));
+      console.log(chalk.dim(`    http://<your-ip>:${port}/interactions`));
+      console.log(chalk.dim("  に設定してください。"));
+    } catch (e) {
+      console.log(chalk.red(`  ❌ Interaction Server の起動に失敗しました: ${e}`));
+      this.interactionServer = null;
     }
   }
 
@@ -263,28 +300,32 @@ export class REPL {
             if (models.length === 0) {
               console.log(chalk.dim("  利用可能なモデルはありません。"));
             } else {
-              console.log(chalk.dim("  利用可能なモデル:"));
               const currentModel = this.agent.getModel();
-              for (const m of models) {
-                const marker =
-                  m.name === currentModel ? chalk.green(" ← current") : "";
-                const sizeLabel =
-                  m.size > 0
-                    ? chalk.dim(` (${(m.size / 1e9).toFixed(1)}GB)`)
-                    : "";
-                console.log(
-                  chalk.dim(
-                    `    ${chalk.cyan(m.name)}${sizeLabel}${marker}`,
-                  ),
-                );
+              const chosen = await select({
+                message: "モデルを選択:",
+                choices: models.map((m) => {
+                  const sizeLabel = m.size > 0 ? ` (${(m.size / 1e9).toFixed(1)}GB)` : "";
+                  const isCurrent = m.name === currentModel;
+                  return {
+                    name: `${m.name}${sizeLabel}${isCurrent ? "  ← current" : ""}`,
+                    value: m.name,
+                  };
+                }),
+                default: currentModel,
+              });
+              if (chosen !== currentModel) {
+                this.agent.setModel(chosen);
+                this.config.mainLLM.model = chosen;
+                console.log(chalk.dim(`  モデルを ${chalk.yellow(currentModel)} から ${chalk.cyan(chosen)} に切り替えました`));
+              } else {
+                console.log(chalk.dim(`  モデルは変更されませんでした。`));
               }
             }
           } catch (e) {
-            console.log(
-              chalk.red(
-                `  モデル一覧の取得に失敗しました: ${e instanceof Error ? e.message : String(e)}`,
-              ),
-            );
+            // Ctrl+C でキャンセルされた場合は何もしない
+            if (!(e instanceof Error && e.message.includes("User force closed"))) {
+              console.log(chalk.red(`  モデル一覧の取得に失敗しました: ${e instanceof Error ? e.message : String(e)}`));
+            }
           }
         } else {
           const newModel = args[0];
@@ -358,11 +399,21 @@ export class REPL {
       case "/discord": {
         const subCmd = args[0];
         if (!subCmd || subCmd === "status") {
-          const dEnabled = this.config.discord?.enabled ?? false;
-          const dUrl = this.config.discord?.webhookUrl ?? "Not configured";
-          console.log(chalk.bold("\n  === Discord Notification Status ==="));
-          console.log(chalk.dim(`  Status: ${dEnabled ? chalk.green("Enabled") : chalk.yellow("Disabled")}`));
-          console.log(chalk.dim(`  Webhook URL: ${dUrl}`));
+          const d = this.config.discord;
+          const dEnabled = d?.enabled ?? false;
+          const dUrl = d?.webhookUrl || "未設定";
+          const dListening = this.interactionServer?.running ?? false;
+          const dPort = d?.interactionPort ?? 3003;
+          const dAppId = d?.applicationId ? chalk.dim(d.applicationId) : chalk.yellow("未設定");
+          const dPubKey = d?.publicKey ? chalk.green("設定済み") : chalk.yellow("未設定");
+          const dToken = d?.botToken ? chalk.green("設定済み") : chalk.yellow("未設定");
+          console.log(chalk.bold("\n  === Discord Status ==="));
+          console.log(chalk.dim(`  通知 (Webhook): ${dEnabled ? chalk.green("有効") : chalk.yellow("無効")}`));
+          console.log(chalk.dim(`  Webhook URL:    ${dUrl}`));
+          console.log(chalk.dim(`  受信サーバー:   ${dListening ? chalk.green(`起動中 (port ${dPort})`) : chalk.yellow("停止中")}`));
+          console.log(chalk.dim(`  Application ID: ${dAppId}`));
+          console.log(chalk.dim(`  Public Key:     ${dPubKey}`));
+          console.log(chalk.dim(`  Bot Token:      ${dToken}`));
           console.log();
         } else if (subCmd === "enable") {
           if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
@@ -409,8 +460,261 @@ export class REPL {
               console.log(chalk.red(`  ❌ 送信失敗: ${result.error}`));
             }
           }
+        } else if (subCmd === "app-id") {
+          // Application ID 設定
+          const id = args[1];
+          if (!id) {
+            console.log(chalk.yellow("  使い方: /discord app-id <application-id>"));
+            console.log(chalk.dim("  Discord Developer Portal → アプリ → General Information → Application ID"));
+          } else {
+            if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
+            this.config.discord.applicationId = id;
+            saveConfig(this.config);
+            console.log(chalk.green(`  ✅ Application ID を設定しました: ${id}`));
+          }
+        } else if (subCmd === "public-key") {
+          // Public Key 設定 (署名検証用)
+          const key = args[1];
+          if (!key) {
+            console.log(chalk.yellow("  使い方: /discord public-key <public-key>"));
+            console.log(chalk.dim("  Discord Developer Portal → アプリ → General Information → Public Key"));
+          } else {
+            if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
+            this.config.discord.publicKey = key;
+            saveConfig(this.config);
+            console.log(chalk.green("  ✅ Public Key を設定しました。"));
+          }
+        } else if (subCmd === "bot-token") {
+          // Bot Token 設定 (コマンド登録・follow-up 送信用)
+          const token = args[1];
+          if (!token) {
+            console.log(chalk.yellow("  使い方: /discord bot-token <bot-token>"));
+            console.log(chalk.dim("  Discord Developer Portal → アプリ → Bot → Token"));
+          } else {
+            if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
+            this.config.discord.botToken = token;
+            saveConfig(this.config);
+            console.log(chalk.green("  ✅ Bot Token を設定しました。"));
+          }
+        } else if (subCmd === "port") {
+          // Interaction Server のポート設定
+          const portNum = parseInt(args[1] ?? "", 10);
+          if (!portNum || portNum < 1 || portNum > 65535) {
+            console.log(chalk.yellow("  使い方: /discord port <port-number>  (例: 3003)"));
+          } else {
+            if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
+            this.config.discord.interactionPort = portNum;
+            saveConfig(this.config);
+            console.log(chalk.green(`  ✅ Interaction Server ポートを ${portNum} に設定しました。`));
+          }
+        } else if (subCmd === "register") {
+          // スラッシュコマンドを Discord に登録
+          const guildId = args[1]; // 省略時はグローバル登録
+          const appId = this.config.discord?.applicationId;
+          const botToken = this.config.discord?.botToken;
+          if (!appId || !botToken) {
+            console.log(chalk.yellow("  Application ID と Bot Token が必要です。"));
+            console.log(chalk.dim("  /discord app-id <id>     → Application ID を設定"));
+            console.log(chalk.dim("  /discord bot-token <tok> → Bot Token を設定"));
+          } else {
+            const scope = guildId ? `ギルド ${guildId}` : "グローバル";
+            console.log(chalk.dim(`  /ask コマンドを登録中 (${scope})...`));
+            const result = await registerAskCommand(appId, botToken, guildId);
+            if (result.success) {
+              console.log(chalk.green(`  ✅ /ask コマンドを登録しました (ID: ${result.commandId})`));
+              if (!guildId) {
+                console.log(chalk.dim("  グローバル登録は反映まで最大 1 時間かかります。"));
+                console.log(chalk.dim("  すぐ試したい場合は '/discord register <guild-id>' でギルド限定登録をどうぞ。"));
+              }
+            } else {
+              console.log(chalk.red(`  ❌ 登録失敗: ${result.error}`));
+            }
+          }
+        } else if (subCmd === "listen") {
+          // Interaction Server の起動/停止
+          const action = args[1];
+          if (action === "start") {
+            if (this.interactionServer?.running) {
+              console.log(chalk.yellow("  Interaction Server はすでに起動中です。"));
+            } else {
+              await this.startInteractionServer();
+            }
+          } else if (action === "stop") {
+            if (!this.interactionServer?.running) {
+              console.log(chalk.yellow("  Interaction Server は起動していません。"));
+            } else {
+              this.interactionServer.stop();
+              console.log(chalk.yellow("  Interaction Server を停止しました。"));
+            }
+          } else if (action === "auto-start") {
+            // 次回起動時から自動起動
+            const on = args[2] !== "off";
+            if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
+            this.config.discord.listenEnabled = on;
+            saveConfig(this.config);
+            console.log(on
+              ? chalk.green("  ✅ 次回起動時から Interaction Server を自動起動します。")
+              : chalk.yellow("  自動起動を無効化しました。"),
+            );
+          } else {
+            console.log(chalk.yellow("  使い方: /discord listen [start|stop|auto-start [off]]"));
+          }
         } else {
-          console.log(chalk.yellow("  使い方: /discord [status|enable|disable|url <URL>|test]"));
+          console.log(chalk.yellow("  使い方: /discord <サブコマンド>"));
+          console.log(chalk.dim("  通知系:    status | enable | disable | url <URL> | test"));
+          console.log(chalk.dim("  受信設定:  app-id <id> | public-key <key> | bot-token <tok> | port <num>"));
+          console.log(chalk.dim("  コマンド:  register [guild-id]"));
+          console.log(chalk.dim("  サーバー:  listen start | listen stop | listen auto-start [off]"));
+        }
+        break;
+      }
+
+      case "/permission": {
+        const permissions = this.agent.getPermissions();
+        const subCmd = args[0];
+        const toolName = args[1];
+
+        if (!subCmd || subCmd === "list") {
+          const autoList = permissions.getAutoApproveList();
+          const requireList = permissions.getRequireApprovalList();
+          const discordList = permissions.getDiscordAutoApproveList();
+          const rules = permissions.getRules();
+          console.log(chalk.bold("  [パターンルール] rules (ツール名リストより優先):"));
+          console.log(chalk.bold("    deny (常に拒否):"));
+          if (rules.deny.length === 0) console.log(chalk.dim("      (なし)"));
+          else for (const r of rules.deny) console.log(chalk.red(`      ✗ ${r}`));
+          console.log(chalk.bold("    allow (常に許可):"));
+          if (rules.allow.length === 0) console.log(chalk.dim("      (なし)"));
+          else for (const r of rules.allow) console.log(chalk.green(`      ✓ ${r}`));
+          console.log(chalk.bold("    ask (常に確認):"));
+          if (rules.ask.length === 0) console.log(chalk.dim("      (なし)"));
+          else for (const r of rules.ask) console.log(chalk.yellow(`      ? ${r}`));
+          console.log(chalk.bold("  [CLI] 自動許可 (autoApproveTools):"));
+          if (autoList.length === 0) {
+            console.log(chalk.dim("    (なし)"));
+          } else {
+            for (const t of autoList) console.log(chalk.green(`    ✓ ${t}`));
+          }
+          console.log(chalk.bold("  [CLI] 確認必要 (requireApprovalTools):"));
+          if (requireList.length === 0) {
+            console.log(chalk.dim("    (なし)"));
+          } else {
+            for (const t of requireList) console.log(chalk.yellow(`    ? ${t}`));
+          }
+          console.log(chalk.bold("  [Discord] 自動許可 (discordAutoApproveTools):"));
+          if (discordList.length === 0) {
+            console.log(chalk.dim("    (なし)"));
+          } else {
+            for (const t of discordList) console.log(chalk.cyan(`    ✓ ${t}`));
+          }
+        } else if (subCmd === "rules") {
+          // /permission rules のみ: ルール一覧表示
+          const rules = permissions.getRules();
+          console.log(chalk.bold("  パターンルール一覧:"));
+          for (const action of ["deny", "allow", "ask"] as const) {
+            console.log(chalk.bold(`  ${action}:`));
+            if (rules[action].length === 0) {
+              console.log(chalk.dim("    (なし)"));
+            } else {
+              for (const r of rules[action]) {
+                const icon = action === "deny" ? chalk.red("✗") : action === "allow" ? chalk.green("✓") : chalk.yellow("?");
+                console.log(`    ${icon} ${r}`);
+              }
+            }
+          }
+        } else if (subCmd === "rule-add") {
+          // /permission rule-add <allow|deny|ask> <pattern>
+          const action = args[1] as "allow" | "deny" | "ask" | undefined;
+          const pattern = args.slice(2).join(" ");
+          if (!action || !["allow", "deny", "ask"].includes(action) || !pattern) {
+            console.log(chalk.yellow(`  使い方: /permission rule-add <allow|deny|ask> <パターン>`));
+            console.log(chalk.dim(`  例: /permission rule-add allow "bash(npm *)"`));
+            console.log(chalk.dim(`  例: /permission rule-add deny "bash(rm -rf *)"`));
+            console.log(chalk.dim(`  例: /permission rule-add allow "file_write(./src/**)"`));
+            console.log(chalk.dim(`  例: /permission rule-add allow "web_fetch(domain:github.com)"`));
+          } else {
+            permissions.addRule(action, pattern);
+            if (!this.config.security.rules) {
+              this.config.security.rules = { allow: [], deny: [], ask: [] };
+            }
+            if (!this.config.security.rules[action].includes(pattern)) {
+              this.config.security.rules[action].push(pattern);
+            }
+            saveConfig(this.config);
+            const icon = action === "deny" ? "🚫" : action === "allow" ? "✅" : "❓";
+            console.log(chalk.green(`  ${icon} ${action}: "${pattern}" を追加しました`));
+          }
+        } else if (subCmd === "rule-remove") {
+          // /permission rule-remove <allow|deny|ask> <pattern>
+          const action = args[1] as "allow" | "deny" | "ask" | undefined;
+          const pattern = args.slice(2).join(" ");
+          if (!action || !["allow", "deny", "ask"].includes(action) || !pattern) {
+            console.log(chalk.yellow(`  使い方: /permission rule-remove <allow|deny|ask> <パターン>`));
+          } else {
+            permissions.removeRule(action, pattern);
+            if (this.config.security.rules) {
+              this.config.security.rules[action] = this.config.security.rules[action].filter((p) => p !== pattern);
+            }
+            saveConfig(this.config);
+            console.log(chalk.green(`  ✅ ${action}: "${pattern}" を削除しました`));
+          }
+        } else if (subCmd === "auto-add" && toolName) {
+          permissions.addAutoApprove(toolName);
+          if (!this.config.security.autoApproveTools.includes(toolName)) {
+            this.config.security.autoApproveTools.push(toolName);
+          }
+          saveConfig(this.config);
+          console.log(chalk.green(`  ✅ ${toolName} を autoApproveTools に追加しました`));
+        } else if (subCmd === "auto-remove" && toolName) {
+          permissions.removeAutoApprove(toolName);
+          this.config.security.autoApproveTools = this.config.security.autoApproveTools.filter((t) => t !== toolName);
+          saveConfig(this.config);
+          console.log(chalk.green(`  ✅ ${toolName} を autoApproveTools から削除しました`));
+        } else if (subCmd === "require-add" && toolName) {
+          permissions.addRequireApproval(toolName);
+          if (!this.config.security.requireApprovalTools.includes(toolName)) {
+            this.config.security.requireApprovalTools.push(toolName);
+          }
+          saveConfig(this.config);
+          console.log(chalk.green(`  ✅ ${toolName} を requireApprovalTools に追加しました`));
+        } else if (subCmd === "require-remove" && toolName) {
+          permissions.removeRequireApproval(toolName);
+          this.config.security.requireApprovalTools = this.config.security.requireApprovalTools.filter((t) => t !== toolName);
+          saveConfig(this.config);
+          console.log(chalk.green(`  ✅ ${toolName} を requireApprovalTools から削除しました`));
+        } else if (subCmd === "discord-add" && toolName) {
+          permissions.addDiscordAutoApprove(toolName);
+          if (!this.config.security.discordAutoApproveTools) {
+            this.config.security.discordAutoApproveTools = [];
+          }
+          if (!this.config.security.discordAutoApproveTools.includes(toolName)) {
+            this.config.security.discordAutoApproveTools.push(toolName);
+          }
+          saveConfig(this.config);
+          console.log(chalk.green(`  ✅ ${toolName} を discordAutoApproveTools に追加しました`));
+        } else if (subCmd === "discord-remove" && toolName) {
+          permissions.removeDiscordAutoApprove(toolName);
+          if (this.config.security.discordAutoApproveTools) {
+            this.config.security.discordAutoApproveTools = this.config.security.discordAutoApproveTools.filter((t) => t !== toolName);
+          }
+          saveConfig(this.config);
+          console.log(chalk.green(`  ✅ ${toolName} を discordAutoApproveTools から削除しました`));
+        } else {
+          console.log(chalk.yellow("  使い方: /permission <サブコマンド> [引数]"));
+          console.log(chalk.bold("  パターンルール (優先):"));
+          console.log(chalk.dim('  rule-add allow "bash(npm *)"    - パターンに一致する実行を常に許可'));
+          console.log(chalk.dim('  rule-add deny  "bash(rm -rf *)" - パターンに一致する実行を常に拒否'));
+          console.log(chalk.dim('  rule-add ask   "bash(git push *)"- パターンに一致する実行を常に確認'));
+          console.log(chalk.dim('  rule-remove allow "bash(npm *)" - allowルールを削除'));
+          console.log(chalk.dim("  rules                           - パターンルール一覧"));
+          console.log(chalk.bold("  ツール名リスト:"));
+          console.log(chalk.dim("  list                        - 現在の設定一覧を表示"));
+          console.log(chalk.dim("  auto-add <tool>             - CLIで自動許可するツールを追加（設定保存）"));
+          console.log(chalk.dim("  auto-remove <tool>          - CLIの自動許可から削除（設定保存）"));
+          console.log(chalk.dim("  require-add <tool>          - CLIで確認必要なツールを追加（設定保存）"));
+          console.log(chalk.dim("  require-remove <tool>       - CLIの確認必要から削除（設定保存）"));
+          console.log(chalk.dim("  discord-add <tool>          - Discord経由で自動許可するツールを追加（設定保存）"));
+          console.log(chalk.dim("  discord-remove <tool>       - Discord経由の自動許可から削除（設定保存）"));
         }
         break;
       }

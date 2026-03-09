@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { configExists, loadConfig } from "./config/config-manager.js";
+import { configExists, loadConfig, saveConfig } from "./config/config-manager.js";
 import { runSetupWizard } from "./config/setup-wizard.js";
 import { createProvider } from "./providers/provider-factory.js";
 import { AgentLoop } from "./agent/agent-loop.js";
@@ -35,6 +35,7 @@ import { secondLLMConsultTool, secondLLMAgentTool, setSecondLLMManager } from ".
 import { displayWelcome } from "./cli/renderer.js";
 import { REPL } from "./cli/repl.js";
 import { PROVIDER_LABELS } from "./config/types.js";
+import { DiscordInteractionServer } from "./discord/interaction-server.js";
 import { CredentialVault } from "./security/credential-vault.js";
 import { getLatestSession } from "./agent/session-manager.js";
 import { ContextModeManager } from "./context/context-mode.js";
@@ -124,7 +125,13 @@ async function main(): Promise<void> {
   await mcpManager.connectAll(toolRegistry);
 
   // Permissions
-  const permissions = new PermissionManager(config.security);
+  const permissions = new PermissionManager(config.security, (tool) => {
+    // "許可 (設定に保存)" 選択時にconfig.jsonを更新
+    if (!config.security.autoApproveTools.includes(tool)) {
+      config.security.autoApproveTools.push(tool);
+      saveConfig(config);
+    }
+  });
 
   // Hooks
   const hookManager = new HookManager();
@@ -234,6 +241,38 @@ async function main(): Promise<void> {
 
   // Run session start hooks
   await hookManager.runSessionHooks("start");
+
+  // ── バックグラウンドモード (--background): REPL を起動せず Discord Interaction Server のみ実行 ──
+  if (args.includes("--background")) {
+    const discord = config.discord;
+    if (!discord?.applicationId || !discord?.publicKey) {
+      console.error("  --background モードには Discord の applicationId と publicKey が必要です。");
+      console.error("  通常モードで起動して /discord app-id と /discord public-key を設定してください。");
+      process.exit(1);
+    }
+    const port = discord.interactionPort ?? 3003;
+    const server = new DiscordInteractionServer(discord, agent);
+    try {
+      await server.start();
+      console.log(`  [Background Mode] Discord Interaction Server 起動 (port ${port})`);
+      console.log("  Ctrl+C で終了します。");
+    } catch (e) {
+      console.error(`  Interaction Server 起動失敗: ${e}`);
+      process.exit(1);
+    }
+    // SIGINT でグレースフルシャットダウン
+    process.on("SIGINT", async () => {
+      console.log("\n  シャットダウン中...");
+      server.stop();
+      await hookManager.runSessionHooks("stop");
+      agent.saveCurrentSession();
+      await mcpManager.disconnectAll();
+      await playwrightManager.close();
+      process.exit(0);
+    });
+    // プロセスを生かしておく (サーバーが listen しているので自動的に続く)
+    return;
+  }
 
   // Display welcome
   displayWelcome(

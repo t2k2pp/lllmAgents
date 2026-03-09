@@ -25,10 +25,25 @@ export function loadConfig(): Config {
   const raw = fs.readFileSync(CONFIG_FILE, "utf-8");
   const parsed = JSON.parse(raw) as Partial<Config>;
   const defaults = getDefaultConfig();
+
+  // ツール配列はデフォルト ∪ ユーザー設定 で合成する。
+  // こうすることでコード側に追加されたデフォルトツールが既存 config.json でも有効になる。
+  const mergeToolList = (defaultList: string[], savedList?: string[]): string[] => {
+    if (!savedList) return defaultList;
+    return [...new Set([...defaultList, ...savedList])];
+  };
+
+  const savedSecurity = parsed.security ?? {} as Partial<Config["security"]>;
   return {
     ...defaults,
     ...parsed,
-    security: { ...defaults.security, ...parsed.security },
+    security: {
+      ...defaults.security,
+      ...savedSecurity,
+      autoApproveTools: mergeToolList(defaults.security.autoApproveTools, savedSecurity.autoApproveTools),
+      requireApprovalTools: mergeToolList(defaults.security.requireApprovalTools, savedSecurity.requireApprovalTools),
+      discordAutoApproveTools: mergeToolList(defaults.security.discordAutoApproveTools, savedSecurity.discordAutoApproveTools),
+    },
     context: { ...defaults.context, ...parsed.context },
     discord: { ...(defaults.discord ?? { enabled: false, webhookUrl: "" }), ...parsed.discord },
   };

@@ -18,9 +18,11 @@
 | 2 | UX-03 help動的表示 | Medium | Low | スキル発見性 |
 | 2 | SKL-02 システムプロンプト | Medium | Low | LLMのスキル自動利用 |
 | 2 | BROWSER-02 screenshot | High | Medium | vision連携 |
-| 3 | BROWSER-01 a11y tree | High | High | Playwright API置き換え |
-| 3 | PERF-01 UXフィードバック | Medium | Medium | 長時間待機の改善 |
-| 3 | CTX-01 トークナイザー | Medium | High | Ollama API利用 |
+| 3 | Discord双方向連携 | High | High | Discord Slash Command受信 |
+| 4 | SEC-01 権限管理強化 | High | Medium | Claude Code互換ルール実装 |
+| 5 | BROWSER-01 a11y tree | High | High | Playwright API置き換え |
+| 5 | PERF-01 UXフィードバック | Medium | Medium | 長時間待機の改善 |
+| 5 | CTX-01 トークナイザー | Medium | High | Ollama API利用 |
 
 ---
 
@@ -191,3 +193,70 @@
 | `src/cli/repl.ts` | displayHelp にスキルリスト渡す |
 | `src/agent/system-prompt.ts` | スキル一覧をプロンプトに注入 |
 | `src/tools/definitions/browser.ts` | screenshot 一時ファイル保存 |
+
+## 変更ファイル一覧 (Phase 3: Discord双方向連携)
+
+| ファイル | 変更内容 |
+|---------|---------|
+| `src/discord/interaction-server.ts` | HTTP サーバー、Ed25519 署名検証、deferred 応答+follow-up |
+| `src/discord/slash-commands.ts` | `/ask` コマンド登録 (グローバル or ギルド) |
+| `src/config/types.ts` | DiscordConfig に applicationId/publicKey/botToken/interactionPort/listenEnabled 追加 |
+| `src/agent/agent-loop.ts` | `isProcessing` フラグ追加、source パラメータ対応 |
+| `src/cli/repl.ts` | `/discord app-id|public-key|bot-token|port|register|listen` 追加 |
+| `src/index.ts` | `--background` フラグでデーモンモード |
+
+---
+
+## Phase 4: 権限管理強化 (2026-03-10 実装)
+
+### SEC-01: Claude Code 互換パターンベース権限ルール
+
+**背景**: Claude Code の `allow/deny/ask` パターンルール（例: `Bash(npm *)`）に相当する柔軟な権限設定を実装。
+
+**実装内容**:
+
+1. **パターンルールエンジン** (`src/security/rule-engine.ts` 新規)
+   - `evaluateRules(rules, toolName, params)` → `"allow" | "deny" | "ask" | null`
+   - ルール形式: `bash(npm *)`, `file_write(./src/**)`, `web_fetch(domain:github.com)`
+   - glob パターン(`*`, `**`, `?`)対応
+   - Claude Code エイリアス対応（Bash/Read/Write/Edit/WebFetch 等）
+   - 評価順: deny → allow → ask（最初にマッチしたルールが適用）
+
+2. **権限ソース分離** (`src/security/permission-manager.ts` 大幅改修)
+   - `RequestSource = "cli" | "discord"` 追加
+   - CLI: `rules` → `autoApproveTools/requireApprovalTools` → 確認ダイアログ（5択）
+   - Discord: `rules.deny` → `INHERENTLY_SAFE_TOOLS + discordAutoApproveTools`（headless）
+   - **deny ルールは CLI・Discord 双方に適用**（セキュリティ強制）
+   - ツール定義フィルタリング: Discord では許可ツールのみ LLM に提示
+   - 確認ダイアログ 5択: 今回のみ / セッション中常に / 設定に保存して常に / 拒否 / 中止
+
+3. **設定スキーマ拡張** (`src/config/types.ts`)
+   - `SecurityRuleConfig { allow, deny, ask }` 追加
+   - `SecurityConfig.rules` 追加
+   - `SecurityConfig.discordAutoApproveTools` 追加
+   - `loadConfig()` でツールリストを union マージ（新デフォルトが既存 config に自動反映）
+
+4. **REPL コマンド拡張** (`src/cli/repl.ts`)
+   - `/permission list/rules/rule-add/rule-remove/auto-add/auto-remove/require-add/require-remove/discord-add/discord-remove`
+
+5. **タブ補完強化** (`src/cli/completer.ts`)
+   - `/permission` 全サブコマンドを補完候補に追加
+   - `/permission auto-add <tool>` 等でツール名の補完対応
+
+6. **永続保存** (`src/index.ts`)
+   - 「設定に保存して常に許可」選択時に `autoApproveTools` に追記して `config.json` 保存
+
+## 変更ファイル一覧 (Phase 4)
+
+| ファイル | 変更内容 |
+|---------|---------|
+| `src/security/rule-engine.ts` | 新規: パターンルールエンジン |
+| `src/security/permission-manager.ts` | 大幅改修: Discord/CLI分離、5択ダイアログ、ルール評価 |
+| `src/config/types.ts` | SecurityRuleConfig 追加、discordAutoApproveTools 追加 |
+| `src/config/config-manager.ts` | ツールリストの union マージ |
+| `src/agent/agent-loop.ts` | currentSource フィールド、Discord ツール定義フィルタリング |
+| `src/tools/tool-executor.ts` | source パラメータ追加 |
+| `src/discord/interaction-server.ts` | source: "discord" でエージェント呼び出し |
+| `src/cli/repl.ts` | /permission 全サブコマンド追加 |
+| `src/cli/completer.ts` | /permission 補完、ツール名補完 |
+| `src/index.ts` | onPermanentApprove コールバック、saveConfig 連携 |

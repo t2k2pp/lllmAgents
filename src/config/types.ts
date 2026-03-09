@@ -44,11 +44,24 @@ export interface SecondLLMConfig {
   cost: CostConfig;
 }
 
+export interface SecurityRuleConfig {
+  /** 自動許可するパターンルール例: "bash(npm *)", "file_write(./src/**)" */
+  allow: string[];
+  /** 常に拒否するパターンルール例: "bash(rm -rf *)" */
+  deny: string[];
+  /** 常に確認するパターンルール例: "bash(git push *)" */
+  ask: string[];
+}
+
 export interface SecurityConfig {
   allowedDirectories: string[];
   blockedCommands: string[];
   autoApproveTools: string[];
   requireApprovalTools: string[];
+  /** Discord経由のリクエストで自動許可するツール（インタラクティブ確認なし） */
+  discordAutoApproveTools: string[];
+  /** Claude Code 互換のパターンベース権限ルール（ツール名リストより優先） */
+  rules?: SecurityRuleConfig;
   streamCommandOutput?: boolean;
 }
 
@@ -60,6 +73,12 @@ export interface ContextConfig {
 export interface DiscordConfig {
   enabled: boolean;
   webhookUrl: string;
+  // Slash Command 受信用 (Discord Developer Portal で取得)
+  applicationId?: string;
+  publicKey?: string;       // Ed25519 公開鍵 (署名検証用)
+  botToken?: string;        // Bot トークン (コマンド登録・follow-up 送信)
+  interactionPort?: number; // HTTP サーバーポート (デフォルト: 3003)
+  listenEnabled?: boolean;  // 起動時に interaction サーバーを自動起動するか
 }
 
 export interface Config {
@@ -125,6 +144,17 @@ export function getDefaultConfig(): Config {
         "web_search", "web_fetch",
       ],
       requireApprovalTools: ["file_write", "file_edit", "bash", "browser_navigate", "browser_click", "browser_type"],
+      discordAutoApproveTools: [
+        "file_read", "glob", "grep",
+        "web_search", "web_fetch",
+        "browser_snapshot", "vision_analyze",
+        "current_datetime", "sandbox_info",
+      ],
+      rules: {
+        allow: [],
+        deny: [],
+        ask: [],
+      },
       streamCommandOutput: true,
     },
     context: {
@@ -134,6 +164,8 @@ export function getDefaultConfig(): Config {
     discord: {
       enabled: false,
       webhookUrl: "",
+      interactionPort: 3003,
+      listenEnabled: false,
     },
   };
 }

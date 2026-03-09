@@ -107,8 +107,28 @@ stateDiagram-v2
 | `/diff` | 現在のセッションでの変更差分を表示します |
 | `/mode` | コンテキストモード（dev/review/research）の表示・切替を行います |
 | `/discord` | Discord通知設定の確認・有効化・無効化・URL設定を行います |
+| `/permission` | ツール実行権限の表示・変更を行います（サブコマンドあり） |
 
 ※ `/setup` は REPL コマンドではなく、CLI起動時のフラグ `--setup` で実行します。
+
+#### `/permission` サブコマンド一覧
+
+| サブコマンド | 説明 |
+|---|---|
+| `/permission list` | 現在の権限設定を一覧表示 |
+| `/permission rules` | パターンルール（allow/deny/ask）一覧表示 |
+| `/permission auto-add <tool>` | CLIの自動許可ツールに追加 |
+| `/permission auto-remove <tool>` | CLIの自動許可ツールから削除 |
+| `/permission require-add <tool>` | CLI確認必須ツールに追加 |
+| `/permission require-remove <tool>` | CLI確認必須ツールから削除 |
+| `/permission discord-add <tool>` | Discord自動許可ツールに追加 |
+| `/permission discord-remove <tool>` | Discord自動許可ツールから削除 |
+| `/permission rule-add allow <pattern>` | allowルールを追加（例: `bash(npm *)`） |
+| `/permission rule-add deny <pattern>` | denyルールを追加（例: `bash(rm -rf *)`） |
+| `/permission rule-add ask <pattern>` | askルールを追加（例: `bash(git push *)`） |
+| `/permission rule-remove allow <pattern>` | allowルールを削除 |
+| `/permission rule-remove deny <pattern>` | denyルールを削除 |
+| `/permission rule-remove ask <pattern>` | askルールを削除 |
 
 ## 3. 提供機能とツール群
 
@@ -165,6 +185,40 @@ graph TD
 
 ## 4. セキュリティ・権限モデルのUXフロー
 
+### 4.1 権限ソース（CLI / Discord）の分離
+
+リクエストの発生元によって権限評価フローが異なります。
+
+| 評価項目 | CLI（チャット） | Discord |
+|---|---|---|
+| パターンルール deny | ✅ 適用 | ✅ 適用（セキュリティ強制） |
+| パターンルール allow | ✅ 適用 | ❌ 無視 |
+| パターンルール ask | ✅ 確認ダイアログ表示 | ❌ 無視 |
+| `autoApproveTools` | ✅ 自動許可 | ❌ 無視 |
+| `discordAutoApproveTools` | ❌ 無視 | ✅ 自動許可 |
+| `INHERENTLY_SAFE_TOOLS` | ✅ 常に自動許可 | ✅ 常に自動許可 |
+| インタラクティブ確認ダイアログ | ✅ あり | ❌ なし（headless） |
+
+Discord ではインタラクティブ確認が不可能なため、`discordAutoApproveTools` + `INHERENTLY_SAFE_TOOLS` に含まれるツールのみ実行可能です。許可されていないツールをLLMに提示しない（フィルタリング）ことで、Discord側で利用できない旨をLLMがユーザーに伝えます。
+
+### 4.2 パターンベース権限ルール
+
+Claude Code 互換のパターンルールで、ツール名リストより高い優先度で評価されます。
+
+**ルール評価順序: deny → allow → ask → ツール名リスト**
+
+ルール形式:
+```
+bash(npm *)                   # bash ツール、コマンドが "npm *" にマッチ
+file_write(./src/**)          # file_write ツール、パスが "./src/**" にマッチ
+web_fetch(domain:github.com)  # web_fetch ツール、URLが github.com ドメイン
+bash                          # bash ツール（引数問わず全マッチ）
+```
+
+Claude Code エイリアス対応: `Bash`→`bash`、`Read`→`file_read`、`Write`→`file_write`、`Edit`→`file_edit`、`WebFetch`→`web_fetch`
+
+### 4.3 CLI権限確認ダイアログ（UXフロー）
+
 ```mermaid
 sequenceDiagram
     actor U as ユーザー
@@ -173,24 +227,35 @@ sequenceDiagram
     participant Tool as Target Tool
 
     U->>CLI: 「package.jsonを書き換えて」
-    CLI->>PM: 対象ツールのディスパッチ (file_edit)
-    
-    PM->>PM: 権限レベルチェック (ask)
-    PM->>PM: サンドボックス判定
-    alt サンドボックス外・危険コマンド
-        PM-->>CLI: Action Blocked (Deny)
+    CLI->>PM: 対象ツールのディスパッチ (file_edit, source=cli)
+
+    PM->>PM: パターンルール評価 (deny/allow/ask)
+    alt denyルールにマッチ
+        PM-->>CLI: Action Blocked
         CLI-->>U: エラーメッセージ表示
-    else 許可されたスコープ内
-        PM-->>U: 実行を許可しますか？ [O(nce)/A(lways)/D(eny)]
+    else allowルールにマッチ
+        PM->>Tool: 自動実行
+    else askルール または requireApprovalTools
+        PM->>PM: サンドボックス判定
+        PM-->>U: 実行を許可しますか？（5択）
         U->>PM: ユーザー応答
-        alt D(eny)
-            PM-->>CLI: Action Rejected
-        else O(nce) or A(lways)
-            PM->>PM: (A)の場合セッションにキャッシュ
+        alt 拒否 または 中止
+            PM-->>CLI: Action Rejected / Abort
+        else 許可 (今回のみ)
+            PM->>PM: セッションキャッシュに追加
             PM->>Tool: 実行
-            Tool-->>CLI: 実行結果
+        else 許可 (セッション中常に)
+            PM->>PM: alwaysAllowTools に追加
+            PM->>Tool: 実行
+        else 許可 (設定に保存して常に)
+            PM->>PM: autoApproveTools に追加 + config.json保存
+            PM->>Tool: 実行
         end
+    else autoApproveTools
+        PM->>PM: サンドボックス判定
+        PM->>Tool: 自動実行
     end
+    Tool-->>CLI: 実行結果
 ```
 
 ## 5. 設定と環境要件
@@ -202,9 +267,13 @@ sequenceDiagram
   - `providerType`: `ollama`, `lmstudio`, `llamacpp`, `vllm` (4種のローカルLLMプロバイダ。内部的にはすべて OpenAI互換APIで通信)
   - `contextWindow`: トークン上限。これの80%(デフォルト)に達すると自動圧縮。
   - `allowedDirectories`: サンドボックスでアクセスを許可する追加のディレクトリリスト。
-  - `autoApproveTools`: 自動承認するツールのリスト (デフォルト: `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`)
-  - `requireApprovalTools`: 承認が必要なツールのリスト
+  - `autoApproveTools`: CLI経由で自動許可するツールのリスト (デフォルト: `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`, `web_search`, `web_fetch`)
+  - `requireApprovalTools`: CLI経由で確認必須なツールのリスト
+  - `discordAutoApproveTools`: Discord経由で自動許可するツールのリスト（インタラクティブ確認なし）
+  - `rules`: パターンベース権限ルール（`allow` / `deny` / `ask` の3種。`/permission rule-add` で管理）
   - `discord`: Discord連携の設定 (有効化フラグ `enabled` と 通知先URL `webhookUrl`)
+
+> **設定の自動マージ**: バージョンアップで新しいデフォルトツールが追加された場合、既存の `config.json` と新デフォルトの和集合が使用されるため、再設定は不要です。
 
 #### Discord Webhook URL の取得と設定手順
 

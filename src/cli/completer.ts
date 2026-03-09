@@ -39,7 +39,23 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/status", description: "ステータス" },
   { command: "/mode", description: "コンテキストモード" },
   { command: "/discord", description: "Discord通知の設定" },
+  { command: "/permission", description: "権限設定" },
+  { command: "/permission list", description: "権限設定一覧" },
+  { command: "/permission auto-add", description: "CLI自動許可に追加" },
+  { command: "/permission auto-remove", description: "CLI自動許可から削除" },
+  { command: "/permission require-add", description: "CLI確認必要に追加" },
+  { command: "/permission require-remove", description: "CLI確認必要から削除" },
+  { command: "/permission discord-add", description: "Discord許可に追加" },
+  { command: "/permission discord-remove", description: "Discord許可から削除" },
+  { command: "/permission rules", description: "パターンルール一覧" },
+  { command: "/permission rule-add allow", description: "allowルールを追加" },
+  { command: "/permission rule-add deny", description: "denyルールを追加" },
+  { command: "/permission rule-add ask", description: "askルールを追加" },
+  { command: "/permission rule-remove allow", description: "allowルールを削除" },
+  { command: "/permission rule-remove deny", description: "denyルールを削除" },
+  { command: "/permission rule-remove ask", description: "askルールを削除" },
 ];
+
 
 // ─── MenuProvider（InteractiveInput用ドロップダウン） ────
 
@@ -49,6 +65,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
  */
 export function createCommandMenuProvider(
   skillTriggers: { trigger: string; description: string }[] = [],
+  toolNames: string[] = [],
 ): MenuProvider {
   const allDefs: CommandDef[] = [
     ...BUILTIN_COMMAND_DEFS,
@@ -59,6 +76,25 @@ export function createCommandMenuProvider(
   ];
 
   return (partial: string): MenuItem[] => {
+    // /permission <subcommand> <tool名> のツール名補完
+    // partial 例: "permission auto-add ba"
+    const permToolMatch = partial.match(
+      /^(permission (auto-add|auto-remove|require-add|require-remove|discord-add|discord-remove) )(.*)$/,
+    );
+    if (permToolMatch && toolNames.length > 0) {
+      const cmdPrefix = permToolMatch[1]; // "permission auto-add "
+      const toolPrefix = permToolMatch[3]; // 入力中のツール名プレフィックス
+      return toolNames
+        .filter((n) => n.startsWith(toolPrefix))
+        .sort()
+        .map((n) => ({
+          label: `/${cmdPrefix}${n}`,
+          value: `/${cmdPrefix}${n}`,
+          description: "ツール名",
+        }));
+    }
+
+    // 通常コマンドマッチ
     return allDefs
       .filter((d) => d.command.slice(1).startsWith(partial.toLowerCase()))
       .map((d) => ({
@@ -92,6 +128,7 @@ const BUILTIN_COMMANDS = BUILTIN_COMMAND_DEFS.map((d) => d.command);
 
 export interface CompleterOptions {
   skillTriggers?: string[];
+  toolNames?: string[];
   cwd?: string;
 }
 
@@ -100,9 +137,20 @@ export function createCompleter(
 ): (line: string) => CompleterResult {
   const { skillTriggers = [], cwd = process.cwd() } = options;
   const allCommands = [...BUILTIN_COMMANDS, ...skillTriggers];
+  const toolNames = options.toolNames ?? [];
 
   return (line: string): CompleterResult => {
     if (line.startsWith("/")) {
+      // /permission <subcommand> <tool名> のツール名補完
+      const permToolMatch = line.match(
+        /^(\/permission (?:auto-add|auto-remove|require-add|require-remove|discord-add|discord-remove) )(.*)$/,
+      );
+      if (permToolMatch && toolNames.length > 0) {
+        const cmdPrefix = permToolMatch[1];
+        const toolPrefix = permToolMatch[2];
+        const matches = toolNames.filter((n) => n.startsWith(toolPrefix)).map((n) => `${cmdPrefix}${n}`);
+        return [matches, line];
+      }
       const matches = allCommands.filter((cmd) => cmd.startsWith(line));
       return [matches, line];
     }

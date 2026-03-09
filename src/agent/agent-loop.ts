@@ -2,13 +2,13 @@ import chalk from "chalk";
 import ora from "ora";
 import { globalTokenTracker } from "../cost/token-tracker.js";
 import { globalCostCalculator } from "../cost/cost-calculator.js";
-import inquirer from "inquirer";
+import { select } from "@inquirer/prompts";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
 import type { LLMProvider, ToolCall, ToolDefinition, ContentPart } from "../providers/base-provider.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
-import type { PermissionManager } from "../security/permission-manager.js";
+import type { PermissionManager, RequestSource } from "../security/permission-manager.js";
 import type { HookManager } from "../hooks/hook-manager.js";
 import { MessageHistory } from "./message-history.js";
 import { ContextManager } from "./context-manager.js";
@@ -47,6 +47,10 @@ export class AgentLoop {
   private session: SessionData;
   private planManager: PlanManager | null = null;
   private contextModeManager: ContextModeManager | null = null;
+  /** Discord Interaction Server などから並行処理を避けるためのフラグ */
+  public isProcessing = false;
+  /** 現在処理中のリクエストの発生元 */
+  private currentSource: RequestSource = "cli";
 
   constructor(
     private provider: LLMProvider,
@@ -71,7 +75,10 @@ export class AgentLoop {
     this.planManager = pm;
   }
 
-  async run(userMessage: string | ContentPart[]): Promise<void> {
+  async run(userMessage: string | ContentPart[], options?: { source?: RequestSource }): Promise<void> {
+    this.currentSource = options?.source ?? "cli";
+    this.isProcessing = true;
+    try {
     this.history.addUserMessage(userMessage);
     // <think>タグフィルター（古いOllama向け、ストリーム跨ぎ対応）
     const filterThinkingTags = createThinkingFilter();
@@ -339,14 +346,22 @@ export class AgentLoop {
     }
 
     console.log(chalk.yellow("\n  Maximum tool iterations reached."));
+    } finally {
+      this.isProcessing = false;
+    }
   }
 
-  /** Get tool definitions, filtered by plan mode if active */
+  /** Get tool definitions, filtered by plan mode or Discord source */
   private getFilteredToolDefs(): ToolDefinition[] {
     const allDefs = this.toolRegistry.getDefinitions();
 
     if (this.planManager?.isInPlanMode()) {
       const allowed = PlanManager.getPlanModeAllowedTools();
+      return allDefs.filter((d) => allowed.has(d.function.name));
+    }
+
+    if (this.currentSource === "discord") {
+      const allowed = this.permissions.getDiscordAllowedToolNames();
       return allDefs.filter((d) => allowed.has(d.function.name));
     }
 
@@ -356,7 +371,7 @@ export class AgentLoop {
   /** Execute a single tool call, returning whether to abort the rest of the run loop */
   private async executeSingleTool(toolCall: ToolCall): Promise<boolean> {
     const spinner = ora(chalk.dim(`  ${toolCall.function.name}...`)).start();
-    const result = await this.toolExecutor.execute(toolCall);
+    const result = await this.toolExecutor.execute(toolCall, this.currentSource);
 
     if (result.success) {
       spinner.succeed(chalk.dim(`  ${toolCall.function.name}`));
@@ -377,7 +392,7 @@ export class AgentLoop {
     console.log(chalk.dim(`\n  ⟹ ${toolCalls.length} tools in parallel...`));
 
     const promises = toolCalls.map(async (toolCall) => {
-      const result = await this.toolExecutor.execute(toolCall);
+      const result = await this.toolExecutor.execute(toolCall, this.currentSource);
       const icon = result.success ? chalk.green("✓") : chalk.red("✗");
       const suffix = result.success ? "" : `: ${result.error}`;
       console.log(chalk.dim(`  ${icon} ${toolCall.function.name}${suffix}`));
@@ -474,17 +489,13 @@ async function askUserOnError(err: Error): Promise<"retry" | "abort"> {
 
   console.log(chalk.dim(`  ${hint}`));
 
-  const { action } = await inquirer.prompt<{ action: "retry" | "abort" }>([
-    {
-      type: "list",
-      name: "action",
-      message: "どうしますか？",
-      choices: [
-        { name: "リトライ (同じリクエストを再送信)", value: "retry" },
-        { name: "中止 (プロンプトに戻る)", value: "abort" },
-      ],
-    },
-  ]);
+  const action = await select<"retry" | "abort">({
+    message: "どうしますか？",
+    choices: [
+      { name: "リトライ (同じリクエストを再送信)", value: "retry" },
+      { name: "中止 (プロンプトに戻る)", value: "abort" },
+    ],
+  });
 
   return action;
 }

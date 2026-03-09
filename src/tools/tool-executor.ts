@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import type { ToolCall } from "../providers/base-provider.js";
 import type { ToolRegistry, ToolResult } from "./tool-registry.js";
-import type { PermissionManager } from "../security/permission-manager.js";
+import type { PermissionManager, RequestSource } from "../security/permission-manager.js";
 import type { HookManager } from "../hooks/hook-manager.js";
 import * as logger from "../utils/logger.js";
 
@@ -12,7 +12,7 @@ export class ToolExecutor {
     private hookManager?: HookManager,
   ) {}
 
-  async execute(toolCall: ToolCall): Promise<ToolResult> {
+  async execute(toolCall: ToolCall, source: RequestSource = "cli"): Promise<ToolResult> {
     const toolName = toolCall.function.name;
     const handler = this.registry.get(toolName);
 
@@ -36,7 +36,7 @@ export class ToolExecutor {
     }
 
     // Permission check
-    const permission = await this.permissions.checkToolPermission(toolName, params);
+    const permission = await this.permissions.checkToolPermission(toolName, params, source);
     if (!permission.allowed) {
       console.log(chalk.red(`  BLOCKED: ${permission.reason}`));
       return {
