@@ -29,7 +29,7 @@ import { askUserTool } from "./tools/definitions/ask-user.js";
 import { createBrowserTools } from "./tools/definitions/browser.js";
 import { taskTool, taskOutputTool, setSubAgentManager } from "./tools/definitions/task.js";
 import { enterPlanModeTool, exitPlanModeTool, setPlanManager } from "./tools/definitions/plan-mode.js";
-import { skillTool, setSkillRegistry } from "./tools/definitions/skill.js";
+import { skillTool, setSkillRegistry, setSkillPermissionManager } from "./tools/definitions/skill.js";
 import { secondLLMConsultTool, secondLLMAgentTool, setSecondLLMManager } from "./tools/definitions/second-llm.js";
 
 import { displayWelcome } from "./cli/renderer.js";
@@ -160,6 +160,7 @@ async function main(): Promise<void> {
     skillRegistry.register(skill);
   }
   setSkillRegistry(skillRegistry);
+  setSkillPermissionManager(permissions);
 
   // Build skill infos for system prompt
   const skillInfos = skillRegistry.list().map((s) => ({

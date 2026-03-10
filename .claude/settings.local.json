@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo \"/skills:*)",
+      "Bash(timeout 30 npx tsx src/index.ts)",
+      "Bash(node -e \"import\\(''marked''\\).then\\(m => console.log\\(''marked OK:'', m.marked.version || ''ok''\\)\\).catch\\(e => console.log\\(''marked not available:'', e.message\\)\\)\")",
+      "Bash(npx tsc --noEmit)"
+    ]
+  }
+}

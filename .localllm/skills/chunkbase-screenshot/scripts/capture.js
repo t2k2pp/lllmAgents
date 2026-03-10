@@ -44,10 +44,10 @@ async function main() {
 
   try {
     // タイムアウトを長めに設定
-    await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
-    // 広告やオーバーレイなどを考慮して少し待機
-    await page.waitForTimeout(3000);
+    // JS描画を待つ（networkidleより確実）
+    await page.waitForTimeout(5000);
 
     // キャンバスが見えるように1スクリーン分（ここでは600px程度）スクロール
     await page.evaluate(() => {
@@ -55,14 +55,27 @@ async function main() {
     });
 
     // スクロール描画を待つ
-    await page.waitForTimeout(2000);
-    
-    // サブフレームではなくトップレベルの要素を探す
+    await page.waitForTimeout(3000);
+
+    // #map-canvas を試みる（タイムアウトを延長）
     const locator = page.locator('#map-canvas');
-    await locator.waitFor({ state: 'visible', timeout: 15000 });
-    
-    // キャプチャの実行
-    await locator.screenshot({ path: outPath });
+    const canvasFound = await locator.isVisible().catch(() => false);
+
+    if (canvasFound) {
+      await locator.screenshot({ path: outPath });
+    } else {
+      // フォールバック: canvas要素全般を探す
+      const anyCanvas = page.locator('canvas').first();
+      const anyCanvasFound = await anyCanvas.isVisible().catch(() => false);
+      if (anyCanvasFound) {
+        console.log('[情報] #map-canvas が見つからないため canvas 要素でフォールバック');
+        await anyCanvas.screenshot({ path: outPath });
+      } else {
+        // 最終フォールバック: ページ全体をスクリーンショット
+        console.log('[情報] canvas が見つからないためページ全体をキャプチャ');
+        await page.screenshot({ path: outPath, fullPage: false });
+      }
+    }
 
     console.log(`[成功] 画像を保存しました: ${outPath}`);
   } catch (error) {
