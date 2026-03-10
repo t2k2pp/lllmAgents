@@ -855,3 +855,99 @@ sequenceDiagram
 ### Discord 2000文字制限への対応
 
 DiscordのWebhookAPIは1リクエストあたりのメッセージ長に **2000文字の制限** があります。LLMの応答がこれを超える場合、`src/utils/discord.ts` 内の `sendDiscordNotification` メソッドが自動的に文字列をチャンクに分割し、複数回の POST リクエストとして順次送信します。分割時は、なるべくキリの良い場所（改行など）で区切るような配慮が組み込まれています。
+
+---
+
+## 10. 非TTYモード対応と stdin 共有設計 (2026-03-11 追加)
+
+### 背景・問題
+
+パイプ入力（`printf "..." | npm run start`）のような非TTY環境で実行した際に、2つのバグが発生した。
+
+**バグ1: 並列ツール実行時の権限確認競合**
+LLMが複数のツールを `Promise.allSettled` で並列実行すると、各ツールが同時に `inquirer.prompt` を呼び出す。
+TTY環境では inquirer が stdin を排他的に取得するが、非TTY時は stdin が閉じた瞬間に全インスタンスが
+`ExitPromptError: User force closed the prompt with 0 null` を投げてクラッシュしていた。
+
+**バグ2: readline が stdin バッファを消費・破棄する問題**
+REPL の `fallbackQuestion` が `readline.createInterface` を毎回作成し、`rl.close()` 時に
+readline の内部バッファに残っていた行データ（次の入力用）が失われていた。
+例: `printf "prompt\n1\n1\n..."` でパイプしても "prompt" 以降の "1"s が届かずハングアップ。
+
+### 解決策
+
+#### NonTTYReader シングルトン (`src/utils/non-tty-reader.ts`)
+
+readline インスタンスを **1つだけ** 作成し、REPL と PermissionManager で共有する。
+
+```
+stdin (pipe)
+    │
+    ▼
+readline.Interface (1インスタンス, terminal: false)
+    │
+    ├─ "line" イベント
+    │       ├─ waiters がある → 即時 resolve
+    │       └─ waiters なし  → lineQueue に積む
+    │
+    └─ "close" イベント → 全 waiters を "" で resolve
+```
+
+`lineQueue` (先読みキュー) と `waiters` (待ちリスト) を使い、
+どちらが先に来ても正しく行データを受け渡す。
+
+#### REPL fallbackQuestion の変更 (`src/cli/interactive-input.ts`)
+
+```typescript
+// 変更前
+private fallbackQuestion(prefix: string): Promise<string> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, ... });
+    rl.question(prefix, (answer) => { rl.close(); resolve(answer); });
+  });
+}
+
+// 変更後
+private fallbackQuestion(prefix: string): Promise<string> {
+  process.stdout.write(prefix);
+  return nonTTYReader.readLine();  // 共有シングルトンから読む
+}
+```
+
+#### PermissionManager の修正 (`src/security/permission-manager.ts`)
+
+```typescript
+// 追加フィールド
+private _permissionQueue: Promise<void> = Promise.resolve();
+
+// askUserWithScope: 並列実行を直列化
+private async askUserWithScope(...) {
+  let resolveQueue!: () => void;
+  const prev = this._permissionQueue;
+  this._permissionQueue = new Promise<void>((r) => { resolveQueue = r; });
+  await prev;  // 前の確認が終わるまで待つ
+
+  try {
+    if (!process.stdin.isTTY) {
+      return await this.askUserNonTTY(toolName, cacheKey);  // 非TTY: テキストメニュー
+    }
+    // TTY: inquirer (変更なし) + ExitPromptError キャッチ追加
+  } finally {
+    resolveQueue();  // 次の確認を解放
+  }
+}
+```
+
+### 非TTY時の権限確認 UI
+
+```
+  [bash] $ node .../capture.js 1001
+  1: 許可 (今回のみ)
+  2: 許可 (bash をセッション中常に許可)
+  3: 許可 (bash を設定に保存して常に許可)
+  4: 拒否
+  5: 中止
+選択 [1-5]:
+```
+
+パイプで数値を送ることで選択できる。**3は config.json を永続変更するため、テスト時は使用禁止。**

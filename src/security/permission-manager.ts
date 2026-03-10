@@ -5,6 +5,7 @@ import type { PermissionLevel } from "./rules.js";
 import { checkCommand } from "./rules.js";
 import { Sandbox } from "./sandbox.js";
 import { evaluateRules } from "./rule-engine.js";
+import { nonTTYReader } from "../utils/non-tty-reader.js";
 
 /** リクエストの発生元 */
 export type RequestSource = "cli" | "discord";
@@ -31,6 +32,8 @@ export class PermissionManager {
   private sessionApprovals = new Set<string>();
   // Always-allow for specific tools in this session
   private alwaysAllowTools = new Set<string>();
+  // 並列ツール実行時に権限確認を直列化するキュー
+  private _permissionQueue: Promise<void> = Promise.resolve();
 
   constructor(
     securityConfig: SecurityConfig,
@@ -117,6 +120,10 @@ export class PermissionManager {
 
   isPathAllowed(targetPath: string): boolean {
     return this.sandbox.isPathAllowed(targetPath);
+  }
+
+  addAllowedDir(dir: string): void {
+    this.sandbox.addAllowedDir(dir);
   }
 
   async checkToolPermission(
@@ -230,34 +237,90 @@ export class PermissionManager {
     params: Record<string, unknown>,
     cacheKey: string,
   ): Promise<{ allowed: boolean; reason?: string; abortExecution?: boolean }> {
-    const summary = this.formatToolSummary(toolName, params);
-    console.log(chalk.cyan(`\n  [${toolName}] ${summary}`));
+    // 並列ツール実行時でも確認を1件ずつ直列化する
+    let resolveQueue!: () => void;
+    const prev = this._permissionQueue;
+    this._permissionQueue = new Promise<void>((r) => { resolveQueue = r; });
+    await prev;
 
-    const { action } = await inquirer.prompt<{ action: string }>([
-      {
-        type: "list",
-        name: "action",
-        message: "実行を許可しますか？",
-        choices: [
-          { name: "許可 (今回のみ)", value: "once" },
-          { name: `許可 (${toolName} をセッション中常に許可)`, value: "always" },
-          { name: `許可 (${toolName} を設定に保存して常に許可)`, value: "permanent" },
-          { name: "拒否", value: "deny" },
-          { name: "中止 (Agentを中断してプロンプトに戻る)", value: "abort" },
-        ],
-      },
-    ]);
+    try {
+      const summary = this.formatToolSummary(toolName, params);
+      console.log(chalk.cyan(`\n  [${toolName}] ${summary}`));
 
+      // 非TTYモード（パイプ等）: readline テキストメニューにフォールバック
+      if (!process.stdin.isTTY) {
+        return await this.askUserNonTTY(toolName, cacheKey);
+      }
+
+      // TTYモード: inquirer インタラクティブリスト
+      let action: string;
+      try {
+        const result = await inquirer.prompt<{ action: string }>([
+          {
+            type: "list",
+            name: "action",
+            message: "実行を許可しますか？",
+            choices: [
+              { name: "許可 (今回のみ)", value: "once" },
+              { name: `許可 (${toolName} をセッション中常に許可)`, value: "always" },
+              { name: `許可 (${toolName} を設定に保存して常に許可)`, value: "permanent" },
+              { name: "拒否", value: "deny" },
+              { name: "中止 (Agentを中断してプロンプトに戻る)", value: "abort" },
+            ],
+          },
+        ]);
+        action = result.action;
+      } catch (e) {
+        // stdinが閉じられた場合などのフォールバック
+        if (e instanceof Error && (e.constructor.name === "ExitPromptError" || e.message.includes("force closed"))) {
+          console.log(chalk.yellow("  (入力が閉じられたため中止)"));
+          return { allowed: false, abortExecution: true };
+        }
+        throw e;
+      }
+
+      return this.resolvePermissionAction(action, toolName, cacheKey);
+    } finally {
+      resolveQueue();
+    }
+  }
+
+  /** 非TTYモード用: NonTTYReader から1行読んでテキストメニューで選択 */
+  private async askUserNonTTY(
+    toolName: string,
+    cacheKey: string,
+  ): Promise<{ allowed: boolean; reason?: string; abortExecution?: boolean }> {
+    process.stdout.write(
+      `  1: 許可 (今回のみ)\n` +
+      `  2: 許可 (${toolName} をセッション中常に許可)\n` +
+      `  3: 許可 (${toolName} を設定に保存して常に許可)\n` +
+      `  4: 拒否\n` +
+      `  5: 中止\n` +
+      `選択 [1-5]: `,
+    );
+
+    const answer = await nonTTYReader.readLine();
+
+    const actionMap: Record<string, string> = {
+      "1": "once", "2": "always", "3": "permanent", "4": "deny", "5": "abort",
+    };
+    const action = actionMap[answer] ?? "abort";
+    return this.resolvePermissionAction(action, toolName, cacheKey);
+  }
+
+  /** action 文字列から許可結果を返す（TTY/非TTY共通） */
+  private resolvePermissionAction(
+    action: string,
+    toolName: string,
+    cacheKey: string,
+  ): { allowed: boolean; reason?: string; abortExecution?: boolean } {
     if (action === "abort") {
       return { allowed: false, reason: "ユーザーが中止しました", abortExecution: true };
     }
-
     if (action === "deny") {
       return { allowed: false, reason: "ユーザーが拒否しました" };
     }
-
     if (action === "permanent") {
-      // セッション内のautoApproveに追加 + config.jsonに永続保存
       this.autoApprove.add(toolName);
       if (this.onPermanentApprove) {
         this.onPermanentApprove(toolName);
@@ -269,7 +332,6 @@ export class PermissionManager {
       // "once"
       this.sessionApprovals.add(cacheKey);
     }
-
     return { allowed: true };
   }
 

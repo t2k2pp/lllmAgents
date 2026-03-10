@@ -15,6 +15,7 @@
 
 import * as readline from "node:readline";
 import chalk from "chalk";
+import { nonTTYReader } from "../utils/non-tty-reader.js";
 
 // ─── 公開型 ─────────────────────────────────────────────
 
@@ -69,16 +70,10 @@ export class InteractiveInput {
   // ─── readline フォールバック（非TTY） ────────────────
 
   private fallbackQuestion(prefix: string): Promise<string> {
-    return new Promise<string>((resolve) => {
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-      });
-      rl.question(prefix, (answer) => {
-        rl.close();
-        resolve(answer);
-      });
-    });
+    // 非TTYモードでは NonTTYReader シングルトンを使う
+    // （readline.createInterface を毎回作ると内部バッファが失われる問題を回避）
+    process.stdout.write(prefix);
+    return nonTTYReader.readLine();
   }
 
   // ─── インタラクティブ入力（メイン） ──────────────────
