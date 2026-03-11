@@ -1,0 +1,4 @@
+## 2024-05-24 - Fix Command Injection in Tool Definition
+**Vulnerability:** Found a command injection vulnerability in `src/tools/definitions/grep.ts` where `execSync` was used with a string created by `.join(" ")`, potentially allowing arbitrary command execution if an attacker manages to escape the command arguments.
+**Learning:** `execSync` executes commands within a shell by default when given a string, making it highly susceptible to command injection vulnerabilities when user input is included in the command string, even when arguments are appended to an array first if that array is then `.join(" ")`ed.
+**Prevention:** Avoid using `execSync` with dynamically constructed strings. Instead, use `execFileSync` or `spawn` without a shell context, passing arguments as a separate array to prevent argument injection and ensure that arguments are not evaluated by a shell.
