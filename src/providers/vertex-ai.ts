@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { OpenAICompatProvider } from "./openai-compat.js";
 
 interface VertexEndpointConfig {
@@ -26,7 +26,8 @@ export class VertexAIProvider extends OpenAICompatProvider {
     }
 
     try {
-      const token = execSync("gcloud auth print-access-token", { encoding: "utf8" }).trim();
+      // Security: Use execFileSync instead of execSync to prevent command injection
+      const token = execFileSync("gcloud", ["auth", "print-access-token"], { encoding: "utf8" }).trim();
       this.cachedToken = {
         value: token,
         expiresAt: now + this.TOKEN_LIFETIME_MS,
