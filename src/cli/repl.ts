@@ -797,9 +797,10 @@ export class REPL {
 
       case "/diff": {
         console.log(chalk.dim("  直近のgit diffを表示..."));
-        const { execSync } = await import("node:child_process");
+        const { execFileSync } = await import("node:child_process");
         try {
-          const diff = execSync("git diff --stat", {
+          // Security: Use execFileSync instead of execSync to prevent command injection
+          const diff = execFileSync("git", ["diff", "--stat"], {
             encoding: "utf-8",
             cwd: process.cwd(),
           });
