@@ -40,6 +40,11 @@ class NonTTYLineReader {
     });
   }
 
+  /** stdin が閉じて（EOF）いるかどうか */
+  isClosed(): boolean {
+    return this.closed;
+  }
+
   private init(): void {
     this.rl = readline.createInterface({
       input: process.stdin,

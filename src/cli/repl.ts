@@ -25,6 +25,7 @@ import { DiscordInteractionServer } from "../discord/interaction-server.js";
 import { registerAskCommand } from "../discord/slash-commands.js";
 import { select } from "@inquirer/prompts";
 import { saveConfig } from "../config/config-manager.js";
+import { nonTTYReader } from "../utils/non-tty-reader.js";
 
 export class REPL {
   private input: InteractiveInput;
@@ -89,6 +90,11 @@ export class REPL {
 
         // ── EOF (Ctrl+D on empty / stdin closed) ──
         if (raw === "" && !this.isMultiline) {
+          // 非TTYモード（パイプ等）: stdin が閉じたら自動終了
+          if (!process.stdin.isTTY && nonTTYReader.isClosed()) {
+            console.log(chalk.dim("  (stdin closed, exiting)"));
+            break;
+          }
           continue;
         }
 

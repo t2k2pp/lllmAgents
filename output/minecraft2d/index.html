@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Minecraft Clone</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(to bottom, #87CEEB 0%, #E0F6FF 100%);
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        #gameContainer {
+            position: relative;
+        }
+        #gameCanvas {
+            border: 4px solid #333;
+            display: block;
+            background: #87CEEB;
+        }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        #blockSelector {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 5px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .blockBtn {
+            width: 40px;
+            height: 40px;
+            border: 3px solid transparent;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        .blockBtn:hover {
+            transform: scale(1.1);
+        }
+        .blockBtn.selected {
+            border-color: white;
+        }
+        .instructions {
+            margin-top: 5px;
+            font-size: 12px;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div id="ui">
+            <div><strong>2D Minecraft Clone</strong></div>
+            <div class="instructions">
+                WASD: Move | Click: Place/Break | 1-5: Select Block
+            </div>
+        </div>
+        <div id="blockSelector"></div>
+    </div>
+
+    <script>
+        // Game constants
+        const BLOCK_SIZE = 32;
+        const GRAVITY = 0.5;
+        const JUMP_FORCE = -10;
+        const MOVE_SPEED = 4;
+        const AIR_RESISTANCE = 0.9;
+        const GROUND_FRICTION = 0.8;
+
+        // Block types
+        const BLOCKS = {
+            AIR: 0,
+            DIRT: 1,
+            GRASS: 2,
+            STONE: 3,
+            WOOD: 4,
+            LEAF: 5,
+            SAND: 6,
+            WATER: 7
+        };
+
+        const BLOCK_COLORS = {
+            [BLOCKS.AIR]: null,
+            [BLOCKS.DIRT]: '#8B4513',
+            [BLOCKS.GRASS]: '#228B22',
+            [BLOCKS.STONE]: '#808080',
+            [BLOCKS.WOOD]: '#A0522D',
+            [BLOCKS.LEAF]: '#32CD32',
+            [BLOCKS.SAND]: '#F4A460',
+            [BLOCKS.WATER]: '#4169E1'
+        };
+
+        const BLOCK_NAMES = {
+            [BLOCKS.DIRT]: 'Dirt',
+            [BLOCKS.GRASS]: 'Grass',
+            [BLOCKS.STONE]: 'Stone',
+            [BLOCKS.WOOD]: 'Wood',
+            [BLOCKS.LEAF]: 'Leaf',
+            [BLOCKS.SAND]: 'Sand',
+            [BLOCKS.WATER]: 'Water'
+        };
+
+        // Game state
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const cols = Math.ceil(canvas.width / BLOCK_SIZE);
+        const rows = Math.ceil(canvas.height / BLOCK_SIZE);
+        
+        let world = [];
+        let player = {
+            x: canvas.width / 2,
+            y: canvas.height / 3,
+            width: 20,
+            height: 28,
+            vx: 0,
+            vy: 0,
+            grounded: false
+        };
+        let camera = { x: 0, y: 0 };
+        let selectedBlock = BLOCKS.DIRT;
+        let keys = {};
+        let mouse = { x: 0, y: 0, leftDown: false, rightDown: false };
+
+        // Initialize world
+        function initWorld() {
+            world = new Array(cols).fill(null).map(() => new Array(rows).fill(BLOCKS.AIR));
+            
+            // Generate terrain
+            let height = Math.floor(rows * 0.6);
+            for (let x = 0; x < cols; x++) {
+                // Simple terrain variation
+                if (x > 0 && Math.random() < 0.3) {
+                    height += Math.random() < 0.5 ? -1 : 1;
+                    height = Math.max(Math.floor(rows * 0.4), Math.min(Math.floor(rows * 0.7), height));
+                }
+                
+                for (let y = 0; y < rows; y++) {
+                    if (y < height) {
+                        world[x][y] = BLOCKS.AIR;
+                    } else if (y === height) {
+                        world[x][y] = BLOCKS.GRASS;
+                    } else if (y < height + 3) {
+                        world[x][y] = BLOCKS.DIRT;
+                    } else {
+                        world[x][y] = BLOCKS.STONE;
+                    }
+                }
+                
+                // Add trees occasionally
+                if (x < cols - 3 && Math.random() < 0.1 && world[x][height] === BLOCKS.GRASS) {
+                    createTree(x, height);
+                }
+                
+                // Add sand patches
+                if (x > 0 && x < cols - 1 && Math.random() < 0.05) {
+                    for (let i = 0; i < 3; i++) {
+                        if (world[x + i][height]) {
+                            world[x + i][height] = BLOCKS.SAND;
+                        }
+                    }
+                }
+            }
+            
+            // Set player position on ground - find ground level at player's x position
+            const playerCol = Math.floor(player.x / BLOCK_SIZE);
+            let groundRow = Math.floor(rows * 0.6);
+            // Search for actual ground level
+            for (let y = 0; y < rows; y++) {
+                if (world[playerCol][y] !== BLOCKS.AIR) {
+                    groundRow = y;
+                    break;
+                }
+            }
+            player.y = (groundRow - 1) * BLOCK_SIZE;
+        }
+
+        function createTree(x, groundY) {
+            const treeHeight = 3 + Math.floor(Math.random() * 2);
+            for (let y = 1; y <= treeHeight; y++) {
+                world[x][groundY - y] = BLOCKS.WOOD;
+            }
+            // Leaves
+            for (let lx = x - 2; lx <= x + 2; lx++) {
+                for (let ly = groundY - treeHeight - 2; ly <= groundY - treeHeight; ly++) {
+                    if (lx >= 0 && lx < cols && ly >= 0 && Math.abs(lx - x) + Math.abs(ly - (groundY - treeHeight)) <= 3) {
+                        if (world[lx][ly] === BLOCKS.AIR) {
+                            world[lx][ly] = BLOCKS.LEAF;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Input handlers
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+            if (e.key >= '1' && e.key <= '5') {
+                const blocks = [BLOCKS.DIRT, BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAF];
+                selectedBlock = blocks[parseInt(e.key) - 1];
+                updateBlockSelector();
+            }
+            if (e.key === ' ') e.preventDefault();
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+        
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
+        });
+        
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 0) mouse.leftDown = true;
+            if (e.button === 2) mouse.rightDown = true;
+            handleMouseClick();
+        });
+        
+        canvas.addEventListener('mouseup', (e) => {
+            if (e.button === 0) mouse.leftDown = false;
+            if (e.button === 2) mouse.rightDown = false;
+        });
+        
+        canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        function handleMouseClick() {
+            const worldX = mouse.x + camera.x;
+            const worldY = mouse.y + camera.y;
+            const blockX = Math.floor(worldX / BLOCK_SIZE);
+            const blockY = Math.floor(worldY / BLOCK_SIZE);
+            
+            if (blockX < 0 || blockX >= cols || blockY < 0 || blockY >= rows) return;
+            
+            // Calculate distance from player
+            const playerCenterX = player.x + player.width / 2;
+            const playerCenterY = player.y + player.height / 2;
+            const blockCenterX = blockX * BLOCK_SIZE + BLOCK_SIZE / 2;
+            const blockCenterY = blockY * BLOCK_SIZE + BLOCK_SIZE / 2;
+            const distance = Math.sqrt(
+                Math.pow(playerCenterX - blockCenterX, 2) + 
+                Math.pow(playerCenterY - blockCenterY, 2)
+            );
+            
+            if (distance > BLOCK_SIZE * 4) return; // Too far
+            
+            if (mouse.leftDown) {
+                // Place block (only on empty or water)
+                if (world[blockX][blockY] === BLOCKS.AIR || world[blockX][blockY] === BLOCKS.WATER) {
+                    // Check if player is not inside
+                    if (!checkPlayerCollision(blockX, blockY)) {
+                        world[blockX][blockY] = selectedBlock;
+                    }
+                }
+            } else if (mouse.rightDown) {
+                // Break block
+                world[blockX][blockY] = BLOCKS.AIR;
+            }
+        }
+
+        function checkPlayerCollision(blockX, blockY) {
+            const blockLeft = blockX * BLOCK_SIZE;
+            const blockRight = blockLeft + BLOCK_SIZE;
+            const blockTop = blockY * BLOCK_SIZE;
+            const blockBottom = blockTop + BLOCK_SIZE;
+            
+            return !(player.x + player.width < blockLeft ||
+                    player.x > blockRight ||
+                    player.y + player.height < blockTop ||
+                    player.y > blockBottom);
+        }
+
+        // Physics
+        function updatePhysics() {
+            // Horizontal movement
+            if (keys['a']) player.vx -= 0.5;
+            if (keys['d']) player.vx += 0.5;
+            
+            // Jump
+            if (keys['w'] && player.grounded) {
+                player.vy = JUMP_FORCE;
+                player.grounded = false;
+            }
+            
+            // Apply physics
+            player.vy += GRAVITY;
+            player.vx *= AIR_RESISTANCE;
+            
+            // Limit speed
+            player.vx = Math.max(-MOVE_SPEED, Math.min(MOVE_SPEED, player.vx));
+            
+            // Horizontal movement and collision
+            player.x += player.vx;
+            handleCollision(true);
+            
+            // Keep in bounds horizontally
+            if (player.x < 0) { player.x = 0; player.vx = 0; }
+            if (player.x > cols * BLOCK_SIZE - player.width) {
+                player.x = cols * BLOCK_SIZE - player.width;
+                player.vx = 0;
+            }
+            
+            // Vertical movement and collision
+            player.y += player.vy;
+            player.grounded = false;
+            handleCollision(false);
+            
+            // World bounds
+            if (player.y > rows * BLOCK_SIZE) {
+                player.y = 0;
+                player.vy = 0;
+            }
+            if (player.y < 0) {
+                player.y = 0;
+                player.vy = 0;
+            }
+        }
+
+        function handleCollision(horizontal) {
+            const startX = Math.floor(player.x / BLOCK_SIZE);
+            const endX = Math.floor((player.x + player.width - 0.1) / BLOCK_SIZE);
+            const startY = Math.floor(player.y / BLOCK_SIZE);
+            const endY = Math.floor((player.y + player.height - 0.1) / BLOCK_SIZE);
+            
+            for (let x = startX; x <= endX; x++) {
+                for (let y = startY; y <= endY; y++) {
+                    if (x >= 0 && x < cols && y >= 0 && y < rows) {
+                        const block = world[x][y];
+                        if (block !== BLOCKS.AIR && block !== BLOCKS.WATER) {
+                            if (horizontal) {
+                                if (player.vx > 0) {
+                                    player.x = x * BLOCK_SIZE - player.width - 0.1;
+                                } else if (player.vx < 0) {
+                                    player.x = (x + 1) * BLOCK_SIZE + 0.1;
+                                }
+                                player.vx = 0;
+                            } else {
+                                if (player.vy > 0) {
+                                    player.y = y * BLOCK_SIZE - player.height - 0.1;
+                                    player.grounded = true;
+                                } else if (player.vy < 0) {
+                                    player.y = (y + 1) * BLOCK_SIZE + 0.1;
+                                }
+                                player.vy = 0;
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Rendering
+        function render() {
+            // Clear canvas
+            ctx.fillStyle = '#87CEEB';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Update camera to follow player
+            camera.x = player.x - canvas.width / 2 + player.width / 2;
+            camera.y = player.y - canvas.height / 2 + player.height / 2;
+            
+            // Clamp camera
+            camera.x = Math.max(0, Math.min(camera.x, cols * BLOCK_SIZE - canvas.width));
+            camera.y = Math.max(0, Math.min(camera.y, rows * BLOCK_SIZE - canvas.height));
+            
+            // Draw blocks
+            const startCol = Math.floor(camera.x / BLOCK_SIZE);
+            const endCol = startCol + Math.ceil(canvas.width / BLOCK_SIZE) + 1;
+            const startRow = Math.floor(camera.y / BLOCK_SIZE);
+            const endRow = startRow + Math.ceil(canvas.height / BLOCK_SIZE) + 1;
+            
+            for (let x = startCol; x < endCol; x++) {
+                for (let y = startRow; y < endRow; y++) {
+                    if (x >= 0 && x < cols && y >= 0 && y < rows) {
+                        const block = world[x][y];
+                        if (block !== BLOCKS.AIR) {
+                            const screenX = Math.round(x * BLOCK_SIZE - camera.x);
+                            const screenY = Math.round(y * BLOCK_SIZE - camera.y);
+                            ctx.fillStyle = BLOCK_COLORS[block];
+                            ctx.fillRect(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE);
+                            
+                            // Add simple shading
+                            ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+                            ctx.lineWidth = 1;
+                            ctx.strokeRect(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE);
+                        }
+                    }
+                }
+            }
+            
+            // Draw player
+            const playerScreenX = Math.round(player.x - camera.x);
+            const playerScreenY = Math.round(player.y - camera.y);
+            
+            // Body
+            ctx.fillStyle = '#FF6347';
+            ctx.fillRect(playerScreenX, playerScreenY, player.width, player.height);
+            
+            // Head
+            ctx.fillStyle = '#FFE4C4';
+            ctx.fillRect(playerScreenX + 2, playerScreenY - 8, 16, 16);
+            
+            // Eyes
+            ctx.fillStyle = '#000';
+            ctx.fillRect(playerScreenX + 5, playerScreenY - 5, 3, 3);
+            ctx.fillRect(playerScreenX + 12, playerScreenY - 5, 3, 3);
+            
+            // Draw selection highlight
+            const worldX = mouse.x + camera.x;
+            const worldY = mouse.y + camera.y;
+            const blockX = Math.floor(worldX / BLOCK_SIZE);
+            const blockY = Math.floor(worldY / BLOCK_SIZE);
+            
+            if (blockX >= 0 && blockX < cols && blockY >= 0 && blockY < rows) {
+                const highlightX = blockX * BLOCK_SIZE - camera.x;
+                const highlightY = blockY * BLOCK_SIZE - camera.y;
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(Math.round(highlightX), Math.round(highlightY), BLOCK_SIZE, BLOCK_SIZE);
+            }
+        }
+
+        // Block selector UI
+        function initBlockSelector() {
+            const selector = document.getElementById('blockSelector');
+            const blocks = [BLOCKS.DIRT, BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAF];
+            
+            blocks.forEach((block, index) => {
+                const btn = document.createElement('canvas');
+                btn.className = 'blockBtn' + (block === selectedBlock ? ' selected' : '');
+                btn.width = 40;
+                btn.height = 40;
+                const ctx = btn.getContext('2d');
+                ctx.fillStyle = BLOCK_COLORS[block];
+                ctx.fillRect(2, 2, 36, 36);
+                ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+                ctx.strokeRect(2, 2, 36, 36);
+                btn.onclick = () => {
+                    selectedBlock = block;
+                    updateBlockSelector();
+                };
+                selector.appendChild(btn);
+            });
+        }
+
+        function updateBlockSelector() {
+            const btns = document.querySelectorAll('.blockBtn');
+            const blocks = [BLOCKS.DIRT, BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAF];
+            btns.forEach((btn, i) => {
+                if (blocks[i] === selectedBlock) {
+                    btn.classList.add('selected');
+                } else {
+                    btn.classList.remove('selected');
+                }
+            });
+        }
+
+        // Game loop
+        function gameLoop() {
+            updatePhysics();
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Initialize
+        initWorld();
+        initBlockSelector();
+        gameLoop();
+    </script>
+</body>
+</html>

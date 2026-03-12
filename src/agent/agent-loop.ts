@@ -3,6 +3,7 @@ import ora from "ora";
 import { globalTokenTracker } from "../cost/token-tracker.js";
 import { globalCostCalculator } from "../cost/cost-calculator.js";
 import { select } from "@inquirer/prompts";
+import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
 import type { LLMProvider, ToolCall, ToolDefinition, ContentPart } from "../providers/base-provider.js";
@@ -489,15 +490,35 @@ async function askUserOnError(err: Error): Promise<"retry" | "abort"> {
 
   console.log(chalk.dim(`  ${hint}`));
 
-  const action = await select<"retry" | "abort">({
-    message: "どうしますか？",
-    choices: [
-      { name: "リトライ (同じリクエストを再送信)", value: "retry" },
-      { name: "中止 (プロンプトに戻る)", value: "abort" },
-    ],
-  });
+  // 非TTYモード（パイプ等）: テキストメニューにフォールバック
+  if (!process.stdin.isTTY) {
+    process.stdout.write(
+      `  1: リトライ (同じリクエストを再送信)\n` +
+      `  2: 中止 (プロンプトに戻る)\n` +
+      `選択 [1-2]: `
+    );
+    const answer = await nonTTYReader.readLine();
+    return answer === "1" ? "retry" : "abort";
+  }
 
-  return action;
+  // TTYモード: inquirer インタラクティブリスト
+  try {
+    const action = await select<"retry" | "abort">({
+      message: "どうしますか？",
+      choices: [
+        { name: "リトライ (同じリクエストを再送信)", value: "retry" },
+        { name: "中止 (プロンプトに戻る)", value: "abort" },
+      ],
+    });
+    return action;
+  } catch (e) {
+    // stdinが閉じられた場合はabort
+    if (e instanceof Error && (e.constructor.name === "ExitPromptError" || e.message.includes("force closed"))) {
+      console.log(chalk.yellow("  (入力が閉じられたため中止)"));
+      return "abort";
+    }
+    throw e;
+  }
 }
 
 /**

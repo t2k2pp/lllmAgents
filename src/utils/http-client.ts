@@ -26,8 +26,9 @@ const DEFAULT_GET_TIMEOUT = 10_000; // 10秒
 /** 非ストリーミングPOST（モデル情報クエリ等）。ローカルLLM向けに余裕を持たせる */
 const DEFAULT_POST_TIMEOUT = 300_000; // 5分
 
-/** ストリーミング接続タイムアウト。fetch()〜レスポンスヘッダー受信まで */
-const DEFAULT_STREAM_CONNECT_TIMEOUT = 3_600_000; // 1時間
+/** ストリーミング接続タイムアウト。fetch()〜最初のトークン受信まで。
+ *  大型MoEモデル（122b等）は初回ロードに60分以上かかる場合があるため2時間に設定。 */
+const DEFAULT_STREAM_CONNECT_TIMEOUT = 7_200_000; // 2時間
 
 /** ストリーム読み取りのアイドルタイムアウト。チャンク間の最大無通信時間 */
 const DEFAULT_STREAM_IDLE_TIMEOUT = 3_600_000; // 60分
