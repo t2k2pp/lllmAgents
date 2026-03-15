@@ -565,8 +565,21 @@ You are a codebase exploration specialist. Your job is to quickly find files, se
 ---
 name: skill-name     # 必須: スキル名 (/skill-name コマンドとして機能)
 description: ...     # 必須: スキルの説明とトリガー条件
+context: fork        # 任意: "fork" を指定するとフォークコンテキストで実行
+tools: [bash, file_read, glob, grep]  # 任意: context:fork 時に許可するツール（未指定時は全ツール）
 ---
 ```
+
+**`context: fork` について:**
+
+`context: fork` を指定したスキルは、メインの会話コンテキストとは独立した **フォークコンテキスト（SubAgent）** で実行されます。
+
+| モード | 動作 | 用途 |
+|--------|------|------|
+| デフォルト（インライン） | スキル指示をメインLLMへの命令として返す | シンプルなワークフロー、対話が必要なタスク |
+| `context: fork` | 独立したSubAgentでスキルを実行し、結果のみ返す | 長時間処理、メインコンテキストを汚さない調査・レビュー系タスク |
+
+フォーク実行時のSubAgentは、スキルの `content`（Markdown本文）をシステムプロンプトとして使用し、`tools` フィールドで許可するツールを制限できます。
 
 ### 10.2 スキルのロードパスと優先順位
 
@@ -591,13 +604,14 @@ description: ...     # 必須: スキルの説明とトリガー条件
 
 ### 10.4 組み込みスキル一覧
 
-| スキル名 | 説明 |
-|---|---|
-| `commit` | Gitコミットメッセージ作成・コミット実行 |
-| `pr-review` | プルリクエストのレビュー |
-| `tdd` | テスト駆動開発フロー |
-| `build-fix` | ビルドエラーの修正 |
-| `skill-creator` | 新規スキルの雛形生成・バリデーション |
+| スキル名 | 説明 | context |
+|---|---|---|
+| `commit` | Gitコミットメッセージ作成・コミット実行 | インライン |
+| `pr-review` | プルリクエストのレビュー | **fork** |
+| `tdd` | テスト駆動開発フロー | インライン |
+| `build-fix` | ビルドエラーの修正 | インライン |
+| `skill-creator` | 新規スキルの雛形生成・バリデーション | インライン |
+| `code-stats` | コードベースの統計情報収集・報告 | **fork** |
 
 ---
 

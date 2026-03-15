@@ -1,6 +1,8 @@
 ---
 name: pr-review
 description: Pull Requestのコードレビュー。ユーザーがPRレビュー、コードレビュー、変更のレビュー、またはプルリクエストの確認を要求したときに使用する。
+context: fork
+tools: [bash, file_read, glob, grep]
 ---
 
 # PR Review Skill

@@ -5,6 +5,10 @@ export interface SkillDefinition {
   content: string;  // The full skill prompt/instructions
   filePath: string;
   builtIn: boolean;
+  /** フォークモード: "fork" の場合、独立したSubAgentコンテキストで実行 */
+  context?: "fork";
+  /** context:fork 時に許可するツールリスト（未指定時は全ツール） */
+  tools?: string[];
 }
 
 export class SkillRegistry {
