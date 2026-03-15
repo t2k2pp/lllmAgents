@@ -1,10 +1,15 @@
 # 外部設計書 (External Design)
 
+> **バージョン**: 統合版 (2026-03-15)
+> **対象**: LocalLLM Agent v0.2.x 実装済み機能 + v0.3.0 設計中機能
+
 本ドキュメントでは、LocalLLM Agent の外部仕様（ユーザー向け機能・インターフェース・動作要件）について定義します。
+
+---
 
 ## 1. システム概要
 
-LocalLLM Agent は、ローカルで稼働するLLM（大規模言語モデル）を活用した**CLI型AIエージェント**です。ユーザーのPC上で自律的に動作し、ファイルの読み書き、Web検索、ブラウザ操作、コマンドの実行などを通じてタスクを遂行します。Claude Code にインスパイアされた対話型の REPL インターフェースを提供します。
+LocalLLM Agent は、ローカルで稼働するLLM（大規模言語モデル）を活用した **CLI型AIエージェント** です。ユーザーのPC上で自律的に動作し、ファイルの読み書き、Web検索、ブラウザ操作、コマンドの実行などを通じてタスクを遂行します。Claude Code にインスパイアされた対話型の REPL インターフェースを提供します。
 
 ### 1.1 主な特徴とユースケース
 
@@ -31,57 +36,78 @@ mindmap
       自動コンテキスト圧縮
 ```
 
+### 1.2 Claude Code との比較
+
+LocalLLM Agent は Claude Code の「シームレスなCLI体験」「自律的なツール実行」を踏襲しつつ、**データプライバシーの絶対的な保護** と **ランニングコストゼロ** を主な目的として開発されています。
+
 ```mermaid
-usecase
-  %% ユーザーとエージェント間のインタラクション概要
-  actor User as "ユーザー"
-  
-  package "LocalLLM Agent" {
-    usecase "REPL対話" as UC1
-    usecase "コマンド操作(/help等)" as UC2
-    usecase "ファイル編集・検索" as UC3
-    usecase "OSコマンド実行(bash)" as UC4
-    usecase "Web操作(Playwright)" as UC5
-    usecase "プランモード(タスク設計)" as UC6
-  }
-  
-  User --> UC1
-  User --> UC2
-  User --> UC6
-  
-  UC1 ..> UC3 : "LLM自律判断"
-  UC1 ..> UC4 : "LLM自律判断"
-  UC1 ..> UC5 : "LLM自律判断"
-  
-  note right of UC4
-    ※実行前にユーザーの承認(Ask)またはブロック(Deny)が発生
-  end note
+graph TD
+    classDef claude fill:#e3f2fd,stroke:#1565c0;
+    classDef local fill:#e8f5e9,stroke:#2e7d32;
+    classDef note fill:#f5f5f5,stroke:#9e9e9e;
+
+    subgraph "Claude Code (Cloud-based)"
+        User1[User Terminal]:::claude
+        API[Anthropic API]:::claude
+        Model1[Claude 3.x Sonnet]:::claude
+        User1 <-->|コード・プロンプトをインターネット経由送信| API
+        API <--> Model1
+    end
+
+    subgraph "LocalLLM Agent (On-premise)"
+        User2[User Terminal]:::local
+        Provider[Local Provider: Ollama/vLLM]:::local
+        Model2[llama3 / Qwen / etc]:::local
+        User2 <-->|localhost IPC| Provider
+        Provider <--> Model2
+    end
+
+    NoteC["⚠️ コードやプロンプトは外部流出する"]:::note
+    NoteL["✅ データの完全な秘匿性・エアギャップ可能"]:::note
+
+    API -.-> NoteC
+    Provider -.-> NoteL
 ```
+
+| 比較項目 | Claude Code | LocalLLM Agent |
+| :--- | :--- | :--- |
+| **推論基盤** | クラウド (Claude 3.x 等) | **ローカルオンプレミス** (Ollama, LM Studio等) |
+| **運用コスト** | 従量課金 (APIトークン消費) | **無料** (マシンの電気代のみ) |
+| **プライバシー** | ソースコードが外部APIサーバに送信される | **完全オフライン動作可能** |
+| **ツール数** | 30以上 | **22種** (§3参照) |
+| **サブエージェント** | 4タイプ (Task tool) | **4タイプ** を独自実装 |
+| **プランモード** | 組み込み | **組み込み** (idle→planning→awaiting_approval) |
+| **スキルシステム** | Skill tool + `/command` | **対応** (builtin + ユーザー定義) |
+| **コンテキスト管理** | 大容量コンテキスト (200K+) | **自動圧縮機能** (ローカルの制限に対応) |
+| **ブラウザ操作** | 主にファイル操作・コマンド実行 | **Playwright統合** (クリック・入力・スクショ・a11yツリー) |
+
+---
 
 ## 2. ユーザーインターフェース (UI)
 
 ### 2.1 REPL コマンドラインUI
+
 エージェントはターミナル上で動作し、コマンドプロンプト形式でユーザーの自然言語入力を受け付けます。
 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    
+
     Idle --> Typing : キー入力
     Typing --> MultiLine : "```" (バッククォート3つ)
     MultiLine --> Typing : "```" で閉じる
     Typing --> Processing : Enter押下
-    
+
     Processing --> Streaming : LLM推論中
     Streaming --> ToolExecution : ツール呼び出し検出
     ToolExecution --> PermissionCheck : 状態変更操作
-    
+
     PermissionCheck --> ToolExecution : ユーザー承認 (y/always)
     PermissionCheck --> Processing : ユーザー拒否 (n)
-    
+
     ToolExecution --> Processing : 結果のフィードバック
     Streaming --> Idle : 回答完了
-    
+
     Processing --> Idle : Ctrl+C (キャンセル)
     ToolExecution --> Idle : Ctrl+C (キャンセル)
 ```
@@ -108,6 +134,8 @@ stateDiagram-v2
 | `/mode` | コンテキストモード（dev/review/research）の表示・切替を行います |
 | `/discord` | Discord通知設定の確認・有効化・無効化・URL設定を行います |
 | `/permission` | ツール実行権限の表示・変更を行います（サブコマンドあり） |
+| `/second` | セカンドLLMの設定・状態確認を行います (v0.3.0) |
+| `/cost` | セカンドLLMのトークン使用量とコストを表示します (v0.3.0) |
 
 ※ `/setup` は REPL コマンドではなく、CLI起動時のフラグ `--setup` で実行します。
 
@@ -130,9 +158,21 @@ stateDiagram-v2
 | `/permission rule-remove deny <pattern>` | denyルールを削除 |
 | `/permission rule-remove ask <pattern>` | askルールを削除 |
 
+#### `/second` サブコマンド一覧（v0.3.0）
+
+| サブコマンド | 説明 |
+|---|---|
+| `/second setup` | 対話式セカンドLLM設定ウィザードを起動 |
+| `/second status` | 現在の設定と利用状況を表示 |
+| `/second enable` | セカンドLLMを有効化 |
+| `/second disable` | セカンドLLMを無効化 |
+| `/second budget <金額>` | 予算上限を変更 (USD) |
+
+---
+
 ## 3. 提供機能とツール群
 
-エージェントはLLMの推論結果に基づき、以下の **21種の機能（ツール）** を抽象化された関数(Function Calling)として呼び出します。
+エージェントはLLMの推論結果に基づき、以下の **22種の機能（ツール）** を抽象化された関数 (Function Calling) として呼び出します。
 
 ```mermaid
 graph TD
@@ -147,13 +187,14 @@ graph TD
         F5(file_edit):::ask
     end
 
-    subgraph System [システム操作 - 1ツール]
+    subgraph System [システム操作 - 2ツール]
         S1(bash):::ask
+        S2(current_datetime):::safe
     end
 
     subgraph Web [Web検索 - 2ツール]
-        W1(web_search):::ask
-        W2(web_fetch):::ask
+        W1(web_search):::safe
+        W2(web_fetch):::safe
     end
 
     subgraph Browser [ブラウザ操作 - 5ツール]
@@ -178,10 +219,39 @@ graph TD
         A7(ask_user):::ask
     end
 ```
-※緑色: 自動許可(`auto`)、黄色: 確認必須(`ask`)
 
-デフォルトで `auto`（自動許可）に設定されているツール: `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`。
-その他のツールはすべて `ask`（実行前にユーザーの承認が必要）です。
+※緑色: 自動許可 (`auto`)、黄色: 確認必須 (`ask`)
+
+デフォルトで `auto`（自動許可）に設定されているツール: `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`, `web_search`, `web_fetch`, `current_datetime`。その他のツールはすべて `ask`（実行前にユーザーの承認が必要）です。
+
+### 3.1 ツール詳細仕様
+
+| カテゴリ | ツール名 | 権限 | 機能詳細 |
+| :--- | :--- | :--- | :--- |
+| **ファイル取得** | `file_read` | auto | 指定ファイルのテキストを読み込みます。各行に **行番号を付与** して返却します。 |
+| | `glob` | auto | 指定パターン（例: `src/**/*.ts`）に一致するファイル一覧を取得します。 |
+| | `grep` | auto | 高速文字列検索。`ripgrep (rg)` があれば利用し、なければNode.jsネイティブ実装で検索します。 |
+| **ファイル更新** | `file_write` | ask | ファイルを新規作成または全体上書きします。親ディレクトリが存在しない場合は **自動で `mkdir -p`** を実行します。 |
+| | `file_edit` | ask | 既存ファイルの一部を書き換えます。`target_string` がファイル内に一意に存在する場合のみ `replacement_string` に置換します。 |
+| **システム** | `bash` | ask | シェルコマンドを実行し、標準出力/標準エラーを取得します。タイムアウト標準120秒。 |
+| | `current_datetime` | auto | 現在の日時を取得します。ISO 8601形式、ローカルタイムゾーン形式、タイムゾーンオフセット情報を返します。 |
+| **Web** | `web_search` | auto | DuckDuckGo等の検索エンジンAPIでインターネット検索し、サマリーを取得します。 |
+| | `web_fetch` | auto | 指定URLのWebページを取得し、HTMLからプレーンテキスト（Markdown等）を抽出して返します。 |
+| **ブラウザ操作** | `browser_navigate` | ask | **Playwright** プロセスを起動し、指定URLに遷移します。 |
+| | `browser_click` | ask | ブラウザのアクセシビリティツリーから要素をクリックします。 |
+| | `browser_type` | ask | ブラウザの入力フィールドにテキストを入力します。 |
+| | `browser_snapshot` | auto | ページのアクセシビリティツリー（テキスト形式）を取得します。Vision API不要で軽量。 |
+| | `browser_screenshot` | ask | ページのスクリーンショットを取得します。`save_path` 指定時はローカルファイルへ直接保存し、`vision_analyze` と組み合わせた視覚的な状態確認に使用します。 |
+| **画像解析** | `vision_analyze` | auto | スクリーンショットやローカル画像を、画像解析専用のサブLLM（OllamaのLlava等）に渡して状態を視覚的に説明させます。 |
+| **タスク管理** | `todo_write` | ask | エージェント自身が行動計画を整理するためのTODOリストをワークスペースに作成・更新します。 |
+| | `task` | ask | 独立したコンテキストを持つ **子エージェント（SubAgent）** を生成し、スコープを限定したタスクを並列で実行・委譲します。 |
+| | `task_output` | ask | バックグラウンドで起動したサブエージェントの実行結果を取得します。 |
+| | `enter_plan_mode` | ask | 破壊的なツール実行を封印し、システムの調査・設計のみを行う「プランモード」に入ります。 |
+| | `exit_plan_mode` | ask | プランモードを終了し、計画内容を `~/.localllm/plans/` に保存してユーザー承認を待ちます。 |
+| | `skill` | ask | ユーザーが配置した独自Markdownスキルを実行します。内蔵スキル（commit, pr-review, tdd, build-fix 等）も含みます。 |
+| | `ask_user` | ask | エージェントが単独で判断できない問題が発生した場合、コンソール経由でユーザーに直接質問します。 |
+
+---
 
 ## 4. セキュリティ・権限モデルのUXフロー
 
@@ -199,7 +269,7 @@ graph TD
 | `INHERENTLY_SAFE_TOOLS` | ✅ 常に自動許可 | ✅ 常に自動許可 |
 | インタラクティブ確認ダイアログ | ✅ あり | ❌ なし（headless） |
 
-Discord ではインタラクティブ確認が不可能なため、`discordAutoApproveTools` + `INHERENTLY_SAFE_TOOLS` に含まれるツールのみ実行可能です。許可されていないツールをLLMに提示しない（フィルタリング）ことで、Discord側で利用できない旨をLLMがユーザーに伝えます。
+Discord ではインタラクティブ確認が不可能なため、`discordAutoApproveTools` + `INHERENTLY_SAFE_TOOLS` に含まれるツールのみ実行可能です。許可されていないツールはLLMに提示されないため（フィルタリング）、Discord側で使えない旨をLLMがユーザーに伝えます。
 
 ### 4.2 パターンベース権限ルール
 
@@ -258,29 +328,41 @@ sequenceDiagram
     Tool-->>CLI: 実行結果
 ```
 
+---
+
 ## 5. 設定と環境要件
 
 - **要件**: Node.js 18+
 - **LLM**: ローカルLLM環境（Ollama等）の起動
 - **設定ロケーション**: `~/.localllm/config.json`
-- **主要な設定値**:
-  - `providerType`: `ollama`, `lmstudio`, `llamacpp`, `vllm` (4種のローカルLLMプロバイダ。内部的にはすべて OpenAI互換APIで通信)
-  - `contextWindow`: トークン上限。これの80%(デフォルト)に達すると自動圧縮。
-  - `allowedDirectories`: サンドボックスでアクセスを許可する追加のディレクトリリスト。
-  - `autoApproveTools`: CLI経由で自動許可するツールのリスト (デフォルト: `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`, `web_search`, `web_fetch`)
-  - `requireApprovalTools`: CLI経由で確認必須なツールのリスト
-  - `discordAutoApproveTools`: Discord経由で自動許可するツールのリスト（インタラクティブ確認なし）
-  - `rules`: パターンベース権限ルール（`allow` / `deny` / `ask` の3種。`/permission rule-add` で管理）
-  - `discord`: Discord連携の設定 (有効化フラグ `enabled` と 通知先URL `webhookUrl`)
+
+### 5.1 主要な設定値
+
+| 設定キー | 説明 |
+|---|---|
+| `providerType` | `ollama`, `lmstudio`, `llamacpp`, `vllm`（4種のローカルLLMプロバイダ、すべてOpenAI互換APIで通信）|
+| `contextWindow` | トークン上限。この80%（デフォルト）に達すると自動圧縮 |
+| `allowedDirectories` | サンドボックスでアクセスを許可する追加のディレクトリリスト |
+| `autoApproveTools` | CLI経由で自動許可するツールのリスト |
+| `requireApprovalTools` | CLI経由で確認必須なツールのリスト |
+| `discordAutoApproveTools` | Discord経由で自動許可するツールのリスト（インタラクティブ確認なし）|
+| `rules` | パターンベース権限ルール（`allow` / `deny` / `ask` の3種） |
+| `discord` | Discord連携の設定（`enabled` フラグと `webhookUrl`）|
+| `secondLLM` | セカンドLLM設定（v0.3.0、§12参照）|
 
 > **設定の自動マージ**: バージョンアップで新しいデフォルトツールが追加された場合、既存の `config.json` と新デフォルトの和集合が使用されるため、再設定は不要です。
 
-#### Discord Webhook URL の取得と設定手順
+### 5.2 Discord Webhook URL の取得と設定手順
 
 DiscordのWebhookを用いて、エージェントからの応答を任意のチャンネルへ送信できます。
+
 1. **Webhookの作成**: Discordの該当サーバーで、通知先チャンネルの「チャンネルの編集」→「連携サービス」→「ウェブフックを見る/作成」を開き、新しいWebhookを作成します。
 2. **URLの取得**: 作成したWebhookの「ウェブフックURLをコピー」をクリックしてURLを取得します。
-3. **設定の反映**: `~/.localllm/config.json` 内の `"discord"` ブロックに対し、`"enabled": true` とし、`"webhookUrl": "取得したURL"` を文字列として貼り付けます。設定は次回のアクション実行時に即座に反映されます。
+3. **設定の反映**: `~/.localllm/config.json` 内の `"discord"` ブロックに対し、`"enabled": true` とし、`"webhookUrl": "取得したURL"` を設定します。
+
+> **注意**: Webhook URLは `https://discord.com/api/webhooks/<id>/<token>` 形式である必要があります。招待URL（`discord.gg/...`）は使用できません。`/discord test` コマンドで送信テストが可能です。
+
+---
 
 ## 6. Hooksシステム
 
@@ -351,6 +433,8 @@ DiscordのWebhookを用いて、エージェントからの応答を任意のチ
 
 `PreToolUse` フックのコマンドが **非ゼロの終了コード** を返した場合、対象ツールの実行はブロックされます。stderr または stdout の内容がブロック理由としてLLMにフィードバックされます。
 
+---
+
 ## 7. Rulesシステム（常時適用ルール）
 
 エージェントの動作を規定する常時適用ルールを Markdown ファイルで定義・管理します。ルールはシステムプロンプトの一部として LLM に注入され、すべてのセッションで自動的に適用されます。
@@ -382,6 +466,8 @@ DiscordのWebhookを用いて、エージェントからの応答を任意のチ
 - 外部APIへのリクエストにはタイムアウトを設定すること
 ```
 
+---
+
 ## 8. コンテキストモード
 
 エージェントの動作モードを切り替える機能です。モードごとに優先事項、振る舞い、推奨ツールが変わります。
@@ -405,6 +491,8 @@ DiscordのWebhookを用いて、エージェントからの応答を任意のチ
 
 デフォルトモードは `dev` です。モード情報はシステムプロンプトの一部として LLM に注入されます。
 
+---
+
 ## 9. エージェント定義ファイル
 
 サブエージェント（`task` ツール）の動作を定義する Markdown ファイルです。YAML フロントマターでメタデータを、本文でシステムプロンプトを記述します。
@@ -418,9 +506,6 @@ description: Fast codebase exploration (read-only)
 tools: [file_read, glob, grep, web_fetch, web_search]
 ---
 You are a codebase exploration specialist. Your job is to quickly find files, search code, and answer questions about the codebase.
-- Use glob to find files by pattern
-- Use grep to search content
-- Use file_read to examine specific files
 ```
 
 ### YAML フロントマター属性
@@ -449,11 +534,71 @@ You are a codebase exploration specialist. Your job is to quickly find files, se
 2. `~/.localllm/agents/` （ユーザーグローバルオーバーライド）
 3. `.localllm/agents/` （プロジェクトローカルオーバーライド）
 
-## 10. MCP（Model Context Protocol）対応
+---
 
-MCPは外部ツールサーバーと通信するためのJSON-RPC 2.0ベースのプロトコルです。これにより、サードパーティ製のツール（データベース、API、ファイルシステム拡張等）を動的に統合できます。
+## 10. スキルシステム
 
-### 10.1 MCP設定ファイル
+スキルは Markdown 形式のプロンプトファイルで定義され、`/skill-name` スラッシュコマンドとしてトリガーされる **事前定義された操作フロー** です。
+
+### 10.1 スキルファイル形式 (SKILL.md)
+
+各スキルはサブディレクトリ単位で管理します。エントリポイントは `SKILL.md` です。
+
+```text
+<skill-name>/
+  ├── SKILL.md       (必須: YAMLフロントマター + Markdown本文)
+  ├── scripts/       (推奨: 決定論的処理を行うスクリプト)
+  ├── references/    (任意: スキーマ・API仕様・フロー詳細などの分割Markdown)
+  └── assets/        (任意: ひな形ファイルや画像などの静的ファイル)
+```
+
+**SKILL.md フロントマター仕様:**
+
+```yaml
+---
+name: skill-name     # 必須: スキル名 (/skill-name コマンドとして機能)
+description: ...     # 必須: スキルの説明とトリガー条件
+---
+```
+
+### 10.2 スキルのロードパスと優先順位
+
+後からロードされるものが同名スキルを上書きします。
+
+| 優先順位 | パス | 用途 |
+|----------|------|------|
+| 1（低） | `src/skills/builtin/` | アプリ同梱の基本スキル |
+| 2 | `builtin/` (プロジェクトルート) | `.skill` パッケージとしてインストールされたスキル |
+| 3 | `~/.localllm/skills/` | ユーザーグローバルスキル |
+| 4 | `.claude/skills/` (CWD) | プロジェクト固有スキル |
+| 5（高） | `.localllm/skills/` (CWD) | プロジェクト固有スキル（代替パス） |
+
+### 10.3 スクリプトエンジンの選択基準（ハイブリッド設計）
+
+スキル内の `scripts/` ディレクトリには、用途に応じて言語を使い分けます。
+
+| 言語 | 適用ケース |
+|---|---|
+| **Python (`.py`)** | データパース、検証バリデーション、テキスト処理など標準ライブラリで堅牢に書けるCLI処理 |
+| **Node.js (`.js`, `.ts`)** | Playwright等のブラウザ操作、npmエコシステムとの統合が必要な場合 |
+
+### 10.4 組み込みスキル一覧
+
+| スキル名 | 説明 |
+|---|---|
+| `commit` | Gitコミットメッセージ作成・コミット実行 |
+| `pr-review` | プルリクエストのレビュー |
+| `tdd` | テスト駆動開発フロー |
+| `build-fix` | ビルドエラーの修正 |
+| `skill-creator` | 新規スキルの雛形生成・バリデーション |
+
+---
+
+## 11. MCP（Model Context Protocol）対応
+
+MCPは外部ツールサーバーと通信するためのJSON-RPC 2.0ベースのプロトコルです。サードパーティ製のツール（データベース、API、ファイルシステム拡張等）を動的に統合できます。
+
+### 11.1 MCP設定ファイル
 
 `mcp-servers.json` にMCPサーバー定義を記述します。以下の順序で読み込まれ、同名サーバーは後のパスで上書きされます。
 
@@ -463,7 +608,7 @@ MCPは外部ツールサーバーと通信するためのJSON-RPC 2.0ベース�
 | 2 | `.localllm/mcp-servers.json` | プロジェクトローカル |
 | 3 | `.claude/mcp-servers.json` | Claude Code互換 |
 
-### 10.2 設定ファイル形式
+### 11.2 設定ファイル形式
 
 ```json
 {
@@ -484,18 +629,18 @@ MCPは外部ツールサーバーと通信するためのJSON-RPC 2.0ベース�
 }
 ```
 
-### 10.3 トランスポート
+### 11.3 トランスポート
 
 | トランスポート | 説明 | 必須設定 |
 |:---|:---|:---|
 | `stdio` | 子プロセスのstdin/stdoutでJSON-RPCメッセージを送受信 | `command`, `args`(任意), `env`(任意) |
 | `sse` | HTTP SSE接続でイベント受信、POSTでリクエスト送信 | `url` |
 
-### 10.4 MCPツールの利用
+### 11.4 MCPツールの利用
 
 MCPサーバーが提供するツールは起動時に自動検出され、`mcp__<サーバー名>__<ツール名>` の命名規則でLLMに提示されます。既存のパーミッションシステム・フックシステムと統合されるため、MCP経由のツールにも同じセキュリティポリシーが適用されます。
 
-### 10.5 ライフサイクル
+### 11.5 ライフサイクル
 
 ```
 アプリ起動
@@ -505,3 +650,40 @@ MCPサーバーが提供するツールは起動時に自動検出され、`mcp_
   → LLMがツールを使用 (tools/call)
   → アプリ終了時に全MCPサーバーを切断
 ```
+
+---
+
+## 12. セカンドLLM機能（v0.3.0 設計中）
+
+> **ステータス**: 設計フェーズ。未実装。実装完了後にこのノートを削除すること。
+
+メインLLM（ローカルLLM）を補完する **セカンドLLM** として、別のローカルLLMまたはクラウドLLM（Vertex AI / Azure AI）を利用可能にします。
+
+### 12.1 基本方針
+
+| 項目 | 方針 |
+|---|---|
+| メインLLM | **ローカルLLMのみ**。変更なし |
+| セカンドLLM | **ローカルLLM または クラウドLLM**。オプション機能 |
+| 起動条件 | セカンドLLM設定が有効 **かつ** ユーザーが明示的に利用を指示 |
+| 動作モード | ① メインLLMへの相談（consult） ② サブエージェントとしてタスク実行（agent） |
+| コスト管理 | クラウドLLM: トークン使用量を記録し、予算上限で自動停止。ローカルLLM: 予算不要 |
+
+### 12.2 対応プロバイダ
+
+| プラットフォーム | 利用可能モデル | 認証方式 |
+|---|---|---|
+| **Vertex AI** | Gemini (3 Pro, 3 Flash, 2.5系), Claude (Opus, Sonnet, Haiku) | Google Cloud サービスアカウント / ADC |
+| **Azure OpenAI** | GPT (5.x系, 4o系) | API Key / Azure AD |
+| **Azure AI Foundry** | Claude (Opus, Sonnet, Haiku) | API Key |
+| **Ollama / LM Studio 等** | 任意のローカルモデル | なし |
+
+### 12.3 セカンドLLMの呼び出し方法
+
+ユーザーは `@second` プレフィックスを使ってセカンドLLMへのタスク委任を指示します。
+
+```
+@second この関数のアルゴリズムを改善してください
+```
+
+詳細設計は `v030_second_llm_design.md` を参照してください。
