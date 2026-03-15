@@ -53,6 +53,18 @@ export interface SecurityRuleConfig {
   ask: string[];
 }
 
+export interface ProcessSandboxConfig {
+  /** OS-level サンドボックスを有効にするか（デフォルト: false） */
+  enabled: boolean;
+  /**
+   * サンドボックスレベル:
+   * - "none"    : OS-level 隔離なし（アプリレベルのみ）
+   * - "network" : ネットワーク名前空間隔離（Linux: unshare --net, macOS: sandbox-exec で network deny）
+   * - "full"    : ネットワーク + ファイルシステム隔離（Linux: bwrap, macOS: sandbox-exec）
+   */
+  level: "none" | "network" | "full";
+}
+
 export interface SecurityConfig {
   allowedDirectories: string[];
   blockedCommands: string[];
@@ -63,6 +75,8 @@ export interface SecurityConfig {
   /** Claude Code 互換のパターンベース権限ルール（ツール名リストより優先） */
   rules?: SecurityRuleConfig;
   streamCommandOutput?: boolean;
+  /** OS-level プロセスサンドボックス設定（bash ツール実行に適用） */
+  processSandbox?: ProcessSandboxConfig;
 }
 
 export interface ContextConfig {

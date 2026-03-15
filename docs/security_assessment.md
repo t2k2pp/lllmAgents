@@ -57,6 +57,26 @@ graph TD
 
 ## 2. サンドボックスの実装状況
 
+### 2.0 OS-level プロセスサンドボックス（Claude Code 同等の仕組み）
+
+`src/security/process-sandbox.ts` に実装された **`ProcessSandbox`** クラスが、bash ツール実行時にカーネルレベルの隔離を付加します。Claude Code と同等の「deny default → 必要な権限のみ allow」ホワイトリスト方式を採用。
+
+```
+config.security.processSandbox.enabled = true  （デフォルト: false）
+config.security.processSandbox.level   = "network" | "full"
+```
+
+| レベル | Linux | macOS | Windows |
+|--------|-------|-------|---------|
+| `network` | `unshare --net` でネットワーク名前空間隔離 | `sandbox-exec` で network deny | 未サポート |
+| `full` | `bwrap` で read-only rootfs + 許可ディレクトリのみ writable bind mount | `sandbox-exec` で filesystem + network 制限 | 未サポート |
+
+**書き込み許可ディレクトリ（full レベル）**: `cwd`, `~/.localllm`, `allowedDirectories` 設定値のみ writable。
+
+**フォールバック**: `bwrap`/`unshare`/`sandbox-exec` が存在しない場合は自動的に `none` にデグレード（ログに警告なし）。`sandbox_info` ツールでツール有無を確認できる。
+
+**注意**: `processSandbox.enabled = false`（デフォルト）では従来どおりアプリレベルのみ。有効化はユーザーの明示的な設定変更が必要。
+
 ### 2.1 対策済みリスク
 
 以下のリスクに対して `safeResolvePath()` / `pathStartsWith()` / `normalizeWindowsPath()` を実装し、`Sandbox.isPathAllowed()` に統合済みです（`src/utils/platform.ts`, `src/security/sandbox.ts`）。
@@ -177,6 +197,6 @@ LocalLLM Agent の主要な設計目標の1つは「データプライバシー�
 | 課題 | 説明 |
 |---|---|
 | **AST解析の導入** | 単なる正規表現ではなくシェルのASTをパースし、難読化された危険コマンドを検知する機能 |
-| **Chroot / eBPF 等による隔離** | アプリケーションレイヤーのサンドボックスではなく、OSレベルでのアクセス制限の実装 |
+| ~~Chroot / eBPF 等による隔離~~ | ~~アプリケーションレイヤーのサンドボックスではなく、OSレベルでのアクセス制限の実装~~ → **実装済み** (`ProcessSandbox`: Linux `unshare`/`bwrap`, macOS `sandbox-exec`, 設定で有効化) |
 | **Git等との自動連携** | 破壊的な変更が行われる前に自動でコミット/スタッシュの退避スナップショットを作成する「Undo機能」の組み込み |
 | ~~web_fetch のURLスキーム制限~~ | ~~`file://` 等のプロトコルハンドラを明示的にブロック~~ → **実装済み** (`http://` / `https://` のみ許可) |
