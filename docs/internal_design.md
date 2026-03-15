@@ -1,6 +1,10 @@
 # 内部設計書 (Internal Design)
 
+> **バージョン**: 統合版 (2026-03-15)
+
 本ドキュメントでは、LocalLLM Agent の内部アーキテクチャ、コンポーネント間の連携構造、モジュール設計、データの流れについて定義します。
+
+---
 
 ## 1. ソフトウェア・アーキテクチャ
 
@@ -30,18 +34,22 @@ graph TD
         TR[ToolRegistry]:::core
         TE[ToolExecutor]:::core
         SR[SkillRegistry]:::core
+        HM[HookManager]:::core
+        RL[RuleLoader]:::core
+        CMM[ContextModeManager]:::core
     end
 
     subgraph "Security Layer"
         Perm[PermissionManager]:::sec
         Sand[Sandbox]:::sec
-        Rules[SecurityRules]:::sec
+        RE[RuleEngine]:::sec
     end
 
     subgraph "Infrastructure Layer"
         Prov[Provider Interfaces]:::infra
-        Clients[Ollama / LMStudio / vLLM 등]:::infra
+        Clients[Ollama / LMStudio / vLLM等]:::infra
         Play[PlaywrightManager]:::infra
+        MCP[MCPManager]:::infra
     end
 
     REPL --> |User Input| AL
@@ -51,24 +59,51 @@ graph TD
     AL --> |Delegation| SM
     AL --> |Inference Request| Prov
     Prov --> Clients
-    
+
     AL --> |Parse Tool Calls| TE
     TE --> |Check Tools| TR
     TE --> |Check Skills| SR
     TE --> |Authorize| Perm
+    TE --> |Lifecycle Hooks| HM
 
     Perm --> Sand
-    Perm --> Rules
-    
+    Perm --> RE
+
     TE --> |Execute Web| Play
 
+    AL --> RL
+    AL --> CMM
+    MCP --> TR
 ```
+
+### 1.1 ディレクトリ構成
+
+```
+src/
+├── agent/          - AgentLoop, PlanManager, ContextManager, MessageHistory, SystemPrompt
+├── agents/         - エージェント定義ファイル (.md) とローダー
+├── tools/          - ToolRegistry, ToolExecutor, 22ツール定義
+├── providers/      - LLMプロバイダ (Ollama, LMStudio, llama.cpp, vLLM)
+├── cli/            - REPL, レンダラー, 補完 (completer)
+├── hooks/          - HookManager (Pre/PostToolUse, Session lifecycle)
+├── rules/          - RuleLoader + builtin rules (security, coding-style, git-workflow)
+├── context/        - ContextModeManager (dev/review/research)
+├── skills/         - SkillRegistry + builtin skills
+├── security/       - PermissionManager, Sandbox, RuleEngine
+├── config/         - ConfigManager, セットアップウィザード
+├── browser/        - PlaywrightManager
+├── mcp/            - MCPManager, MCPClient
+├── utils/          - http-client, discord, non-tty-reader, platform
+└── index.ts        - エントリポイント・初期化
+```
+
+---
 
 ## 2. コンポーネント詳細・内部ロジック
 
 ### 2.1 AgentLoop の実行フロー
-メインとなる思考ループ（推論とツール実行のサイクル）のフローを以下に示します。
-特筆すべきは、LLMからの複数のTool Callsを `Promise.allSettled` で**並列処理**している点です。
+
+メインとなる思考ループ（推論とツール実行のサイクル）のフローを以下に示します。LLMからの複数のTool Callsを `Promise.allSettled` で **並列処理** している点が特徴です。
 
 ```mermaid
 sequenceDiagram
@@ -80,7 +115,7 @@ sequenceDiagram
 
     User->>Loop: メッセージ入力
     Loop->>Loop: Historyに追加
-    
+
     Loop->>Context: shouldCompress() ?
     alt 要圧縮
         Context->>LLM: 圧縮用プロンプト実行
@@ -89,11 +124,11 @@ sequenceDiagram
     end
 
     loop Max Iterations (50)
-        Note over Loop: 🔄 LLM待機スピナー開始<br/>(経過時間を1秒ごとに更新)
+        Note over Loop: 🔄 LLM待機スピナー開始
         Loop->>LLM: chatWithTools(History)
         LLM-->>Loop: Stream Response (Text + ToolCalls)
-        Note over Loop: ✔ スピナー停止<br/>(2秒以上なら経過時間表示)
-        
+        Note over Loop: ✔ スピナー停止
+
         alt ToolCallsあり
             Loop->>Exec: execute(ToolCall 1) (Parallel)
             Loop->>Exec: execute(ToolCall 2) (Parallel)
@@ -107,15 +142,16 @@ sequenceDiagram
 ```
 
 ### 2.2 サブエージェントのライフサイクル (`SubAgentManager`)
+
 複雑なタスクを分割処理するために、独立した内部エージェントを生成します。
 
 ```mermaid
 stateDiagram-v2
     state "AgentLoop (Main)" as Main
     state "SubAgentManager" as SAM
-    
+
     Main --> SAM : taskツール実行
-    
+
     state SAM {
         [*] --> Initialize: タイプ決定(plan, explore, bash等)
         Initialize --> IsolateContext: 独自のHistory空間生成
@@ -124,67 +160,47 @@ stateDiagram-v2
         ToolExec --> SubLoop
         SubLoop --> Finalize: タスク完了報告生成
     }
-    
+
     SAM --> Main : 報告/結果をMainのHistoryへ追加
 ```
 
 ### 2.3 プランモード (`PlanManager`) による状態制御
+
 「計画なしに破壊的変更を行うこと」を防ぐため、プラン（設計）フェーズにモードを分離しています。
 
 ```mermaid
 stateDiagram-v2
     [*] --> idle
-    
+
     idle --> planning : `/plan` コマンド<br>または `enter_plan_mode`
-    
+
     planning --> planning : 調査(read-only tools)
     planning --> awaiting_approval : `exit_plan_mode(plan_file)`
-    
+
     awaiting_approval --> approved : ユーザーが[Y]承認
     awaiting_approval --> rejected : ユーザーが[N]拒否 (修正指示)
-    
+
     rejected --> planning : フィードバックを基に再設計
     approved --> idle : 計画に基づき<br>実行用ツール(write等)を解禁
 ```
 
 ### 2.4 Agent Core のその他の主要コンポーネント
-- **ContextManager (自動コンテキスト圧縮機能)**
-  セッション中のトークン使用量を監視し、`compressionThreshold` (デフォルト80%) を超えた際に動作します。古いメッセージ群をLLM自身に「簡潔に要約」させ、システムプロンプトの直後に『要約された過去の文脈』として挿入することで、無限に続く会話でもコンテキスト上限をオーバーしない仕組みを提供します。
-- **SessionManager (セッション永続化)**
+
+- **ContextManager（自動コンテキスト圧縮機能）**
+  セッション中のトークン使用量を監視し、`compressionThreshold`（デフォルト80%）を超えた際に動作します。古いメッセージ群をLLM自身に「簡潔に要約」させ、システムプロンプトの直後に『要約された過去の文脈』として挿入することで、無限に続く会話でもコンテキスト上限をオーバーしない仕組みを提供します。
+
+- **SessionManager（セッション永続化）**
   LLMのプロバイダ情報や会話履歴（Tool executionの結果含む）を JSON 形式で `~/.localllm/sessions/` 配下に自動保存・復元し、ターミナルを再起動しても前回の続きから作業を再開できるライフサイクルを管理します。
-- **ProjectContext (CLAUDE.md 対応)**
+
+- **ProjectContext（CLAUDE.md 対応）**
   ワークスペースのルートに `CLAUDE.md` ファイルが存在する場合、それを自動的に検出し、System Promptの一部としてLLMにインジェクションします。これによりプロジェクト固有のコーディング規約や方針をエージェントに遵守させます。
-- **Memory (自動記憶機能)**
-  会話コンテキストとは独立した永続記憶 (`~/.localllm/memory/MEMORY.md`) を操作します。エージェント自身が必要と判断した知識やユーザーの好みを永続化します。
 
-### 2.5 ツール群の詳細仕様 (Tool Definitions)
-本システムには、LLMが自律的に呼び出せる**21種類**の機能(Function Calling)群が実装されています。
+- **Memory（自動記憶機能）**
+  会話コンテキストとは独立した永続記憶（`~/.localllm/memory/MEMORY.md`）を操作します。エージェント自身が必要と判断した知識やユーザーの好みを永続化します。
 
-| カテゴリ | ツール名 | 権限 | 機能詳細と動作ロジック |
-| :--- | :--- | :--- | :--- |
-| **ファイル取得** | `file_read` | auto | 指定されたファイルのテキストを読み込みます。LLMが修正箇所を特定しやすいよう、出力テキストの各行には**行番号を付与**して返却されます。 |
-| | `glob` | auto | 指定されたパターン(例:`src/**/*.ts`)に一致するファイル一覧を取得します。ディレクトリ構造の初期探索に用いられます。 |
-| | `grep` | auto | 高速な文字列検索を行います。(システムに `ripgrep (rg)` がインストールされていればフォールバックして利用し、なければNode.jsネイティブ実装で検索します) |
-| **ファイル更新** | `file_write` | ask | ファイルを新規作成、または全体を上書きします。対象の親ディレクトリが存在しない場合は**自動で `mkdir -p` を実行**します。 |
-| | `file_edit` | ask | 既存ファイルの一部分を書き換えます。LLMから渡された `target_string` がファイル内に「一意に存在するか」を厳密にチェックし、合致した場合のみ `replacement_string` に置換します。 |
-| **システム** | `bash` | ask | シェルコマンドを実行し、標準出力/標準エラー出力を取得します。無限ループ等のタイムアウト(標準120秒)が設けられています。 |
-| **Web検索** | `web_search` | ask | DuckDuckGo等の検索エンジンAPIを用いて、インターネットから最新情報を検索しサマリーを取得します。 |
-| | `web_fetch` | ask | 指定されたURLのWebページをダウンロードし、HTMLからプレーンテキスト(Markdown等)を抽出して読み取りやすく整形した結果を返却します。 |
-| **ブラウザ操作** | `browser_navigate` | ask | **Playwright**プロセスを起動し、指定されたURLに遷移します。 |
-| | `browser_click` | ask | ブラウザ上のアクセシビリティツリーから特定の要素をクリックします。 |
-| | `browser_type` | ask | ブラウザ上の入力フィールドにテキストを入力します。 |
-| | `browser_snapshot` | auto | ページのアクセシビリティツリー（テキスト形式）を取得します。Vision APIが不要なため軽量です。 |
-| | `browser_screenshot` | ask | ページのスクリーンショット（base64画像）を取得します。`vision_analyze` と組み合わせて視覚的な状態確認に使用します。 |
-| **画像解析** | `vision_analyze` | auto | ブラウザ操作で取得したスクリーンショットやローカル画像を、画像解析専用のサブLLM(OllamaのLlava等)に渡して状態を視覚的に説明させます。 |
-| **タスク・補助** | `todo_write` | ask | エージェント自身が行動計画を整理するためのTODOリストをワークスペースに作成・更新します。 |
-| | `task` | ask | 自身とは別の独立したコンテキストを持つ**子エージェント (SubAgent)** を生成し、「調査専門」や「コマンド実行専門」などスコープを限定したタスクを裏側(並列)で実行・委譲します。 |
-| | `task_output` | ask | バックグラウンドで起動したサブエージェントの実行結果を取得します。 |
-| | `enter_plan_mode` | ask | 破壊的なツール実行を封印し、システムの調査・設計のみを行う「プランモード」に入ります。 |
-| | `exit_plan_mode` | ask | プランモードを終了し、計画内容を `~/.localllm/plans/` に保存してユーザー承認を待ちます。 |
-| | `skill` | ask | ユーザーが `~/.localllm/skills/`、`.claude/skills/`、`.localllm/skills/` に配置した独自Markdown形式のスキル（例: git commit, pr review 等の一連の事前定義された操作フロー）を実行します。内蔵スキル (commit, pr-review, tdd, build-fix) も含みます。 |
-| | `ask_user` | ask | エージェント単独で判断できない問題や、致命的なエラーが発生した場合にコンソール経由でユーザーに直接質問を投げかけ回答を待ちます。 |
+---
 
-※ **権限のデフォルト設定**: `auto`（自動許可）は `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze` の5ツールのみ。その他はすべて `ask`（要ユーザー承認）。
+## 3. セキュリティ層：サンドボックス
 
 本システムのサンドボックス機構は、OSレベルの仮想化（コンテナ等）ではなく、アプリケーション層（Node.js）での「パスの文字列評価」によるシンプルなアーキテクチャを採用しています。
 
@@ -197,10 +213,10 @@ sequenceDiagram
 
     Tool->>PM: 対象パス(targetPath)での操作要求
     PM->>Sandbox: isPathAllowed(targetPath)
-    
-    Note over Sandbox: 1. パスの正規化<br/>resolved = path.resolve(targetPath)
-    Note over Sandbox: 2. 許可リストとの前方一致比較<br/>resolved.startsWith(allowedDir)
-    
+
+    Note over Sandbox: 1. パスの正規化<br/>resolved = safeResolvePath(targetPath)
+    Note over Sandbox: 2. 許可リストとの前方一致比較<br/>pathStartsWith(resolved, allowedDir)
+
     alt 許可リストのパスから始まる場合
         Sandbox-->>PM: true (許可)
         PM->>OS: ファイル操作の実行
@@ -211,16 +227,24 @@ sequenceDiagram
 ```
 
 ### 3.1 許可ディレクトリの初期化
-システム起動時、`Sandbox` クラスは以下の領域を安全なディレクトリリスト(`allowedDirs`)としてメモリ上に保持します。
+
+システム起動時、`Sandbox` クラスは以下の領域を安全なディレクトリリスト (`allowedDirs`) としてメモリ上に保持します。
+
 1. `process.cwd()` : エージェントを起動した現在の作業ディレクトリ
 2. `os.homedir() + "/.localllm"` : エージェントの挙動を管理する設定領域
 3. `config.json` の `allowedDirectories` パラメータで指定された追加パス
 
 ### 3.2 評価ロジックと制約
-実際のパス解決は `path.resolve()` により相対パス表記（`../`など）を排除した絶対パス文字列を生成し、それが許可リストと前方一致（`startsWith`）するかで判定します。
-この「文字列ベースの検査機構」に依存している仕様が原因となり、OS特有のファイルシステム挙動（WindowsのショートパスやUNCパス、Linux/Macのシンボリックリンク等）に対する技術的制約やバイパスリスクを抱えています。リスクの詳細は『セキュリティ評価書 (`security_assessment.md`)』に明記しています。
 
-## 4. インターフェース設計 (クラス構造)
+`safeResolvePath()`（`src/utils/platform.ts`）により `path.resolve()` + `fs.realpathSync()` を組み合わせて相対パス・シンボリックリンクを解決し、許可リストと前方一致（`pathStartsWith()`）で判定します。
+
+- **Windows対応**: `normalizeWindowsPath()` によりパスの大文字・小文字統一、8.3短縮パス解決、UNCパス正規化を実施
+- **Linux/macOS対応**: `fs.realpathSync()` によりシンボリックリンクを実体パスに解決
+- **テストカバレッジ**: `tests/security/sandbox.test.ts` に20テスト
+
+---
+
+## 4. インターフェース設計（クラス構造）
 
 ```mermaid
 classDiagram
@@ -321,9 +345,12 @@ classDiagram
     SubAgentManager ..> AgentDefinitionLoader
 ```
 
+---
+
 ## 5. HookManager アーキテクチャ
 
 ### 概要
+
 `HookManager`（`src/hooks/hook-manager.ts`）は、ツール実行のライフサイクルとセッションのライフサイクルにユーザー定義のシェルコマンドを差し込む機構です。`ToolExecutor` に注入され、ツール実行の前後にフックコマンドを実行します。
 
 ### クラス構造
@@ -369,7 +396,7 @@ classDiagram
 
 ### ToolExecutor との統合
 
-`ToolExecutor`（`src/tools/tool-executor.ts`）のコンストラクタにオプショナルな `hookManager` パラメータが渡されます。`execute()` メソッド内で以下の順序で処理が行われます。
+`ToolExecutor`（`src/tools/tool-executor.ts`）の `execute()` メソッド内で以下の順序で処理が行われます。
 
 ```mermaid
 sequenceDiagram
@@ -401,23 +428,19 @@ sequenceDiagram
 
 ### 環境変数の構築 (`buildEnv`)
 
-`buildEnv` メソッドは、ツールのパラメータから環境変数を構築します。
 - `TOOL_NAME`: 常に設定
-- `FILE_PATH`: `params.file_path ?? params.path ?? params.pattern ?? params.command` から抽出（`extractFilePath` メソッド）
+- `FILE_PATH`: `params.file_path ?? params.path ?? params.pattern ?? params.command` から抽出
 - `TOOL_OUTPUT`, `TOOL_SUCCESS`, `TOOL_ERROR`: PostToolUse 時のみ `ToolResult` から設定
 
-### フックのロード順序
+### フックのロード順序とマッチングロジック
 
-`loadHooks(projectDir)` メソッドは以下の順序でファイルを読み込み、すべてのフックを `this.hooks` 配列に追加します。
+`loadHooks(projectDir)` メソッドは以下の順序でファイルを読み込みます。
 
 1. `{projectDir}/.claude/hooks.json`
 2. `{projectDir}/.localllm/hooks.json`
 3. `~/.localllm/hooks.json`
 
-### マッチングロジック (`getMatching`)
-
-`matcher` が未指定のフックは、同じ `type` のすべてのツール実行にマッチします。
-`matcher.tool` が指定されている場合はツール名の完全一致、`matcher.filePattern` が指定されている場合は glob パターンマッチ（`*` と `**` をサポート）で判定します。
+`matcher` が未指定のフックは、同じ `type` のすべてのツール実行にマッチします。`matcher.tool` が指定されている場合はツール名の完全一致、`matcher.filePattern` が指定されている場合は glob パターンマッチ（`*` と `**` をサポート）で判定します。
 
 ### index.ts での初期化
 
@@ -425,22 +448,23 @@ sequenceDiagram
 const hookManager = new HookManager();
 hookManager.loadHooks(process.cwd());
 
-// AgentLoop コンストラクタに渡される
 const agent = new AgentLoop(
   provider, model, toolRegistry, permissions,
   contextWindow, compressionThreshold,
   contextModeManager, hookManager
 );
 
-// セッションフックの実行
 await hookManager.runSessionHooks("start");
 // ... REPL実行 ...
 await hookManager.runSessionHooks("stop");
 ```
 
+---
+
 ## 6. RuleLoader アーキテクチャ
 
 ### 概要
+
 `RuleLoader`（`src/rules/rule-loader.ts`）は、Markdown 形式のルールファイルを複数のソースから読み込み、システムプロンプトに注入する機構です。
 
 ### クラス構造
@@ -463,18 +487,16 @@ classDiagram
 
 ### ロード順序
 
-`loadAllRules()` メソッドは以下の順序でルールを読み込みます。すべてのルールが結合されます（上書きではなく追加）。
+`loadAllRules()` メソッドは以下の順序でルールを読み込みます（すべてのルールが結合されます）。
 
 1. **builtin** (`src/rules/builtin/`): `import.meta.url` から相対パスで解決。組み込み3種（security.md, coding-style.md, git-workflow.md）
 2. **user** (`~/.localllm/rules/`): `os.homedir()` ベース
 3. **project** (`.claude/rules/`): `process.cwd()` ベース
 4. **project** (`.localllm/rules/`): `process.cwd()` ベース
 
-各ディレクトリから `.md` 拡張子のファイルのみを読み込み、ファイル名（拡張子除く）を `name`、ファイル内容を `content`、ソース種別（`"builtin"`, `"user"`, `"project"`）を `source` として `Rule` オブジェクトを生成します。
-
 ### システムプロンプトへの注入
 
-`formatForSystemPrompt()` メソッドは `loadAllRules()` を呼び出し、結果を以下の形式で文字列化します。
+`formatForSystemPrompt()` メソッドが以下の形式で文字列化し、`buildSystemPrompt()`（`src/agent/system-prompt.ts`）の中でシステムプロンプトの末尾付近に追加されます。
 
 ```
 # ルール
@@ -486,11 +508,12 @@ classDiagram
 ...
 ```
 
-この文字列は `buildSystemPrompt()`（`src/agent/system-prompt.ts`）の中で呼び出され、システムプロンプトの末尾付近に追加されます。
+---
 
 ## 7. ContextModeManager アーキテクチャ
 
 ### 概要
+
 `ContextModeManager`（`src/context/context-mode.ts`）は、エージェントの動作モード（dev/review/research）を管理し、モードに応じたシステムプロンプトセクションを生成します。
 
 ### クラス構造
@@ -513,27 +536,20 @@ classDiagram
     }
 ```
 
-### モード定義（`MODE_DEFINITIONS`）
+### モード定義
 
-`ContextMode` 型は `"dev" | "review" | "research"` のユニオン型です。各モードは `ModeDefinition` インターフェースで定義されています。
+`ContextMode` 型は `"dev" | "review" | "research"` のユニオン型です。
 
 | フィールド | dev | review | research |
 |:---|:---|:---|:---|
 | `name` | Development | Code Review | Research |
-| `description` | Active development mode | Code review mode | Research and exploration mode |
 | `priority` | Work -> Correct -> Clean | Critical > High > Medium > Low | Understand -> Verify -> Document |
-| `behavior` | Write code first, test after, commit atomically | Thorough analysis, severity-based prioritization, provide solutions | Explore and learn, read broadly, summarize findings |
+| `behavior` | Write code first, test after, commit atomically | Thorough analysis, severity-based prioritization | Explore and learn, read broadly, summarize findings |
 | `preferredTools` | file_write, file_edit, bash, task | file_read, grep, glob | file_read, grep, glob, web_fetch, web_search |
 
-### 状態管理
-
 - `currentMode` プロパティでパブリックに現在のモードを保持（デフォルト: `"dev"`）
-- `switchMode()` で切り替え
 - REPL の `/mode` コマンドから `switchMode()` が呼ばれる
-
-### システムプロンプトセクション
-
-`getPromptSection()` は以下の形式の文字列を返し、`buildSystemPrompt()` 内でシステムプロンプトの末尾に追加されます。
+- `getPromptSection()` はシステムプロンプトの末尾に以下の形式で追加されます:
 
 ```
 # Context Mode: {def.name}
@@ -542,9 +558,12 @@ classDiagram
 - Preferred tools: {def.preferredTools.join(", ")}
 ```
 
+---
+
 ## 8. AgentDefinitionLoader アーキテクチャ
 
 ### 概要
+
 `AgentDefinitionLoader`（`src/agents/agent-loader.ts`）は、Markdown + YAML フロントマター形式のエージェント定義ファイルを読み込み、サブエージェントの設定を提供します。
 
 ### クラス構造
@@ -573,30 +592,14 @@ classDiagram
 
 ### ロードの仕組み
 
-#### 遅延ロード（Lazy Loading）
-`get(name)` メソッドは内部で `this.loaded` フラグをチェックし、未ロードの場合は `loadAll()` を自動的に呼び出します。`loadAll()` も `this.loaded` が true の場合はキャッシュを返却します。
+- **遅延ロード（Lazy Loading）**: `get(name)` メソッドは内部で `this.loaded` フラグをチェックし、未ロードの場合は `loadAll()` を自動的に呼び出します。
+- **ロード順序とオーバーライド**: `getSearchPaths()` が返すパスの順序で読み込み、**同名のエージェントは後のパスで上書き** されます（`Map.set()` による上書き）。
 
-#### ロード順序とオーバーライド
-`getSearchPaths()` が返すパスの順序で読み込み、**同名のエージェントは後のパスで上書き**されます（`Map.set()` による上書き）。
-
-1. `src/agents/builtin/` （`import.meta.url` から `fileURLToPath` で解決 + `"builtin"` ディレクトリ）
+1. `src/agents/builtin/` （`import.meta.url` から `fileURLToPath` で解決）
 2. `~/.localllm/agents/` （`getHomedir()` ベース）
 3. `.localllm/agents/` （`path.resolve` = CWD相対）
 
-#### フロントマターの解析（`parseFrontmatter`）
-独自の簡易 YAML パーサーで以下をサポートします。
-- 文字列値（クォート有無どちらも対応）
-- フロースタイル配列: `[a, b, c]`
-- `---` で囲まれたフロントマターブロック
-- 本文はフロントマター以降のテキスト全体が `systemPrompt` として使用
-
-#### AgentDefinition の属性
-- `name`: フロントマターの `name`（必須。未指定の場合はスキップ）
-- `description`: フロントマターの `description`（デフォルト: `""`）
-- `tools`: フロントマターの `tools`（デフォルト: `[]`）
-- `allowedTools`: フロントマターの `allowedTools`（未指定の場合は `tools` と同一）
-- `systemPrompt`: フロントマター以降の本文
-- `source`: ファイルの絶対パス
+- **フロントマターの解析 (`parseFrontmatter`)**: 独自の簡易 YAML パーサーで文字列値（クォート有無どちらも対応）とフロースタイル配列 `[a, b, c]` をサポート。
 
 ### 組み込みエージェント（4種）
 
@@ -606,6 +609,8 @@ classDiagram
 | `plan.md` | plan | file_read, glob, grep, web_fetch, web_search |
 | `general-purpose.md` | general-purpose | file_read, file_write, file_edit, glob, grep, bash, web_fetch, web_search, todo_write, ask_user |
 | `code-reviewer.md` | code-reviewer | file_read, glob, grep, bash |
+
+---
 
 ## 9. MCPManager アーキテクチャ
 
@@ -641,7 +646,6 @@ classDiagram
         -connectStdio() Promise~void~
         -connectSSE() Promise~void~
         -sendRequest(method, params) Promise~T~
-        -sendNotification(method, params) void
         -handleResponse(msg) void
     }
 
@@ -708,48 +712,32 @@ sequenceDiagram
 2. `{projectDir}/.localllm/mcp-servers.json`（プロジェクトローカル）
 3. `{projectDir}/.claude/mcp-servers.json`（Claude Code互換）
 
-### ツール命名規則と変換
-
-MCPサーバーから取得したツールは `mcp__<サーバー名>__<ツール名>` の形式で `ToolHandler` に変換されます。LLMにはプレフィックス付きの名前で提示され、MCPサーバーへの呼び出し時にはオリジナルのツール名が使用されます。
+### ツール命名規則
 
 ```
-MCPTool { name: "read_file", inputSchema: {...} }
+MCPTool { name: "read_file" }
   ↓ mcpToolToHandler()
-ToolHandler { name: "mcp__filesystem__read_file", definition: {...}, execute: async (params) => ... }
+ToolHandler { name: "mcp__filesystem__read_file" }
 ```
 
-### index.ts での統合
-
-```typescript
-// 起動時
-const mcpManager = new MCPManager(process.cwd());
-await mcpManager.connectAll(toolRegistry);
-
-// 終了時
-await mcpManager.disconnectAll();
-```
+---
 
 ## 10. HTTP通信レイヤーのタイムアウト戦略
 
 ### 概要
 
-`src/utils/http-client.ts` は、すべてのLLMプロバイダーおよびWeb系ツールが使用するHTTP通信の基盤モジュールです。
-ローカルLLMは応答に数分〜数十分を要するため、一般的なWebアプリケーションとは異なるタイムアウト設計が必要です。
+`src/utils/http-client.ts` は、すべてのLLMプロバイダーおよびWeb系ツールが使用するHTTP通信の基盤モジュールです。ローカルLLMは応答に数分〜数十分を要するため、一般的なWebアプリケーションとは異なるタイムアウト設計が必要です。
 
 ### タイムアウト設計
 
-本システムでは、用途に応じて3つのタイムアウト値を使い分けています。
-
-| 関数 | 用途 | デフォルト | 説明 |
-|:---|:---|:---|:---|
-| `httpGet` | 接続確認（モデル一覧等） | 10秒 | サーバー起動確認のみなので短い |
-| `httpPost` | 非ストリーミングPOST | 5分 | モデル情報クエリ等 |
-| `httpPostStream` (接続) | ストリーミング接続確立 | 1時間 | `fetch()`〜レスポンスヘッダー受信まで |
-| `httpPostStream` (アイドル) | ストリーム読み取り | 60分 | チャンク間の最大無通信時間 |
+| 関数 | 用途 | デフォルト |
+|:---|:---|:---|
+| `httpGet` | 接続確認（モデル一覧等） | 10秒 |
+| `httpPost` | 非ストリーミングPOST | 5分 |
+| `httpPostStream` (接続) | ストリーミング接続確立 | 1時間 |
+| `httpPostStream` (アイドル) | ストリーム読み取り | 60分 |
 
 ### ストリーミングのタイムアウトアーキテクチャ
-
-ストリーミング応答（LLMチャット）のタイムアウトは、以下の3層で構成されています。
 
 ```mermaid
 sequenceDiagram
@@ -776,62 +764,31 @@ sequenceDiagram
     alt 60分間データ受信なし
         Note over App: アイドルタイムアウト発動
         App->>App: AbortController.abort()
-        Note over App: エラー: "ストリーム読み取り<br/>タイムアウト"
     end
 ```
 
-#### 第1層: undici bodyTimeout の無効化
+**3層アーキテクチャ:**
+1. **undici bodyTimeout の無効化**: `bodyTimeout: 0` / `headersTimeout: 0` のカスタム `Agent` を `dispatcher` として注入し、undici のデフォルト5分タイムアウトを無効化
+2. **接続タイムアウト**: `fetch()` からレスポンスヘッダー受信までの最大待機時間（デフォルト1時間）
+3. **アイドルタイムアウト**: `wrapWithIdleTimeout()` がチャンク受信ごとにタイマーをリセット。60分間データが受信されない場合のみ中断
 
-Node.js の `fetch()` は内部で `undici` ライブラリを使用しており、デフォルトで `bodyTimeout: 300_000`（5分）が設定されています。
-この内部タイムアウトはアプリケーション側から直接制御できないため、カスタム `Agent` インスタンスを `dispatcher` オプション経由で注入し、`bodyTimeout: 0` / `headersTimeout: 0` で無効化しています。
-
-```typescript
-const streamAgent = new Agent({
-  bodyTimeout: 0,
-  headersTimeout: 0,
-});
-```
-
-#### 第2層: 接続タイムアウト
-
-`fetch()` 呼び出しからレスポンスヘッダー受信までの最大待機時間（デフォルト1時間）。
-`AbortController` + `setTimeout` で実装し、レスポンスヘッダー受信後にタイマーをクリアします。
-
-#### 第3層: アイドルタイムアウト
-
-`wrapWithIdleTimeout()` 関数が `ReadableStream` をラップし、チャンク受信ごとにタイマーをリセットします。
-一定時間（デフォルト60分）データが一切受信されない場合にのみストリームを中断します。
-
-- **LLMが推論中**（最初のトークン生成待ち）の場合でもタイムアウトしない設計ではない点に注意。60分以内に最初のトークンが到着しなければタイムアウトする。
-- 完全なハング（サーバーダウン等）の検出が主目的。
-
-### エラーハンドリング
-
-`openai-compat.ts` の `doChat` メソッドにおいて、ストリーム読み取り中のエラーを以下のように分類して処理します。
-
-| エラー種別 | 判定条件 | ユーザーへのメッセージ |
-|:---|:---|:---|
-| アイドルタイムアウト | `AbortError` or `message.includes("abort")` | 「ストリーム読み取りタイムアウト: LLMサーバーから一定時間データが受信できませんでした」 |
-| その他のエラー | 上記以外 | エラーメッセージをそのまま表示 |
-
-### 設計判断の根拠
-
-| 判断 | 理由 |
+| 設計判断 | 理由 |
 |:---|:---|
-| アイドルタイムアウト60分 | 大型モデル（27B+）の最初のトークン生成に数分〜数十分かかることがある。余裕を持たせつつ、完全なハングを検出 |
-| 全体タイムアウトではなくアイドル | ストリーミング中はデータが断続的に到着する。全体時間で制限すると長い応答が途中で切れる |
+| アイドルタイムアウト60分 | 大型モデル（27B+）の最初のトークン生成に数分〜数十分かかることがある |
+| 全体タイムアウトではなくアイドル | ストリーミング中はデータが断続的に到着する。全体時間制限では長い応答が途中で切れる |
 | undici Agent をシングルトン化 | リクエストごとにAgentを生成すると接続プールが無駄になるため |
-| bodyTimeout=0 で無効化 | undiciのデフォルト300秒がローカルLLMの応答時間と合わず、早期切断の原因になっていた |
 
-## 11. Discord通知統合 (Discord Notification Integration)
+---
+
+## 11. Discord通知統合
 
 ### 概要
 
-LLM（特にローカルLLM）は応答生成に時間がかかる場合があるため、生成完了時にその応答内容を自動的にDiscordへ通知する機能を提供します。これにより、ユーザーはターミナルを監視し続けることなく、別作業をしながら応答結果を受け取ることができます。
+LLMの応答生成完了時に、応答内容を自動的にDiscordへ通知する機能です。ユーザーはターミナルを監視し続けることなく、別作業をしながら応答結果を受け取れます。
 
 ### アーキテクチャ
 
-通知処理は、エージェントループが完了してREPLに制御が戻るタイミング（`src/cli/repl.ts`）で実行されます。これにより、既存のAgentCoreやProviderといった重い処理ロジックに影響を与えず、オプショナルな機能として疎結合に保たれています。
+通知処理は、エージェントループが完了してREPLに制御が戻るタイミング（`src/cli/repl.ts`）で実行されます。これにより、AgentCoreやProviderに影響を与えず、オプショナルな機能として疎結合に保たれています。
 
 ```mermaid
 sequenceDiagram
@@ -844,41 +801,37 @@ sequenceDiagram
     User->>REPL: メッセージを入力
     REPL->>Loop: run(userMessage)
     Loop-->>REPL: 実行完了 (History 更新)
-    
+
     REPL->>Config: Discord設定の確認 (enabled && webhookUrl)
     alt 設定有効
         REPL->>REPL: Historyから最後のAssistantメッセージを抽出
-        REPL->>Discord: sendDiscordNotification() <br/> HTTP POST (メッセージ転送)
+        REPL->>Discord: sendDiscordNotification() HTTP POST
     end
 ```
 
 ### Discord 2000文字制限への対応
 
-DiscordのWebhookAPIは1リクエストあたりのメッセージ長に **2000文字の制限** があります。LLMの応答がこれを超える場合、`src/utils/discord.ts` 内の `sendDiscordNotification` メソッドが自動的に文字列をチャンクに分割し、複数回の POST リクエストとして順次送信します。分割時は、なるべくキリの良い場所（改行など）で区切るような配慮が組み込まれています。
+Discordの1リクエストあたり2000文字制限に対し、`src/utils/discord.ts` 内の `sendDiscordNotification` が自動的に文字列をチャンクに分割し、複数回の POST リクエストとして順次送信します。分割時はなるべくキリの良い場所（改行など）で区切ります。
 
 ---
 
-## 10. 非TTYモード対応と stdin 共有設計 (2026-03-11 追加)
+## 12. 非TTYモード対応と stdin 共有設計
 
 ### 背景・問題
 
-パイプ入力（`printf "..." | npm run start`）のような非TTY環境で実行した際に、2つのバグが発生した。
+パイプ入力（`printf "..." | npm run start`）のような非TTY環境で実行した際に、2つのバグが発生していました。
 
 **バグ1: 並列ツール実行時の権限確認競合**
-LLMが複数のツールを `Promise.allSettled` で並列実行すると、各ツールが同時に `inquirer.prompt` を呼び出す。
-TTY環境では inquirer が stdin を排他的に取得するが、非TTY時は stdin が閉じた瞬間に全インスタンスが
-`ExitPromptError: User force closed the prompt with 0 null` を投げてクラッシュしていた。
+LLMが複数のツールを `Promise.allSettled` で並列実行すると、各ツールが同時に `inquirer.prompt` を呼び出します。非TTY時は stdin が閉じた瞬間に全インスタンスが `ExitPromptError: User force closed the prompt with 0 null` を投げてクラッシュしていました。
 
 **バグ2: readline が stdin バッファを消費・破棄する問題**
-REPL の `fallbackQuestion` が `readline.createInterface` を毎回作成し、`rl.close()` 時に
-readline の内部バッファに残っていた行データ（次の入力用）が失われていた。
-例: `printf "prompt\n1\n1\n..."` でパイプしても "prompt" 以降の "1"s が届かずハングアップ。
+REPL の `fallbackQuestion` が `readline.createInterface` を毎回作成し、`rl.close()` 時に readline の内部バッファに残っていた行データが失われていました。
 
 ### 解決策
 
 #### NonTTYReader シングルトン (`src/utils/non-tty-reader.ts`)
 
-readline インスタンスを **1つだけ** 作成し、REPL と PermissionManager で共有する。
+readline インスタンスを **1つだけ** 作成し、REPL と PermissionManager で共有します。
 
 ```
 stdin (pipe)
@@ -893,20 +846,11 @@ readline.Interface (1インスタンス, terminal: false)
     └─ "close" イベント → 全 waiters を "" で resolve
 ```
 
-`lineQueue` (先読みキュー) と `waiters` (待ちリスト) を使い、
-どちらが先に来ても正しく行データを受け渡す。
+`lineQueue`（先読みキュー）と `waiters`（待ちリスト）を使い、どちらが先に来ても正しく行データを受け渡します。
 
 #### REPL fallbackQuestion の変更 (`src/cli/interactive-input.ts`)
 
 ```typescript
-// 変更前
-private fallbackQuestion(prefix: string): Promise<string> {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, ... });
-    rl.question(prefix, (answer) => { rl.close(); resolve(answer); });
-  });
-}
-
 // 変更後
 private fallbackQuestion(prefix: string): Promise<string> {
   process.stdout.write(prefix);
@@ -950,11 +894,9 @@ private async askUserWithScope(...) {
 選択 [1-5]:
 ```
 
-パイプで数値を送ることで選択できる。**3は config.json を永続変更するため、テスト時は使用禁止。**
+**重要**: パイプで数値を送ることで選択できます。**3は config.json を永続変更するため、テスト時は使用禁止。**
 
-### 非TTYモードの適用範囲と制限（2026-03-13 追記）
-
-非TTYパイプモードはCI的な自動テストに有効だが、以下の限界がある：
+### 非TTYモードの適用範囲と制限
 
 | 検証できること | 検証できないこと |
 |---|---|
@@ -967,8 +909,7 @@ private async askUserWithScope(...) {
 
 ### 長時間タスクの推奨実行パターン
 
-アウトプット品質が重要な長時間タスク（書籍生成・大規模リファクタ等）では、
-「パイプ一括投入→放置」ではなく以下のパターンを推奨する：
+アウトプット品質が重要な長時間タスク（書籍生成・大規模リファクタ等）では、以下のパターンを推奨します。
 
 ```
 1. バックグラウンド起動（最初のプロンプトのみ）
@@ -976,5 +917,3 @@ private async askUserWithScope(...) {
 3. 出力を評価して追加指示を投入（別プロセスで追加パイプ）
 4. 品質が基準を満たしたら次フェーズへ
 ```
-
-このパターンにより、Claude Codeの知識・判断をアウトプット内容に反映できる。
