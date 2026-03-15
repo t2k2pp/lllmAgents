@@ -26,6 +26,7 @@ import { registerAskCommand } from "../discord/slash-commands.js";
 import { select } from "@inquirer/prompts";
 import { saveConfig } from "../config/config-manager.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
+import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
 
 export class REPL {
   private input: InteractiveInput;
@@ -33,6 +34,8 @@ export class REPL {
   private isMultiline = false;
   private lineNumber = 0;
   private interactionServer: DiscordInteractionServer | null = null;
+  private loopManager = new LoopManager();
+  private agentBusy = false;
 
   constructor(
     private agent: AgentLoop,
@@ -136,6 +139,11 @@ export class REPL {
       }
     } finally {
       this.agent.saveCurrentSession();
+      // アクティブなループタイマーを全停止
+      const stoppedLoops = this.loopManager.stopAll();
+      if (stoppedLoops > 0) {
+        console.log(chalk.dim(`  ループ ${stoppedLoops} 件を停止しました。`));
+      }
       // stdin を pause してイベントループを解放し、プロセスを終了可能にする
       process.stdin.pause();
     }
@@ -183,6 +191,7 @@ export class REPL {
   // ─── 入力処理 ──────────────────────────────────────
 
   private async processInput(input: string): Promise<void> {
+    this.agentBusy = true;
     try {
       if (input.startsWith("@second ")) {
          if (!this.secondLLMManager || !this.secondLLMManager.isAvailable()) {
@@ -218,6 +227,8 @@ export class REPL {
       console.error(
         chalk.red(`\n  Error: ${e instanceof Error ? e.message : String(e)}\n`),
       );
+    } finally {
+      this.agentBusy = false;
     }
   }
 
@@ -915,6 +926,103 @@ export class REPL {
           console.log(chalk.yellow(`  Unknown mode: ${modeArg}`));
           console.log(chalk.dim("  Available modes: dev, review, research"));
         }
+        break;
+      }
+
+      case "/loop": {
+        const subCmd = args[0]?.toLowerCase();
+
+        // /loop list
+        if (subCmd === "list") {
+          const entries = this.loopManager.list();
+          if (entries.length === 0) {
+            console.log(chalk.dim("  アクティブなループはありません。"));
+          } else {
+            console.log(chalk.bold(`\n  アクティブなループ (${entries.length} 件):`));
+            for (const e of entries) {
+              const lastRun = e.lastRunAt
+                ? e.lastRunAt.toLocaleTimeString()
+                : "未実行";
+              console.log(
+                chalk.cyan(`    [${e.id}]`) +
+                  chalk.dim(` 間隔: ${e.intervalStr}`) +
+                  chalk.dim(` | 実行数: ${e.runCount}`) +
+                  chalk.dim(` | 最終実行: ${lastRun}`) +
+                  `\n        ${chalk.white(e.prompt)}`,
+              );
+            }
+            console.log();
+          }
+          break;
+        }
+
+        // /loop stop [id|all]
+        if (subCmd === "stop") {
+          const target = args[1];
+          if (!target || target === "all") {
+            const count = this.loopManager.stopAll();
+            console.log(
+              count > 0
+                ? chalk.dim(`  全ループを停止しました (${count} 件)。`)
+                : chalk.dim("  停止するループがありません。"),
+            );
+          } else {
+            const ok = this.loopManager.stop(target);
+            console.log(
+              ok
+                ? chalk.dim(`  ループ [${target}] を停止しました。`)
+                : chalk.yellow(`  ループ [${target}] が見つかりません。`),
+            );
+          }
+          break;
+        }
+
+        // /loop [interval] <prompt>
+        const argsStr = args.join(" ");
+        if (!argsStr) {
+          console.log(chalk.yellow("  使い方: /loop [間隔] <プロンプト>"));
+          console.log(chalk.dim("  例: /loop 5m /pr-review"));
+          console.log(chalk.dim("  例: /loop 30m デプロイ状況を確認"));
+          console.log(chalk.dim("  間隔: 10s, 5m, 2h, 1d (省略時: 10m)"));
+          console.log(chalk.dim("  /loop list  - 一覧表示"));
+          console.log(chalk.dim("  /loop stop [id|all]  - 停止"));
+          break;
+        }
+
+        const { intervalMs, intervalStr, prompt: loopPrompt } = parseLoopArgs(argsStr);
+
+        if (!loopPrompt) {
+          console.log(chalk.yellow("  プロンプトを指定してください。"));
+          break;
+        }
+
+        const loopId = this.loopManager.start(
+          loopPrompt,
+          intervalMs,
+          intervalStr,
+          async (p: string) => {
+            if (this.agentBusy) {
+              console.log(
+                chalk.dim(`\n  [Loop ${loopId}] エージェント実行中のためスキップ (${new Date().toLocaleTimeString()})`),
+              );
+              return;
+            }
+            console.log(
+              chalk.bold(`\n  [Loop ${loopId}] 実行開始 (${new Date().toLocaleTimeString()}): `) +
+                chalk.white(p),
+            );
+            if (p.startsWith("/")) {
+              await this.handleCommand(p);
+            } else {
+              await this.processInput(p);
+            }
+          },
+        );
+
+        console.log(
+          chalk.green(`  ✅ ループ [${loopId}] を開始しました。`) +
+            chalk.dim(` 間隔: ${intervalStr} | プロンプト: "${loopPrompt}"`),
+        );
         break;
       }
 
