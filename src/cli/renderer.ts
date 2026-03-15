@@ -59,6 +59,9 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/skills")}         利用可能なスキル一覧
     ${chalk.cyan("/status")}         全体ステータス
     ${chalk.cyan("/discord")}        Discord通知の設定
+    ${chalk.cyan("/loop [間隔] <プロンプト>")}  指定間隔でプロンプトを繰り返し実行
+    ${chalk.cyan("/loop list")}      アクティブなループ一覧
+    ${chalk.cyan("/loop stop [id|all]")}  ループを停止
 ${skillSection}
   ${chalk.bold("入力:")}
     Shift+Enter  改行を挿入（マルチライン入力）
