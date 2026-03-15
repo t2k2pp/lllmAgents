@@ -114,6 +114,13 @@ export interface SubAgentResult {
   success: boolean;
 }
 
+/** スキルのcontext:forkで使用するカスタム設定のオーバーライド */
+export interface SubAgentConfigOverrides {
+  systemPrompt?: string;
+  allowedTools?: string[];
+  maxTurns?: number;
+}
+
 export class SubAgent {
   private agentId: string;
   private history: MessageHistory;
@@ -128,6 +135,7 @@ export class SubAgent {
     permissions: PermissionManager,
     type: SubAgentType,
     description: string,
+    overrides?: SubAgentConfigOverrides,
   ) {
     this.agentId = `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -139,6 +147,9 @@ export class SubAgent {
     this.config = {
       ...resolved,
       description,
+      ...(overrides?.systemPrompt !== undefined && { systemPrompt: overrides.systemPrompt }),
+      ...(overrides?.allowedTools !== undefined && { allowedTools: overrides.allowedTools }),
+      ...(overrides?.maxTurns !== undefined && { maxTurns: overrides.maxTurns }),
     };
 
     this.filteredRegistry = this.createFilteredRegistry(toolRegistry, this.config);
@@ -304,6 +315,28 @@ export class SubAgentManager {
             }
       )
     );
+  }
+
+  /**
+   * スキルのcontext:fork用: スキル内容をsystemPromptとしてSubAgentを起動する。
+   * スキルの指示を独立したコンテキストで実行し、メインコンテキストを汚染しない。
+   */
+  async launchSkillFork(
+    skillName: string,
+    skillSystemPrompt: string,
+    allowedTools: string[] | undefined,
+    prompt: string,
+  ): Promise<SubAgentResult> {
+    const agent = new SubAgent(
+      this.provider,
+      this.model,
+      this.toolRegistry,
+      this.permissions,
+      "general-purpose",
+      `skill:${skillName}`,
+      { systemPrompt: skillSystemPrompt, allowedTools },
+    );
+    return agent.run(prompt);
   }
 
   async getResult(agentId: string): Promise<SubAgentResult | null> {

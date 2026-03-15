@@ -24,6 +24,15 @@ function parseSkillFile(content: string, filePath: string, builtIn: boolean): Sk
   if (!meta.name || !meta.description) return null;
   const trigger = meta.trigger || `/${meta.name}`;
 
+  // context: "fork" のみ有効値として受け付ける
+  const context = meta.context === "fork" ? "fork" as const : undefined;
+
+  // tools: "[bash, file_read]" or "bash, file_read" 形式をパース
+  const toolsRaw = meta.tools;
+  const tools = toolsRaw
+    ? toolsRaw.replace(/^\[|\]$/g, "").split(",").map((t) => t.trim()).filter(Boolean)
+    : undefined;
+
   return {
     name: meta.name,
     description: meta.description,
@@ -31,6 +40,8 @@ function parseSkillFile(content: string, filePath: string, builtIn: boolean): Sk
     content: body.trim(),
     filePath,
     builtIn,
+    context,
+    tools,
   };
 }
 

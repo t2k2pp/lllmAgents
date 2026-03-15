@@ -29,7 +29,7 @@ import { askUserTool } from "./tools/definitions/ask-user.js";
 import { createBrowserTools } from "./tools/definitions/browser.js";
 import { taskTool, taskOutputTool, setSubAgentManager } from "./tools/definitions/task.js";
 import { enterPlanModeTool, exitPlanModeTool, setPlanManager } from "./tools/definitions/plan-mode.js";
-import { skillTool, setSkillRegistry, setSkillPermissionManager } from "./tools/definitions/skill.js";
+import { skillTool, setSkillRegistry, setSkillPermissionManager, setSkillSubAgentManager } from "./tools/definitions/skill.js";
 import { secondLLMConsultTool, secondLLMAgentTool, setSecondLLMManager } from "./tools/definitions/second-llm.js";
 
 import { displayWelcome } from "./cli/renderer.js";
@@ -190,6 +190,7 @@ async function main(): Promise<void> {
   // Sub-agent manager
   const subAgentManager = new SubAgentManager(provider, config.mainLLM.model, toolRegistry, permissions);
   setSubAgentManager(subAgentManager);
+  setSkillSubAgentManager(subAgentManager);
 
   // Second LLM
   const secondLLMManager = new SecondLLMManager(toolRegistry, permissions);

@@ -3,9 +3,11 @@ import chalk from "chalk";
 import type { ToolHandler } from "../tool-registry.js";
 import type { SkillRegistry } from "../../skills/skill-registry.js";
 import type { PermissionManager } from "../../security/permission-manager.js";
+import type { SubAgentManager } from "../../agent/sub-agent.js";
 
 let skillRegistry: SkillRegistry | null = null;
 let permissionManager: PermissionManager | null = null;
+let subAgentManager: SubAgentManager | null = null;
 
 export function setSkillRegistry(registry: SkillRegistry): void {
   skillRegistry = registry;
@@ -13,6 +15,10 @@ export function setSkillRegistry(registry: SkillRegistry): void {
 
 export function setSkillPermissionManager(pm: PermissionManager): void {
   permissionManager = pm;
+}
+
+export function setSkillSubAgentManager(manager: SubAgentManager): void {
+  subAgentManager = manager;
 }
 
 export const skillTool: ToolHandler = {
@@ -63,8 +69,6 @@ export const skillTool: ToolHandler = {
       };
     }
 
-    console.log(chalk.dim(`\n  [Skill] ${skill.trigger}: ${skill.description}`));
-
     // Resolve skill directory for script references
     const skillDir = path.dirname(skill.filePath);
 
@@ -76,7 +80,38 @@ export const skillTool: ToolHandler = {
     // Replace ${SKILL_DIR} placeholder with the absolute skill directory path
     const resolvedContent = skill.content.replace(/\$\{SKILL_DIR\}/g, skillDir);
 
-    // Return the skill content as instructions for the LLM to follow
+    // context:fork - 独立したSubAgentコンテキストでスキルを実行
+    if (skill.context === "fork") {
+      if (!subAgentManager) {
+        return { success: false, output: "", error: "SubAgentManager not initialized (context:fork requires SubAgentManager)" };
+      }
+
+      console.log(chalk.dim(`\n  [Skill:fork] ${skill.trigger}: ${skill.description}`));
+      console.log(chalk.dim(`  フォークコンテキストで実行中...`));
+
+      const forkPrompt = args
+        ? `${args}`
+        : "スキルの指示に従ってタスクを実行してください。";
+
+      const result = await subAgentManager.launchSkillFork(
+        skill.name,
+        resolvedContent,
+        skill.tools,
+        forkPrompt,
+      );
+
+      const statusLabel = result.success ? chalk.green("完了") : chalk.red("失敗");
+      console.log(chalk.dim(`  [Skill:fork] ${statusLabel}`));
+
+      return {
+        success: result.success,
+        output: result.result,
+      };
+    }
+
+    // デフォルト: スキル内容をLLMへの指示として返す（インライン実行）
+    console.log(chalk.dim(`\n  [Skill] ${skill.trigger}: ${skill.description}`));
+
     const output = [
       `<skill-loaded name="${skill.name}" trigger="${skill.trigger}" skill-dir="${skillDir}">`,
       resolvedContent,
