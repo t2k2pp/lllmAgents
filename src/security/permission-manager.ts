@@ -229,6 +229,14 @@ export class PermissionManager {
       }
     }
 
+    // browser_screenshot: save_path が指定された場合はサンドボックスチェック
+    if (toolName === "browser_screenshot" && params.save_path) {
+      const savePath = params.save_path as string;
+      if (!this.sandbox.isPathAllowed(savePath)) {
+        return { allowed: false, reason: `save_path ${savePath} はサンドボックス外です` };
+      }
+    }
+
     return this.askUserWithScope(toolName, params, cacheKey);
   }
 
