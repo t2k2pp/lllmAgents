@@ -13,9 +13,9 @@ npx tsc --noEmit     # 型チェックのみ
 ```
 
 ## Architecture
-- src/agent/       - エージェントループ、サブエージェント、プランモード、セッション、メモリ
-- src/agents/      - エージェント定義ファイル (.md) とローダー
-- src/tools/       - ツールレジストリ、エグゼキュータ、21ツール定義
+- src/agent/       - **コアロジック**: AgentLoop, PlanManager, ContextManager, MessageHistory, SystemPrompt（TypeScriptコード）
+- src/agents/      - **エージェント定義**: サブエージェントの役割を定義する .md ファイル群とローダー（agent/ とは別物）
+- src/tools/       - ツールレジストリ、エグゼキュータ、23ツール定義
 - src/providers/   - LLMプロバイダー (Ollama, LMStudio, llama.cpp, vLLM)
 - src/cli/         - REPL、レンダラー
 - src/hooks/       - Pre/PostToolUse, Session lifecycle hooks

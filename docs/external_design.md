@@ -172,7 +172,7 @@ stateDiagram-v2
 
 ## 3. 提供機能とツール群
 
-エージェントはLLMの推論結果に基づき、以下の **22種の機能（ツール）** を抽象化された関数 (Function Calling) として呼び出します。
+エージェントはLLMの推論結果に基づき、以下の **23種の機能（ツール）** を抽象化された関数 (Function Calling) として呼び出します。
 
 ```mermaid
 graph TD
@@ -187,9 +187,10 @@ graph TD
         F5(file_edit):::ask
     end
 
-    subgraph System [システム操作 - 2ツール]
+    subgraph System [システム操作 - 3ツール]
         S1(bash):::ask
         S2(current_datetime):::safe
+        S3(sandbox_info):::safe
     end
 
     subgraph Web [Web検索 - 2ツール]
@@ -210,19 +211,24 @@ graph TD
     end
 
     subgraph AgentTools [タスク・エージェント管理 - 7ツール]
-        A1(todo_write):::ask
+        A1(todo_write):::safe
         A2(task):::ask
-        A3(task_output):::ask
-        A4(enter_plan_mode):::ask
-        A5(exit_plan_mode):::ask
+        A3(task_output):::safe
+        A4(enter_plan_mode):::safe
+        A5(exit_plan_mode):::safe
         A6(skill):::ask
-        A7(ask_user):::ask
+        A7(ask_user):::safe
     end
 ```
 
 ※緑色: 自動許可 (`auto`)、黄色: 確認必須 (`ask`)
 
-デフォルトで `auto`（自動許可）に設定されているツール: `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`, `web_search`, `web_fetch`, `current_datetime`。その他のツールはすべて `ask`（実行前にユーザーの承認が必要）です。
+ツールの権限は2種類あります。
+
+- **`auto`（自動許可）**: 常にユーザー確認なしで実行されます。以下の2層で決定されます。
+  - `INHERENTLY_SAFE_TOOLS`（コード定数）: `ask_user`, `todo_write`, `enter_plan_mode`, `exit_plan_mode`, `task_output`, `current_datetime`, `sandbox_info` — 設定に関わらず **常に** auto
+  - `autoApproveTools`（設定ファイル）: デフォルトは `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`, `web_search`, `web_fetch`
+- **`ask`（要確認）**: 実行前にインタラクティブな承認ダイアログを表示します。明示的に指定されていないツールはすべて `ask` にフォールバックします。
 
 ### 3.1 ツール詳細仕様
 
@@ -234,22 +240,23 @@ graph TD
 | **ファイル更新** | `file_write` | ask | ファイルを新規作成または全体上書きします。親ディレクトリが存在しない場合は **自動で `mkdir -p`** を実行します。 |
 | | `file_edit` | ask | 既存ファイルの一部を書き換えます。`target_string` がファイル内に一意に存在する場合のみ `replacement_string` に置換します。 |
 | **システム** | `bash` | ask | シェルコマンドを実行し、標準出力/標準エラーを取得します。タイムアウト標準120秒。 |
-| | `current_datetime` | auto | 現在の日時を取得します。ISO 8601形式、ローカルタイムゾーン形式、タイムゾーンオフセット情報を返します。 |
+| | `current_datetime` | auto (常時) | 現在の日時を取得します。ISO 8601形式、ローカルタイムゾーン形式、タイムゾーンオフセット情報を返します。 |
+| | `sandbox_info` | auto (常時) | 現在のサンドボックス設定（許可ディレクトリ、ブロックコマンド等）を返します。 |
 | **Web** | `web_search` | auto | DuckDuckGo等の検索エンジンAPIでインターネット検索し、サマリーを取得します。 |
-| | `web_fetch` | auto | 指定URLのWebページを取得し、HTMLからプレーンテキスト（Markdown等）を抽出して返します。 |
+| | `web_fetch` | auto | 指定URLのWebページを取得し、HTMLからプレーンテキスト（Markdown等）を抽出して返します。`http://` / `https://` のみ許可。 |
 | **ブラウザ操作** | `browser_navigate` | ask | **Playwright** プロセスを起動し、指定URLに遷移します。 |
 | | `browser_click` | ask | ブラウザのアクセシビリティツリーから要素をクリックします。 |
 | | `browser_type` | ask | ブラウザの入力フィールドにテキストを入力します。 |
 | | `browser_snapshot` | auto | ページのアクセシビリティツリー（テキスト形式）を取得します。Vision API不要で軽量。 |
-| | `browser_screenshot` | ask | ページのスクリーンショットを取得します。`save_path` 指定時はローカルファイルへ直接保存し、`vision_analyze` と組み合わせた視覚的な状態確認に使用します。 |
+| | `browser_screenshot` | ask | ページのスクリーンショットを取得します。`save_path` 指定時はサンドボックス内のパスに保存し、`vision_analyze` と組み合わせた視覚的な状態確認に使用します。 |
 | **画像解析** | `vision_analyze` | auto | スクリーンショットやローカル画像を、画像解析専用のサブLLM（OllamaのLlava等）に渡して状態を視覚的に説明させます。 |
-| **タスク管理** | `todo_write` | ask | エージェント自身が行動計画を整理するためのTODOリストをワークスペースに作成・更新します。 |
+| **タスク管理** | `todo_write` | auto (常時) | エージェント自身が行動計画を整理するためのTODOリストをワークスペースに作成・更新します。 |
 | | `task` | ask | 独立したコンテキストを持つ **子エージェント（SubAgent）** を生成し、スコープを限定したタスクを並列で実行・委譲します。 |
-| | `task_output` | ask | バックグラウンドで起動したサブエージェントの実行結果を取得します。 |
-| | `enter_plan_mode` | ask | 破壊的なツール実行を封印し、システムの調査・設計のみを行う「プランモード」に入ります。 |
-| | `exit_plan_mode` | ask | プランモードを終了し、計画内容を `~/.localllm/plans/` に保存してユーザー承認を待ちます。 |
+| | `task_output` | auto (常時) | バックグラウンドで起動したサブエージェントの実行結果を取得します。 |
+| | `enter_plan_mode` | auto (常時) | 破壊的なツール実行を封印し、システムの調査・設計のみを行う「プランモード」に入ります。 |
+| | `exit_plan_mode` | auto (常時) | プランモードを終了し、計画内容を `~/.localllm/plans/` に保存してユーザー承認を待ちます。 |
 | | `skill` | ask | ユーザーが配置した独自Markdownスキルを実行します。内蔵スキル（commit, pr-review, tdd, build-fix 等）も含みます。 |
-| | `ask_user` | ask | エージェントが単独で判断できない問題が発生した場合、コンソール経由でユーザーに直接質問します。 |
+| | `ask_user` | auto (常時) | エージェントが単独で判断できない問題が発生した場合、コンソール経由でユーザーに直接質問します。 |
 
 ---
 

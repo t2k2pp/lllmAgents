@@ -26,6 +26,11 @@ export const webFetchTool: ToolHandler = {
   async execute(params: Record<string, unknown>): Promise<ToolResult> {
     const url = params.url as string;
 
+    // セキュリティ: http/https のみ許可（file:// 等によるローカルファイル漏洩を防ぐ）
+    if (!/^https?:\/\//i.test(url)) {
+      return { success: false, output: "", error: `セキュリティエラー: URLは http:// または https:// で始まる必要があります（指定値: ${url}）` };
+    }
+
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15000);

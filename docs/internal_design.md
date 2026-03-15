@@ -82,7 +82,7 @@ graph TD
 src/
 ├── agent/          - AgentLoop, PlanManager, ContextManager, MessageHistory, SystemPrompt
 ├── agents/         - エージェント定義ファイル (.md) とローダー
-├── tools/          - ToolRegistry, ToolExecutor, 22ツール定義
+├── tools/          - ToolRegistry, ToolExecutor, 23ツール定義
 ├── providers/      - LLMプロバイダ (Ollama, LMStudio, llama.cpp, vLLM)
 ├── cli/            - REPL, レンダラー, 補完 (completer)
 ├── hooks/          - HookManager (Pre/PostToolUse, Session lifecycle)
@@ -104,6 +104,15 @@ src/
 ### 2.1 AgentLoop の実行フロー
 
 メインとなる思考ループ（推論とツール実行のサイクル）のフローを以下に示します。LLMからの複数のTool Callsを `Promise.allSettled` で **並列処理** している点が特徴です。
+
+**最大イテレーション数 (`MAX_TOOL_ITERATIONS = 50`) の設計根拠:**
+
+| 観点 | 理由 |
+|---|---|
+| **無限ループ防止** | LLMがツール呼び出しを繰り返してループ状態になった場合に強制終了するセーフガード |
+| **実用的な上限** | 一般的なエージェントタスク（コード変更・調査・デバッグ）で50回を超えることは稀 |
+| **応答時間の保証** | ローカルLLM（27B等）では1イテレーションに数十秒かかる場合があり、上限がないと数時間動き続ける可能性がある |
+| **ユーザーによる設定変更** | 現在は定数のため設定ファイルから変更不可。複雑タスクが多い場合は `src/agent/agent-loop.ts` の `MAX_TOOL_ITERATIONS` を直接変更してください |
 
 ```mermaid
 sequenceDiagram

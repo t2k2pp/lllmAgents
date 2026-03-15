@@ -1,8 +1,16 @@
 # v0.3.0 セカンドLLM機能 設計書
 
-> **ステータス**: 設計フェーズ（未実装）
+> **ステータス**: 実装済み（2026-03-15）
 > **作成日**: 2026-03-15
 > **関連**: 外部仕様の概要は `external_design.md` §12 を参照
+>
+> **実装状況**:
+> - `src/providers/vertex-ai.ts` — Vertex AI プロバイダー ✅
+> - `src/providers/azure-openai.ts` — Azure OpenAI プロバイダー ✅
+> - `src/providers/azure-claude.ts` — Azure Claude プロバイダー ✅
+> - `src/tools/definitions/second-llm.ts` — `second_llm_consult` / `second_llm_agent` ツール ✅
+> - `src/cost/cost-calculator.ts`, `token-tracker.ts`, `budget-guard.ts` — コスト管理 ✅
+> - `src/index.ts` — `config.secondLLM.enabled` 時に条件付きで登録 ✅
 
 ---
 
