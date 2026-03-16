@@ -26,7 +26,8 @@ export class ToolExecutor {
 
     let params: Record<string, unknown>;
     try {
-      params = JSON.parse(toolCall.function.arguments);
+      const argsStr = toolCall.function.arguments?.trim();
+      params = argsStr ? JSON.parse(argsStr) : {};
     } catch {
       return {
         success: false,
