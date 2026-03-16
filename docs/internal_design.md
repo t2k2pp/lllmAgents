@@ -926,3 +926,87 @@ private async askUserWithScope(...) {
 3. 出力を評価して追加指示を投入（別プロセスで追加パイプ）
 4. 品質が基準を満たしたら次フェーズへ
 ```
+
+---
+
+## 13. VLLMProvider アーキテクチャ
+
+### 背景・問題
+
+vLLM サーバーは `--enable-auto-tool-choice` と `--tool-call-parser` を指定せずに起動した場合、OpenAI互換のネイティブツールコール（`tool_choice: "auto"` を含むリクエスト）に対して HTTP 400 を返します。この状態ではエージェントとして機能しません。
+
+### 解決策: 自動検出とテキストベースフォールバック
+
+`VLLMProvider`（`src/providers/vllm.ts`）は起動時にツールコールのサポートを自動検出し、未対応の場合はテキストベースフォールバックへ透過的に切り替えます。
+
+```mermaid
+flowchart TD
+    A[chatWithTools 呼び出し] --> B{ツールコールサポート確認}
+    B -->|未確認| C[checkToolCallSupport\ntool_choice:auto でテストリクエスト送信]
+    C -->|200 OK| D[サポートあり\nキャッシュ]
+    C -->|400 Error| E[サポートなし\nキャッシュ]
+    D --> F[OpenAI互換 ネイティブ\ntool calling を使用]
+    E --> G[テキストベース\nフォールバックを使用]
+    B -->|キャッシュ済み| F
+    B -->|キャッシュ済み| G
+```
+
+### テキストベースフォールバックの仕組み
+
+ツールコール非対応時は以下の方式でエージェント機能を実現します:
+
+```
+1. システムプロンプトにツール定義（JSON仕様）を埋め込む
+2. LLM にXMLフォーマットでのツールコール出力を指示する
+   <tool_call>
+   {"name": "ツール名", "parameters": {"key": "value"}}
+   </tool_call>
+3. レスポンステキストを正規表現でパース → ToolCall オブジェクトに変換
+4. AgentLoop が通常通りツールを実行する
+```
+
+#### メッセージ変換
+
+テキストベースフォールバックでは、会話履歴のメッセージを LLM が理解できるテキスト形式に変換します:
+
+| 元のメッセージ形式 | 変換後 |
+|---|---|
+| `{role: "system"}` | ツール定義を末尾に追記 |
+| `{role: "assistant", tool_calls: [...]}` | XML形式でtool_callsをcontent末尾に追記し、tool_callsフィールドを除去 |
+| `{role: "tool", content: "結果"}` | `{role: "user", content: "[ツール実行結果]\n結果"}` に変換 |
+
+### thinkingコンテンツフィルタリング
+
+Qwen3 系の reasoning モデルは、vLLM の `--enable-reasoning` 未設定時に thinking コンテンツを `content` フィールドに直接含めます。このとき `<think>` タグは省略され、`</think>` のみで thinking と回答を区切る場合があります:
+
+```
+（thinking コンテンツ...）</think>
+
+実際の回答...
+```
+
+`VLLMProvider.applyThinkFilter()` がこれに対応します。`</think>` タグが出現するまでのテキストをバッファリングして捨て、`</think>` 以降のテキストのみをユーザーに表示します。
+
+```typescript
+private async *applyThinkFilter(gen): AsyncGenerator<ChatChunk> {
+  let thinkFilterDone = false;
+  let buffer = "";
+
+  for await (const chunk of gen) {
+    if (chunk.type === "text" && !thinkFilterDone) {
+      buffer += chunk.text;
+      const closeIdx = buffer.indexOf("</think>");
+      if (closeIdx !== -1) {
+        thinkFilterDone = true;
+        // </think> 以降のみ yield
+        yield { ...chunk, text: buffer.slice(closeIdx + 8) };
+      }
+      // </think> 未到達 → バッファリング継続
+    } else {
+      yield chunk;
+    }
+  }
+}
+```
+
+このフィルタは `chat()` と `chatWithTools()` の両方に適用されます。

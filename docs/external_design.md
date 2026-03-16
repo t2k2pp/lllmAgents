@@ -347,7 +347,7 @@ sequenceDiagram
 
 | 設定キー | 説明 |
 |---|---|
-| `providerType` | `ollama`, `lmstudio`, `llamacpp`, `vllm`（4種のローカルLLMプロバイダ、すべてOpenAI互換APIで通信）|
+| `providerType` | `ollama`, `lmstudio`, `llamacpp`, `vllm`（4種のローカルLLMプロバイダ、すべてOpenAI互換APIで通信）。vLLMの制約については §5.3 を参照 |
 | `contextWindow` | トークン上限。この80%（デフォルト）に達すると自動圧縮 |
 | `allowedDirectories` | サンドボックスでアクセスを許可する追加のディレクトリリスト |
 | `autoApproveTools` | CLI経由で自動許可するツールのリスト |
@@ -359,7 +359,38 @@ sequenceDiagram
 
 > **設定の自動マージ**: バージョンアップで新しいデフォルトツールが追加された場合、既存の `config.json` と新デフォルトの和集合が使用されるため、再設定は不要です。
 
-### 5.2 Discord Webhook URL の取得と設定手順
+### 5.2 vLLM の設定と制約
+
+vLLM はデフォルト設定ではOpenAIネイティブのツールコール（`tool_choice: "auto"`）をサポートしません。
+
+#### ツールコールの動作
+
+LocalLLM Agent は起動時に vLLM サーバーのツールコールサポートを自動検出します:
+
+| 検出結果 | 動作 |
+|---|---|
+| **サポートあり** (`--enable-auto-tool-choice` 設定済み) | OpenAI互換APIのネイティブツールコールを使用 |
+| **サポートなし**（デフォルト） | テキストベースフォールバックを自動使用。XMLフォーマット (`<tool_call>`) でツールコールを行う |
+
+テキストベースフォールバックでも、`file_read`・`bash`・`web_fetch` 等のすべてのツールが動作します。
+
+#### vLLM でネイティブツールコールを有効にする手順
+
+vLLM サーバーを以下のオプションで起動することで、より高精度なツールコールが可能になります:
+
+```bash
+vllm serve <モデル名> \
+  --enable-auto-tool-choice \
+  --tool-call-parser hermes   # モデルに応じて: hermes / mistral / llama3_json / pythonic
+```
+
+Qwen3 系モデルの場合は `--tool-call-parser hermes` を推奨します。
+
+#### thinking コンテンツのフィルタリング
+
+Qwen3 等の reasoning モデルは `<think>...</think>` タグで囲まれた内部思考プロセスを出力します。vLLM の `--enable-reasoning` オプションが未設定の場合、thinking コンテンツが `content` フィールドに混入します。LocalLLM Agent は `</think>` タグを検出して thinking コンテンツを自動的にフィルタリングし、ユーザーには表示しません。
+
+### 5.3 Discord Webhook URL の取得と設定手順
 
 DiscordのWebhookを用いて、エージェントからの応答を任意のチャンネルへ送信できます。
 
