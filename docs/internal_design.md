@@ -931,53 +931,19 @@ private async askUserWithScope(...) {
 
 ## 13. VLLMProvider アーキテクチャ
 
-### 背景・問題
+### 前提: vLLM のセットアップ要件
 
-vLLM サーバーは `--enable-auto-tool-choice` と `--tool-call-parser` を指定せずに起動した場合、OpenAI互換のネイティブツールコール（`tool_choice: "auto"` を含むリクエスト）に対して HTTP 400 を返します。この状態ではエージェントとして機能しません。
+vLLM サーバーはエージェント機能に必要なツールコール（`tool_choice: "auto"`）を使うために、以下のオプションを**必ず**指定して起動する必要があります:
 
-### 解決策: 自動検出とテキストベースフォールバック
-
-`VLLMProvider`（`src/providers/vllm.ts`）は起動時にツールコールのサポートを自動検出し、未対応の場合はテキストベースフォールバックへ透過的に切り替えます。
-
-```mermaid
-flowchart TD
-    A[chatWithTools 呼び出し] --> B{ツールコールサポート確認}
-    B -->|未確認| C[checkToolCallSupport\ntool_choice:auto でテストリクエスト送信]
-    C -->|200 OK| D[サポートあり\nキャッシュ]
-    C -->|400 Error| E[サポートなし\nキャッシュ]
-    D --> F[OpenAI互換 ネイティブ\ntool calling を使用]
-    E --> G[テキストベース\nフォールバックを使用]
-    B -->|キャッシュ済み| F
-    B -->|キャッシュ済み| G
+```bash
+vllm serve <モデル名> --enable-auto-tool-choice --tool-call-parser hermes
 ```
 
-### テキストベースフォールバックの仕組み
-
-ツールコール非対応時は以下の方式でエージェント機能を実現します:
-
-```
-1. システムプロンプトにツール定義（JSON仕様）を埋め込む
-2. LLM にXMLフォーマットでのツールコール出力を指示する
-   <tool_call>
-   {"name": "ツール名", "parameters": {"key": "value"}}
-   </tool_call>
-3. レスポンステキストを正規表現でパース → ToolCall オブジェクトに変換
-4. AgentLoop が通常通りツールを実行する
-```
-
-#### メッセージ変換
-
-テキストベースフォールバックでは、会話履歴のメッセージを LLM が理解できるテキスト形式に変換します:
-
-| 元のメッセージ形式 | 変換後 |
-|---|---|
-| `{role: "system"}` | ツール定義を末尾に追記 |
-| `{role: "assistant", tool_calls: [...]}` | XML形式でtool_callsをcontent末尾に追記し、tool_callsフィールドを除去 |
-| `{role: "tool", content: "結果"}` | `{role: "user", content: "[ツール実行結果]\n結果"}` に変換 |
+これらのオプションなしで起動した場合、ツールコールリクエストに対して HTTP 400 が返り、エラーとしてユーザーに通知されます。アプリ側での透過的なフォールバックは行いません。
 
 ### thinkingコンテンツフィルタリング
 
-Qwen3 系の reasoning モデルは、vLLM の `--enable-reasoning` 未設定時に thinking コンテンツを `content` フィールドに直接含めます。このとき `<think>` タグは省略され、`</think>` のみで thinking と回答を区切る場合があります:
+Qwen3 系の reasoning モデルは、vLLM の `--enable-reasoning` 未設定時に thinking コンテンツを `content` フィールドに直接含めます。`</think>` タグのみで thinking と実際の回答を区切る形式になります:
 
 ```
 （thinking コンテンツ...）</think>
@@ -985,24 +951,29 @@ Qwen3 系の reasoning モデルは、vLLM の `--enable-reasoning` 未設定時
 実際の回答...
 ```
 
-`VLLMProvider.applyThinkFilter()` がこれに対応します。`</think>` タグが出現するまでのテキストをバッファリングして捨て、`</think>` 以降のテキストのみをユーザーに表示します。
+`VLLMProvider.applyThinkFilter()` がこれに対応します。最初の `BUFFER_LIMIT`（2000文字）まで `</think>` を待ちバッファリングし、見つかればそれ以前を捨てて以降をストリーミングします。2000文字を超えた場合は thinking なしと判断してバッファをそのまま flush し、通常ストリーミングに切り替えます。これにより非 thinking モデルでもストリーミング感が維持されます。
 
 ```typescript
 private async *applyThinkFilter(gen): AsyncGenerator<ChatChunk> {
-  let thinkFilterDone = false;
+  const BUFFER_LIMIT = 2000;
   let buffer = "";
+  let thinkFilterDone = false;
 
   for await (const chunk of gen) {
-    if (chunk.type === "text" && !thinkFilterDone) {
+    if (chunk.type === "text" && chunk.text && !thinkFilterDone) {
       buffer += chunk.text;
       const closeIdx = buffer.indexOf("</think>");
       if (closeIdx !== -1) {
         thinkFilterDone = true;
-        // </think> 以降のみ yield
-        yield { ...chunk, text: buffer.slice(closeIdx + 8) };
+        yield { ...chunk, text: buffer.slice(closeIdx + 8) }; // </think> 以降のみ
+      } else if (buffer.length >= BUFFER_LIMIT) {
+        thinkFilterDone = true;
+        yield { ...chunk, text: buffer }; // thinking なし → flush してストリーミング再開
       }
-      // </think> 未到達 → バッファリング継続
     } else {
+      if (!thinkFilterDone && buffer && chunk.type === "done") {
+        yield { type: "text", text: buffer }; // ストリーム完了まで </think> なし → そのまま yield
+      }
       yield chunk;
     }
   }
@@ -1010,3 +981,16 @@ private async *applyThinkFilter(gen): AsyncGenerator<ChatChunk> {
 ```
 
 このフィルタは `chat()` と `chatWithTools()` の両方に適用されます。
+
+### tool-executor の空引数対応
+
+vLLM のネイティブツールコールでは、引数なしのツール（例: `current_datetime`）を呼び出した際に、ストリーミングレスポンスの `arguments` フィールドが送られない場合があります。`ToolExecutor` は空文字列の場合に `{}` として扱います:
+
+```typescript
+const argsStr = toolCall.function.arguments?.trim();
+params = argsStr ? JSON.parse(argsStr) : {};
+```
+
+### LM Studio の reasoning フィールド対応
+
+LM Studio は thinking コンテンツを `reasoning_content` ではなく `reasoning` フィールドで返す場合があります。`OpenAICompatProvider` の SSEDelta 型に `reasoning` フィールドを追加し、`reasoning_content` と同様に thinking チャンクとして処理します。
