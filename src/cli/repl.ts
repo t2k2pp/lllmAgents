@@ -67,12 +67,29 @@ export class REPL {
    */
   async start(): Promise<void> {
     // Ctrl+C 中断ハンドラー: エージェント処理中は abort()、そうでなければ案内
+    // Ctrl+C ハンドラー:
+    //   処理中1回目 → ソフト中断 (abort) + "もう一度で終了" 案内
+    //   処理中2回目 → プロセス終了（強制脱出手段を保持）
+    //   待機中      → プロセス終了（通常動作）
+    let ctrlCCount = 0;
+    let ctrlCResetTimer: ReturnType<typeof setTimeout> | null = null;
     const sigintHandler = () => {
       if (this.agentBusy) {
-        this.agent.abort();
-        // abort()内で表示するのでここでは何もしない
+        ctrlCCount++;
+        if (ctrlCResetTimer) clearTimeout(ctrlCResetTimer);
+        if (ctrlCCount === 1) {
+          this.agent.abort();
+          console.log(chalk.yellow("\n  (Ctrl+C) 処理を中断中... もう一度 Ctrl+C でプロセス終了"));
+          // 3秒以内に2回目が来なければリセット
+          ctrlCResetTimer = setTimeout(() => { ctrlCCount = 0; }, 3000);
+        } else {
+          // 2回目: 強制終了
+          console.log(chalk.yellow("\n  強制終了します..."));
+          process.exit(1);
+        }
       } else {
-        console.log(chalk.dim("\n  (Ctrl+C) /quit で終了"));
+        // 待機中: 通常通り終了
+        process.exit(0);
       }
     };
     process.on("SIGINT", sigintHandler);
