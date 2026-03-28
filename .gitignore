@@ -8,3 +8,5 @@ coverage/
 .vitest/
 *.log
 screenshots/
+output/
+*.zip
