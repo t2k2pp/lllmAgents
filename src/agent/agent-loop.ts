@@ -55,6 +55,8 @@ export class AgentLoop {
   private streamingDisplay: boolean = false;
   /** 現在処理中のリクエストの発生元 */
   private currentSource: RequestSource = "cli";
+  /** Ctrl+C などによる中断フラグ */
+  private _aborted = false;
   /** LLM I/O ロガー */
   private llmLogger: LLMLogger;
 
@@ -87,9 +89,24 @@ export class AgentLoop {
     this.planManager = pm;
   }
 
+  /** 実行中の処理を中断する（Ctrl+C など）。次のイテレーション冒頭で停止する */
+  abort(): void {
+    this._aborted = true;
+  }
+
+  /** 中断フラグをリセットする（次の run() 開始前に呼ぶ） */
+  clearAbort(): void {
+    this._aborted = false;
+  }
+
+  isAborted(): boolean {
+    return this._aborted;
+  }
+
   async run(userMessage: string | ContentPart[], options?: { source?: RequestSource }): Promise<void> {
     this.currentSource = options?.source ?? "cli";
     this.isProcessing = true;
+    this._aborted = false;
     try {
     this.history.addUserMessage(userMessage);
     // <think>タグフィルター（古いOllama向け、ストリーム跨ぎ対応）
@@ -99,6 +116,11 @@ export class AgentLoop {
     let codeBlockRetried = false;
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+      // 中断チェック
+      if (this._aborted) {
+        console.log(chalk.yellow("\n  (処理を中断しました)"));
+        return;
+      }
       // Context compression check
       if (this.contextManager.shouldCompress(this.history)) {
         const compressSpinner = ora("コンテキストを圧縮中...").start();
@@ -177,6 +199,13 @@ export class AgentLoop {
           };
 
           for await (const chunk of gen) {
+            if (this._aborted) {
+              stopWaitingSpinner();
+              if (thinkingSpinner) { thinkingSpinner.stop(); thinkingSpinner = null; }
+              if (this.streamingDisplay && hasStartedOutput) process.stdout.write("\n");
+              console.log(chalk.yellow("\n  (処理を中断しました)"));
+              return;
+            }
             switch (chunk.type) {
               case "thinking":
                 // Qwen3等のthinkingモデル: reasoning_content を受信

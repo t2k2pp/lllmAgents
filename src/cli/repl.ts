@@ -27,8 +27,6 @@ import { select } from "@inquirer/prompts";
 import { saveConfig } from "../config/config-manager.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
-import { runTenacious } from "../tenacious/tenacious-runner.js";
-import { getSubAgentManager } from "../tools/definitions/task.js";
 
 export class REPL {
   private input: InteractiveInput;
@@ -68,6 +66,17 @@ export class REPL {
    * REPLメインループ。ユーザーが /quit するまで resolve しない。
    */
   async start(): Promise<void> {
+    // Ctrl+C 中断ハンドラー: エージェント処理中は abort()、そうでなければ案内
+    const sigintHandler = () => {
+      if (this.agentBusy) {
+        this.agent.abort();
+        // abort()内で表示するのでここでは何もしない
+      } else {
+        console.log(chalk.dim("\n  (Ctrl+C) /quit で終了"));
+      }
+    };
+    process.on("SIGINT", sigintHandler);
+
     // listenEnabled が有効なら起動時に Interaction Server を自動起動
     if (this.config.discord?.listenEnabled && this.config.discord.publicKey) {
       await this.startInteractionServer();
@@ -270,6 +279,7 @@ export class REPL {
       case "/quit":
       case "/exit":
         this.agent.saveCurrentSession();
+        process.removeAllListeners("SIGINT");
         console.log(chalk.dim("\n  Goodbye!\n"));
         return "quit";
 
@@ -301,29 +311,73 @@ export class REPL {
         if (!tryArgsStr) {
           console.log(chalk.dim("  使用方法: /try [最大試行数] <プロンプト>"));
           console.log(chalk.dim("  例: /try 3 output/gamesにテトリスを作って"));
-          console.log(chalk.dim("  試行数省略時はデフォルト3回"));
-          break;
-        }
-        const sam = getSubAgentManager();
-        if (!sam) {
-          console.log(chalk.yellow("  サブエージェントが初期化されていません。"));
+          console.log(chalk.dim("  試行数省略時はデフォルト3回 / Ctrl+C で中断可"));
           break;
         }
         // 先頭が数字なら試行数とみなす
-        let maxAttempts = 3;
+        let tryMaxAttempts = 3;
         let tryPrompt = tryArgsStr;
-        const firstNum = parseInt(args[0], 10);
-        if (!isNaN(firstNum) && firstNum > 0 && firstNum <= 10 && args.length > 1) {
-          maxAttempts = firstNum;
+        const tryFirstNum = parseInt(args[0], 10);
+        if (!isNaN(tryFirstNum) && tryFirstNum > 0 && tryFirstNum <= 10 && args.length > 1) {
+          tryMaxAttempts = tryFirstNum;
           tryPrompt = args.slice(1).join(" ").trim();
         }
         if (!tryPrompt) {
           console.log(chalk.yellow("  プロンプトが必要です。"));
           break;
         }
+        // @ファイル参照を解決
+        const { resolved: tryResolved, mentions: tryMentions } = resolveAtMentions(tryPrompt);
+        if (tryMentions.length > 0) printMentionFeedback(tryMentions);
+
         this.agentBusy = true;
         try {
-          await runTenacious({ prompt: tryPrompt, maxAttempts }, sam);
+          console.log(chalk.cyan(`\n  ┌─ 試行錯誤モード (最大${tryMaxAttempts}回) ─── Ctrl+C で中断可 ───`));
+          console.log(chalk.dim(`  │ タスク: ${tryPrompt.slice(0, 70)}${tryPrompt.length > 70 ? "..." : ""}`));
+          console.log(chalk.cyan(`  └${"─".repeat(54)}\n`));
+
+          let trySucceeded = false;
+          for (let tryAttempt = 1; tryAttempt <= tryMaxAttempts; tryAttempt++) {
+            if (this.agent.isAborted()) break;
+
+            console.log(chalk.cyan(`  ── 試行 ${tryAttempt}/${tryMaxAttempts} ${"─".repeat(40)}`));
+
+            // 前回の履歴長を記録してfile_write検出に使う
+            const msgsBefore = this.agent.getHistory().getMessages().length;
+
+            const promptForAttempt = tryAttempt === 1
+              ? tryResolved
+              : `${tryResolved}\n\n**再試行 (${tryAttempt}回目):** 前回の試行でファイルが作成されませんでした。` +
+                `今度は必ず file_write ツールを呼び出して実際にファイルを保存してください。`;
+
+            await this.agent.run(promptForAttempt);
+
+            if (this.agent.isAborted()) break;
+
+            // file_write が呼ばれたか確認
+            const msgsAfter = this.agent.getHistory().getMessages();
+            const newMsgs = msgsAfter.slice(msgsBefore);
+            const fileWritten = newMsgs.some(m =>
+              m.role === "assistant" &&
+              Array.isArray((m as { tool_calls?: unknown[] }).tool_calls) &&
+              (m as { tool_calls: Array<{ function: { name: string } }> }).tool_calls
+                .some(tc => tc.function.name === "file_write")
+            );
+
+            if (fileWritten) {
+              console.log(chalk.green(`\n  ✓ 試行 ${tryAttempt} 回目でファイルが作成されました\n`));
+              trySucceeded = true;
+              break;
+            }
+
+            if (tryAttempt < tryMaxAttempts) {
+              console.log(chalk.yellow(`\n  ✗ ファイル未作成。次の試行に進みます...\n`));
+            }
+          }
+
+          if (!trySucceeded && !this.agent.isAborted()) {
+            console.log(chalk.yellow(`\n  ${tryMaxAttempts}回試行しましたがファイルが作成されませんでした\n`));
+          }
         } finally {
           this.agentBusy = false;
         }
