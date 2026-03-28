@@ -180,6 +180,9 @@ async function main(): Promise<void> {
     contextModeManager,
     hookManager,
     skillInfos,
+    "main",
+    undefined,
+    config.streamingDisplay ?? false,
   );
 
   // Plan manager

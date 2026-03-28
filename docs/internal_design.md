@@ -93,6 +93,7 @@ src/
 ├── config/         - ConfigManager, セットアップウィザード
 ├── browser/        - PlaywrightManager
 ├── mcp/            - MCPManager, MCPClient
+├── tenacious/      - TenaciousRunner（試行錯誤モード: /try コマンド）
 ├── utils/          - http-client, discord, non-tty-reader, platform
 └── index.ts        - エントリポイント・初期化
 ```
@@ -994,3 +995,70 @@ params = argsStr ? JSON.parse(argsStr) : {};
 ### LM Studio の reasoning フィールド対応
 
 LM Studio は thinking コンテンツを `reasoning_content` ではなく `reasoning` フィールドで返す場合があります。`OpenAICompatProvider` の SSEDelta 型に `reasoning` フィールドを追加し、`reasoning_content` と同様に thinking チャンクとして処理します。
+
+---
+
+## 11. 試行錯誤モード（TenaciousRunner）
+
+### 11.1 概要
+
+`src/tenacious/tenacious-runner.ts` が `/try` コマンドのオーケストレーションを担います。
+
+**設計参考**:
+- [Karpathy/autoresearch](https://github.com/karpathy/autoresearch): 固定試行予算、スコアによる保持/破棄
+- [Anthropic harness design](https://www.anthropic.com/engineering/harness-design-long-running-apps): Generator/Evaluator 分離、コンテキストリセット
+
+### 11.2 アーキテクチャ
+
+```
+/try コマンド (repl.ts)
+  └── runTenacious(options, subAgentManager)
+        │
+        ├── [1] Planner サブエージェント (plan type)
+        │     → 成功基準チェックリスト生成
+        │     → 合格ライン: TOTAL_SCORE >= 7/10
+        │
+        └── [2..N] ループ (最大 maxAttempts 回)
+              ├── Generator サブエージェント (general-purpose type)
+              │     → 新鮮なコンテキストで実装
+              │     → attempt > 1 の場合: 前回フィードバックをプロンプトに注入
+              │
+              └── Evaluator サブエージェント (plan type)
+                    → glob/file_read で実際のファイルを確認
+                    → 各基準を 0-10 でスコアリング
+                    → "TOTAL_SCORE: X.X" を出力
+                    → 合格 → 終了、不合格 → フィードバックを次の Generator へ
+```
+
+### 11.3 コンテキストリセットの実装
+
+各サブエージェントは `SubAgentManager.launchForeground()` で独立インスタンスとして起動します。これにより:
+- Generator は前回試行の失敗パターンに引きずられない（Anthropic 推奨のコンテキストリセット）
+- Evaluator は Generator の自己評価バイアスなしに客観的評価できる（Generator/Evaluator 分離）
+
+### 11.4 主要定数・インターフェース
+
+```typescript
+const PASS_SCORE = 7;  // 合格ライン（10点満点）
+
+interface TenaciousOptions {
+  prompt: string;       // ユーザーの元プロンプト
+  maxAttempts: number;  // 最大試行回数（デフォルト: 3）
+}
+
+interface AttemptResult {
+  attempt: number;
+  generatorSummary: string;  // Generator の作業ログ（先頭500文字）
+  evaluatorScore: number;    // Evaluator のスコア（0-10）
+  evaluatorFeedback: string; // Evaluator の詳細フィードバック
+  passed: boolean;
+}
+```
+
+### 11.5 評価スコアのパース
+
+Evaluator が出力する `TOTAL_SCORE: X.X` を正規表現で抽出します。見つからない場合はデフォルト 4 点（低め）として扱い、不必要な早期終了を防ぎます。
+
+```typescript
+const scoreMatch = text.match(/TOTAL_SCORE:\s*(\d+(?:\.\d+)?)/i);
+```

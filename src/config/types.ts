@@ -102,6 +102,8 @@ export interface Config {
   security: SecurityConfig;
   context: ContextConfig;
   discord?: DiscordConfig;
+  /** true: テキストをリアルタイムにストリーミング表示。false(デフォルト): スピナー+完了後Markdownレンダリング */
+  streamingDisplay?: boolean;
 }
 
 // ヘルパー: セカンドLLMがクラウドかローカルかを判定

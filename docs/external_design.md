@@ -738,3 +738,55 @@ MCPサーバーが提供するツールは起動時に自動検出され、`mcp_
 ```
 
 詳細設計は `v030_second_llm_design.md` を参照してください。
+
+---
+
+## 13. 試行錯誤モード（Tenacious Runner）
+
+### 13.1 概要
+
+複雑なタスク（ゲーム作成・マルチファイル実装など）を、自動的に評価・フィードバックを繰り返しながら品質が合格ラインに達するまで試行錯誤するモードです。
+
+**設計参考**:
+- [Karpathy/autoresearch](https://github.com/karpathy/autoresearch): 固定試行予算、スコアによる保持/破棄
+- [Anthropic harness design](https://www.anthropic.com/engineering/harness-design-long-running-apps): Generator/Evaluator分離、コンテキストリセット
+
+### 13.2 コマンド
+
+```
+/try [最大試行数] <プロンプト>
+```
+
+| 例 | 説明 |
+|---|---|
+| `/try テトリスを作って` | 最大3回（デフォルト）試行 |
+| `/try 5 output/games/tetrisにパーティクル付きテトリスを作って` | 最大5回試行 |
+
+### 13.3 実行フロー
+
+```
+① Planner（サブエージェント）
+   → 「完成の定義」と評価チェックリストを生成
+   → 例: "index.htmlが存在すること", "ゲームが動作すること" など
+
+② Generator（サブエージェント、毎回新鮮なコンテキスト）
+   → タスクを実装
+   → 2回目以降は前回のフィードバックを受け取って改善
+
+③ Evaluator（サブエージェント、Generatorとは独立）
+   → 実際のファイルをglobで確認
+   → 各成功基準を 0-10 でスコアリング
+   → TOTAL_SCORE を出力
+
+④ TOTAL_SCORE >= 7 → 完了
+   TOTAL_SCORE < 7  → フィードバックを②に渡して繰り返す
+
+⑤ 最大試行数に達したら最終結果を報告
+```
+
+### 13.4 コンテキストリセットの効果
+
+各サブエージェントは独立したコンテキストで起動するため:
+- Generator は前回の失敗パターンに引きずられない
+- Evaluator は Generator の自己評価バイアスなしに客観評価できる
+- 前回のフィードバックは明示的にプロンプトに渡すことで引き継ぎ

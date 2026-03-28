@@ -3,6 +3,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import inquirer from "inquirer";
 import chalk from "chalk";
+import { nonTTYReader } from "../utils/non-tty-reader.js";
 
 export type PlanState = "idle" | "planning" | "awaiting_approval" | "approved" | "rejected";
 
@@ -66,18 +67,34 @@ export class PlanManager {
     console.log(this.currentPlan.content);
     console.log(chalk.bold("\n  ==========================\n"));
 
-    const { action } = await inquirer.prompt<{ action: string }>([
-      {
-        type: "list",
-        name: "action",
-        message: "この計画を承認しますか？",
-        choices: [
-          { name: "承認して実装開始", value: "approve" },
-          { name: "フィードバックを追加", value: "feedback" },
-          { name: "却下", value: "reject" },
-        ],
-      },
-    ]);
+    let action: string;
+
+    if (!process.stdin.isTTY) {
+      // 非TTYモード（パイプ等）: テキストメニューにフォールバック
+      process.stdout.write(
+        `  1: 承認して実装開始\n` +
+        `  2: フィードバックを追加\n` +
+        `  3: 却下\n` +
+        `選択 [1-3]: `,
+      );
+      const answer = await nonTTYReader.readLine();
+      const map: Record<string, string> = { "1": "approve", "2": "feedback", "3": "reject" };
+      action = map[answer?.trim()] ?? "approve";
+    } else {
+      const result = await inquirer.prompt<{ action: string }>([
+        {
+          type: "list",
+          name: "action",
+          message: "この計画を承認しますか？",
+          choices: [
+            { name: "承認して実装開始", value: "approve" },
+            { name: "フィードバックを追加", value: "feedback" },
+            { name: "却下", value: "reject" },
+          ],
+        },
+      ]);
+      action = result.action;
+    }
 
     if (action === "approve") {
       this.currentPlan.state = "approved";
@@ -85,13 +102,20 @@ export class PlanManager {
     }
 
     if (action === "feedback") {
-      const { feedback } = await inquirer.prompt<{ feedback: string }>([
-        {
-          type: "input",
-          name: "feedback",
-          message: "フィードバック:",
-        },
-      ]);
+      let feedback: string;
+      if (!process.stdin.isTTY) {
+        process.stdout.write(`フィードバック: `);
+        feedback = await nonTTYReader.readLine();
+      } else {
+        const result = await inquirer.prompt<{ feedback: string }>([
+          {
+            type: "input",
+            name: "feedback",
+            message: "フィードバック:",
+          },
+        ]);
+        feedback = result.feedback;
+      }
       this.currentPlan.state = "planning";
       this.currentPlan.feedback = feedback;
       return { approved: false, feedback };

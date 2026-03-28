@@ -8,6 +8,10 @@ export function setSubAgentManager(manager: SubAgentManager): void {
   subAgentManager = manager;
 }
 
+export function getSubAgentManager(): SubAgentManager | null {
+  return subAgentManager;
+}
+
 export const taskTool: ToolHandler = {
   name: "task",
   definition: {

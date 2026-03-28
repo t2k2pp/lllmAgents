@@ -22,6 +22,7 @@ import {
 import { PlanManager } from "./plan-mode.js";
 import type { ContextModeManager } from "../context/context-mode.js";
 import * as logger from "../utils/logger.js";
+import { LLMLogger } from "./llm-logger.js";
 
 // marked-terminal でMarkdownをターミナル向けにレンダリング
 marked.use(markedTerminal() as Parameters<typeof marked.use>[0]);
@@ -50,8 +51,12 @@ export class AgentLoop {
   private contextModeManager: ContextModeManager | null = null;
   /** Discord Interaction Server などから並行処理を避けるためのフラグ */
   public isProcessing = false;
+  /** true: テキストをリアルタイムにストリーミング表示。false: スピナー+完了後Markdownレンダリング */
+  private streamingDisplay: boolean = false;
   /** 現在処理中のリクエストの発生元 */
   private currentSource: RequestSource = "cli";
+  /** LLM I/O ロガー */
+  private llmLogger: LLMLogger;
 
   constructor(
     private provider: LLMProvider,
@@ -63,13 +68,19 @@ export class AgentLoop {
     contextModeManager?: ContextModeManager,
     hookManager?: HookManager,
     skills?: SkillInfo[],
+    agentId: string = "main",
+    sessionId?: string,
+    streamingDisplay: boolean = false,
   ) {
+    this.streamingDisplay = streamingDisplay;
     this.contextModeManager = contextModeManager ?? null;
     const systemPrompt = buildSystemPrompt(contextModeManager, skills);
     this.history = new MessageHistory(systemPrompt);
     this.contextManager = new ContextManager(provider, model, contextWindow, compressionThreshold);
     this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager);
     this.session = createSession(model);
+    this.llmLogger = new LLMLogger(agentId, sessionId);
+    logger.debug(`LLM I/O log: ${this.llmLogger.getFilePath()}`);
   }
 
   setPlanManager(pm: PlanManager): void {
@@ -85,6 +96,7 @@ export class AgentLoop {
     const filterThinkingTags = createThinkingFilter();
     let emptyResponseRetries = 0;
     const MAX_EMPTY_RETRIES = 3;
+    let codeBlockRetried = false;
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       // Context compression check
@@ -107,14 +119,21 @@ export class AgentLoop {
       let thinkingSpinner: ReturnType<typeof ora> | null = null;
       let success = false;
 
-      // 受信トークン数（スピナー表示用）
-      let receivedTokens = 0;
+      let receivedTokens = 0; // スピナーモード: 受信トークンカウンター
+      let thinkingStarted = false; // ストリーミングモード: [思考]ヘッダー表示済みフラグ
       // LLM呼び出しループ: 接続エラー時は自動リトライ、その他はユーザーに判断を委ねる
       let connectionRetries = 0;
 
       while (!success) {
         try {
           const toolDefs = this.getFilteredToolDefs();
+          // LLM I/O ログ: リクエスト記録
+          this.llmLogger.nextTurn();
+          this.llmLogger.logRequest(
+            this.history.getMessages(),
+            this.model,
+            toolDefs.length > 0 ? toolDefs : undefined,
+          );
           const gen = toolDefs.length > 0
             ? this.provider.chatWithTools({
               model: this.model,
@@ -162,36 +181,62 @@ export class AgentLoop {
               case "thinking":
                 // Qwen3等のthinkingモデル: reasoning_content を受信
                 if (chunk.text) {
-                  // 待機スピナーが動いていたら停止
                   stopWaitingSpinner();
-                  if (!thinkingSpinner) {
-                    thinkingSpinner = ora(chalk.dim("  考え中...")).start();
+                  if (this.streamingDisplay) {
+                    // ストリーミングモード: グレーでリアルタイム表示
+                    if (!thinkingStarted) {
+                      thinkingStarted = true;
+                      process.stdout.write(chalk.gray("\n[思考]\n"));
+                    }
+                    process.stdout.write(chalk.gray(chunk.text));
+                  } else {
+                    // スピナーモード: "考え中..." スピナー
+                    if (!thinkingSpinner) {
+                      thinkingSpinner = ora(chalk.dim("  考え中...")).start();
+                    }
                   }
                   thinkingContent += chunk.text;
                 }
                 break;
               case "text":
                 if (chunk.text) {
-                  // 待機スピナーが動いていたら停止
                   stopWaitingSpinner();
-                  // thinkingスピナーが動いていたら停止
-                  if (thinkingSpinner) {
-                    thinkingSpinner.stop();
-                    thinkingSpinner = null;
-                  }
-                  // <think>...</think> タグをフィルタリング（古いOllamaの場合contentに含まれる）
-                  const displayText = filterThinkingTags(chunk.text);
-                  if (displayText) {
-                    // トークン受信中: スピナーでカウンター表示（生テキストはバッファリング）
-                    receivedTokens += displayText.split(/\s+/).length;
-                    if (!hasStartedOutput) {
-                      hasStartedOutput = true;
-                      // 受信中スピナーを開始
-                      thinkingSpinner = ora({ text: chalk.dim(`  受信中... (${receivedTokens} トークン)`), spinner: "dots" }).start();
+                  if (this.streamingDisplay) {
+                    // ストリーミングモード: リアルタイム表示
+                    if (thinkingSpinner) {
+                      thinkingSpinner.stop();
+                      thinkingSpinner = null;
                     }
-                    // 既存スピナーのテキストを更新
-                    if (thinkingSpinner !== null) {
-                      thinkingSpinner.text = chalk.dim(`  受信中... (${receivedTokens} トークン)`);
+                    const displayText = filterThinkingTags(chunk.text);
+                    if (displayText) {
+                      if (!hasStartedOutput) {
+                        hasStartedOutput = true;
+                        // thinking直後なら区切り線を挿入
+                        if (thinkingStarted) {
+                          process.stdout.write(chalk.gray("\n[/思考]\n\n"));
+                        } else {
+                          process.stdout.write("\n");
+                        }
+                      }
+                      process.stdout.write(displayText);
+                    }
+                  } else {
+                    // スピナーモード: バッファリング + "受信中..." スピナー
+                    if (thinkingSpinner) {
+                      thinkingSpinner.stop();
+                      thinkingSpinner = null;
+                    }
+                    // <think>...</think> タグをフィルタリング（古いOllamaの場合contentに含まれる）
+                    const displayText = filterThinkingTags(chunk.text);
+                    if (displayText) {
+                      receivedTokens += displayText.split(/\s+/).length;
+                      if (!hasStartedOutput) {
+                        hasStartedOutput = true;
+                        thinkingSpinner = ora({ text: chalk.dim(`  受信中... (${receivedTokens} トークン)`), spinner: "dots" }).start();
+                      }
+                      if (thinkingSpinner !== null) {
+                        thinkingSpinner.text = chalk.dim(`  受信中... (${receivedTokens} トークン)`);
+                      }
                     }
                   }
                   textContent += chunk.text;
@@ -217,6 +262,10 @@ export class AgentLoop {
                 }
                 throw new Error(chunk.error ?? "LLM error");
               case "done":
+                // ストリーミングモード: 表示済みテキストの末尾に改行
+                if (this.streamingDisplay && hasStartedOutput) {
+                  process.stdout.write("\n");
+                }
                 if (chunk.usage) {
                   const cost = globalCostCalculator.calculateForModel(
                     this.model,
@@ -250,6 +299,14 @@ export class AgentLoop {
             thinkingSpinner = null;
           }
 
+          // LLM I/O ログ: レスポンス記録（thinking含む）
+          this.llmLogger.logResponse({
+            model: this.model,
+            thinking: thinkingContent || undefined,
+            text: textContent || undefined,
+            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          });
+
           success = true;
           connectionRetries = 0;
         } catch (e) {
@@ -268,6 +325,7 @@ export class AgentLoop {
             hasStartedOutput = false;
             thinkingSpinner = null;
             receivedTokens = 0;
+            thinkingStarted = false;
             continue;
           }
 
@@ -284,6 +342,7 @@ export class AgentLoop {
             hasStartedOutput = false;
             thinkingSpinner = null;
             receivedTokens = 0;
+            thinkingStarted = false;
             continue;
           } else {
             // "abort" → この発話を中止してREPLに戻る（プロセスは終了しない）
@@ -294,9 +353,8 @@ export class AgentLoop {
 
       if (!success) return;
 
-      if (hasStartedOutput) {
-        // ストリーミングで収集した全テキストをフィルター・レンダリングして表示
-        // (新しいフィルターインスタンスを使い、完全なtextContentに適用)
+      if (hasStartedOutput && !this.streamingDisplay) {
+        // スピナーモード: 収集した全テキストをフィルター・レンダリングして表示
         const filteredText = createThinkingFilter()(textContent);
         if (filteredText.trim()) {
           if (hasMarkdown(filteredText)) {
@@ -323,6 +381,42 @@ export class AgentLoop {
         }
 
         continue;
+      }
+
+      // コードブロックをテキスト返した場合のリプロンプト（file_write未使用検出）
+      if (toolCalls.length === 0 && !codeBlockRetried && hasLargeCodeBlock(textContent)) {
+        codeBlockRetried = true;
+        console.log(chalk.yellow("\n  コードがテキストで返されました。file_writeツールを使って実際にファイルを作成します..."));
+        this.history.addAssistantMessage(textContent);
+        this.history.addUserMessage(
+          "コードをテキストで返しましたが、実際にファイルを作成してください。" +
+          "file_writeツールを呼び出して、指定されたパスにファイルを保存してください。" +
+          "コードをチャットに書くのではなく、必ずfile_writeツールを使用してください。"
+        );
+        continue;
+      }
+
+      // リプロンプト後もツールを呼ばず、JSONコードブロックでfile_writeを「説明」している場合
+      // → JSONを解析して直接実行する
+      if (toolCalls.length === 0 && codeBlockRetried) {
+        const fakeWrites = extractFakeFileWriteCalls(textContent);
+        if (fakeWrites.length > 0) {
+          console.log(chalk.yellow(`\n  ツール呼び出しの代わりにJSONが返されました。${fakeWrites.length}件のfile_writeを直接実行します...`));
+          this.history.addAssistantMessage(textContent);
+          let shouldAbort = false;
+          for (const fw of fakeWrites) {
+            const syntheticCall: ToolCall = {
+              id: `synthetic_fw_${Date.now()}`,
+              type: "function",
+              function: { name: "file_write", arguments: JSON.stringify(fw) },
+            };
+            shouldAbort = await this.executeSingleTool(syntheticCall);
+            if (shouldAbort) return;
+          }
+          // 書き込み完了後、モデルに続きを促す
+          this.history.addUserMessage("ファイルの作成が完了しました。");
+          continue;
+        }
       }
 
       // Final response
@@ -466,6 +560,14 @@ export class AgentLoop {
     this.model = model;
   }
 
+  getStreamingDisplay(): boolean {
+    return this.streamingDisplay;
+  }
+
+  setStreamingDisplay(value: boolean): void {
+    this.streamingDisplay = value;
+  }
+
   getToolRegistry(): ToolRegistry {
     return this.toolRegistry;
   }
@@ -595,4 +697,40 @@ function formatElapsed(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+/**
+ * モデルがfile_writeツールを呼ばずにJSONコードブロックで
+ * {"file_path": "...", "content": "..."} を出力した場合にそれを抽出する。
+ */
+function extractFakeFileWriteCalls(text: string): Array<{ file_path: string; content: string }> {
+  const results: Array<{ file_path: string; content: string }> = [];
+  const jsonBlockRegex = /```(?:json)?\s*\n([\s\S]*?)\n```/g;
+  let match;
+  while ((match = jsonBlockRegex.exec(text)) !== null) {
+    try {
+      const obj = JSON.parse(match[1]);
+      if (typeof obj.file_path === "string" && typeof obj.content === "string") {
+        results.push({ file_path: obj.file_path, content: obj.content });
+      }
+    } catch {
+      // JSONパース失敗は無視
+    }
+  }
+  return results;
+}
+
+/**
+ * テキストに「大きなコードブロック」が含まれているか検出する。
+ * モデルがfile_writeを使わずコードをテキストで返したケースを検出するために使用する。
+ * 5行以上のコードブロックがあればtrueを返す。
+ */
+function hasLargeCodeBlock(text: string): boolean {
+  const codeBlockRegex = /```[\s\S]*?```/g;
+  const matches = text.match(codeBlockRegex);
+  if (!matches) return false;
+  return matches.some((block) => {
+    const lines = block.split("\n").length;
+    return lines >= 7; // 開閉行 + 5行以上のコード
+  });
 }

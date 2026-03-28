@@ -27,6 +27,8 @@ import { select } from "@inquirer/prompts";
 import { saveConfig } from "../config/config-manager.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
+import { runTenacious } from "../tenacious/tenacious-runner.js";
+import { getSubAgentManager } from "../tools/definitions/task.js";
 
 export class REPL {
   private input: InteractiveInput;
@@ -294,6 +296,61 @@ export class REPL {
         console.log(chalk.dim("  完了。"));
         break;
 
+      case "/try": {
+        const tryArgsStr = args.join(" ").trim();
+        if (!tryArgsStr) {
+          console.log(chalk.dim("  使用方法: /try [最大試行数] <プロンプト>"));
+          console.log(chalk.dim("  例: /try 3 output/gamesにテトリスを作って"));
+          console.log(chalk.dim("  試行数省略時はデフォルト3回"));
+          break;
+        }
+        const sam = getSubAgentManager();
+        if (!sam) {
+          console.log(chalk.yellow("  サブエージェントが初期化されていません。"));
+          break;
+        }
+        // 先頭が数字なら試行数とみなす
+        let maxAttempts = 3;
+        let tryPrompt = tryArgsStr;
+        const firstNum = parseInt(args[0], 10);
+        if (!isNaN(firstNum) && firstNum > 0 && firstNum <= 10 && args.length > 1) {
+          maxAttempts = firstNum;
+          tryPrompt = args.slice(1).join(" ").trim();
+        }
+        if (!tryPrompt) {
+          console.log(chalk.yellow("  プロンプトが必要です。"));
+          break;
+        }
+        this.agentBusy = true;
+        try {
+          await runTenacious({ prompt: tryPrompt, maxAttempts }, sam);
+        } finally {
+          this.agentBusy = false;
+        }
+        break;
+      }
+
+      case "/stream": {
+        if (args.length === 0) {
+          const current = this.agent.getStreamingDisplay();
+          console.log(chalk.dim(`  表示モード: ${current ? "ストリーミング表示" : "スピナー+Markdownレンダリング"}`));
+          console.log(chalk.dim("  切り替え: /stream on  または  /stream off"));
+        } else if (args[0] === "on") {
+          this.agent.setStreamingDisplay(true);
+          this.config.streamingDisplay = true;
+          saveConfig(this.config);
+          console.log(chalk.dim("  ストリーミング表示モードに切り替えました。（設定を保存しました）"));
+        } else if (args[0] === "off") {
+          this.agent.setStreamingDisplay(false);
+          this.config.streamingDisplay = false;
+          saveConfig(this.config);
+          console.log(chalk.dim("  スピナー+Markdownレンダリングモードに切り替えました。（設定を保存しました）"));
+        } else {
+          console.log(chalk.yellow("  使用方法: /stream [on|off]"));
+        }
+        break;
+      }
+
       case "/model": {
         if (args.length === 0) {
           console.log(
@@ -333,6 +390,7 @@ export class REPL {
               if (chosen !== currentModel) {
                 this.agent.setModel(chosen);
                 this.config.mainLLM.model = chosen;
+                saveConfig(this.config);
                 console.log(chalk.dim(`  モデルを ${chalk.yellow(currentModel)} から ${chalk.cyan(chosen)} に切り替えました`));
               } else {
                 console.log(chalk.dim(`  モデルは変更されませんでした。`));
@@ -352,6 +410,7 @@ export class REPL {
           } else {
             this.agent.setModel(newModel);
             this.config.mainLLM.model = newModel;
+            saveConfig(this.config);
             console.log(
               chalk.dim(
                 `  モデルを ${chalk.yellow(oldModel)} から ${chalk.cyan(newModel)} に切り替えました`,
