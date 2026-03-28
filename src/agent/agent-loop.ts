@@ -376,6 +376,8 @@ export class AgentLoop {
             continue;
           } else {
             // "abort" → この発話を中止してREPLに戻る（プロセスは終了しない）
+            // _aborted を立てることで /try などの呼び出し元もループを抜けられる
+            this._aborted = true;
             return;
           }
         }
