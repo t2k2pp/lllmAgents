@@ -65,6 +65,29 @@ git操作、ビルド、テスト実行などのターミナルタスクを処�
 // Shared loader instance (lazy-initialized)
 let sharedLoader: AgentDefinitionLoader | null = null;
 
+/** テキストに7行以上のコードブロックが含まれているか検出する */
+function hasLargeCodeBlock(text: string): boolean {
+  const matches = text.match(/```[\s\S]*?```/g);
+  if (!matches) return false;
+  return matches.some((block) => block.split("\n").length >= 7);
+}
+
+/** モデルがfile_writeをJSONコードブロックで「説明」した場合に抽出する */
+function extractFakeFileWriteCalls(text: string): Array<{ file_path: string; content: string }> {
+  const results: Array<{ file_path: string; content: string }> = [];
+  const jsonBlockRegex = /```(?:json)?\s*\n([\s\S]*?)\n```/g;
+  let match;
+  while ((match = jsonBlockRegex.exec(text)) !== null) {
+    try {
+      const obj = JSON.parse(match[1]);
+      if (typeof obj.file_path === "string" && typeof obj.content === "string") {
+        results.push({ file_path: obj.file_path, content: obj.content });
+      }
+    } catch { /* JSON パース失敗は無視 */ }
+  }
+  return results;
+}
+
 function getLoader(): AgentDefinitionLoader {
   if (!sharedLoader) {
     sharedLoader = new AgentDefinitionLoader();
@@ -192,6 +215,7 @@ export class SubAgent {
     const maxTurns = this.config.maxTurns ?? MAX_SUB_ITERATIONS;
     let finalResult = "";
 
+    let codeBlockRetried = false;
     for (let iteration = 0; iteration < maxTurns; iteration++) {
       try {
         const defs = this.filteredRegistry.getDefinitions();
@@ -224,6 +248,40 @@ export class SubAgent {
         }
 
         // Final response - no tool calls
+        // コードブロックをテキストで返した場合のリプロンプト（file_write未使用検出）
+        if (!codeBlockRetried && hasLargeCodeBlock(response.content)) {
+          codeBlockRetried = true;
+          this.history.addAssistantMessage(response.content);
+          this.history.addUserMessage(
+            "コードをテキストで返しましたが、実際にファイルを作成してください。" +
+            "file_writeツールを呼び出して、指定されたパスにファイルを保存してください。" +
+            "コードをチャットに書くのではなく、必ずfile_writeツールを使用してください。"
+          );
+          continue;
+        }
+
+        // リプロンプト後もJSONコードブロックで返した場合は直接実行
+        if (codeBlockRetried) {
+          const fakeWrites = extractFakeFileWriteCalls(response.content);
+          if (fakeWrites.length > 0) {
+            this.history.addAssistantMessage(response.content);
+            for (const fw of fakeWrites) {
+              const syntheticCall = {
+                id: `synthetic_fw_${Date.now()}`,
+                type: "function" as const,
+                function: { name: "file_write", arguments: JSON.stringify(fw) },
+              };
+              const result = await this.toolExecutor.execute(syntheticCall);
+              const resultContent = result.success
+                ? result.output
+                : `Error: ${result.error}\n${result.output}`;
+              this.history.addToolResult(syntheticCall.id, resultContent);
+            }
+            this.history.addUserMessage("ファイルの作成が完了しました。作業の結果を報告してください。");
+            continue;
+          }
+        }
+
         this.history.addAssistantMessage(response.content);
         finalResult = response.content;
         break;
