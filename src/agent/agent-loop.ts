@@ -114,6 +114,7 @@ export class AgentLoop {
     let emptyResponseRetries = 0;
     const MAX_EMPTY_RETRIES = 3;
     let codeBlockRetried = false;
+    let shortAckRetried = false; // 短い確認応答（ツール未呼び出し）への追加プロンプト済みフラグ
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       // 中断チェック
@@ -409,6 +410,24 @@ export class AgentLoop {
           return;
         }
 
+        continue;
+      }
+
+      // 短い確認応答（ツール未呼び出し）を検出: モデルが「やります」だけ言って止まったケース
+      // 150文字未満かつツール呼び出しなし → 実装を促す追加プロンプト
+      if (
+        toolCalls.length === 0 &&
+        !shortAckRetried &&
+        !codeBlockRetried &&
+        textContent.trim().length > 0 &&
+        textContent.trim().length < 150
+      ) {
+        shortAckRetried = true;
+        this.history.addAssistantMessage(textContent);
+        this.history.addUserMessage(
+          "今すぐ file_write ツールを呼び出してファイルを作成してください。" +
+          "説明や確認は不要です。最初のアクションとして file_write ツールを呼び出してください。"
+        );
         continue;
       }
 
