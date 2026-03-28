@@ -337,38 +337,49 @@ export class REPL {
           console.log(chalk.cyan(`  └${"─".repeat(54)}\n`));
 
           let trySucceeded = false;
+          let tryLastFeedback = "";
           for (let tryAttempt = 1; tryAttempt <= tryMaxAttempts; tryAttempt++) {
             if (this.agent.isAborted()) break;
 
             console.log(chalk.cyan(`  ── 試行 ${tryAttempt}/${tryMaxAttempts} ${"─".repeat(40)}`));
 
-            // 前回の履歴長を記録してfile_write検出に使う
-            const msgsBefore = this.agent.getHistory().getMessages().length;
+            // 試行ごとに履歴をリセット（コンテキスト肥大化を防ぐ）
+            this.agent.getHistory().clear();
 
             const promptForAttempt = tryAttempt === 1
               ? tryResolved
-              : `${tryResolved}\n\n**再試行 (${tryAttempt}回目):** 前回の試行でファイルが作成されませんでした。` +
-                `今度は必ず file_write ツールを呼び出して実際にファイルを保存してください。`;
+              : `${tryResolved}\n\n---\n**再試行 (${tryAttempt}回目):** 前回の試行の問題点:\n${tryLastFeedback}\n\n` +
+                `上記を踏まえて再実装してください。特に file_write ツールを呼び出して実際にファイルを保存してください。`;
 
             await this.agent.run(promptForAttempt);
 
             if (this.agent.isAborted()) break;
 
-            // file_write が呼ばれたか確認
-            const msgsAfter = this.agent.getHistory().getMessages();
-            const newMsgs = msgsAfter.slice(msgsBefore);
-            const fileWritten = newMsgs.some(m =>
-              m.role === "assistant" &&
-              Array.isArray((m as { tool_calls?: unknown[] }).tool_calls) &&
-              (m as { tool_calls: Array<{ function: { name: string } }> }).tool_calls
-                .some(tc => tc.function.name === "file_write")
+            // file_write が呼ばれたか: ツール結果メッセージで "File written:" を確認
+            const allMsgs = this.agent.getHistory().getMessages();
+            const fileWritten = allMsgs.some(m =>
+              m.role === "tool" &&
+              typeof m.content === "string" &&
+              m.content.startsWith("File written:")
             );
 
             if (fileWritten) {
-              console.log(chalk.green(`\n  ✓ 試行 ${tryAttempt} 回目でファイルが作成されました\n`));
+              // 書かれたファイルパスを表示
+              const writtenPaths = allMsgs
+                .filter(m => m.role === "tool" && typeof m.content === "string" && m.content.startsWith("File written:"))
+                .map(m => (m.content as string).replace("File written: ", "").trim());
+              console.log(chalk.green(`\n  ✓ 試行 ${tryAttempt} 回目で完了`));
+              writtenPaths.forEach(p => console.log(chalk.green(`    → ${p}`)));
+              console.log();
               trySucceeded = true;
               break;
             }
+
+            // 失敗した場合: 最後のアシスタント応答をフィードバックとして次回に渡す
+            const lastAssistant = [...allMsgs].reverse().find(m => m.role === "assistant");
+            tryLastFeedback = typeof lastAssistant?.content === "string"
+              ? lastAssistant.content.slice(0, 500)
+              : "ファイルが作成されませんでした";
 
             if (tryAttempt < tryMaxAttempts) {
               console.log(chalk.yellow(`\n  ✗ ファイル未作成。次の試行に進みます...\n`));
