@@ -55,8 +55,11 @@ export const todoWriteTool: ToolHandler = {
     },
   },
   async execute(params: Record<string, unknown>): Promise<ToolResult> {
-    const newTodos = params.todos as TodoItem[];
-    todos = newTodos;
+    const newTodos = params.todos;
+    if (!Array.isArray(newTodos)) {
+      return { success: false, output: "", error: "todosパラメータが配列ではありません。todos: [{content: '...', status: 'pending'}] の形式で渡してください。" };
+    }
+    todos = newTodos as TodoItem[];
     return { success: true, output: formatTodos() };
   },
 };
