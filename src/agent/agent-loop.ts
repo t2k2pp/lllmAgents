@@ -977,6 +977,9 @@ function hasLargeCodeBlock(text: string): boolean {
  * 元のイテレーターが次の値を yield するのを待っている間も、
  * 500ms ごとに isAborted() をチェックし、true なら早期終了する。
  * これにより、LLM ストリーミングが長時間ブロックしても Ctrl+C が効く。
+ *
+ * 注意: AsyncGenerator は同時に1つの .next() しか保留できないため、
+ * 同じ Promise を再利用してタイムアウトと競争させる。
  */
 async function* abortableIterator<T>(
   gen: AsyncGenerator<T>,
@@ -985,17 +988,22 @@ async function* abortableIterator<T>(
   const POLL_INTERVAL = 500;
   while (true) {
     if (isAborted()) return;
-    // gen.next() と abort ポーリングを競争させる
-    const result = await Promise.race([
-      gen.next(),
-      new Promise<"abort_check">((resolve) => setTimeout(() => resolve("abort_check"), POLL_INTERVAL)),
-    ]);
-    if (result === "abort_check") {
-      // タイムアウト: abort チェックのみ、再度ループ
-      continue;
+    // gen.next() を1回だけ呼び、その Promise をタイムアウトと繰り返し競争させる
+    const nextPromise = gen.next();
+    while (true) {
+      if (isAborted()) return;
+      const result = await Promise.race([
+        nextPromise.then((v) => ({ kind: "value" as const, v })),
+        new Promise<{ kind: "timeout" }>((resolve) => setTimeout(() => resolve({ kind: "timeout" }), POLL_INTERVAL)),
+      ]);
+      if (result.kind === "timeout") {
+        // タイムアウト: abort チェックして再度同じ nextPromise を待つ
+        continue;
+      }
+      // 値が来た
+      if (result.v.done) return;
+      yield result.v.value;
+      break; // 外側ループで次の gen.next() へ
     }
-    const iterResult = result as IteratorResult<T>;
-    if (iterResult.done) return;
-    yield iterResult.value;
   }
 }
