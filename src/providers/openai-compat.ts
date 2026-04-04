@@ -307,7 +307,10 @@ export class OpenAICompatProvider implements LLMProvider {
 
 /**
  * ツール呼び出し引数からモデルのトークンアーティファクトを除去し、有効なJSONに修復する。
- * Gemma等のモデルが `<|"...<|"|` のような特殊トークン境界を引数に混入させる問題に対応。
+ *
+ * 各種LLMが特殊トークン（ChatML: <|im_start|>, Llama: <|eot_id|>, その他 <|...|> 形式）を
+ * ツール引数に混入させることがある。これらが JSON 内のエスケープシーケンスと干渉して
+ * JSON全体を壊すため、汎用的に除去・修復する。
  */
 function sanitizeToolCallArgs(args: string): string {
   // まず有効なJSONならそのまま返す
@@ -318,21 +321,59 @@ function sanitizeToolCallArgs(args: string): string {
     // 修復を試みる
   }
 
-  // トークンアーティファクトの除去: <|, |>, <|", "|> 等のパターン
-  let cleaned = args
-    .replace(/<\|"/g, '"')    // <|" → "
-    .replace(/"?\|>/g, '"')   // "|> or |> → "
-    .replace(/<\|/g, '')      // <| → (remove)
-    .replace(/\|>/g, '');     // |> → (remove)
+  let cleaned = args;
+
+  // Phase 1: 特殊トークンの汎用除去
+  // <|...|> 形式のトークン全般 (例: <|im_start|>, <|eot_id|>, <|"|>, <|\"|>)
+  cleaned = cleaned.replace(/<\|[^<]*?\|>/g, '');
+  // [INST], [/INST] 等のメタタグ
+  cleaned = cleaned.replace(/\[\/?INST\]/g, '');
+  // 残った <|...（閉じ |> がないもの）: <| + バックスラッシュ + 引用符 → 引用符に
+  cleaned = cleaned.replace(/<\|\\"/g, '"');
+  // <| + バックスラッシュ + 非引用符文字 → バックスラッシュごと除去
+  cleaned = cleaned.replace(/<\|\\(.)/g, '$1');
+  // 残った <| → 除去
+  cleaned = cleaned.replace(/<\|/g, '');
+  // 孤立した |> → 除去
+  cleaned = cleaned.replace(/\|>/g, '');
 
   try {
     JSON.parse(cleaned);
     return cleaned;
   } catch {
-    // さらに修復を試みる: 不完全なJSON末尾の補完
+    // Phase 2 へ
   }
 
-  // 末尾が途切れている場合: 開きっぱなしの括弧を閉じる
+  // Phase 2: トークン除去で生じた残骸の修復
+  // 二重引用符 "" → " （文字列の開始/終了位置で発生）
+  cleaned = cleaned.replace(/: ""/g, ': "');
+  cleaned = cleaned.replace(/"",/g, '",');
+  cleaned = cleaned.replace(/""\}/g, '"}');
+  // 引用符に挟まれた孤立パイプ: "|" → "
+  cleaned = cleaned.replace(/"\|"/g, '"');
+  // 文字列末尾の孤立パイプ: |", → ",  |"} → "}
+  cleaned = cleaned.replace(/\|",/g, '",');
+  cleaned = cleaned.replace(/\|"\}/g, '"}');
+
+  try {
+    JSON.parse(cleaned);
+    return cleaned;
+  } catch {
+    // Phase 3 へ
+  }
+
+  // Phase 3: JSON で無効なエスケープシーケンスの修復
+  // 有効: \n \r \t \b \f \u \\ \/ \"  → それ以外の \X は X に置換
+  cleaned = cleaned.replace(/\\([^nrtbfu\\/"])/g, '$1');
+
+  try {
+    JSON.parse(cleaned);
+    return cleaned;
+  } catch {
+    // Phase 4 へ
+  }
+
+  // Phase 4: 括弧バランスの修復（末尾が途切れている場合）
   const openBraces = (cleaned.match(/{/g) || []).length;
   const closeBraces = (cleaned.match(/}/g) || []).length;
   const openBrackets = (cleaned.match(/\[/g) || []).length;
