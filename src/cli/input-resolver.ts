@@ -71,7 +71,12 @@ export function resolveAtMentions(
     const attachments: string[] = [];
 
     for (const m of mentions) {
-      if (m.type === "not_found") continue;
+      if (m.type === "not_found") {
+        // @パスが見つからない場合も @ を除去してパスのみ残す（モデルの混乱を防ぐ）
+        const rawPath = m.original.slice(1);
+        resolved = resolved.split(m.original).join(rawPath);
+        continue;
+      }
 
       const rawPath = m.original.slice(1);
       resolved = resolved.split(m.original).join(rawPath);
