@@ -1,12 +1,41 @@
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
+import * as fs from "node:fs";
 import { isWindows } from "../../utils/platform.js";
 import { ProcessSandbox } from "../../security/process-sandbox.js";
 import { loadConfig } from "../../config/config-manager.js";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
 
 const DEFAULT_TIMEOUT = 120_000; // 2 minutes
+
+/** Windows で git bash のパスを探す。見つからなければ null */
+function findGitBash(): string | null {
+  const candidates = [
+    path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "bin", "bash.exe"),
+    path.join(process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Git", "bin", "bash.exe"),
+    path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Git", "bin", "bash.exe"),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  // PATH から探す
+  try {
+    const result = execFileSync("where", ["bash.exe"], { encoding: "utf-8", timeout: 3000 });
+    const first = result.trim().split("\n")[0]?.trim();
+    if (first && fs.existsSync(first)) return first;
+  } catch { /* ignore */ }
+  return null;
+}
+
+/** Windows で git bash のパスをキャッシュ */
+let gitBashPath: string | null | undefined;
+function getGitBash(): string | null {
+  if (gitBashPath === undefined) {
+    gitBashPath = findGitBash();
+  }
+  return gitBashPath;
+}
 
 let streamOutputEnabled = false;
 
@@ -67,9 +96,16 @@ export const bashTool: BashToolHandler = {
     let cleanup: (() => void) | undefined;
 
     if (isWindows) {
-      // Windows は未サポート（アプリレベルのみ）
-      shell = "cmd.exe";
-      shellArgs = ["/c", command];
+      const bash = getGitBash();
+      if (bash) {
+        // git bash を使用（Unix構文対応）
+        shell = bash;
+        shellArgs = ["-c", command];
+      } else {
+        // git bash が見つからない場合は cmd.exe フォールバック
+        shell = "cmd.exe";
+        shellArgs = ["/c", command];
+      }
     } else {
       const sandbox = getProcessSandbox();
       if (sandbox.isActive()) {
@@ -117,7 +153,18 @@ export const bashTool: BashToolHandler = {
 
       proc.on("close", (code) => {
         cleanup?.();
-        const output = (stdout + (stderr ? `\nSTDERR:\n${stderr}` : "")).trim();
+        let stderrText = stderr;
+        // Windows で文字化けしたSTDERRにヒントを付加
+        if (isWindows && stderrText && /[\ufffd]/.test(stderrText)) {
+          stderrText += "\n(文字化けしたエラーメッセージはShift-JISエンコードの可能性があります)";
+        }
+        // よくあるWindows特有エラーへのヒント
+        if (isWindows && stderrText) {
+          if (/is not recognized|認識されていません|内部コマンドまたは外部コマンド/.test(stderrText)) {
+            stderrText += "\n(ヒント: ファイル内容の確認には file_read ツールを使用してください)";
+          }
+        }
+        const output = (stdout + (stderrText ? `\nSTDERR:\n${stderrText}` : "")).trim();
         const truncated = output.length > 30000 ? output.slice(0, 30000) + "\n... (truncated)" : output;
 
         if (code === 0) {

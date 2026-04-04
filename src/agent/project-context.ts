@@ -19,6 +19,7 @@ export function loadProjectInstructions(cwd?: string): string {
   const dir = cwd ?? process.cwd();
   const parts: string[] = [];
 
+  // CWD のみ読み込む（親ディレクトリは読み込まない: 無関係な指示が混入するため）
   for (const filename of INSTRUCTION_FILES) {
     const filePath = path.join(dir, filename);
     if (fs.existsSync(filePath)) {
@@ -29,24 +30,6 @@ export function loadProjectInstructions(cwd?: string): string {
         }
       } catch {
         // Skip unreadable files
-      }
-    }
-  }
-
-  // Also check parent directory
-  const parentDir = path.dirname(dir);
-  if (parentDir !== dir) {
-    for (const filename of INSTRUCTION_FILES) {
-      const filePath = path.join(parentDir, filename);
-      if (fs.existsSync(filePath)) {
-        try {
-          const content = fs.readFileSync(filePath, "utf-8");
-          if (content.trim()) {
-            parts.push(`# ${filename} (parent)\n\n${content.trim()}`);
-          }
-        } catch {
-          // Skip
-        }
       }
     }
   }
