@@ -10,3 +10,13 @@ coverage/
 screenshots/
 output/
 *.zip
+
+# Local settings
+.claude/settings.local.json
+
+# Windows null device artifact
+$null
+
+# Temporary/test files
+src/Level.js
+src/test-Level.js
