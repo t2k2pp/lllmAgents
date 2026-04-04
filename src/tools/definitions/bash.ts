@@ -37,6 +37,22 @@ function getGitBash(): string | null {
   return gitBashPath;
 }
 
+/**
+ * コマンド文字列中のWindowsスタイルパス（バックスラッシュ区切り）をUnixスタイル（スラッシュ）に変換する。
+ * git bash では \ がエスケープ文字として解釈されるため、パス区切りとしての \ を / に変換する必要がある。
+ *
+ * 対象: ドライブレター付きパス (C:\Users\...) およびUNCパス (\\server\share)
+ * 非対象: エスケープシーケンス (\n, \t 等)、正規表現中の \
+ */
+function convertWindowsPaths(command: string): string {
+  // ドライブレター付きパス: C:\Users\... → C:/Users/...
+  // 後ろにパス構成文字が続くバックスラッシュのみ変換
+  return command.replace(
+    /([A-Za-z]):\\([\w.\-\\/ ]+)/g,
+    (_match, drive: string, rest: string) => `${drive}:/${rest.replace(/\\/g, '/')}`
+  );
+}
+
 let streamOutputEnabled = false;
 
 /** bash ツール用のプロセスサンドボックスインスタンス（初回 execute 時に遅延初期化） */
@@ -99,8 +115,9 @@ export const bashTool: BashToolHandler = {
       const bash = getGitBash();
       if (bash) {
         // git bash を使用（Unix構文対応）
+        // Windowsパスのバックスラッシュをスラッシュに変換（bash のエスケープ解釈を防止）
         shell = bash;
-        shellArgs = ["-c", command];
+        shellArgs = ["-c", convertWindowsPaths(command)];
       } else {
         // git bash が見つからない場合は cmd.exe フォールバック
         shell = "cmd.exe";

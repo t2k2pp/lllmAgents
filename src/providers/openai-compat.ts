@@ -363,8 +363,9 @@ function sanitizeToolCallArgs(args: string): string {
   }
 
   // Phase 3: JSON で無効なエスケープシーケンスの修復
-  // 有効: \n \r \t \b \f \u \\ \/ \"  → それ以外の \X は X に置換
-  cleaned = cleaned.replace(/\\([^nrtbfu\\/"])/g, '$1');
+  // 有効: \n \r \t \b \f \u \\ \/ \"  → それ以外の \X は \\X に（バックスラッシュを保持）
+  // 例: \U → \\U (Windowsパス C:\Users 等を壊さない)、\p → \\p
+  cleaned = cleaned.replace(/\\([^nrtbfu\\/"])/g, '\\\\$1');
 
   try {
     JSON.parse(cleaned);
