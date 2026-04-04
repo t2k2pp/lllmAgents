@@ -141,6 +141,8 @@ export class OpenAICompatProvider implements LLMProvider {
       messages: messages.map((m) => this.formatMessage(m)),
       stream: true,
       temperature: temperature ?? 0.7,
+      // 反復ループ防止 (4bit量子化モデルで頻発するトークン反復崩壊を抑制)
+      repetition_penalty: 1.05,
       // ストリーミングでusage情報を取得するためのオプション
       stream_options: { include_usage: true },
     };
@@ -189,7 +191,7 @@ export class OpenAICompatProvider implements LLMProvider {
                 toolCall: {
                   id: tc.id,
                   type: "function",
-                  function: { name: tc.name, arguments: tc.args },
+                  function: { name: tc.name, arguments: sanitizeToolCallArgs(tc.args) },
                 },
               };
             }
@@ -248,7 +250,7 @@ export class OpenAICompatProvider implements LLMProvider {
                     toolCall: {
                       id: tc.id,
                       type: "function",
-                      function: { name: tc.name, arguments: tc.args },
+                      function: { name: tc.name, arguments: sanitizeToolCallArgs(tc.args) },
                     },
                   };
                 }
@@ -289,9 +291,61 @@ export class OpenAICompatProvider implements LLMProvider {
       formatted.tool_call_id = msg.tool_call_id;
     }
     if (msg.tool_calls) {
-      formatted.tool_calls = msg.tool_calls;
+      // tool_calls の arguments が有効なJSONか検証し、不正な場合は修復する
+      formatted.tool_calls = msg.tool_calls.map((tc) => {
+        const sanitized = sanitizeToolCallArgs(tc.function.arguments);
+        if (sanitized !== tc.function.arguments) {
+          return { ...tc, function: { ...tc.function, arguments: sanitized } };
+        }
+        return tc;
+      });
     }
 
     return formatted;
+  }
+}
+
+/**
+ * ツール呼び出し引数からモデルのトークンアーティファクトを除去し、有効なJSONに修復する。
+ * Gemma等のモデルが `<|"...<|"|` のような特殊トークン境界を引数に混入させる問題に対応。
+ */
+function sanitizeToolCallArgs(args: string): string {
+  // まず有効なJSONならそのまま返す
+  try {
+    JSON.parse(args);
+    return args;
+  } catch {
+    // 修復を試みる
+  }
+
+  // トークンアーティファクトの除去: <|, |>, <|", "|> 等のパターン
+  let cleaned = args
+    .replace(/<\|"/g, '"')    // <|" → "
+    .replace(/"?\|>/g, '"')   // "|> or |> → "
+    .replace(/<\|/g, '')      // <| → (remove)
+    .replace(/\|>/g, '');     // |> → (remove)
+
+  try {
+    JSON.parse(cleaned);
+    return cleaned;
+  } catch {
+    // さらに修復を試みる: 不完全なJSON末尾の補完
+  }
+
+  // 末尾が途切れている場合: 開きっぱなしの括弧を閉じる
+  const openBraces = (cleaned.match(/{/g) || []).length;
+  const closeBraces = (cleaned.match(/}/g) || []).length;
+  const openBrackets = (cleaned.match(/\[/g) || []).length;
+  const closeBrackets = (cleaned.match(/]/g) || []).length;
+
+  for (let i = 0; i < openBrackets - closeBrackets; i++) cleaned += "]";
+  for (let i = 0; i < openBraces - closeBraces; i++) cleaned += "}";
+
+  try {
+    JSON.parse(cleaned);
+    return cleaned;
+  } catch {
+    // 修復不能: 空のオブジェクトを返す（ツール実行側でエラーになる）
+    return "{}";
   }
 }
