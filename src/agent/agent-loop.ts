@@ -71,6 +71,23 @@ function isTaskRequest(text: string): boolean {
   return taskPatterns.some((p) => p.test(text));
 }
 
+/** モデルの応答がタスク完了を宣言しているか判定する */
+function isCompletionResponse(text: string): boolean {
+  const completionPatterns = [
+    /完了(しました|いたしました|です|致しました)/,
+    /完成(しました|いたしました|です|致しました)/,
+    /これで.{0,10}(完了|完成|終了)/,
+    /以上で.{0,10}(完了|完成|終了)/,
+    /すべて.{0,10}(実装済み|完了|完成)/,
+    /不足.{0,10}(ありません|見当たりません|ございません)/,
+    /追加.{0,10}(不要|ありません|必要ありません)/,
+    /task.{0,5}(complete|done|finished)/i,
+    /all.{0,10}(implemented|complete|done)/i,
+    /nothing.{0,10}(left|remaining|to do)/i,
+  ];
+  return completionPatterns.some((p) => p.test(text));
+}
+
 export class AgentLoop {
   private history: MessageHistory;
   private contextManager: ContextManager;
@@ -242,7 +259,7 @@ export class AgentLoop {
             }
           };
 
-          for await (const chunk of gen) {
+          for await (const chunk of abortableIterator(gen, () => this._aborted)) {
             if (this._aborted) {
               stopWaitingSpinner();
               if (thinkingSpinner) { thinkingSpinner.stop(); thinkingSpinner = null; }
@@ -468,11 +485,13 @@ export class AgentLoop {
 
       // テキストのみ応答（ツール未呼び出し）の検出とリプロンプト
       // 会話的入力（挨拶など）では発火しない
+      // 完了宣言の場合はリプロンプトせずそのまま返す
       if (
         toolCalls.length === 0 &&
         !codeBlockRetried &&
         textContent.trim().length > 0 &&
-        isTaskRequest(userMessageText)
+        isTaskRequest(userMessageText) &&
+        !isCompletionResponse(textContent)
       ) {
         consecutiveTextOnly++;
 
@@ -648,6 +667,11 @@ export class AgentLoop {
 
     const promises = toolCalls.map(async (toolCall) => {
       await acquire();
+      // 中断チェック: 待機中にabortされた場合はスキップ
+      if (this._aborted) {
+        release();
+        return { toolCall, result: { success: false, output: "", error: "中断されました" } };
+      }
       try {
         const result = await this.toolExecutor.execute(toolCall, this.currentSource);
         const icon = result.success ? chalk.green("✓") : chalk.red("✗");
@@ -946,4 +970,32 @@ function hasLargeCodeBlock(text: string): boolean {
     const lines = block.split("\n").length;
     return lines >= 7; // 開閉行 + 5行以上のコード
   });
+}
+
+/**
+ * AsyncGenerator を abort 可能にするラッパー。
+ * 元のイテレーターが次の値を yield するのを待っている間も、
+ * 500ms ごとに isAborted() をチェックし、true なら早期終了する。
+ * これにより、LLM ストリーミングが長時間ブロックしても Ctrl+C が効く。
+ */
+async function* abortableIterator<T>(
+  gen: AsyncGenerator<T>,
+  isAborted: () => boolean,
+): AsyncGenerator<T> {
+  const POLL_INTERVAL = 500;
+  while (true) {
+    if (isAborted()) return;
+    // gen.next() と abort ポーリングを競争させる
+    const result = await Promise.race([
+      gen.next(),
+      new Promise<"abort_check">((resolve) => setTimeout(() => resolve("abort_check"), POLL_INTERVAL)),
+    ]);
+    if (result === "abort_check") {
+      // タイムアウト: abort チェックのみ、再度ループ
+      continue;
+    }
+    const iterResult = result as IteratorResult<T>;
+    if (iterResult.done) return;
+    yield iterResult.value;
+  }
 }

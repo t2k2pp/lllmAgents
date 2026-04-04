@@ -83,9 +83,9 @@ export class REPL {
           // 3秒以内に2回目が来なければリセット
           ctrlCResetTimer = setTimeout(() => { ctrlCCount = 0; }, 3000);
         } else {
-          // 2回目: 強制終了
+          // 2回目: 強制終了（process.exitが効かない場合に備えてkillも使用）
           console.log(chalk.yellow("\n  強制終了します..."));
-          process.exit(1);
+          process.kill(process.pid, "SIGKILL");
         }
       } else {
         // 待機中: 通常通り終了
