@@ -104,6 +104,8 @@ export interface Config {
   discord?: DiscordConfig;
   /** true: テキストをリアルタイムにストリーミング表示。false(デフォルト): スピナー+完了後Markdownレンダリング */
   streamingDisplay?: boolean;
+  /** ツールの最大並列実行数（デフォルト: 3）。vLLM KVキャッシュやリソースに合わせて調整 */
+  maxParallelTools?: number;
 }
 
 // ヘルパー: セカンドLLMがクラウドかローカルかを判定

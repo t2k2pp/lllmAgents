@@ -213,6 +213,9 @@ export class REPL {
     if (this.planManager?.isInPlanMode()) {
       return chalk.yellow("[plan] > ");
     }
+    if (this.agent.getPermissions().isAutorunMode()) {
+      return chalk.magenta("[autorun] > ");
+    }
     return chalk.green("> ");
   }
 
@@ -873,6 +876,44 @@ export class REPL {
           console.log(chalk.dim("  require-remove <tool>       - CLIの確認必要から削除（設定保存）"));
           console.log(chalk.dim("  discord-add <tool>          - Discord経由で自動許可するツールを追加（設定保存）"));
           console.log(chalk.dim("  discord-remove <tool>       - Discord経由の自動許可から削除（設定保存）"));
+        }
+        break;
+      }
+
+      case "/parallel": {
+        const n = parseInt(args[0], 10);
+        if (isNaN(n)) {
+          console.log(chalk.dim(`  現在の並列実行上限: ${this.agent.getMaxParallelTools()}`));
+          console.log(chalk.dim("  変更: /parallel <数値>"));
+        } else {
+          this.agent.setMaxParallelTools(n);
+          console.log(chalk.green(`  並列実行上限を ${this.agent.getMaxParallelTools()} に設定しました`));
+        }
+        break;
+      }
+
+      case "/autorun": {
+        const permissions = this.agent.getPermissions();
+        const subArg = args[0];
+        if (subArg === "on") {
+          permissions.setAutorunMode(true);
+          console.log(chalk.green("  自律実行モード ON"));
+          console.log(chalk.dim("  作業フォルダ内の操作は削除以外すべて自動承認されます"));
+          console.log(chalk.dim("  中断: Ctrl+C / 停止: /autorun off"));
+        } else if (subArg === "off") {
+          permissions.setAutorunMode(false);
+          console.log(chalk.yellow("  自律実行モード OFF"));
+        } else {
+          const current = permissions.isAutorunMode();
+          if (current) {
+            permissions.setAutorunMode(false);
+            console.log(chalk.yellow("  自律実行モード OFF"));
+          } else {
+            permissions.setAutorunMode(true);
+            console.log(chalk.green("  自律実行モード ON"));
+            console.log(chalk.dim("  作業フォルダ内の操作は削除以外すべて自動承認されます"));
+            console.log(chalk.dim("  中断: Ctrl+C / 停止: /autorun off"));
+          }
         }
         break;
       }

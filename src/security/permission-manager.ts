@@ -22,6 +22,17 @@ const INHERENTLY_SAFE_TOOLS = new Set([
   "sandbox_info",
 ]);
 
+/**
+ * 自律実行モード (autorun): 作業フォルダ配下の操作を削除以外すべて自動承認。
+ * bashの破壊的コマンド（rm, del, rmdir等）とサンドボックス外パスは引き続きブロック。
+ */
+const AUTORUN_DESTRUCTIVE_PATTERNS = [
+  /\brm\s/, /\brmdir\b/, /\bdel\b/, /\brd\b/,
+  /\bunlink\b/, /\bshred\b/, /\btruncate\b/,
+  /\bmkfs\b/, /\bformat\b/, /\bdd\s/,
+  />\s*\/dev\//, /\bgit\s+clean\b/, /\bgit\s+reset\s+--hard\b/,
+];
+
 export class PermissionManager {
   private sandbox: Sandbox;
   private autoApprove: Set<string>;
@@ -34,6 +45,8 @@ export class PermissionManager {
   private alwaysAllowTools = new Set<string>();
   // 並列ツール実行時に権限確認を直列化するキュー
   private _permissionQueue: Promise<void> = Promise.resolve();
+  // 自律実行モード: 作業フォルダ内の非破壊操作を自動承認
+  private _autorunMode = false;
 
   constructor(
     securityConfig: SecurityConfig,
@@ -106,6 +119,17 @@ export class PermissionManager {
 
   removeDiscordAutoApprove(tool: string): void {
     this.discordAutoApprove.delete(tool);
+  }
+
+  // --- 自律実行モード ---
+
+  /** 自律実行モードの ON/OFF を切り替え */
+  setAutorunMode(enabled: boolean): void {
+    this._autorunMode = enabled;
+  }
+
+  isAutorunMode(): boolean {
+    return this._autorunMode;
   }
 
   // ---
@@ -185,6 +209,13 @@ export class PermissionManager {
     // ruleResult === "ask" の場合はそのまま確認ダイアログへ進む
     // ruleResult === null の場合はツール名リストで判定
 
+    // --- 自律実行モード (autorun) ---
+    if (this._autorunMode && ruleResult !== "ask") {
+      const autorunResult = this.checkAutorunPermission(toolName, params);
+      if (autorunResult !== null) return autorunResult;
+      // null → autorun では判定不能 → 通常フローへ
+    }
+
     const level = ruleResult === "ask" ? "ask" : this.getPermissionLevel(toolName);
 
     // Auto-approve
@@ -238,6 +269,58 @@ export class PermissionManager {
     }
 
     return this.askUserWithScope(toolName, params, cacheKey);
+  }
+
+  /**
+   * 自律実行モードでの権限チェック。
+   * 作業フォルダ内の非破壊操作なら自動承認。
+   * 判定不能（autorunスコープ外）の場合は null を返す。
+   */
+  private checkAutorunPermission(
+    toolName: string,
+    params: Record<string, unknown>,
+  ): { allowed: boolean; reason?: string } | null {
+    // ファイル操作: サンドボックス内かつ削除でなければOK
+    if (toolName === "file_write" || toolName === "file_edit") {
+      const filePath = (params.file_path ?? params.path) as string | undefined;
+      if (!filePath) return { allowed: true };
+      if (!this.sandbox.isPathAllowed(filePath)) {
+        return { allowed: false, reason: `[autorun] パス ${filePath} はサンドボックス外です` };
+      }
+      return { allowed: true };
+    }
+
+    // bash: サンドボックス内 + 非破壊コマンドならOK
+    if (toolName === "bash") {
+      const command = (params.command as string) ?? "";
+      // 破壊的コマンドは通常の確認フローへ
+      if (AUTORUN_DESTRUCTIVE_PATTERNS.some((p) => p.test(command))) {
+        return null; // 通常フローへフォールバック
+      }
+      // 危険コマンドチェック（既存ルール）
+      const dangerousRule = checkCommand(command);
+      if (dangerousRule?.action === "block") {
+        return { allowed: false, reason: dangerousRule.message };
+      }
+      return { allowed: true };
+    }
+
+    // ブラウザ操作、web_fetch/web_search などその他のツール: 自動承認
+    if (toolName.startsWith("browser_") || toolName === "web_fetch" || toolName === "web_search") {
+      return { allowed: true };
+    }
+
+    // glob, grep 等の読み取り系: サンドボックスチェックのみ
+    if (toolName === "glob" || toolName === "grep" || toolName === "file_read") {
+      const filePath = (params.path ?? params.file_path ?? params.pattern) as string | undefined;
+      if (filePath && !this.sandbox.isPathAllowed(filePath)) {
+        return { allowed: false, reason: `[autorun] パス ${filePath} はサンドボックス外です` };
+      }
+      return { allowed: true };
+    }
+
+    // 未知のツール → 通常フローへ
+    return null;
   }
 
   private async askUserWithScope(
