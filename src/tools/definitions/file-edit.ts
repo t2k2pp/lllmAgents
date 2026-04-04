@@ -47,7 +47,14 @@ export const fileEditTool: ToolHandler = {
     const occurrences = content.split(oldString).length - 1;
 
     if (occurrences === 0) {
-      return { success: false, output: "", error: "old_string not found in file" };
+      // ファイルの現在の内容を添付してモデルの次の判断を助ける
+      const lineCount = content.split("\n").length;
+      const preview = content.length > 1500 ? content.slice(0, 1500) + "\n...(truncated)" : content;
+      return {
+        success: false,
+        output: `ファイルの現在の内容 (${lineCount}行):\n${preview}`,
+        error: "old_string not found in file. 正しい文字列で再試行するか、file_writeでファイル全体を書き直してください。",
+      };
     }
 
     if (!replaceAll && occurrences > 1) {

@@ -42,6 +42,35 @@ function renderMarkdown(text: string): string {
 const MAX_TOOL_ITERATIONS = 50;
 const MAX_CONNECTION_RETRIES = 3;
 
+/**
+ * モデルのアーティファクト/ガベージ出力を検出する。
+ * `<12000:` のようなトークンID漏れや [TOOL_CALLS] 形式のネイティブツール呼び出し形式など。
+ */
+function isGarbageResponse(text: string): boolean {
+  const t = text.trim();
+  // トークンID漏れパターン: <数字: や <数字>
+  if (/^<\d+[:\s>]/.test(t)) return true;
+  // Mistral ネイティブツール呼び出し形式（vLLMがOpenAI形式に変換できなかった場合）
+  if (t.startsWith("[TOOL_CALLS]")) return true;
+  // その他の明らかなアーティファクト（短い特殊文字のみ）
+  if (t.length < 5 && /^[<>\[\]@#|{}]+$/.test(t)) return true;
+  return false;
+}
+
+/** ユーザーメッセージが実装タスクを意図しているか判定する（会話的入力を除外する） */
+function isTaskRequest(text: string): boolean {
+  const taskPatterns = [
+    /実装|作成|書いて|修正|変更|追加|削除|移動|リファクタ|テスト|ビルド|デプロイ/,
+    /implement|create|write|fix|modify|change|add|delete|remove|refactor|build|deploy|update/i,
+    /ファイル|コード|関数|クラス|モジュール|スクリプト/,
+    /file|code|function|class|module|script/i,
+    // 継続指示・催促
+    /続け|進め|やって|完成|仕上げ|終わらせ|始め|開始/,
+    /continue|go ahead|finish|start|proceed/i,
+  ];
+  return taskPatterns.some((p) => p.test(text));
+}
+
 export class AgentLoop {
   private history: MessageHistory;
   private contextManager: ContextManager;
@@ -57,6 +86,10 @@ export class AgentLoop {
   private currentSource: RequestSource = "cli";
   /** Ctrl+C などによる中断フラグ */
   private _aborted = false;
+  /** file_edit 連続失敗カウンタ（ファイルパス → 連続失敗回数） */
+  private fileEditFailCounts = new Map<string, number>();
+  /** ツールの最大並列実行数 */
+  private maxParallelTools: number;
   /** LLM I/O ロガー */
   private llmLogger: LLMLogger;
 
@@ -73,8 +106,10 @@ export class AgentLoop {
     agentId: string = "main",
     sessionId?: string,
     streamingDisplay: boolean = false,
+    maxParallelTools: number = 3,
   ) {
     this.streamingDisplay = streamingDisplay;
+    this.maxParallelTools = maxParallelTools;
     this.contextModeManager = contextModeManager ?? null;
     const systemPrompt = buildSystemPrompt(contextModeManager, skills);
     this.history = new MessageHistory(systemPrompt);
@@ -109,12 +144,20 @@ export class AgentLoop {
     this._aborted = false;
     try {
     this.history.addUserMessage(userMessage);
+    // ユーザーメッセージのテキスト部分を抽出（タスク判定用）
+    const userMessageText = typeof userMessage === "string"
+      ? userMessage
+      : (userMessage as ContentPart[])
+          .filter((p): p is { type: "text"; text: string } => p.type === "text")
+          .map((p) => p.text)
+          .join(" ");
     // <think>タグフィルター（古いOllama向け、ストリーム跨ぎ対応）
     const filterThinkingTags = createThinkingFilter();
     let emptyResponseRetries = 0;
     const MAX_EMPTY_RETRIES = 3;
     let codeBlockRetried = false;
-    let shortAckRetried = false; // 短い確認応答（ツール未呼び出し）への追加プロンプト済みフラグ
+    let consecutiveTextOnly = 0; // ツール未呼び出しテキスト応答の連続回数
+    const MAX_TEXT_ONLY_RETRIES = 5;
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       // 中断チェック
@@ -399,6 +442,7 @@ export class AgentLoop {
 
       // Tool calls: execute (parallel when multiple) and continue
       if (toolCalls.length > 0) {
+        consecutiveTextOnly = 0; // ツール呼び出し成功でリセット
         this.history.addAssistantMessage(textContent, toolCalls);
 
         let shouldAbort = false;
@@ -415,21 +459,45 @@ export class AgentLoop {
         continue;
       }
 
-      // 短い確認応答（ツール未呼び出し）を検出: モデルが「やります」だけ言って止まったケース
-      // 150文字未満かつツール呼び出しなし → 実装を促す追加プロンプト
+      // ガベージ応答（トークンアーティファクト等）を検出: リプロンプトしても改善しないため中断
+      if (toolCalls.length === 0 && textContent.trim().length > 0 && isGarbageResponse(textContent)) {
+        console.log(chalk.yellow("\n  モデルの応答が解析できない形式です。プロンプトを変えて再度お試しください。"));
+        this.history.addAssistantMessage(textContent);
+        return;
+      }
+
+      // テキストのみ応答（ツール未呼び出し）の検出とリプロンプト
+      // 会話的入力（挨拶など）では発火しない
       if (
         toolCalls.length === 0 &&
-        !shortAckRetried &&
         !codeBlockRetried &&
         textContent.trim().length > 0 &&
-        textContent.trim().length < 150
+        isTaskRequest(userMessageText)
       ) {
-        shortAckRetried = true;
-        this.history.addAssistantMessage(textContent);
-        this.history.addUserMessage(
-          "今すぐ file_write ツールを呼び出してファイルを作成してください。" +
-          "説明や確認は不要です。最初のアクションとして file_write ツールを呼び出してください。"
-        );
+        consecutiveTextOnly++;
+
+        if (consecutiveTextOnly >= MAX_TEXT_ONLY_RETRIES) {
+          // 限界到達: ユーザーに報告して中断
+          console.log(chalk.yellow("\n  モデルがツール呼び出しを行えません。プロンプトを変えて再度お試しください。"));
+          this.history.addAssistantMessage(textContent);
+          return;
+        }
+
+        if (consecutiveTextOnly >= 3) {
+          // 3回以上: 前回の応答を履歴に入れず、強いリプロンプト
+          console.log(chalk.dim(`  (テキストのみ応答 ${consecutiveTextOnly}回目 - 前回応答を破棄して再試行)`));
+          this.history.addUserMessage(
+            "あなたの応答はテキストのみでした。テキストは不要です。" +
+            "次のアクションとして必要なツールを呼び出してください。説明せずにツールを実行してください。"
+          );
+        } else {
+          // 1-2回目: 通常のリプロンプト
+          this.history.addAssistantMessage(textContent);
+          this.history.addUserMessage(
+            "ツールを呼び出して実装を開始してください。" +
+            "説明は不要です。最初のアクションとしてツールを呼び出してください。"
+          );
+        }
         continue;
       }
 
@@ -524,24 +592,71 @@ export class AgentLoop {
       spinner.fail(chalk.dim(`  ${toolCall.function.name}: ${result.error}`));
     }
 
-    const resultContent = result.success
+    let resultContent = result.success
       ? result.output
       : `Error: ${result.error}\n${result.output}`;
+
+    // file_edit 連続失敗追跡
+    if (toolCall.function.name === "file_edit") {
+      let filePath = "";
+      try {
+        const args = JSON.parse(toolCall.function.arguments ?? "{}");
+        filePath = (args.file_path ?? args.path ?? "") as string;
+      } catch { /* ignore */ }
+
+      if (!result.success && filePath) {
+        const count = (this.fileEditFailCounts.get(filePath) ?? 0) + 1;
+        this.fileEditFailCounts.set(filePath, count);
+        if (count >= 2) {
+          resultContent += "\n\n[システム] このファイルへの file_edit が " + count + " 回連続で失敗しています。" +
+            "file_write でファイル全体を書き直してください。";
+        }
+      } else if (result.success && filePath) {
+        // 成功したらカウンタリセット
+        this.fileEditFailCounts.delete(filePath);
+      }
+    }
+
     this.history.addToolResult(toolCall.id, resultContent);
-    
+
     return result.abortExecution === true;
   }
 
-  /** Execute multiple tool calls in parallel with Promise.allSettled, returning whether to abort the run loop */
+  /** Execute multiple tool calls with concurrency limit, returning whether to abort the run loop */
   private async executeToolsParallel(toolCalls: ToolCall[]): Promise<boolean> {
-    console.log(chalk.dim(`\n  ⟹ ${toolCalls.length} tools in parallel...`));
+    const limit = this.maxParallelTools;
+    console.log(chalk.dim(`\n  ⟹ ${toolCalls.length} tools (max ${limit} parallel)...`));
+
+    // セマフォによる同時実行数制限
+    let running = 0;
+    const queue: (() => void)[] = [];
+    function acquire(): Promise<void> {
+      if (running < limit) {
+        running++;
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => queue.push(resolve));
+    }
+    function release(): void {
+      const next = queue.shift();
+      if (next) {
+        next(); // running は減らさない（次のタスクが即取得）
+      } else {
+        running--;
+      }
+    }
 
     const promises = toolCalls.map(async (toolCall) => {
-      const result = await this.toolExecutor.execute(toolCall, this.currentSource);
-      const icon = result.success ? chalk.green("✓") : chalk.red("✗");
-      const suffix = result.success ? "" : `: ${result.error}`;
-      console.log(chalk.dim(`  ${icon} ${toolCall.function.name}${suffix}`));
-      return { toolCall, result };
+      await acquire();
+      try {
+        const result = await this.toolExecutor.execute(toolCall, this.currentSource);
+        const icon = result.success ? chalk.green("✓") : chalk.red("✗");
+        const suffix = result.success ? "" : `: ${result.error}`;
+        console.log(chalk.dim(`  ${icon} ${toolCall.function.name}${suffix}`));
+        return { toolCall, result };
+      } finally {
+        release();
+      }
     });
 
     const settled = await Promise.allSettled(promises);
@@ -625,6 +740,14 @@ export class AgentLoop {
   getPermissions(): PermissionManager {
     return this.permissions;
   }
+
+  getMaxParallelTools(): number {
+    return this.maxParallelTools;
+  }
+
+  setMaxParallelTools(value: number): void {
+    this.maxParallelTools = Math.max(1, Math.floor(value));
+  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -698,27 +821,52 @@ async function askUserOnError(err: Error): Promise<"retry" | "abort"> {
  */
 function createThinkingFilter(): (text: string) => string {
   let insideThink = false;
+  // チャンク境界でタグが分断される場合のバッファ（最大 "<think>" or "</think>" の長さ-1 = 7文字）
+  let pendingBuffer = "";
 
   return (text: string): string => {
+    // 前回の残りバッファと今回のテキストを連結
+    const input = pendingBuffer + text;
+    pendingBuffer = "";
+
     let result = "";
     let i = 0;
 
-    while (i < text.length) {
+    while (i < input.length) {
       if (!insideThink) {
-        // <think> の開始を検出
-        const openIdx = text.indexOf("<think>", i);
+        // 孤立した </think> を除去（reasoning_content で思考済みのモデルが text 冒頭に残す場合）
+        const closeOnlyIdx = input.indexOf("</think>", i);
+        const openIdx = input.indexOf("<think>", i);
+
+        // </think> が <think> より先に出現 → 孤立タグなのでスキップ
+        if (closeOnlyIdx !== -1 && (openIdx === -1 || closeOnlyIdx < openIdx)) {
+          result += input.slice(i, closeOnlyIdx);
+          i = closeOnlyIdx + 8; // "</think>".length
+          continue;
+        }
+
         if (openIdx === -1) {
-          result += text.slice(i);
+          // タグが見つからないが、末尾に "<" で始まる部分一致がある可能性
+          // "<think>" (7文字) の部分一致を保留
+          const remaining = input.slice(i);
+          const holdBack = getPartialTagLength(remaining);
+          if (holdBack > 0) {
+            result += remaining.slice(0, remaining.length - holdBack);
+            pendingBuffer = remaining.slice(remaining.length - holdBack);
+          } else {
+            result += remaining;
+          }
           break;
         }
-        result += text.slice(i, openIdx);
+        result += input.slice(i, openIdx);
         insideThink = true;
         i = openIdx + 7; // "<think>".length
       } else {
         // </think> の終了を検出
-        const closeIdx = text.indexOf("</think>", i);
+        const closeIdx = input.indexOf("</think>", i);
         if (closeIdx === -1) {
-          // タグが閉じていない → 残りは全部thinking
+          // タグが閉じていない → 残りは全部thinking（バッファに保留）
+          // ただし "</think>" の部分一致が末尾にある可能性 → 保留不要（insideThink中は全部捨てる）
           break;
         }
         insideThink = false;
@@ -728,6 +876,21 @@ function createThinkingFilter(): (text: string) => string {
 
     return result;
   };
+}
+
+/** テキスト末尾の "<think>" / "</think>" 部分一致の長さを返す（0 = 部分一致なし） */
+function getPartialTagLength(text: string): number {
+  // "<think>" (7文字) と "</think>" (8文字) の prefix をチェック
+  const tags = ["<think>", "</think>"];
+  for (let len = Math.min(text.length, 8); len >= 1; len--) {
+    const suffix = text.slice(text.length - len);
+    for (const tag of tags) {
+      if (tag.startsWith(suffix)) {
+        return len;
+      }
+    }
+  }
+  return 0;
 }
 
 function isConnectionError(err: Error): boolean {
