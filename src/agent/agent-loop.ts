@@ -175,6 +175,7 @@ export class AgentLoop {
     let codeBlockRetried = false;
     let consecutiveTextOnly = 0; // ツール未呼び出しテキスト応答の連続回数
     const MAX_TEXT_ONLY_RETRIES = 5;
+    let hasExecutedTools = false; // この run() 内でツールを1回でも実行したか
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       // 中断チェック
@@ -460,6 +461,7 @@ export class AgentLoop {
       // Tool calls: execute (parallel when multiple) and continue
       if (toolCalls.length > 0) {
         consecutiveTextOnly = 0; // ツール呼び出し成功でリセット
+        hasExecutedTools = true;
         this.history.addAssistantMessage(textContent, toolCalls);
 
         let shouldAbort = false;
@@ -485,10 +487,11 @@ export class AgentLoop {
 
       // テキストのみ応答（ツール未呼び出し）の検出とリプロンプト
       // 会話的入力（挨拶など）では発火しない
-      // 完了宣言の場合はリプロンプトせずそのまま返す
+      // ツール実行後のテキスト応答は結果報告なのでそのまま返す（再プロンプトしない）
       if (
         toolCalls.length === 0 &&
         !codeBlockRetried &&
+        !hasExecutedTools &&
         textContent.trim().length > 0 &&
         isTaskRequest(userMessageText) &&
         !isCompletionResponse(textContent)
