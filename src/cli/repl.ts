@@ -81,6 +81,10 @@ export class REPL {
         if (ctrlCCount === 1) {
           this.agent.abort();
           bashTool.killRunningProcess();
+          // ESCリスナーのraw modeを即座に解除（入力壊れ防止）
+          if (process.stdin.isTTY) {
+            try { process.stdin.setRawMode(false); } catch { /* ignore */ }
+          }
           console.log(chalk.yellow("\n  (Ctrl+C) 処理を中断中... もう一度 Ctrl+C でプロセス終了"));
           // 3秒以内に2回目が来なければリセット
           ctrlCResetTimer = setTimeout(() => { ctrlCCount = 0; }, 3000);
