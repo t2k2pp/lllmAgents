@@ -262,6 +262,10 @@ export class REPL {
       );
     } finally {
       this.agentBusy = false;
+      // abort後のターミナル状態リセット: oraスピナーやinquirerがstdinを不正な状態で残す可能性がある
+      if (process.stdin.isTTY) {
+        try { process.stdin.setRawMode(false); } catch { /* ignore */ }
+      }
     }
   }
 
