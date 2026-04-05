@@ -22,9 +22,10 @@ export class PlaywrightManager {
 
     const pw = await getPlaywright();
     logger.info("Launching browser...");
-    this.browser = await pw.chromium.launch({ headless: true });
+    this.browser = await pw.chromium.launch({ headless: true, timeout: 30000 });
     this.context = await this.browser.newContext();
     this.page = await this.context.newPage();
+    this.page.setDefaultTimeout(30000);
     return this.page;
   }
 

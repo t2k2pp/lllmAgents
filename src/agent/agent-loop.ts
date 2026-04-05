@@ -562,6 +562,9 @@ export class AgentLoop {
         if (emptyResponseRetries < MAX_EMPTY_RETRIES) {
           emptyResponseRetries++;
           console.log(chalk.yellow(`\n  空のレスポンスを受信したため再試行します (${emptyResponseRetries}/${MAX_EMPTY_RETRIES})...`));
+          // 同じリクエストをそのまま再送しても同じ結果になるため、ナッジメッセージを追加する
+          this.history.addAssistantMessage("（空のレスポンス）");
+          this.history.addUserMessage("続けてください。次に必要なアクションを実行してください。");
           continue;
         }
 
