@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import type { AgentLoop } from "../agent/agent-loop.js";
 import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";
+import { bashTool } from "../tools/definitions/bash.js";
 import { globalTokenTracker } from "../cost/token-tracker.js";
 import { displayHelp, type SkillSummary } from "./renderer.js";
 import { estimateMessageTokens } from "../agent/token-counter.js";
@@ -79,13 +80,14 @@ export class REPL {
         if (ctrlCResetTimer) clearTimeout(ctrlCResetTimer);
         if (ctrlCCount === 1) {
           this.agent.abort();
+          bashTool.killRunningProcess();
           console.log(chalk.yellow("\n  (Ctrl+C) 処理を中断中... もう一度 Ctrl+C でプロセス終了"));
           // 3秒以内に2回目が来なければリセット
           ctrlCResetTimer = setTimeout(() => { ctrlCCount = 0; }, 3000);
         } else {
-          // 2回目: 強制終了（process.exitが効かない場合に備えてkillも使用）
+          // 2回目: 強制終了
           console.log(chalk.yellow("\n  強制終了します..."));
-          process.kill(process.pid, "SIGKILL");
+          process.exit(1);
         }
       } else {
         // 待機中: 通常通り終了

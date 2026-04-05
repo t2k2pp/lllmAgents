@@ -74,7 +74,13 @@ export function resetProcessSandboxCache(): void {
 
 interface BashToolHandler extends ToolHandler {
   setStreamOutput(enabled: boolean): void;
+  /** 現在実行中の子プロセスを強制終了する（Ctrl+C用） */
+  killRunningProcess(): void;
 }
+
+/** 現在実行中の子プロセス（abort用） */
+import type { ChildProcess } from "node:child_process";
+let currentProcess: ChildProcess | null = null;
 
 export const bashTool: BashToolHandler = {
   name: "bash",
@@ -101,6 +107,12 @@ export const bashTool: BashToolHandler = {
   },
   setStreamOutput(enabled: boolean): void {
     streamOutputEnabled = enabled;
+  },
+  killRunningProcess(): void {
+    if (currentProcess && !currentProcess.killed) {
+      currentProcess.kill();
+      currentProcess = null;
+    }
   },
   async execute(params: Record<string, unknown>): Promise<ToolResult> {
     const command = params.command as string;
@@ -149,6 +161,7 @@ export const bashTool: BashToolHandler = {
         env: { ...process.env },
         stdio: ["ignore", "pipe", "pipe"],
       });
+      currentProcess = proc;
 
       let stdout = "";
       let stderr = "";
@@ -169,6 +182,7 @@ export const bashTool: BashToolHandler = {
       });
 
       proc.on("close", (code) => {
+        currentProcess = null;
         cleanup?.();
         let stderrText = stderr;
         // Windows で文字化けしたSTDERRにヒントを付加
@@ -192,6 +206,7 @@ export const bashTool: BashToolHandler = {
       });
 
       proc.on("error", (err) => {
+        currentProcess = null;
         cleanup?.();
         resolve({ success: false, output: "", error: err.message });
       });
