@@ -649,6 +649,9 @@ export class AgentLoop {
       ? result.output
       : `Error: ${result.error}\n${result.output}`;
 
+    // エラー時にアクショナブルなガイダンスを付加
+    resultContent = enrichToolResult(toolCall.function.name, toolCall.function.arguments, result.success, resultContent);
+
     // file_edit 連続失敗追跡
     if (toolCall.function.name === "file_edit") {
       let filePath = "";
@@ -723,9 +726,10 @@ export class AgentLoop {
     for (const entry of settled) {
       if (entry.status === "fulfilled") {
         const { toolCall, result } = entry.value;
-        const resultContent = result.success
+        let resultContent = result.success
           ? result.output
           : `Error: ${result.error}\n${result.output}`;
+        resultContent = enrichToolResult(toolCall.function.name, toolCall.function.arguments, result.success, resultContent);
         this.history.addToolResult(toolCall.id, resultContent);
 
         if (result.abortExecution) {
@@ -1040,4 +1044,45 @@ async function* abortableIterator<T>(
       break; // 外側ループで次の gen.next() へ
     }
   }
+}
+
+/**
+ * ツール実行結果にアクショナブルなガイダンスを付加する。
+ * ローカルLLMがエラーから次のアクションを自力で判断できない場合の補助。
+ * 成功時はそのまま返す。失敗時はエラー内容に応じた具体的な次のステップを追記する。
+ */
+function enrichToolResult(toolName: string, _args: string, success: boolean, content: string): string {
+  if (success) return content;
+
+  const errorLower = content.toLowerCase();
+
+  // file_read: ファイルが見つからない
+  if (toolName === "file_read" && errorLower.includes("not found")) {
+    return content + "\n\n[ガイド] ファイルが存在しません。次のいずれかを実行してください:" +
+      "\n- file_write でこのファイルを新規作成する" +
+      "\n- glob で正しいファイルパスを検索する" +
+      "\n- 同じパスで file_read を繰り返さない";
+  }
+
+  // file_read: ディレクトリを指定した
+  if (toolName === "file_read" && errorLower.includes("is a directory")) {
+    return content + "\n\n[ガイド] パスはディレクトリです。glob でディレクトリ内のファイル一覧を取得してください。";
+  }
+
+  // file_edit: old_string が見つからない
+  if (toolName === "file_edit" && errorLower.includes("not found in file")) {
+    return content; // 既にfile-edit.ts側にガイダンスあり
+  }
+
+  // bash: コマンド実行失敗
+  if (toolName === "bash" && errorLower.includes("exit code")) {
+    return content + "\n\n[ガイド] コマンドが失敗しました。STDERRのエラーメッセージを読んで原因を特定し、修正してください。";
+  }
+
+  // 汎用: 明らかなエラー
+  if (errorLower.includes("not found") || errorLower.includes("error")) {
+    return content + "\n\n[ガイド] エラーが発生しました。同じ操作を繰り返さず、エラーメッセージに基づいて別のアプローチを取ってください。";
+  }
+
+  return content;
 }
