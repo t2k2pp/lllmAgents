@@ -136,11 +136,11 @@ export class PlanManager {
     return this.currentPlan;
   }
 
-  /** List of read-only tools allowed during planning */
+  /** List of tools allowed during planning (investigation + documentation) */
   static getPlanModeAllowedTools(): Set<string> {
     return new Set([
-      "file_read", "glob", "grep", "web_fetch", "web_search",
-      "ask_user", "todo_write", "exit_plan_mode",
+      "file_read", "file_write", "glob", "grep", "web_fetch", "web_search",
+      "bash", "ask_user", "todo_write", "exit_plan_mode",
     ]);
   }
 }
