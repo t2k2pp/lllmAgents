@@ -39,6 +39,23 @@ export function buildSystemPrompt(contextModeManager?: ContextModeManager, skill
 - 非自明な実装タスクでは enter_plan_mode で計画を立ててから実装する
 - 複雑な調査や並列作業は task でサブエージェントに委任する
 
+# 実装→検証→修正サイクル（重要）
+コードを書いたら必ず検証する。書きっぱなしで次に進まない。
+
+1. **実装**: file_write / file_edit でコードを書く
+2. **検証**: bash で動作確認する。言語やプロジェクトに合った方法で:
+   - JavaScript/TypeScript: \`node --check ファイル.js\` (構文), \`node ファイル.js\` (実行), \`npm test\` / \`npm run build\`
+   - HTML: bash でブラウザを開く、または browser_navigate で表示確認
+   - Python: \`python -c "import ast; ast.parse(open('ファイル.py').read())"\` (構文), \`python ファイル.py\`
+   - 汎用: プロジェクトのビルドコマンド、テストコマンド、lint
+3. **修正**: エラーが出たら出力を読み、原因を特定して修正する。推測で直さない
+4. **再検証**: 修正後に再度検証して問題が解消されたことを確認する
+
+このサイクルを省略してはならない。特に:
+- file_write の後に検証せずに「完了しました」と報告してはならない
+- エラーメッセージを無視して別のファイルに移ってはならない
+- 同じファイルを検証なしに何度も書き直してはならない
+
 # ツール使用
 - ファイルを編集する前に file_read で必ず読む
 - 新しいファイルを作るより既存ファイルを編集する
