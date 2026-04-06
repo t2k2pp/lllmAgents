@@ -176,6 +176,10 @@ export class AgentLoop {
     let consecutiveTextOnly = 0; // ツール未呼び出しテキスト応答の連続回数
     const MAX_TEXT_ONLY_RETRIES = 5;
     let hasExecutedTools = false; // この run() 内でツールを1回でも実行したか
+    /** 直前のツール呼び出しシグネチャ（反復検出用） */
+    let lastToolSignature = "";
+    let repeatToolCount = 0;
+    const MAX_REPEAT_TOOL = 3; // 同じツール呼び出しがN回連続で失敗したら中断
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       // 中断チェック
@@ -462,6 +466,30 @@ export class AgentLoop {
       if (toolCalls.length > 0) {
         consecutiveTextOnly = 0; // ツール呼び出し成功でリセット
         hasExecutedTools = true;
+
+        // 同じツール呼び出しの反復検出
+        const currentSignature = toolCalls.map(tc => tc.function.name + ":" + tc.function.arguments).join("|");
+        if (currentSignature === lastToolSignature) {
+          repeatToolCount++;
+          if (repeatToolCount >= MAX_REPEAT_TOOL) {
+            console.log(chalk.yellow(`\n  同じツール呼び出しが${MAX_REPEAT_TOOL}回連続しています。別のアプローチを試みます...`));
+            this.history.addAssistantMessage(textContent, toolCalls);
+            // 直前のツール結果を偽造せずに、問題を指摘するメッセージを追加
+            for (const tc of toolCalls) {
+              this.history.addToolResult(tc.id,
+                "Error: このツール呼び出しは同じ引数で繰り返し実行されており、同じ結果が返っています。" +
+                "別のアプローチを取ってください。ファイルが存在しない場合は作成し、ツール名を間違えている場合は正しいツールを使ってください。"
+              );
+            }
+            repeatToolCount = 0;
+            lastToolSignature = "";
+            continue;
+          }
+        } else {
+          repeatToolCount = 1;
+          lastToolSignature = currentSignature;
+        }
+
         this.history.addAssistantMessage(textContent, toolCalls);
 
         let shouldAbort = false;
