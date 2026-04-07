@@ -13,13 +13,13 @@ export const secondLLMConsultTool: ToolHandler = {
     type: "function",
     function: {
       name: "second_llm_consult",
-      description: "Consult the second LLM for specific factual information or analysis. Suitable when you just need an answer without the LLM needing to use tools.",
+      description: "セカンドLLMに質問・相談する。コードレビュー、方針の壁打ち、要約・分析など、ツール不要な単発の質問に使う。コンテキスト節約のため、大きな調査結果の要約にも有効。",
       parameters: {
         type: "object",
         properties: {
           prompt: {
             type: "string",
-            description: "The prompt or question to ask the second LLM. Be as explicit and detailed as possible in giving the context.",
+            description: "セカンドLLMへの質問。背景・コンテキストを具体的に含めること。",
           },
         },
         required: ["prompt"],
@@ -46,13 +46,13 @@ export const secondLLMAgentTool: ToolHandler = {
     type: "function",
     function: {
       name: "second_llm_agent",
-      description: "Delegate a complex sub-task to the second LLM. The second LLM will act as an agent, using available tools independently to solve the task and return the final result. Cannot create further sub-tasks.",
+      description: "セカンドLLMにサブタスクを委任する。セカンドLLMがエージェントとしてツール（ファイル読み書き、bash等）を使い、独立してタスクを完遂し結果を返す。コンテキスト節約やファイル調査の委任に有効。",
       parameters: {
         type: "object",
         properties: {
           task: {
             type: "string",
-            description: "A comprehensive description of the task for the second LLM to perform. Include all necessary context and constraints.",
+            description: "セカンドLLMに実行させるタスクの詳細な説明。必要なコンテキスト・制約を全て含めること。",
           },
         },
         required: ["task"],

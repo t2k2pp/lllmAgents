@@ -21,7 +21,7 @@ export interface SkillInfo {
   description: string;
 }
 
-export function buildSystemPrompt(contextModeManager?: ContextModeManager, skills?: SkillInfo[]): string {
+export function buildSystemPrompt(contextModeManager?: ContextModeManager, skills?: SkillInfo[], hasSecondLLM?: boolean): string {
   const memory = loadMemory();
   const projectInstructions = loadProjectInstructions();
   const gitInfo = getGitInfo();
@@ -114,6 +114,24 @@ ${truncateAtLine(memory, 2000)}`);
 ユーザーが明示的にスキルを呼び出した場合、もしくはユーザーの依頼を達成するために必要な場合のみ使用する:
 
 ${skillLines}`);
+  }
+
+  // Second LLM
+  if (hasSecondLLM) {
+    parts.push(`
+# セカンドLLM（別モデルへの委任）
+second_llm_consult と second_llm_agent の2つのツールが利用可能。
+以下の場面で**自発的に**使用すること:
+
+- **コンテキスト節約**: 大きなファイルの調査や要約など、メインの会話履歴を消費したくない作業をサブエージェントに委任する
+- **コードレビュー**: 自分が書いたコードの品質チェックを別の視点で確認したい時
+- **方針の壁打ち**: 実装アプローチに迷った時にセカンドLLMに相談する
+
+使い分け:
+- second_llm_consult: 単発の質問（分析・要約・レビュー依頼）
+- second_llm_agent: ツールを使った複合タスクの委任（ファイル調査+レポートなど）
+
+注意: 単純なファイル読み書きなど自分で直接できるタスクには使わない。`);
   }
 
   // Rules

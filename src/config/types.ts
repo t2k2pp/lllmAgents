@@ -16,6 +16,7 @@ export interface LLMEndpoint {
 export interface SecondLLMEndpoint {
   providerType: SecondLLMProviderType;
   model: string;
+  contextWindow?: number;
   // ローカルLLM用
   baseUrl?: string;
   // Vertex AI用
@@ -127,6 +128,22 @@ export interface ModelDetail extends ModelInfo {
   parameterSize?: string;
   quantizationLevel?: string;
   format?: string;
+}
+
+/**
+ * 人間可読なトークン数表記をパースする。
+ * "128k" → 128000, "256K" → 256000, "1m" → 1000000, "4096" → 4096
+ * パース不能なら NaN を返す。
+ */
+export function parseTokenCount(input: string): number {
+  const trimmed = input.trim().toLowerCase();
+  const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*([km]?)$/);
+  if (!match) return NaN;
+  const num = parseFloat(match[1]);
+  const suffix = match[2];
+  if (suffix === "k") return Math.round(num * 1000);
+  if (suffix === "m") return Math.round(num * 1000000);
+  return Math.round(num);
 }
 
 export const DEFAULT_PORTS: Record<ProviderType, number> = {

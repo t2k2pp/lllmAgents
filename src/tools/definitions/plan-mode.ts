@@ -114,7 +114,8 @@ export const exitPlanModeTool: ToolHandler = {
         output: JSON.stringify({
           approved: false,
           feedback: result.feedback,
-          message: "フィードバックに基づいて計画を修正してください。",
+          message: "ユーザーからフィードバックがあります。計画を修正してください。修正後、exit_plan_mode を再度呼び出して修正版の計画を提出してください。",
+          next_action: "exit_plan_mode",
         }),
       };
     }

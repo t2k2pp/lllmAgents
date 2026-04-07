@@ -146,7 +146,13 @@ export class OpenAICompatProvider implements LLMProvider {
       // ストリーミングでusage情報を取得するためのオプション
       stream_options: { include_usage: true },
     };
-    if (maxTokens) body.max_tokens = maxTokens;
+    // max_tokens: 設定のcontextWindowから渡されたモデルのコンテキストサイズを使用する。
+    // サーバーは入力トークン+max_tokensがコンテキストを超えないよう自動調整するため、
+    // コンテキストサイズをそのまま渡しても問題ない。
+    // finish_reason="length" が返った場合はエージェント側で自動継続する。
+    if (maxTokens) {
+      body.max_tokens = maxTokens;
+    }
     if (tools && tools.length > 0) {
       body.tools = tools;
       body.tool_choice = toolChoice ?? "auto";

@@ -21,6 +21,10 @@ export class ContextManager {
     this.keepRecentMessages = keepRecentMessages;
   }
 
+  setContextWindow(value: number): void {
+    this.contextWindow = value;
+  }
+
   shouldCompress(history: MessageHistory): boolean {
     const messages = history.getMessages();
     const tokens = estimateMessageTokens(messages);

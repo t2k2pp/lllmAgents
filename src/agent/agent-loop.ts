@@ -107,6 +107,8 @@ export class AgentLoop {
   private fileEditFailCounts = new Map<string, number>();
   /** ツールの最大並列実行数 */
   private maxParallelTools: number;
+  /** モデルのコンテキストウィンドウサイズ（トークン数） — max_tokens算出に使用 */
+  private contextWindow: number;
   /** LLM I/O ロガー */
   private llmLogger: LLMLogger;
 
@@ -124,11 +126,13 @@ export class AgentLoop {
     sessionId?: string,
     streamingDisplay: boolean = false,
     maxParallelTools: number = 3,
+    hasSecondLLM: boolean = false,
   ) {
     this.streamingDisplay = streamingDisplay;
     this.maxParallelTools = maxParallelTools;
+    this.contextWindow = contextWindow;
     this.contextModeManager = contextModeManager ?? null;
-    const systemPrompt = buildSystemPrompt(contextModeManager, skills);
+    const systemPrompt = buildSystemPrompt(contextModeManager, skills, hasSecondLLM);
     this.history = new MessageHistory(systemPrompt);
     this.contextManager = new ContextManager(provider, model, contextWindow, compressionThreshold);
     this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager);
@@ -209,6 +213,7 @@ export class AgentLoop {
 
       let receivedTokens = 0; // スピナーモード: 受信トークンカウンター
       let thinkingStarted = false; // ストリーミングモード: [思考]ヘッダー表示済みフラグ
+      let finishReason = "stop"; // LLMの終了理由（"length"なら出力が途中で切れた）
       // LLM呼び出しループ: 接続エラー時は自動リトライ、その他はユーザーに判断を委ねる
       let connectionRetries = 0;
 
@@ -227,11 +232,13 @@ export class AgentLoop {
               model: this.model,
               messages: this.history.getMessages(),
               tools: toolDefs,
+              maxTokens: this.contextWindow,
               stream: true,
             })
             : this.provider.chat({
               model: this.model,
               messages: this.history.getMessages(),
+              maxTokens: this.contextWindow,
               stream: true,
             });
 
@@ -357,6 +364,7 @@ export class AgentLoop {
                 }
                 throw new Error(chunk.error ?? "LLM error");
               case "done":
+                finishReason = chunk.finishReason ?? "stop";
                 // ストリーミングモード: 表示済みテキストの末尾に改行
                 if (this.streamingDisplay && hasStartedOutput) {
                   process.stdout.write("\n");
@@ -449,6 +457,14 @@ export class AgentLoop {
       }
 
       if (!success) return;
+
+      // finish_reason="length": max_tokensに達して出力が途中で切れた場合、自動的に続きを生成する
+      if (finishReason === "length" && textContent.trim().length > 0) {
+        console.log(chalk.dim("\n  (出力がmax_tokensに達したため、続きを生成します...)"));
+        this.history.addAssistantMessage(textContent, toolCalls.length > 0 ? toolCalls : undefined);
+        this.history.addUserMessage("続きを出力してください。途中から再開してください。");
+        continue;
+      }
 
       if (hasStartedOutput && !this.streamingDisplay) {
         // スピナーモード: 収集した全テキストをフィルター・レンダリングして表示
@@ -781,6 +797,15 @@ export class AgentLoop {
 
   getModel(): string {
     return this.model;
+  }
+
+  getContextWindow(): number {
+    return this.contextWindow;
+  }
+
+  setContextWindow(value: number): void {
+    this.contextWindow = value;
+    this.contextManager.setContextWindow(value);
   }
 
   setModel(model: string): void {

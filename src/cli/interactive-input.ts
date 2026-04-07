@@ -517,9 +517,14 @@ export class InteractiveInput {
             selectItem();
             renderInput();
 
-            if (buffer.startsWith("/")) {
-              // /コマンド: 選択 → 即確定（Claude Codeと同じ動作）
+            if (buffer.startsWith("/") && !buffer.endsWith(" ")) {
+              // /コマンド: 選択 → 即確定（引数不要のコマンド）
               finish(buffer);
+            } else if (buffer.startsWith("/") && buffer.endsWith(" ")) {
+              // /コマンド サブコマンド + 末尾スペース: 引数が必要なので確定しない
+              // メニューを閉じて続けて入力可能にする
+              updateMenu();
+              if (menuVisible) renderMenu();
             } else if (selectedValue.endsWith("/")) {
               // @ディレクトリ: さらに中身を展開
               updateMenu();

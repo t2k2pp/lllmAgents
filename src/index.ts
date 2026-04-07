@@ -161,41 +161,7 @@ async function main(): Promise<void> {
   setSkillRegistry(skillRegistry);
   setSkillPermissionManager(permissions);
 
-  // Build skill infos for system prompt
-  const skillInfos = skillRegistry.list().map((s) => ({
-    name: s.name,
-    trigger: s.trigger,
-    description: s.description,
-  }));
-
-  // Agent loop
-  const agent = new AgentLoop(
-    provider,
-    config.mainLLM.model,
-    toolRegistry,
-    permissions,
-    contextWindow,
-    config.context.compressionThreshold,
-    contextModeManager,
-    hookManager,
-    skillInfos,
-    "main",
-    undefined,
-    config.streamingDisplay ?? false,
-    config.maxParallelTools ?? 3,
-  );
-
-  // Plan manager
-  const planManager = new PlanManager();
-  agent.setPlanManager(planManager);
-  setPlanManager(planManager);
-
-  // Sub-agent manager
-  const subAgentManager = new SubAgentManager(provider, config.mainLLM.model, toolRegistry, permissions);
-  setSubAgentManager(subAgentManager);
-  setSkillSubAgentManager(subAgentManager);
-
-  // Second LLM
+  // Second LLM (Agent Loop作成前に初期化 — システムプロンプトに反映するため)
   const secondLLMManager = new SecondLLMManager(toolRegistry, permissions);
   const secondLlmConfig = config.secondLLM ?? undefined;
   if (secondLlmConfig && secondLlmConfig.enabled && secondLlmConfig.endpoint) {
@@ -223,6 +189,42 @@ async function main(): Promise<void> {
       toolRegistry.register(secondLLMAgentTool);
     }
   }
+  const hasSecondLLM = secondLLMManager.isAvailable();
+
+  // Build skill infos for system prompt
+  const skillInfos = skillRegistry.list().map((s) => ({
+    name: s.name,
+    trigger: s.trigger,
+    description: s.description,
+  }));
+
+  // Agent loop
+  const agent = new AgentLoop(
+    provider,
+    config.mainLLM.model,
+    toolRegistry,
+    permissions,
+    contextWindow,
+    config.context.compressionThreshold,
+    contextModeManager,
+    hookManager,
+    skillInfos,
+    "main",
+    undefined,
+    config.streamingDisplay ?? false,
+    config.maxParallelTools ?? 3,
+    hasSecondLLM,
+  );
+
+  // Plan manager
+  const planManager = new PlanManager();
+  agent.setPlanManager(planManager);
+  setPlanManager(planManager);
+
+  // Sub-agent manager
+  const subAgentManager = new SubAgentManager(provider, config.mainLLM.model, toolRegistry, permissions);
+  setSubAgentManager(subAgentManager);
+  setSkillSubAgentManager(subAgentManager);
 
   // Check for --resume flag
   const resumeIdx = args.indexOf("--resume");
