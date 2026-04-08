@@ -655,6 +655,15 @@ export class AgentLoop {
   /** Execute a single tool call, returning whether to abort the rest of the run loop */
   private async executeSingleTool(toolCall: ToolCall): Promise<boolean> {
     const spinner = ora(chalk.dim(`  ${toolCall.function.name}...`)).start();
+    // 権限確認ダイアログがスピナーに隠れないよう、
+    // 確認が必要なツールではスピナーを一時停止してから execute する。
+    // execute 内部で permission check → inquirer prompt が走るため、
+    // スピナーが stdout を専有していると入力が見えなくなる。
+    const needsApproval = this.permissions.getPermissionLevel(toolCall.function.name) === "ask"
+      && this.currentSource === "cli";
+    if (needsApproval) {
+      spinner.stop();
+    }
     const result = await this.toolExecutor.execute(toolCall, this.currentSource);
 
     if (result.success) {

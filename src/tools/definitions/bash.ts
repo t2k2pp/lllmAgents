@@ -155,9 +155,18 @@ export const bashTool: BashToolHandler = {
     }
 
     return new Promise((resolve) => {
+      let resolved = false;
+      const done = (result: ToolResult) => {
+        if (resolved) return;
+        resolved = true;
+        currentProcess = null;
+        cleanup?.();
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        resolve(result);
+      };
+
       const proc = spawn(shell, shellArgs, {
         cwd: process.cwd(),
-        timeout,
         env: { ...process.env },
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -181,15 +190,11 @@ export const bashTool: BashToolHandler = {
         }
       });
 
-      proc.on("close", (code) => {
-        currentProcess = null;
-        cleanup?.();
+      const buildResult = (code: number | null): ToolResult => {
         let stderrText = stderr;
-        // Windows で文字化けしたSTDERRにヒントを付加
         if (isWindows && stderrText && /[\ufffd]/.test(stderrText)) {
           stderrText += "\n(文字化けしたエラーメッセージはShift-JISエンコードの可能性があります)";
         }
-        // よくあるWindows特有エラーへのヒント
         if (isWindows && stderrText) {
           if (/is not recognized|認識されていません|内部コマンドまたは外部コマンド/.test(stderrText)) {
             stderrText += "\n(ヒント: ファイル内容の確認には file_read ツールを使用してください)";
@@ -197,19 +202,31 @@ export const bashTool: BashToolHandler = {
         }
         const output = (stdout + (stderrText ? `\nSTDERR:\n${stderrText}` : "")).trim();
         const truncated = output.length > 30000 ? output.slice(0, 30000) + "\n... (truncated)" : output;
-
         if (code === 0) {
-          resolve({ success: true, output: truncated });
-        } else {
-          resolve({ success: false, output: truncated, error: `Exit code: ${code}` });
+          return { success: true, output: truncated };
         }
+        return { success: false, output: truncated, error: `Exit code: ${code}` };
+      };
+
+      // close と exit の両方を監視（Windowsでcloseが発火しないケース対策）
+      proc.on("close", (code) => done(buildResult(code)));
+      proc.on("exit", (code) => {
+        // close が先に来ることが多いが、来なかった場合のフォールバック
+        // ストリームが閉じていなくても 500ms 後に強制解決
+        setTimeout(() => done(buildResult(code)), 500);
       });
 
       proc.on("error", (err) => {
-        currentProcess = null;
-        cleanup?.();
-        resolve({ success: false, output: "", error: err.message });
+        done({ success: false, output: "", error: err.message });
       });
+
+      // 独自タイムアウト: spawn の timeout は Windows で効かないことがあるため
+      const timeoutTimer = setTimeout(() => {
+        if (!resolved) {
+          try { proc.kill(); } catch { /* ignore */ }
+          done({ success: false, output: stdout.trim(), error: `Timeout: command exceeded ${timeout}ms` });
+        }
+      }, timeout);
     });
   },
 };

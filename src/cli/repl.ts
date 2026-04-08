@@ -83,10 +83,6 @@ export class REPL {
         if (ctrlCCount === 1) {
           this.agent.abort();
           bashTool.killRunningProcess();
-          // ESCリスナーのraw modeを即座に解除（入力壊れ防止）
-          if (process.stdin.isTTY) {
-            try { process.stdin.setRawMode(false); } catch { /* ignore */ }
-          }
           console.log(chalk.yellow("\n  (Ctrl+C) 処理を中断中... もう一度 Ctrl+C でプロセス終了"));
           // 3秒以内に2回目が来なければリセット
           ctrlCResetTimer = setTimeout(() => { ctrlCCount = 0; }, 3000);
@@ -229,36 +225,8 @@ export class REPL {
 
   // ─── 入力処理 ──────────────────────────────────────
 
-  /**
-   * エージェント処理中にESCキーで中断できるようにする。
-   * stdin を raw mode にしてキー入力を監視し、ESC で abort() を呼ぶ。
-   * 処理完了時に cleanup を呼んでリスナーを除去する。
-   */
-  private startEscListener(): () => void {
-    const stdin = process.stdin;
-    if (!stdin.isTTY) return () => {};
-
-    const onData = (data: Buffer) => {
-      // ESC = 0x1b (単独、矢印キーのプレフィクスではない)
-      if (data.length === 1 && data[0] === 0x1b) {
-        this.agent.abort();
-        bashTool.killRunningProcess();
-        console.log(chalk.yellow("\n  (ESC) 処理を中断しています..."));
-      }
-    };
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.on("data", onData);
-
-    return () => {
-      stdin.removeListener("data", onData);
-      try { stdin.setRawMode(false); } catch { /* ignore */ }
-    };
-  }
-
   private async processInput(input: string): Promise<void> {
     this.agentBusy = true;
-    const cleanupEsc = this.startEscListener();
     try {
       if (input.startsWith("@second ")) {
          if (!this.secondLLMManager || !this.secondLLMManager.isAvailable()) {
@@ -298,7 +266,6 @@ export class REPL {
         chalk.red(`\n  Error: ${e instanceof Error ? e.message : String(e)}\n`),
       );
     } finally {
-      cleanupEsc();
       this.agentBusy = false;
     }
   }
