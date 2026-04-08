@@ -642,8 +642,10 @@ export class AgentLoop {
       return allDefs.filter((d) => allowed.has(d.function.name));
     }
 
-    if (this.currentSource === "discord") {
-      const allowed = this.permissions.getDiscordAllowedToolNames();
+    if (this.currentSource === "discord" || this.currentSource === "slack") {
+      const allowed = this.currentSource === "discord"
+        ? this.permissions.getDiscordAllowedToolNames()
+        : this.permissions.getSlackAllowedToolNames();
       return allDefs.filter((d) => allowed.has(d.function.name));
     }
 

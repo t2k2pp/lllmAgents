@@ -23,6 +23,7 @@ import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { PlanManager } from "../agent/plan-mode.js";
 import type { ContextModeManager, ContextMode } from "../context/context-mode.js";
 import { sendDiscordNotification, isValidDiscordWebhookUrl } from "../utils/discord.js";
+import { sendSlackNotification, isValidSlackWebhookUrl } from "../utils/slack.js";
 import { DiscordInteractionServer } from "../discord/interaction-server.js";
 import { registerAskCommand } from "../discord/slash-commands.js";
 import { select } from "@inquirer/prompts";
@@ -278,14 +279,17 @@ export class REPL {
       }
       await this.agent.run(resolved);
 
-      // LLMの応答が完了した後、Discord通知設定が有効なら送信する
-      if (this.config.discord?.enabled && this.config.discord?.webhookUrl) {
-        const historyMsgs = this.agent.getHistory().getMessages();
-        // 直近のメッセージ（大抵はassistantのもの）を探す
-        const lastMsg = historyMsgs[historyMsgs.length - 1];
-        if (lastMsg && lastMsg.role === "assistant" && typeof lastMsg.content === "string" && lastMsg.content.trim() !== "") {
+      // LLMの応答が完了した後、通知設定が有効なら送信する
+      const historyMsgs = this.agent.getHistory().getMessages();
+      const lastMsg = historyMsgs[historyMsgs.length - 1];
+      if (lastMsg && lastMsg.role === "assistant" && typeof lastMsg.content === "string" && lastMsg.content.trim() !== "") {
+        if (this.config.discord?.enabled && this.config.discord?.webhookUrl) {
           console.log(chalk.dim("  Sending response to Discord..."));
           await sendDiscordNotification(this.config.discord.webhookUrl, lastMsg.content);
+        }
+        if (this.config.slack?.enabled && this.config.slack?.webhookUrl) {
+          console.log(chalk.dim("  Sending response to Slack..."));
+          await sendSlackNotification(this.config.slack.webhookUrl, lastMsg.content);
         }
       }
 
@@ -950,6 +954,97 @@ export class REPL {
           console.log(chalk.dim("  受信設定:  app-id <id> | public-key <key> | bot-token <tok> | port <num>"));
           console.log(chalk.dim("  コマンド:  register [guild-id]"));
           console.log(chalk.dim("  サーバー:  listen start | listen stop | listen auto-start [off]"));
+        }
+        break;
+      }
+
+      case "/slack": {
+        const subCmd = args[0];
+        if (!subCmd || subCmd === "status") {
+          const s = this.config.slack;
+          const sEnabled = s?.enabled ?? false;
+          const sUrl = s?.webhookUrl || "未設定";
+          const sBotToken = s?.botToken ? chalk.green("設定済み") : chalk.yellow("未設定");
+          const sAppToken = s?.appToken ? chalk.green("設定済み") : chalk.yellow("未設定");
+          console.log(chalk.bold("\n  === Slack Status ==="));
+          console.log(chalk.dim(`  通知 (Webhook): ${sEnabled ? chalk.green("有効") : chalk.yellow("無効")}`));
+          console.log(chalk.dim(`  Webhook URL:    ${sUrl}`));
+          console.log(chalk.dim(`  Bot Token:      ${sBotToken}`));
+          console.log(chalk.dim(`  App Token:      ${sAppToken}`));
+          console.log(chalk.dim(`  --slack モード:  bot-token + app-token 設定後に 'npm run start -- --slack' で起動`));
+          console.log();
+        } else if (subCmd === "enable") {
+          if (!this.config.slack) this.config.slack = { enabled: false, webhookUrl: "" };
+          if (!this.config.slack.webhookUrl) {
+            console.log(chalk.yellow("  注意: Webhook URL が設定されていません。先に '/slack url <URL>' を実行してください。"));
+          }
+          this.config.slack.enabled = true;
+          saveConfig(this.config);
+          console.log(chalk.green("  Slack 通知を有効化しました。"));
+        } else if (subCmd === "disable") {
+          if (!this.config.slack) this.config.slack = { enabled: false, webhookUrl: "" };
+          this.config.slack.enabled = false;
+          saveConfig(this.config);
+          console.log(chalk.yellow("  Slack 通知を無効化しました。"));
+        } else if (subCmd === "url") {
+          const urlStr = args[1];
+          if (!urlStr) {
+            console.log(chalk.yellow("  使い方: /slack url <webhook-url>"));
+            console.log(chalk.dim("  例: /slack url https://hooks.slack.com/services/T.../B.../..."));
+          } else if (!isValidSlackWebhookUrl(urlStr)) {
+            console.log(chalk.red("  無効なWebhook URLです。"));
+            console.log(chalk.yellow("  正しい形式: https://hooks.slack.com/services/T.../B.../..."));
+            console.log(chalk.dim("  Slack App設定 → Incoming Webhooks で取得してください。"));
+          } else {
+            if (!this.config.slack) this.config.slack = { enabled: false, webhookUrl: "" };
+            this.config.slack.webhookUrl = urlStr;
+            saveConfig(this.config);
+            console.log(chalk.green(`  Slack Webhook URL を設定しました。`));
+            console.log(chalk.dim(`  URL: ${urlStr}`));
+            console.log(chalk.dim("  /slack test でテスト送信できます。"));
+          }
+        } else if (subCmd === "test") {
+          const webhookUrl = this.config.slack?.webhookUrl ?? "";
+          if (!webhookUrl) {
+            console.log(chalk.yellow("  Webhook URL が設定されていません。先に '/slack url <URL>' を実行してください。"));
+          } else if (!isValidSlackWebhookUrl(webhookUrl)) {
+            console.log(chalk.red("  設定されているURLが無効です。'/slack url <URL>' で正しいWebhook URLを設定してください。"));
+          } else {
+            console.log(chalk.dim("  Slack にテストメッセージを送信中..."));
+            const result = await sendSlackNotification(webhookUrl, "lllmAgents テスト通知\nSlack通知が正常に動作しています！");
+            if (result.success) {
+              console.log(chalk.green("  テストメッセージを送信しました。Slackを確認してください。"));
+            } else {
+              console.log(chalk.red(`  送信失敗: ${result.error}`));
+            }
+          }
+        } else if (subCmd === "bot-token") {
+          const token = args[1];
+          if (!token) {
+            console.log(chalk.yellow("  使い方: /slack bot-token <xoxb-...>"));
+            console.log(chalk.dim("  Slack App → OAuth & Permissions → Bot User OAuth Token"));
+          } else {
+            if (!this.config.slack) this.config.slack = { enabled: false, webhookUrl: "" };
+            this.config.slack.botToken = token;
+            saveConfig(this.config);
+            console.log(chalk.green("  Bot Token を設定しました。"));
+          }
+        } else if (subCmd === "app-token") {
+          const token = args[1];
+          if (!token) {
+            console.log(chalk.yellow("  使い方: /slack app-token <xapp-...>"));
+            console.log(chalk.dim("  Slack App → Basic Information → App-Level Tokens"));
+          } else {
+            if (!this.config.slack) this.config.slack = { enabled: false, webhookUrl: "" };
+            this.config.slack.appToken = token;
+            saveConfig(this.config);
+            console.log(chalk.green("  App-Level Token を設定しました。"));
+          }
+        } else {
+          console.log(chalk.yellow("  使い方: /slack <サブコマンド>"));
+          console.log(chalk.dim("  通知系:    status | enable | disable | url <URL> | test"));
+          console.log(chalk.dim("  Bot設定:   bot-token <xoxb-...> | app-token <xapp-...>"));
+          console.log(chalk.dim("  起動:      npm run start -- --slack"));
         }
         break;
       }

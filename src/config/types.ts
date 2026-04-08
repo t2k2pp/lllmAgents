@@ -73,6 +73,8 @@ export interface SecurityConfig {
   requireApprovalTools: string[];
   /** Discord経由のリクエストで自動許可するツール（インタラクティブ確認なし） */
   discordAutoApproveTools: string[];
+  /** Slack経由のリクエストで自動許可するツール（インタラクティブ確認なし） */
+  slackAutoApproveTools: string[];
   /** Claude Code 互換のパターンベース権限ルール（ツール名リストより優先） */
   rules?: SecurityRuleConfig;
   streamCommandOutput?: boolean;
@@ -96,6 +98,13 @@ export interface DiscordConfig {
   listenEnabled?: boolean;  // 起動時に interaction サーバーを自動起動するか
 }
 
+export interface SlackConfig {
+  enabled: boolean;           // Webhook通知の有効/無効
+  webhookUrl: string;         // 通知用Incoming Webhook URL
+  botToken?: string;          // xoxb- Bot Token (Bolt用)
+  appToken?: string;          // xapp- App-Level Token (Socket Mode用)
+}
+
 export interface Config {
   mainLLM: LLMEndpoint;
   visionLLM: LLMEndpoint | null;
@@ -103,6 +112,7 @@ export interface Config {
   security: SecurityConfig;
   context: ContextConfig;
   discord?: DiscordConfig;
+  slack?: SlackConfig;
   /** true: テキストをリアルタイムにストリーミング表示。false(デフォルト): スピナー+完了後Markdownレンダリング */
   streamingDisplay?: boolean;
   /** ツールの最大並列実行数（デフォルト: 3）。vLLM KVキャッシュやリソースに合わせて調整 */
@@ -185,6 +195,12 @@ export function getDefaultConfig(): Config {
         "browser_snapshot", "vision_analyze",
         "current_datetime", "sandbox_info",
       ],
+      slackAutoApproveTools: [
+        "file_read", "glob", "grep",
+        "web_search", "web_fetch",
+        "browser_snapshot", "vision_analyze",
+        "current_datetime", "sandbox_info",
+      ],
       rules: {
         allow: [],
         deny: [],
@@ -201,6 +217,10 @@ export function getDefaultConfig(): Config {
       webhookUrl: "",
       interactionPort: 3003,
       listenEnabled: false,
+    },
+    slack: {
+      enabled: false,
+      webhookUrl: "",
     },
   };
 }

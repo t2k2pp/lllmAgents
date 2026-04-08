@@ -8,7 +8,7 @@ import { evaluateRules } from "./rule-engine.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 
 /** リクエストの発生元 */
-export type RequestSource = "cli" | "discord";
+export type RequestSource = "cli" | "discord" | "slack";
 
 // ユーザーに質問する・タスク管理するなど本質的に安全なツール
 // configに関わらず常にauto-approve
@@ -38,6 +38,7 @@ export class PermissionManager {
   private autoApprove: Set<string>;
   private requireApproval: Set<string>;
   private discordAutoApprove: Set<string>;
+  private slackAutoApprove: Set<string>;
   private rules: SecurityRuleConfig;
   // Session-level approvals: "tool:paramsHash" → approved
   private sessionApprovals = new Set<string>();
@@ -57,6 +58,7 @@ export class PermissionManager {
     this.autoApprove = new Set(securityConfig.autoApproveTools);
     this.requireApproval = new Set(securityConfig.requireApprovalTools);
     this.discordAutoApprove = new Set(securityConfig.discordAutoApproveTools ?? []);
+    this.slackAutoApprove = new Set(securityConfig.slackAutoApproveTools ?? []);
     this.rules = securityConfig.rules ?? { allow: [], deny: [], ask: [] };
   }
 
@@ -95,6 +97,15 @@ export class PermissionManager {
     return new Set([...INHERENTLY_SAFE_TOOLS, ...this.discordAutoApprove]);
   }
 
+  getSlackAutoApproveList(): string[] {
+    return [...this.slackAutoApprove].sort();
+  }
+
+  /** Slack経由で使用可能なツール名のセットを返す（INHERENTLY_SAFE_TOOLS含む） */
+  getSlackAllowedToolNames(): Set<string> {
+    return new Set([...INHERENTLY_SAFE_TOOLS, ...this.slackAutoApprove]);
+  }
+
   // --- 変更メソッド（REPLの /permission コマンドから使用） ---
 
   addAutoApprove(tool: string): void {
@@ -119,6 +130,14 @@ export class PermissionManager {
 
   removeDiscordAutoApprove(tool: string): void {
     this.discordAutoApprove.delete(tool);
+  }
+
+  addSlackAutoApprove(tool: string): void {
+    this.slackAutoApprove.add(tool);
+  }
+
+  removeSlackAutoApprove(tool: string): void {
+    this.slackAutoApprove.delete(tool);
   }
 
   // --- 自律実行モード ---
@@ -155,9 +174,12 @@ export class PermissionManager {
     params: Record<string, unknown>,
     source: RequestSource = "cli",
   ): Promise<{ allowed: boolean; reason?: string; abortExecution?: boolean }> {
-    // Discord: インタラクティブ確認不可のためheadlessモード
+    // Discord/Slack: インタラクティブ確認不可のためheadlessモード
     if (source === "discord") {
       return this.checkDiscordPermission(toolName, params);
+    }
+    if (source === "slack") {
+      return this.checkSlackPermission(toolName, params);
     }
 
     // CLI: 通常の確認フロー
@@ -183,6 +205,33 @@ export class PermissionManager {
     }
 
     // ファイル操作はサンドボックスチェック
+    if (toolName.startsWith("file_") || toolName === "glob" || toolName === "grep") {
+      const filePath = (params.path ?? params.file_path ?? params.pattern) as string | undefined;
+      if (filePath && !this.sandbox.isPathAllowed(filePath)) {
+        return { allowed: false, reason: `パス ${filePath} はサンドボックス外です` };
+      }
+    }
+
+    return { allowed: true };
+  }
+
+  /** Slack経由: slackAutoApproveTools + INHERENTLY_SAFE_TOOLS のみ許可 */
+  private checkSlackPermission(
+    toolName: string,
+    params: Record<string, unknown>,
+  ): { allowed: boolean; reason?: string } {
+    if (evaluateRules({ allow: [], deny: this.rules.deny, ask: [] }, toolName, params) === "deny") {
+      return { allowed: false, reason: `ルールにより ${toolName} はブロックされました（Slack）` };
+    }
+
+    const allowed = INHERENTLY_SAFE_TOOLS.has(toolName) || this.slackAutoApprove.has(toolName);
+    if (!allowed) {
+      return {
+        allowed: false,
+        reason: `Slack経由では ${toolName} は許可されていません（/permission slack-add ${toolName} で追加可能）`,
+      };
+    }
+
     if (toolName.startsWith("file_") || toolName === "glob" || toolName === "grep") {
       const filePath = (params.path ?? params.file_path ?? params.pattern) as string | undefined;
       if (filePath && !this.sandbox.isPathAllowed(filePath)) {

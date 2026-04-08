@@ -43,9 +43,11 @@ export function loadConfig(): Config {
       autoApproveTools: mergeToolList(defaults.security.autoApproveTools, savedSecurity.autoApproveTools),
       requireApprovalTools: mergeToolList(defaults.security.requireApprovalTools, savedSecurity.requireApprovalTools),
       discordAutoApproveTools: mergeToolList(defaults.security.discordAutoApproveTools, savedSecurity.discordAutoApproveTools),
+      slackAutoApproveTools: mergeToolList(defaults.security.slackAutoApproveTools, savedSecurity.slackAutoApproveTools),
     },
     context: { ...defaults.context, ...parsed.context },
     discord: { ...(defaults.discord ?? { enabled: false, webhookUrl: "" }), ...parsed.discord },
+    slack: { ...(defaults.slack ?? { enabled: false, webhookUrl: "" }), ...parsed.slack },
   };
 }
 

@@ -281,6 +281,57 @@ async function main(): Promise<void> {
     return;
   }
 
+  // ── Slackモード (--slack): REPL の代わりに Slack Bot を起動 ──
+  if (args.includes("--slack")) {
+    const slackConfig = config.slack;
+    if (!slackConfig?.botToken || !slackConfig?.appToken) {
+      console.error("  --slack モードには Slack の botToken と appToken が必要です。");
+      console.error("  通常モードで起動して /slack bot-token と /slack app-token を設定してください。");
+      process.exit(1);
+    }
+
+    const { SlackBot } = await import("./slack/slack-bot.js");
+    const slackBot = new SlackBot(slackConfig, agent);
+
+    try {
+      await slackBot.start();
+      console.log("  [Slack Mode] Slack Bot 起動 (Socket Mode)");
+      console.log("  Slack でメンションまたは DM でメッセージを送信してください。");
+      console.log("  CLI: exit / status のみ受付。Ctrl+C で終了。");
+    } catch (e) {
+      console.error(`  Slack Bot 起動失敗: ${e}`);
+      process.exit(1);
+    }
+
+    // 最小CLI（exit/status のみ）
+    const readline = await import("readline");
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.on("line", (line: string) => {
+      const cmd = line.trim().toLowerCase();
+      if (cmd === "exit" || cmd === "quit") {
+        slackBot.stop().then(() => process.exit(0));
+      } else if (cmd === "status") {
+        console.log(`  Slack Bot: ${slackBot.running ? "running" : "stopped"}`);
+        console.log(`  Agent processing: ${agent.isProcessing}`);
+      } else {
+        console.log("  Commands: exit, status");
+      }
+    });
+
+    // SIGINT でグレースフルシャットダウン
+    process.on("SIGINT", async () => {
+      console.log("\n  シャットダウン中...");
+      await slackBot.stop();
+      await hookManager.runSessionHooks("stop");
+      agent.saveCurrentSession();
+      await mcpManager.disconnectAll();
+      await playwrightManager.close();
+      process.exit(0);
+    });
+
+    return;
+  }
+
   // Display welcome
   displayWelcome(
     config.mainLLM.model,

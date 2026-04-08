@@ -25,7 +25,8 @@
     "marked-terminal": "^7.3.0",
     "ora": "^8.1.1",
     "playwright": "^1.50.1",
-    "undici": "^7.3.0"
+    "undici": "^7.3.0",
+    "@slack/bolt": "^4.1.0"
   },
   "devDependencies": {
     "@types/inquirer": "^9.0.7",
