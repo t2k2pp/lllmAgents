@@ -118,6 +118,15 @@ export interface SearchConfig {
   searxngUrl?: string;
 }
 
+export interface ObsidianConfig {
+  /** Obsidian Vault の絶対パス */
+  vaultPath: string;
+  /** ナレッジノートの保存先ディレクトリ (vault相対、デフォルト: "Knowledge") */
+  knowledgeDir?: string;
+  /** 全ノートに自動付与するタグ (デフォルト: ["lllmagents"]) */
+  defaultTags?: string[];
+}
+
 export interface Config {
   mainLLM: LLMEndpoint;
   visionLLM: LLMEndpoint | null;
@@ -128,6 +137,8 @@ export interface Config {
   slack?: SlackConfig;
   /** Web検索設定 */
   search?: SearchConfig;
+  /** Obsidian Vault 連携 (ナレッジベース) */
+  obsidian?: ObsidianConfig;
   /** true: テキストをリアルタイムにストリーミング表示。false(デフォルト): スピナー+完了後Markdownレンダリング */
   streamingDisplay?: boolean;
   /** ツールの最大並列実行数（デフォルト: 3）。vLLM KVキャッシュやリソースに合わせて調整 */

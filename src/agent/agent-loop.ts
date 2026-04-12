@@ -134,13 +134,14 @@ export class AgentLoop {
     maxParallelTools: number = 3,
     hasSecondLLM: boolean = false,
     samplingParams: SamplingParams = {},
+    hasObsidian: boolean = false,
   ) {
     this.streamingDisplay = streamingDisplay;
     this.maxParallelTools = maxParallelTools;
     this.contextWindow = contextWindow;
     this.samplingParams = samplingParams;
     this.contextModeManager = contextModeManager ?? null;
-    const systemPrompt = buildSystemPrompt(contextModeManager, skills, hasSecondLLM);
+    const systemPrompt = buildSystemPrompt(contextModeManager, skills, hasSecondLLM, hasObsidian);
     this.history = new MessageHistory(systemPrompt);
     this.contextManager = new ContextManager(provider, model, contextWindow, compressionThreshold);
     this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager);

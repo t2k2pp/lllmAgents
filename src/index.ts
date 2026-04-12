@@ -30,6 +30,8 @@ import { taskTool, taskOutputTool, setSubAgentManager } from "./tools/definition
 import { enterPlanModeTool, exitPlanModeTool, setPlanManager } from "./tools/definitions/plan-mode.js";
 import { skillTool, setSkillRegistry, setSkillPermissionManager, setSkillSubAgentManager } from "./tools/definitions/skill.js";
 import { secondLLMConsultTool, secondLLMAgentTool, setSecondLLMManager } from "./tools/definitions/second-llm.js";
+import { knowledgeSaveTool, setObsidianConfig } from "./tools/definitions/knowledge-save.js";
+import { knowledgeSearchTool } from "./tools/definitions/knowledge-search.js";
 
 import { displayWelcome } from "./cli/renderer.js";
 import { REPL } from "./cli/repl.js";
@@ -88,6 +90,13 @@ async function main(): Promise<void> {
   toolRegistry.register(webFetchTool);
   toolRegistry.register(createWebSearchTool(config.search));
   // current_datetime は不要（システムプロンプトの環境情報に現在日時を含めているため）
+
+  // Knowledge (Obsidian) tools
+  setObsidianConfig(config.obsidian ?? null);
+  if (config.obsidian?.vaultPath) {
+    toolRegistry.register(knowledgeSaveTool);
+    toolRegistry.register(knowledgeSearchTool);
+  }
 
   // Interactive tools
   toolRegistry.register(todoWriteTool);
@@ -223,6 +232,7 @@ async function main(): Promise<void> {
     config.maxParallelTools ?? 3,
     hasSecondLLM,
     samplingParams,
+    !!config.obsidian?.vaultPath,
   );
 
   // Plan manager

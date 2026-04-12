@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import chalk from "chalk";
 import type { AgentLoop } from "../agent/agent-loop.js";
 import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";
@@ -1228,6 +1230,178 @@ export class REPL {
         } else {
           this.agent.setMaxParallelTools(n);
           console.log(chalk.green(`  並列実行上限を ${this.agent.getMaxParallelTools()} に設定しました`));
+        }
+        break;
+      }
+
+      case "/knowledge": {
+        const subCmd = args[0];
+        if (!subCmd || subCmd === "status") {
+          const obs = this.config.obsidian;
+          if (!obs?.vaultPath) {
+            console.log(chalk.yellow("  Obsidian Vault が未設定です。"));
+            console.log(chalk.dim("  設定: /knowledge vault <パス>"));
+          } else {
+            console.log(chalk.bold("  Obsidian ナレッジベース:"));
+            console.log(`    Vault:    ${chalk.cyan(obs.vaultPath)}`);
+            const knDir = obs.knowledgeDir ?? "Knowledge";
+            const knPath = path.join(obs.vaultPath, knDir);
+            console.log(`    保存先:   ${chalk.cyan(knPath)}`);
+            console.log(`    デフォルトタグ: ${chalk.cyan((obs.defaultTags ?? ["lllmagents"]).join(", "))}`);
+            try {
+              const { getKnowledgeBasePath } = await import("../tools/definitions/knowledge-save.js");
+              const basePath = getKnowledgeBasePath();
+              if (basePath) {
+                const countMd = (dir: string): number => {
+                  if (!fs.existsSync(dir)) return 0;
+                  let count = 0;
+                  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                    if (e.isDirectory()) count += countMd(path.join(dir, e.name));
+                    else if (e.name.endsWith(".md")) count++;
+                  }
+                  return count;
+                };
+                console.log(`    ノート数: ${chalk.yellow(String(countMd(basePath)))}`);
+              }
+            } catch { /* ignore */ }
+          }
+        } else if (subCmd === "vault") {
+          const vaultPath = args.slice(1).join(" ").trim();
+          if (!vaultPath) {
+            console.log(chalk.yellow("  使い方: /knowledge vault <Obsidian Vaultのパス>"));
+            break;
+          }
+          const resolved = path.resolve(vaultPath);
+          if (!fs.existsSync(resolved)) {
+            console.log(chalk.red(`  パスが存在しません: ${resolved}`));
+            break;
+          }
+          if (!this.config.obsidian) {
+            this.config.obsidian = { vaultPath: resolved };
+          } else {
+            this.config.obsidian.vaultPath = resolved;
+          }
+          saveConfig(this.config);
+          const { setObsidianConfig, knowledgeSaveTool } = await import("../tools/definitions/knowledge-save.js");
+          const { knowledgeSearchTool } = await import("../tools/definitions/knowledge-search.js");
+          setObsidianConfig(this.config.obsidian);
+          const registry = this.agent.getToolRegistry();
+          if (!registry.get("knowledge_save")) {
+            registry.register(knowledgeSaveTool);
+            registry.register(knowledgeSearchTool);
+          }
+          console.log(chalk.green(`  Vault パスを設定しました: ${resolved}`));
+          console.log(chalk.dim("  ナレッジツール (knowledge_save, knowledge_search) が利用可能になりました。"));
+        } else if (subCmd === "tags") {
+          const obs = this.config.obsidian;
+          if (!obs?.vaultPath) {
+            console.log(chalk.yellow("  Vault が未設定です。/knowledge vault <パス> で設定してください。"));
+            break;
+          }
+          try {
+            const { getKnowledgeBasePath } = await import("../tools/definitions/knowledge-save.js");
+            const basePath = getKnowledgeBasePath();
+            if (!basePath) { console.log(chalk.yellow("  ナレッジディレクトリがありません。")); break; }
+            const tagCounts = new Map<string, number>();
+            const walkAndCountTags = (dir: string) => {
+              if (!fs.existsSync(dir)) return;
+              for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const fp = path.join(dir, e.name);
+                if (e.isDirectory()) { walkAndCountTags(fp); continue; }
+                if (!e.name.endsWith(".md")) continue;
+                const head = fs.readFileSync(fp, "utf-8").slice(0, 1500);
+                const tagMatch = head.match(/tags:\n((?:\s+-\s+.+\n?)+)/);
+                if (tagMatch) {
+                  for (const line of tagMatch[1].split("\n")) {
+                    const m = line.match(/^\s+-\s+(.+)/);
+                    if (m) tagCounts.set(m[1].trim(), (tagCounts.get(m[1].trim()) ?? 0) + 1);
+                  }
+                }
+              }
+            };
+            walkAndCountTags(basePath);
+            if (tagCounts.size === 0) {
+              console.log(chalk.dim("  タグはまだありません。"));
+            } else {
+              const sorted = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]);
+              console.log(chalk.bold("  タグ一覧:"));
+              for (const [tag, count] of sorted) {
+                console.log(`    ${chalk.cyan(tag)} (${count})`);
+              }
+            }
+          } catch (e) {
+            console.log(chalk.red(`  エラー: ${e}`));
+          }
+        } else if (subCmd === "recent") {
+          const obs = this.config.obsidian;
+          if (!obs?.vaultPath) { console.log(chalk.yellow("  Vault が未設定です。")); break; }
+          const limit = parseInt(args[1] ?? "10", 10);
+          try {
+            const { getKnowledgeBasePath } = await import("../tools/definitions/knowledge-save.js");
+            const basePath = getKnowledgeBasePath();
+            if (!basePath) { console.log(chalk.dim("  ナレッジノートはまだありません。")); break; }
+            const files: { path: string; mtime: number }[] = [];
+            const walk = (dir: string) => {
+              if (!fs.existsSync(dir)) return;
+              for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const fp = path.join(dir, e.name);
+                if (e.isDirectory()) { walk(fp); continue; }
+                if (e.name.endsWith(".md")) files.push({ path: fp, mtime: fs.statSync(fp).mtimeMs });
+              }
+            };
+            walk(basePath);
+            files.sort((a, b) => b.mtime - a.mtime);
+            const recent = files.slice(0, limit);
+            if (recent.length === 0) {
+              console.log(chalk.dim("  ナレッジノートはまだありません。"));
+            } else {
+              console.log(chalk.bold(`  最近のナレッジ (${recent.length}件):`));
+              for (const f of recent) {
+                const rel = path.relative(obs.vaultPath, f.path).replace(/\\/g, "/");
+                const head = fs.readFileSync(f.path, "utf-8").slice(0, 500);
+                const titleMatch = head.match(/title:\s*"?([^"\n]+)"?/);
+                const title = titleMatch ? titleMatch[1] : path.basename(f.path, ".md");
+                console.log(`    ${chalk.cyan(title)} — ${chalk.dim(rel)}`);
+              }
+            }
+          } catch (e) {
+            console.log(chalk.red(`  エラー: ${e}`));
+          }
+        } else if (subCmd === "search") {
+          const query = args.slice(1).join(" ").trim();
+          if (!query) { console.log(chalk.yellow("  使い方: /knowledge search <キーワード>")); break; }
+          try {
+            const { knowledgeSearchTool } = await import("../tools/definitions/knowledge-search.js");
+            const result = await knowledgeSearchTool.execute({ query, limit: 10 });
+            if (result.success) {
+              console.log("\n" + result.output);
+            } else {
+              console.log(chalk.red(`  ${result.error}`));
+            }
+          } catch (e) {
+            console.log(chalk.red(`  エラー: ${e}`));
+          }
+        } else if (subCmd === "open") {
+          const obs = this.config.obsidian;
+          if (!obs?.vaultPath) { console.log(chalk.yellow("  Vault が未設定です。")); break; }
+          const knPath = path.join(obs.vaultPath, obs.knowledgeDir ?? "Knowledge");
+          try {
+            const { exec } = await import("node:child_process");
+            if (process.platform === "win32") exec(`explorer "${knPath}"`);
+            else if (process.platform === "darwin") exec(`open "${knPath}"`);
+            else exec(`xdg-open "${knPath}"`);
+            console.log(chalk.green(`  フォルダを開きました: ${knPath}`));
+          } catch (e) {
+            console.log(chalk.red(`  エラー: ${e}`));
+          }
+        } else {
+          console.log(chalk.bold("  /knowledge サブコマンド:"));
+          console.log(chalk.dim("    (引数なし)          設定状態を表示"));
+          console.log(chalk.dim("    vault <path>        Obsidian Vault パスを設定"));
+          console.log(chalk.dim("    tags                タグ一覧と使用数"));
+          console.log(chalk.dim("    recent [N]          最近のナレッジノート (デフォルト10件)"));
+          console.log(chalk.dim("    search <query>      キーワード検索"));
+          console.log(chalk.dim("    open                フォルダをエクスプローラーで開く"));
         }
         break;
       }

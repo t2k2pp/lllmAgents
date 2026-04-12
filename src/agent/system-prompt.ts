@@ -21,7 +21,7 @@ export interface SkillInfo {
   description: string;
 }
 
-export function buildSystemPrompt(contextModeManager?: ContextModeManager, skills?: SkillInfo[], hasSecondLLM?: boolean): string {
+export function buildSystemPrompt(contextModeManager?: ContextModeManager, skills?: SkillInfo[], hasSecondLLM?: boolean, hasObsidian?: boolean): string {
   const memory = loadMemory();
   const projectInstructions = loadProjectInstructions();
   const gitInfo = getGitInfo();
@@ -132,6 +132,27 @@ second_llm_consult と second_llm_agent の2つのツールが利用可能。
 - second_llm_agent: ツールを使った複合タスクの委任（ファイル調査+レポートなど）
 
 注意: 単純なファイル読み書きなど自分で直接できるタスクには使わない。`);
+  }
+
+  // Obsidian Knowledge
+  if (hasObsidian) {
+    parts.push(`
+# ナレッジベース（Obsidian連携）
+knowledge_save と knowledge_search の2つのツールが利用可能。
+
+## knowledge_save — 保存
+**ユーザーが「記録して」「ナレッジに保存して」等と指示した場合のみ使用する。自動的には保存しない。**
+
+- ノート本文は日本語で書く
+- 推奨構成: ## 要約 → ## 主要ポイント → ## 詳細 → ## ソース
+- タグは階層構造を使う: technology/frontend, language/typescript, framework/react 等
+- type: web (Web検索結果), research (複数ソースの調査まとめ), reference (チートシート)
+- ソースURLがある場合は必ず source パラメータに含める
+
+## knowledge_search — 検索
+過去に保存したナレッジを検索して回答に活用する。
+- ユーザーの質問に関連する過去の調査結果がないか確認する際に使う
+- タグフィルタで絞り込み可能（前方一致: "technology" で "technology/frontend" もマッチ）`);
   }
 
   // Rules

@@ -17,7 +17,8 @@
 8. [discord — Discord連携](#discord)
 9. [slack — Slack連携](#slack)
 10. [search — Web検索](#search)
-11. [その他のトップレベル設定](#その他のトップレベル設定)
+11. [obsidian — Obsidianナレッジベース連携](#obsidian)
+12. [その他のトップレベル設定](#その他のトップレベル設定)
 
 ---
 
@@ -367,6 +368,29 @@ CLIコマンド `/slack bot-token <TOKEN>` → `/slack app-token <TOKEN>` でも
 | `searxngUrl` | string | — | SearXNGのJSON APIエンドポイント (例: `http://localhost:8888`) |
 
 CLIコマンド `/search provider searxng` → `/search url http://localhost:8888` でも設定可能。
+
+## obsidian — Obsidianナレッジベース連携
+
+Obsidian Vault をナレッジベースとして使用する。設計詳細は [docs/obsidian-integration.md](obsidian-integration.md) を参照。
+
+| キー | 型 | デフォルト | 説明 |
+|------|-----|----------|------|
+| `vaultPath` | string | — | Obsidian Vaultの絶対パス。`/knowledge vault <path>` で設定可能 |
+| `knowledgeDir` | string | `"Knowledge"` | ナレッジノートの保存先ディレクトリ (vault相対) |
+| `defaultTags` | string[] | `["lllmagents"]` | 全ノートに自動付与するタグ |
+
+設定例:
+```json
+{
+  "obsidian": {
+    "vaultPath": "D:/Obsidian/MyVault",
+    "knowledgeDir": "Knowledge",
+    "defaultTags": ["lllmagents"]
+  }
+}
+```
+
+CLIコマンド `/knowledge vault <path>` でも設定可能。設定するとナレッジツール (`knowledge_save`, `knowledge_search`) が有効になる。
 
 ## その他のトップレベル設定
 
