@@ -1,71 +1,144 @@
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
+import type { SearchConfig } from "../../config/types.js";
 
 /**
- * Web search using DuckDuckGo HTML (no API key required).
- * Falls back to a simple scrape of search results.
+ * Web search tool.
+ * Supports SearXNG (JSON API) and DuckDuckGo HTML (fallback).
  */
-export const webSearchTool: ToolHandler = {
-  name: "web_search",
-  definition: {
-    type: "function",
-    function: {
-      name: "web_search",
-      description: "Webを検索して結果を返します。DuckDuckGoを使用します。",
-      parameters: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description: "検索クエリ",
+export function createWebSearchTool(searchConfig?: SearchConfig): ToolHandler {
+  const provider = searchConfig?.provider ?? "duckduckgo";
+  const searxngUrl = searchConfig?.searxngUrl ?? "http://localhost:8888";
+
+  return {
+    name: "web_search",
+    definition: {
+      type: "function",
+      function: {
+        name: "web_search",
+        description: `Webを検索して結果を返します。プロバイダー: ${provider}`,
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "検索クエリ",
+            },
+            max_results: {
+              type: "number",
+              description: "最大結果数（デフォルト: 5）",
+            },
           },
-          max_results: {
-            type: "number",
-            description: "最大結果数（デフォルト: 5）",
-          },
+          required: ["query"],
         },
-        required: ["query"],
       },
     },
-  },
-  async execute(params: Record<string, unknown>): Promise<ToolResult> {
-    const query = params.query as string;
-    const maxResults = (params.max_results as number) ?? 5;
+    async execute(params: Record<string, unknown>): Promise<ToolResult> {
+      const query = params.query as string;
+      const maxResults = (params.max_results as number) ?? 5;
 
-    try {
-      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000);
-
-      const res = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          "User-Agent": "LocalLLM-Agent/0.1 (CLI Agent)",
-          Accept: "text/html",
-        },
-      });
-      clearTimeout(timer);
-
-      if (!res.ok) {
-        return { success: false, output: "", error: `Search failed: HTTP ${res.status}` };
+      try {
+        if (provider === "searxng") {
+          return await searchSearXNG(searxngUrl, query, maxResults);
+        }
+        return await searchDuckDuckGo(query, maxResults);
+      } catch (e) {
+        // SearXNG失敗時はDuckDuckGoにフォールバック
+        if (provider === "searxng") {
+          try {
+            const fallback = await searchDuckDuckGo(query, maxResults);
+            fallback.output = `[SearXNG unavailable, fell back to DuckDuckGo]\n\n${fallback.output}`;
+            return fallback;
+          } catch (_) {
+            // fall through
+          }
+        }
+        return { success: false, output: "", error: String(e) };
       }
+    },
+  };
+}
 
-      const html = await res.text();
-      const results = parseSearchResults(html, maxResults);
+// 後方互換: 既存の名前付きエクスポート (DuckDuckGoデフォルト)
+export const webSearchTool = createWebSearchTool();
 
-      if (results.length === 0) {
-        return { success: true, output: `No results found for: ${query}` };
-      }
+// ── SearXNG ──────────────────────────────────────────────
 
-      const output = results
-        .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
-        .join("\n\n");
+async function searchSearXNG(baseUrl: string, query: string, maxResults: number): Promise<ToolResult> {
+  const url = `${baseUrl}/search?q=${encodeURIComponent(query)}&format=json&pageno=1`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
 
-      return { success: true, output: `Search results for "${query}":\n\n${output}` };
-    } catch (e) {
-      return { success: false, output: "", error: String(e) };
-    }
-  },
-};
+  const res = await fetch(url, {
+    signal: controller.signal,
+    headers: { Accept: "application/json" },
+  });
+  clearTimeout(timer);
+
+  if (!res.ok) {
+    throw new Error(`SearXNG API error: HTTP ${res.status}`);
+  }
+
+  const data = (await res.json()) as SearXNGResponse;
+  const results = (data.results ?? []).slice(0, maxResults);
+
+  if (results.length === 0) {
+    return { success: true, output: `No results found for: ${query}` };
+  }
+
+  const output = results
+    .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.content ?? ""}`)
+    .join("\n\n");
+
+  return {
+    success: true,
+    output: `Search results for "${query}" (via SearXNG, ${data.number_of_results ?? "?"} total):\n\n${output}`,
+  };
+}
+
+interface SearXNGResponse {
+  query: string;
+  number_of_results?: number;
+  results: Array<{
+    title: string;
+    url: string;
+    content?: string;
+    engine: string;
+  }>;
+}
+
+// ── DuckDuckGo (既存) ────────────────────────────────────
+
+async function searchDuckDuckGo(query: string, maxResults: number): Promise<ToolResult> {
+  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+
+  const res = await fetch(url, {
+    signal: controller.signal,
+    headers: {
+      "User-Agent": "LocalLLM-Agent/0.1 (CLI Agent)",
+      Accept: "text/html",
+    },
+  });
+  clearTimeout(timer);
+
+  if (!res.ok) {
+    return { success: false, output: "", error: `Search failed: HTTP ${res.status}` };
+  }
+
+  const html = await res.text();
+  const results = parseSearchResults(html, maxResults);
+
+  if (results.length === 0) {
+    return { success: true, output: `No results found for: ${query}` };
+  }
+
+  const output = results
+    .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
+    .join("\n\n");
+
+  return { success: true, output: `Search results for "${query}":\n\n${output}` };
+}
 
 interface SearchResult {
   title: string;
@@ -75,8 +148,6 @@ interface SearchResult {
 
 function parseSearchResults(html: string, max: number): SearchResult[] {
   const results: SearchResult[] = [];
-
-  // DuckDuckGo HTML results pattern
   const resultPattern = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
   const snippetPattern = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
 
@@ -87,7 +158,6 @@ function parseSearchResults(html: string, max: number): SearchResult[] {
     const titleMatch = titleMatches[i];
     const snippetMatch = snippetMatches[i];
 
-    // Extract URL from DuckDuckGo redirect
     let url = titleMatch[1];
     const udParam = url.match(/uddg=([^&]*)/);
     if (udParam) {

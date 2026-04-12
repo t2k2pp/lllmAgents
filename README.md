@@ -292,50 +292,32 @@ Markdownファイルで定義するコーディング規約・ガイドライン
 
 ## 設定
 
-設定ファイル: `~/.localllm/config.json`
+設定ファイル: `~/.localllm/config.json`（初回は `npm run setup` で自動生成）
 
+最小構成:
 ```json
 {
   "mainLLM": {
     "providerType": "ollama",
-    "baseUrl": "http://192.168.1.100:11434",
-    "model": "qwen3.5:27b",
-    "contextWindow": 130000,
-    "temperature": 0.7
+    "baseUrl": "http://localhost:11434",
+    "model": "qwen3:32b",
+    "contextWindow": 40000
   },
   "visionLLM": null,
+  "secondLLM": null,
   "security": {
     "allowedDirectories": [],
-    "autoApproveTools": ["file_read", "glob", "grep", "browser_snapshot", "vision_analyze"]
+    "autoApproveTools": ["file_read", "glob", "grep"]
   },
   "context": {
     "compressionThreshold": 0.8
-  },
-  "discord": {
-    "enabled": false,
-    "webhookUrl": ""
   }
 }
 ```
 
-### Discord 通知の設定方法
+サンプリングパラメータ（temperature, top_p, top_k 等）は未指定ならサーバー側のモデル推奨値がそのまま使われる。明示的に指定する場合は `mainLLM` 内に追加する。
 
-エージェントの応答完了時に、その内容を Discord へ自動的に通知することができます。以下の手順で Webhook URL を取得し、設定ファイルに記載してください。
-
-1. **Discord サーバー設定を開く**
-   通知を送りたいサーバーで、対象チャンネルの「チャンネルの編集（歯車アイコン）」を開きます。
-2. **連携サービス (Integrations) を選択**
-   左側のメニューから「連携サービス」を選択し、「ウェブフックの作成 (Create Webhook)」をクリックします。
-3. **Webhook URL のコピー**
-   作成されたWebhookの「ウェブフックURLをコピー」ボタンを押し、URLを取得します。
-4. **config.json の編集**
-   `~/.localllm/config.json` を開き、以下の設定を追加・編集します。
-   ```json
-   "discord": {
-     "enabled": true,
-     "webhookUrl": "ここにコピーしたURLを貼り付けます"
-   }
-   ```
+全設定項目の詳細・用途別パターン例は **[docs/config-reference.md](docs/config-reference.md)** を参照。
 
 ### データディレクトリ
 
@@ -347,6 +329,7 @@ Markdownファイルで定義するコーディング規約・ガイドライン
 | `~/.localllm/plans/` | プランモードの計画書 |
 | `~/.localllm/hooks/` | ユーザーグローバルフック |
 | `~/.localllm/rules/` | ユーザーグローバルルール |
+| `~/.localllm/llm-logs/` | LLM I/Oログ |
 
 ## テスト
 

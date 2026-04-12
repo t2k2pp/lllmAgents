@@ -58,6 +58,7 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/plan")}           プランモードに入る
     ${chalk.cyan("/skills")}         利用可能なスキル一覧
     ${chalk.cyan("/status")}         全体ステータス
+    ${chalk.cyan("/search")}         Web検索プロバイダー設定 (SearXNG/DuckDuckGo)
     ${chalk.cyan("/discord")}        Discord通知の設定
     ${chalk.cyan("/autorun")}         自律実行モード切替（作業フォルダ内の削除以外を自動承認）
     ${chalk.cyan("/try [N] <プロンプト>")}  試行錯誤モード: 評価付きで最大N回自動リトライ（デフォルト3回）

@@ -21,8 +21,10 @@ import {
 } from "./session-manager.js";
 import { PlanManager } from "./plan-mode.js";
 import type { ContextModeManager } from "../context/context-mode.js";
+import type { SamplingParams } from "../config/types.js";
 import * as logger from "../utils/logger.js";
 import { LLMLogger } from "./llm-logger.js";
+import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
 
 // marked-terminal でMarkdownをターミナル向けにレンダリング
 marked.use(markedTerminal() as Parameters<typeof marked.use>[0]);
@@ -109,8 +111,12 @@ export class AgentLoop {
   private maxParallelTools: number;
   /** モデルのコンテキストウィンドウサイズ（トークン数） — max_tokens算出に使用 */
   private contextWindow: number;
+  /** サンプリングパラメータ（未指定ならサーバー側デフォルトに委ねる） */
+  private samplingParams: SamplingParams;
   /** LLM I/O ロガー */
   private llmLogger: LLMLogger;
+  /** 直前ターンのプロンプトトークン数（待機スピナーでの文脈サイズ表示用） */
+  private lastPromptTokens = 0;
 
   constructor(
     private provider: LLMProvider,
@@ -127,10 +133,12 @@ export class AgentLoop {
     streamingDisplay: boolean = false,
     maxParallelTools: number = 3,
     hasSecondLLM: boolean = false,
+    samplingParams: SamplingParams = {},
   ) {
     this.streamingDisplay = streamingDisplay;
     this.maxParallelTools = maxParallelTools;
     this.contextWindow = contextWindow;
+    this.samplingParams = samplingParams;
     this.contextModeManager = contextModeManager ?? null;
     const systemPrompt = buildSystemPrompt(contextModeManager, skills, hasSecondLLM);
     this.history = new MessageHistory(systemPrompt);
@@ -234,18 +242,33 @@ export class AgentLoop {
               tools: toolDefs,
               maxTokens: this.contextWindow,
               stream: true,
+              ...this.samplingParams,
             })
             : this.provider.chat({
               model: this.model,
               messages: this.history.getMessages(),
               maxTokens: this.contextWindow,
               stream: true,
+              ...this.samplingParams,
             });
 
           // LLM待機スピナー: リクエスト送信〜最初のチャンク受信まで
+          // 文脈情報（msg数 / 直前ターンの送信トークン / contextWindow）も併記してブラックボックス化を防ぐ
           const waitingStartTime = Date.now();
+          const msgCount = this.history.getMessages().length;
+          const ctxFragments: string[] = [`${msgCount}msg`];
+          if (this.lastPromptTokens > 0) {
+            const usedK = (this.lastPromptTokens / 1000).toFixed(1);
+            const maxK = this.contextWindow >= 1000
+              ? `${Math.round(this.contextWindow / 1000)}K`
+              : `${this.contextWindow}`;
+            ctxFragments.push(`~${usedK}K/${maxK}`);
+          }
+          const ctxInfo = ctxFragments.join(" · ");
+          let receivingStartTime = 0; // 最初のテキストチャンク受信時刻（tok/s 計算用）
+
           let waitingSpinner: ReturnType<typeof ora> | null = ora({
-            text: chalk.dim("  LLM処理中..."),
+            text: chalk.dim(`  LLM処理中... (0:00 · ${ctxInfo})`),
             spinner: "dots",
           }).start();
 
@@ -253,7 +276,7 @@ export class AgentLoop {
           const waitingTimer = setInterval(() => {
             if (waitingSpinner) {
               const elapsed = Math.floor((Date.now() - waitingStartTime) / 1000);
-              waitingSpinner.text = chalk.dim(`  LLM処理中... (${formatElapsed(elapsed)})`);
+              waitingSpinner.text = chalk.dim(`  LLM処理中... (${formatElapsed(elapsed)} · ${ctxInfo})`);
             }
           }, 1000);
 
@@ -263,7 +286,7 @@ export class AgentLoop {
               const elapsed = Math.floor((Date.now() - waitingStartTime) / 1000);
               if (elapsed >= 2) {
                 // 2秒以上待った場合のみ経過時間を表示
-                waitingSpinner.succeed(chalk.dim(`  LLM応答開始 (${formatElapsed(elapsed)})`));
+                waitingSpinner.succeed(chalk.dim(`  LLM応答開始 (${formatElapsed(elapsed)} · ${ctxInfo})`));
               } else {
                 waitingSpinner.stop();
               }
@@ -334,10 +357,14 @@ export class AgentLoop {
                       receivedTokens += displayText.split(/\s+/).length;
                       if (!hasStartedOutput) {
                         hasStartedOutput = true;
-                        thinkingSpinner = ora({ text: chalk.dim(`  受信中... (${receivedTokens} トークン)`), spinner: "dots" }).start();
+                        receivingStartTime = Date.now();
+                        thinkingSpinner = ora({ text: chalk.dim(`  受信中... (${receivedTokens} tok)`), spinner: "dots" }).start();
                       }
                       if (thinkingSpinner !== null) {
-                        thinkingSpinner.text = chalk.dim(`  受信中... (${receivedTokens} トークン)`);
+                        const recvElapsed = (Date.now() - receivingStartTime) / 1000;
+                        const rate = recvElapsed > 0.3 ? Math.round(receivedTokens / recvElapsed) : 0;
+                        const rateText = rate > 0 ? `, ${rate} tok/s` : "";
+                        thinkingSpinner.text = chalk.dim(`  受信中... (${receivedTokens} tok${rateText})`);
                       }
                     }
                   }
@@ -370,6 +397,8 @@ export class AgentLoop {
                   process.stdout.write("\n");
                 }
                 if (chunk.usage) {
+                  // 次回ターンの待機スピナー表示用にプロンプトトークン数を記憶
+                  this.lastPromptTokens = chunk.usage.promptTokens ?? this.lastPromptTokens;
                   const cost = globalCostCalculator.calculateForModel(
                     this.model,
                     chunk.usage.promptTokens ?? 0,
@@ -608,7 +637,16 @@ export class AgentLoop {
         // ユーザーに見える出力がゼロ（thinking onlyや空レスポンス）
         if (emptyResponseRetries < MAX_EMPTY_RETRIES) {
           emptyResponseRetries++;
-          console.log(chalk.yellow(`\n  空のレスポンスを受信したため再試行します (${emptyResponseRetries}/${MAX_EMPTY_RETRIES})...`));
+          // 何が起きていたか可視化: 思考のみ / max_tokens到達 / 完全な空レスポンス
+          let reason: string;
+          if (finishReason === "length") {
+            reason = "max_tokens到達で本文なし";
+          } else if (thinkingContent.length > 0) {
+            reason = `思考${thinkingContent.length}文字のみで本文なし`;
+          } else {
+            reason = "本文・思考ともに空";
+          }
+          console.log(chalk.yellow(`\n  空のレスポンス (${reason}) — 再試行します (${emptyResponseRetries}/${MAX_EMPTY_RETRIES})...`));
           // 同じリクエストをそのまま再送しても同じ結果になるため、ナッジメッセージを追加する
           this.history.addAssistantMessage("（空のレスポンス）");
           this.history.addUserMessage("続けてください。次に必要なアクションを実行してください。");
@@ -654,7 +692,8 @@ export class AgentLoop {
 
   /** Execute a single tool call, returning whether to abort the rest of the run loop */
   private async executeSingleTool(toolCall: ToolCall): Promise<boolean> {
-    const spinner = ora(chalk.dim(`  ${toolCall.function.name}...`)).start();
+    const summary = formatToolCall(toolCall);
+    const spinner = ora(chalk.dim(`  ${summary}...`)).start();
     // 権限確認ダイアログがスピナーに隠れないよう、
     // 確認が必要なツールではスピナーを一時停止してから execute する。
     // execute 内部で permission check → inquirer prompt が走るため、
@@ -667,9 +706,9 @@ export class AgentLoop {
     const result = await this.toolExecutor.execute(toolCall, this.currentSource);
 
     if (result.success) {
-      spinner.succeed(chalk.dim(`  ${toolCall.function.name}`));
+      spinner.succeed(chalk.dim(`  ${summary}`));
     } else {
-      spinner.fail(chalk.dim(`  ${toolCall.function.name}: ${result.error}`));
+      spinner.fail(chalk.dim(`  ${summary}: ${formatToolError(result.error, result.output)}`));
     }
 
     let resultContent = result.success
@@ -737,10 +776,11 @@ export class AgentLoop {
         return { toolCall, result: { success: false, output: "", error: "中断されました" } };
       }
       try {
+        const summary = formatToolCall(toolCall);
         const result = await this.toolExecutor.execute(toolCall, this.currentSource);
         const icon = result.success ? chalk.green("✓") : chalk.red("✗");
-        const suffix = result.success ? "" : `: ${result.error}`;
-        console.log(chalk.dim(`  ${icon} ${toolCall.function.name}${suffix}`));
+        const suffix = result.success ? "" : `: ${formatToolError(result.error, result.output)}`;
+        console.log(chalk.dim(`  ${icon} ${summary}${suffix}`));
         return { toolCall, result };
       } finally {
         release();

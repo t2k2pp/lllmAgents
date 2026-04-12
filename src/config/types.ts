@@ -5,12 +5,18 @@ export type CloudProviderType = "vertex-ai" | "azure-openai" | "azure-claude";
 // セカンドLLMはローカルまたはクラウドのいずれかを指定可能
 export type SecondLLMProviderType = ProviderType | CloudProviderType;
 
-export interface LLMEndpoint {
+export interface SamplingParams {
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  repetition_penalty?: number;
+}
+
+export interface LLMEndpoint extends SamplingParams {
   providerType: ProviderType;
   baseUrl: string;
   model: string;
   contextWindow?: number;
-  temperature?: number;
 }
 
 export interface SecondLLMEndpoint {
@@ -105,6 +111,13 @@ export interface SlackConfig {
   appToken?: string;          // xapp- App-Level Token (Socket Mode用)
 }
 
+export interface SearchConfig {
+  /** 検索プロバイダー: "duckduckgo" (デフォルト) | "searxng" */
+  provider: "duckduckgo" | "searxng";
+  /** SearXNG の JSON API エンドポイント (例: "http://localhost:8888") */
+  searxngUrl?: string;
+}
+
 export interface Config {
   mainLLM: LLMEndpoint;
   visionLLM: LLMEndpoint | null;
@@ -113,6 +126,8 @@ export interface Config {
   context: ContextConfig;
   discord?: DiscordConfig;
   slack?: SlackConfig;
+  /** Web検索設定 */
+  search?: SearchConfig;
   /** true: テキストをリアルタイムにストリーミング表示。false(デフォルト): スピナー+完了後Markdownレンダリング */
   streamingDisplay?: boolean;
   /** ツールの最大並列実行数（デフォルト: 3）。vLLM KVキャッシュやリソースに合わせて調整 */
@@ -176,7 +191,6 @@ export function getDefaultConfig(): Config {
       providerType: "ollama",
       baseUrl: "http://localhost:11434",
       model: "",
-      temperature: 0.7,
     },
     visionLLM: null,
     secondLLM: null,

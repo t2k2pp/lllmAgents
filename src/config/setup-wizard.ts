@@ -110,7 +110,6 @@ export async function runSetupWizard(): Promise<Config> {
     baseUrl,
     model: modelName,
     contextWindow: contextWindow || defaultCtx,
-    temperature: 0.7,
   };
 
   // 6. Vision sub-LLM

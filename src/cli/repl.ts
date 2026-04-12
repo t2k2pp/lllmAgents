@@ -454,7 +454,13 @@ export class REPL {
           console.log(chalk.dim(`  プロバイダー:   ${this.config.mainLLM.providerType} @ ${this.config.mainLLM.baseUrl}`));
           console.log(chalk.dim(`  コンテキスト長: ${chalk.yellow(ctxLabel)} トークン (設定値)`));
           console.log(chalk.dim(`  max_tokens:     ${chalk.yellow(ctxLabel)} (= コンテキスト長から自動設定)`));
-          console.log(chalk.dim(`  temperature:    ${this.config.mainLLM.temperature ?? 0.7}`));
+          // サンプリングパラメータ: 設定値があれば表示、なければ "auto (サーバーデフォルト)"
+          const sp = this.config.mainLLM;
+          const fmt = (v: number | undefined) => v !== undefined ? String(v) : chalk.gray("auto");
+          console.log(chalk.dim(`  temperature:    ${fmt(sp.temperature)}`));
+          console.log(chalk.dim(`  top_p:          ${fmt(sp.top_p)}`));
+          console.log(chalk.dim(`  top_k:          ${fmt(sp.top_k)}`));
+          console.log(chalk.dim(`  rep_penalty:    ${fmt(sp.repetition_penalty)}`));
           console.log(chalk.dim(`  ストリーミング: ${this.agent.getStreamingDisplay() ? "ON" : "OFF"}`));
 
           // --- サーバーからモデル詳細を取得 ---
@@ -1012,6 +1018,54 @@ export class REPL {
           console.log(chalk.dim("  通知系:    status | enable | disable | url <URL> | test"));
           console.log(chalk.dim("  Bot設定:   bot-token <xoxb-...> | app-token <xapp-...>"));
           console.log(chalk.dim("  起動:      npm run start -- --slack"));
+        }
+        break;
+      }
+
+      case "/search": {
+        const subCmd = args[0];
+        if (!subCmd || subCmd === "status") {
+          const s = this.config.search ?? { provider: "duckduckgo" };
+          console.log(chalk.bold("  Web検索設定:"));
+          console.log(`    プロバイダー: ${chalk.cyan(s.provider)}`);
+          if (s.provider === "searxng") {
+            console.log(`    SearXNG URL:  ${chalk.cyan(s.searxngUrl ?? "http://localhost:8888")}`);
+          }
+        } else if (subCmd === "searxng") {
+          const url = args[1] ?? "http://localhost:8888";
+          if (!this.config.search) this.config.search = { provider: "searxng", searxngUrl: url };
+          else { this.config.search.provider = "searxng"; this.config.search.searxngUrl = url; }
+          saveConfig(this.config);
+          console.log(chalk.green(`  検索プロバイダーを SearXNG に変更しました (${url})`));
+          console.log(chalk.dim("  反映には再起動が必要です。"));
+        } else if (subCmd === "duckduckgo" || subCmd === "ddg") {
+          if (!this.config.search) this.config.search = { provider: "duckduckgo" };
+          else this.config.search.provider = "duckduckgo";
+          saveConfig(this.config);
+          console.log(chalk.green("  検索プロバイダーを DuckDuckGo に変更しました。"));
+          console.log(chalk.dim("  反映には再起動が必要です。"));
+        } else if (subCmd === "test") {
+          const s = this.config.search ?? { provider: "duckduckgo" };
+          console.log(chalk.dim(`  ${s.provider} でテスト検索中...`));
+          try {
+            const { createWebSearchTool } = await import("../tools/definitions/web-search.js");
+            const tool = createWebSearchTool(this.config.search);
+            const result = await tool.execute({ query: "test", max_results: 3 });
+            if (result.success) {
+              console.log(chalk.green("  テスト成功:"));
+              console.log(result.output.split("\n").map((l: string) => `    ${l}`).join("\n"));
+            } else {
+              console.log(chalk.red(`  テスト失敗: ${result.error}`));
+            }
+          } catch (e) {
+            console.log(chalk.red(`  エラー: ${e}`));
+          }
+        } else {
+          console.log(chalk.yellow("  使い方: /search <サブコマンド>"));
+          console.log(chalk.dim("  status               現在の設定を表示"));
+          console.log(chalk.dim("  searxng [url]         SearXNG に切替 (デフォルト: http://localhost:8888)"));
+          console.log(chalk.dim("  duckduckgo | ddg      DuckDuckGo に切替"));
+          console.log(chalk.dim("  test                  テスト検索を実行"));
         }
         break;
       }

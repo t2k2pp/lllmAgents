@@ -104,19 +104,11 @@ export class OpenAICompatProvider implements LLMProvider {
   }
 
   async *chat(params: ChatParams): AsyncGenerator<ChatChunk> {
-    yield* this.doChat(params.model, params.messages, params.temperature, params.maxTokens, params.stream);
+    yield* this.doChat(params);
   }
 
   async *chatWithTools(params: ChatWithToolsParams): AsyncGenerator<ChatChunk> {
-    yield* this.doChat(
-      params.model,
-      params.messages,
-      params.temperature,
-      params.maxTokens,
-      params.stream,
-      params.tools,
-      params.toolChoice,
-    );
+    yield* this.doChat(params);
   }
 
   async supportsVision(_modelName: string): Promise<boolean> {
@@ -128,34 +120,31 @@ export class OpenAICompatProvider implements LLMProvider {
   }
 
   protected async *doChat(
-    model: string,
-    messages: Message[],
-    temperature?: number,
-    maxTokens?: number,
-    _stream = true,
-    tools?: ToolDefinition[],
-    toolChoice?: ChatWithToolsParams["toolChoice"],
+    params: ChatParams & { tools?: ToolDefinition[]; toolChoice?: ChatWithToolsParams["toolChoice"] },
   ): AsyncGenerator<ChatChunk> {
     const body: Record<string, unknown> = {
-      model,
-      messages: messages.map((m) => this.formatMessage(m)),
+      model: params.model,
+      messages: params.messages.map((m) => this.formatMessage(m)),
       stream: true,
-      temperature: temperature ?? 0.7,
-      // 反復ループ防止 (4bit量子化モデルで頻発するトークン反復崩壊を抑制)
-      repetition_penalty: 1.05,
       // ストリーミングでusage情報を取得するためのオプション
       stream_options: { include_usage: true },
     };
+    // サンプリングパラメータ: 設定値がある場合のみ送信。未指定ならサーバー側デフォルトに委ねる
+    // (モデルの generation_config.json / Modelfile 等の推奨値がそのまま使われる)
+    if (params.temperature !== undefined) body.temperature = params.temperature;
+    if (params.top_p !== undefined) body.top_p = params.top_p;
+    if (params.top_k !== undefined) body.top_k = params.top_k;
+    if (params.repetition_penalty !== undefined) body.repetition_penalty = params.repetition_penalty;
     // max_tokens: 設定のcontextWindowから渡されたモデルのコンテキストサイズを使用する。
     // サーバーは入力トークン+max_tokensがコンテキストを超えないよう自動調整するため、
     // コンテキストサイズをそのまま渡しても問題ない。
     // finish_reason="length" が返った場合はエージェント側で自動継続する。
-    if (maxTokens) {
-      body.max_tokens = maxTokens;
+    if (params.maxTokens) {
+      body.max_tokens = params.maxTokens;
     }
-    if (tools && tools.length > 0) {
-      body.tools = tools;
-      body.tool_choice = toolChoice ?? "auto";
+    if (params.tools && params.tools.length > 0) {
+      body.tools = params.tools;
+      body.tool_choice = params.toolChoice ?? "auto";
     }
 
     let streamBody: ReadableStream<Uint8Array>;

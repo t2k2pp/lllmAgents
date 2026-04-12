@@ -34,9 +34,13 @@ export interface ToolCall {
 export interface ChatParams {
   model: string;
   messages: Message[];
-  temperature?: number;
   maxTokens?: number;
   stream: boolean;
+  // サンプリングパラメータ: 設定値がある場合のみ送信。未指定ならサーバー側デフォルトに委ねる
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  repetition_penalty?: number;
 }
 
 export interface ChatWithToolsParams extends ChatParams {

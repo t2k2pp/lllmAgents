@@ -21,7 +21,7 @@ import { globTool } from "./tools/definitions/glob.js";
 import { grepTool } from "./tools/definitions/grep.js";
 import { bashTool } from "./tools/definitions/bash.js";
 import { webFetchTool } from "./tools/definitions/web-fetch.js";
-import { webSearchTool } from "./tools/definitions/web-search.js";
+import { createWebSearchTool } from "./tools/definitions/web-search.js";
 import { sandboxInfoTool } from "./tools/definitions/sandbox-info.js";
 import { todoWriteTool } from "./tools/definitions/todo-write.js";
 import { askUserTool } from "./tools/definitions/ask-user.js";
@@ -86,7 +86,7 @@ async function main(): Promise<void> {
   // Web & Utility tools
   toolRegistry.register(sandboxInfoTool);
   toolRegistry.register(webFetchTool);
-  toolRegistry.register(webSearchTool);
+  toolRegistry.register(createWebSearchTool(config.search));
   // current_datetime は不要（システムプロンプトの環境情報に現在日時を含めているため）
 
   // Interactive tools
@@ -199,6 +199,14 @@ async function main(): Promise<void> {
   }));
 
   // Agent loop
+  // サンプリングパラメータ: 設定にあれば渡す、なければ空（サーバー側デフォルトに委ねる）
+  const samplingParams = {
+    ...(config.mainLLM.temperature !== undefined && { temperature: config.mainLLM.temperature }),
+    ...(config.mainLLM.top_p !== undefined && { top_p: config.mainLLM.top_p }),
+    ...(config.mainLLM.top_k !== undefined && { top_k: config.mainLLM.top_k }),
+    ...(config.mainLLM.repetition_penalty !== undefined && { repetition_penalty: config.mainLLM.repetition_penalty }),
+  };
+
   const agent = new AgentLoop(
     provider,
     config.mainLLM.model,
@@ -214,6 +222,7 @@ async function main(): Promise<void> {
     config.streamingDisplay ?? false,
     config.maxParallelTools ?? 3,
     hasSecondLLM,
+    samplingParams,
   );
 
   // Plan manager
