@@ -36,11 +36,10 @@ describe("createCompleter (readline fallback)", () => {
       expect(matches).toContain("/help");
     });
 
-    it("/mo → /model, /mode", () => {
+    it("/mo → /model", () => {
       const [matches] = completer("/mo");
       expect(matches).toContain("/model");
       expect(matches).toContain("/model list");
-      expect(matches).toContain("/mode");
     });
 
     it("/qu → /quit", () => {
@@ -135,13 +134,12 @@ describe("createCommandMenuProvider", () => {
     expect(items[0].description).toBe("ヘルプ表示");
   });
 
-  it("mo → /model, /model list, /mode", () => {
+  it("mo → /model, /model list", () => {
     const provider = createCommandMenuProvider();
     const items = provider("mo");
     const labels = items.map((i) => i.label);
     expect(labels).toContain("/model");
     expect(labels).toContain("/model list");
-    expect(labels).toContain("/mode");
   });
 
   it("スキルトリガーも候補に含む", () => {

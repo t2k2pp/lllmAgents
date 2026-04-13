@@ -999,7 +999,7 @@ if (secondLLMManager) {
 }
 
 // REPL に secondLLMManager を渡す
-const repl = new REPL(agent, config, skillRegistry, planManager, contextModeManager, secondLLMManager);
+const repl = new REPL(agent, config, skillRegistry, planManager, secondLLMManager);
 ```
 
 **重要**: セカンドLLMのツール（`second_llm_consult`, `second_llm_agent`）は、セカンドLLM設定が有効な場合のみ ToolRegistry に登録される。無効時はメインLLMのシステムプロンプトにこれらのツールが現れないため、呼び出されることはない。

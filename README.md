@@ -17,7 +17,7 @@
 - **ブラウザ操作**: Playwright統合によるWeb自動化
 - **マルチライン入力**: Shift+Enter / Ctrl+J で改行、@path でファイル参照
 - **インタラクティブUI**: `/`コマンドと`@`ファイルパスの補完ドロップダウン
-- **コンテキストモード**: dev / review / research の3モードで動作を最適化
+- **スキルベースワークフロー**: 開発・レビュー・調査等のワークフローをスキルとして定義、LLMが必要に応じて選択
 - **フック・ルール**: ツール実行前後のフック、コーディングスタイル等のルール自動適用
 - **クロスプラットフォーム**: Windows, macOS, Linux対応
 
@@ -96,7 +96,6 @@ $ npm start
 | `/plan` | プランモードに入る |
 | `/skills` | 利用可能なスキル一覧 |
 | `/status` | 全体ステータス（モデル・コンテキスト・タスク等） |
-| `/mode <dev\|review\|research>` | コンテキストモード切り替え |
 | `/discord` | Discord通知のステータス確認・設定 (`status` / `enable` / `disable` / `url <URL>`) |
 
 ### スキル（直接呼び出し）
@@ -153,16 +152,6 @@ LLMが自律的に呼び出す15種のツール:
 | `bash` | コマンド実行 | bash, file_read, glob, grep | 15 |
 
 フォアグラウンド（完了まで待機）またはバックグラウンド（`task_output`で結果取得）で実行可能。
-
-## コンテキストモード
-
-`/mode` コマンドでLLMの動作を最適化:
-
-| モード | 優先順位 | 適したシーン |
-|--------|----------|-------------|
-| `dev` | 動く → 正しい → 綺麗 | コード実装・機能追加 |
-| `review` | 重大 > 高 > 中 > 低 | コードレビュー・品質検査 |
-| `research` | 理解 → 検証 → 文書化 | 調査・学習・ドキュメント作成 |
 
 ## プランモード
 
@@ -227,8 +216,6 @@ src/
 │   ├── permission-manager.ts # 権限レベル管理
 │   ├── sandbox.ts          # ファイルシステムサンドボックス
 │   └── rules.ts            # 危険コマンド検出（50+パターン）
-├── context/                # コンテキストモード
-│   └── context-mode.ts     # dev / review / research
 ├── browser/                # Playwright統合
 │   └── playwright-manager.ts
 ├── mcp/                    # MCP (Model Context Protocol)

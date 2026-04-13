@@ -36,7 +36,6 @@ graph TD
         SR[SkillRegistry]:::core
         HM[HookManager]:::core
         RL[RuleLoader]:::core
-        CMM[ContextModeManager]:::core
     end
 
     subgraph "Security Layer"
@@ -87,8 +86,7 @@ src/
 ├── cli/            - REPL, レンダラー, 補完 (completer)
 ├── hooks/          - HookManager (Pre/PostToolUse, Session lifecycle)
 ├── rules/          - RuleLoader + builtin rules (security, coding-style, git-workflow)
-├── context/        - ContextModeManager (dev/review/research)
-├── skills/         - SkillRegistry + builtin skills
+├── skills/         - SkillRegistry + builtin skills (dev-workflow, code-review, research 等)
 ├── security/       - PermissionManager, Sandbox, RuleEngine
 ├── config/         - ConfigManager, セットアップウィザード
 ├── browser/        - PlaywrightManager
@@ -264,7 +262,7 @@ classDiagram
         -toolExecutor: ToolExecutor
         -planManager: PlanManager
         -permissions: PermissionManager
-        -contextModeManager: ContextModeManager
+        -intentClassifier: IntentClassifier
         +run(userMessage) Promise~void~
         -executeToolsParallel(toolCalls) Promise~void~
         -executeSingleTool(toolCall) Promise~void~
@@ -297,11 +295,9 @@ classDiagram
         +formatForSystemPrompt() string
     }
 
-    class ContextModeManager {
-        +currentMode: ContextMode
-        +switchMode(mode) void
-        +getPromptSection() string
-        +getModeInfo() ModeInfo
+    class IntentClassifier {
+        +classifyIntent(text, context) Promise~IntentType~
+        +classifyCompletion(text) Promise~CompletionType~
     }
 
     class AgentDefinitionLoader {
@@ -347,7 +343,7 @@ classDiagram
     AgentLoop --> ToolExecutor
     AgentLoop --> BaseProvider
     AgentLoop --> PlanManager
-    AgentLoop --> ContextModeManager
+    AgentLoop --> IntentClassifier
     ToolExecutor --> HookManager
     SubAgentManager --> AgentLoop : creates child
     AgentLoop ..> SkillRegistry
@@ -461,7 +457,7 @@ hookManager.loadHooks(process.cwd());
 const agent = new AgentLoop(
   provider, model, toolRegistry, permissions,
   contextWindow, compressionThreshold,
-  contextModeManager, hookManager
+  hookManager
 );
 
 await hookManager.runSessionHooks("start");
@@ -520,53 +516,14 @@ classDiagram
 
 ---
 
-## 7. ContextModeManager アーキテクチャ
+## 7. IntentClassifier / HierarchicalCompressor（2026-04-14 追加）
 
-### 概要
+旧 ContextModeManager は廃止。代わりに以下を導入:
 
-`ContextModeManager`（`src/context/context-mode.ts`）は、エージェントの動作モード（dev/review/research）を管理し、モードに応じたシステムプロンプトセクションを生成します。
+- **IntentClassifier** (`src/agent/intent-classifier.ts`): ユーザーメッセージの意図分類（task/question/conversation）とAI応答の完了判定。ヒューリスティック→LLM判定の2段構え。
+- **HierarchicalCompressor** (`src/agent/hierarchical-compressor.ts`): 3層階層的コンテキスト圧縮（Layer 0: 生データ → Layer 1: ブロック要約 → Layer 2: キーワード圧縮）。
 
-### クラス構造
-
-```mermaid
-classDiagram
-    class ContextModeManager {
-        +currentMode: ContextMode
-        +switchMode(mode: ContextMode) void
-        +getPromptSection() string
-        +getModeInfo() ModeInfo
-    }
-
-    class ModeDefinition {
-        name: string
-        description: string
-        priority: string
-        behavior: string
-        preferredTools: string[]
-    }
-```
-
-### モード定義
-
-`ContextMode` 型は `"dev" | "review" | "research"` のユニオン型です。
-
-| フィールド | dev | review | research |
-|:---|:---|:---|:---|
-| `name` | Development | Code Review | Research |
-| `priority` | Work -> Correct -> Clean | Critical > High > Medium > Low | Understand -> Verify -> Document |
-| `behavior` | Write code first, test after, commit atomically | Thorough analysis, severity-based prioritization | Explore and learn, read broadly, summarize findings |
-| `preferredTools` | file_write, file_edit, bash, task | file_read, grep, glob | file_read, grep, glob, web_fetch, web_search |
-
-- `currentMode` プロパティでパブリックに現在のモードを保持（デフォルト: `"dev"`）
-- REPL の `/mode` コマンドから `switchMode()` が呼ばれる
-- `getPromptSection()` はシステムプロンプトの末尾に以下の形式で追加されます:
-
-```
-# Context Mode: {def.name}
-- Priority: {def.priority}
-- Behavior: {def.behavior}
-- Preferred tools: {def.preferredTools.join(", ")}
-```
+詳細: `docs/context-intelligence.md` を参照。
 
 ---
 

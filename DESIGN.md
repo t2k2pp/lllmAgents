@@ -7,8 +7,8 @@
 │                    CLI (REPL)                    │
 │  - readline ベース                              │
 │  - マルチライン入力 (``` で囲む)                │
-│  - スラッシュコマンド (/help, /plan, /skill,     │
-│    /mode, ...)                                    │
+│  - スラッシュコマンド (/help, /plan, /skill, ...) │
+│                                                    │
 │  - Ctrl+C でキャンセル                          │
 └──────────────────┬─────────────────────────────┘
                    │
@@ -44,13 +44,6 @@
        │  │  - builtin: security, coding-style,    │
        │  │    git-workflow                         │
        │  │  - ~/.localllm/rules/, .claude/rules/  │
-       │  │  - システムプロンプトに注入             │
-       │  └──────────────────────────────────────┘
-       │
-       ├──┬──────────────────────────────────────┐
-       │  │  ContextModeManager                    │
-       │  │  - dev / review / research             │
-       │  │  - /mode コマンドで切替                 │
        │  │  - システムプロンプトに注入             │
        │  └──────────────────────────────────────┘
        │
@@ -214,8 +207,6 @@ const results = await Promise.allSettled(
 - `/plan` - プランモードに手動で入る
 - `/skills` - 利用可能なスキル一覧
 - `/status` - 全体ステータス (コンテキスト + タスク + エージェント)
-- `/mode` - コンテキストモード切替 (dev / review / research)
-
 **UX改善**:
 - マルチライン入力時に行番号表示
 - ツール実行のサマリー表示強化
@@ -235,7 +226,7 @@ src/
 │   ├── session-manager.ts   # セッション永続化
 │   ├── memory.ts            # 自動メモリ
 │   ├── project-context.ts   # CLAUDE.md等読み込み
-│   └── system-prompt.ts     # システムプロンプト構築 (Rules/ContextMode注入)
+│   └── system-prompt.ts     # システムプロンプト構築 (Rules注入)
 ├── agents/                   # エージェント定義ファイル
 │   ├── agent-loader.ts      # AgentDefinitionLoader
 │   └── builtin/             # 組み込みエージェント定義
@@ -251,8 +242,6 @@ src/
 │       ├── security.md
 │       ├── coding-style.md
 │       └── git-workflow.md
-├── context/                  # コンテキストモード
-│   └── context-mode.ts      # ContextModeManager (dev/review/research)
 ├── mcp/                      # MCP (Model Context Protocol)
 │   ├── types.ts             # JSON-RPC 2.0 / MCPプロトコル型定義
 │   ├── mcp-client.ts        # MCPClient (stdio/SSEトランスポート)
@@ -285,7 +274,7 @@ src/
 │       ├── plan-mode.ts      # プランモードツール
 │       └── skill.ts          # スキル実行ツール
 ├── cli/
-│   ├── repl.ts              # REPL (/mode, /plan, /skills 等)
+│   ├── repl.ts              # REPL (/plan, /skills 等)
 │   └── renderer.ts          # 出力レンダリング
 ├── security/
 │   ├── rules.ts
@@ -381,11 +370,12 @@ REPL.processInput()
 - ロード順: builtin → `~/.localllm/rules/` → `.claude/rules/` → `.localllm/rules/`
 - `buildSystemPrompt()` 内で `RuleLoader.formatForSystemPrompt()` を呼び出してシステムプロンプトに注入
 
-### 6.3 コンテキストモード (`src/context/context-mode.ts`)
-- 3モード: `dev`（開発）, `review`（コードレビュー）, `research`（リサーチ）
-- 各モードに `priority`, `behavior`, `preferredTools` を定義
-- `/mode` コマンドで REPL から切替
-- `buildSystemPrompt()` 内でシステムプロンプトに注入
+### 6.3 ワークフロースキル
+- 旧コンテキストモード（dev/review/research）はスキルに移行済み（2026-04-14廃止）
+- `src/skills/builtin/dev-workflow/SKILL.md` — 開発ワークフロー
+- `src/skills/builtin/code-review/SKILL.md` — コードレビュー
+- `src/skills/builtin/research/SKILL.md` — 調査・探索
+- LLMが必要に応じてスキルを選択する形式（常時システムプロンプト注入から変更）
 
 ### 6.4 エージェント定義ファイル (`src/agents/agent-loader.ts`)
 - `.md` + YAML フロントマター形式（`name`, `description`, `tools`, `allowedTools`）

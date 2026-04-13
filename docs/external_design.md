@@ -131,7 +131,6 @@ stateDiagram-v2
 | `/memory` | 永続メモリの内容を表示します |
 | `/remember` | 指定した情報を永続メモリに記録します |
 | `/diff` | 現在のセッションでの変更差分を表示します |
-| `/mode` | コンテキストモード（dev/review/research）の表示・切替を行います |
 | `/discord` | Discord通知設定の確認・有効化・無効化・URL設定を行います |
 | `/permission` | ツール実行権限の表示・変更を行います（サブコマンドあり） |
 | `/second` | セカンドLLMの設定・状態確認を行います (v0.3.0) |
@@ -505,28 +504,18 @@ DiscordのWebhookを用いて、エージェントからの応答を任意のチ
 
 ---
 
-## 8. コンテキストモード
+## 8. ワークフロースキル
 
-エージェントの動作モードを切り替える機能です。モードごとに優先事項、振る舞い、推奨ツールが変わります。
+旧コンテキストモード（dev/review/research）は2026-04-14に廃止され、スキルに移行しました。
+LLMが必要に応じてスキルを選択する形式です。
 
-### `/mode` コマンド
-
-| 使い方 | 説明 |
+| スキル | 説明 |
 |:---|:---|
-| `/mode` | 現在のモード情報を表示 |
-| `/mode dev` | 開発モードに切り替え |
-| `/mode review` | コードレビューモードに切り替え |
-| `/mode research` | リサーチモードに切り替え |
+| `dev-workflow` | 開発ワークフロー（ツール選択原則、エラー回復戦略） |
+| `code-review` | コードレビュー手順（重要度分類、観点リスト） |
+| `research` | 調査・探索手順（理解→検証→文書化） |
 
-### モード定義
-
-| モード | 名称 | 優先順位 | 振る舞い | 推奨ツール |
-|:---|:---|:---|:---|:---|
-| `dev` | Development | Work -> Correct -> Clean | コードを書いてからテスト、アトミックにコミット | file_write, file_edit, bash, task |
-| `review` | Code Review | Critical > High > Medium > Low | 徹底的な分析、重要度ベースの優先付け、解決策の提示 | file_read, grep, glob |
-| `research` | Research | Understand -> Verify -> Document | 広く探索・学習、発見事項の要約 | file_read, grep, glob, web_fetch, web_search |
-
-デフォルトモードは `dev` です。モード情報はシステムプロンプトの一部として LLM に注入されます。
+詳細: `docs/context-intelligence.md` の「コンテキストモード廃止とスキル化」を参照。
 
 ---
 
