@@ -20,11 +20,12 @@ import {
   type SessionData,
 } from "./session-manager.js";
 import { PlanManager } from "./plan-mode.js";
-import type { ContextModeManager } from "../context/context-mode.js";
 import type { SamplingParams } from "../config/types.js";
 import * as logger from "../utils/logger.js";
 import { LLMLogger } from "./llm-logger.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
+import { getFirstUseGuide } from "./tool-guides.js";
+import { IntentClassifier } from "./intent-classifier.js";
 
 // marked-terminal でMarkdownをターミナル向けにレンダリング
 marked.use(markedTerminal() as Parameters<typeof marked.use>[0]);
@@ -59,36 +60,6 @@ function isGarbageResponse(text: string): boolean {
   return false;
 }
 
-/** ユーザーメッセージが実装タスクを意図しているか判定する（会話的入力を除外する） */
-function isTaskRequest(text: string): boolean {
-  const taskPatterns = [
-    /実装|作成|書いて|修正|変更|追加|削除|移動|リファクタ|テスト|ビルド|デプロイ/,
-    /implement|create|write|fix|modify|change|add|delete|remove|refactor|build|deploy|update/i,
-    /ファイル|コード|関数|クラス|モジュール|スクリプト/,
-    /file|code|function|class|module|script/i,
-    // 継続指示・催促
-    /続け|進め|やって|完成|仕上げ|終わらせ|始め|開始/,
-    /continue|go ahead|finish|start|proceed/i,
-  ];
-  return taskPatterns.some((p) => p.test(text));
-}
-
-/** モデルの応答がタスク完了を宣言しているか判定する */
-function isCompletionResponse(text: string): boolean {
-  const completionPatterns = [
-    /完了(しました|いたしました|です|致しました)/,
-    /完成(しました|いたしました|です|致しました)/,
-    /これで.{0,10}(完了|完成|終了)/,
-    /以上で.{0,10}(完了|完成|終了)/,
-    /すべて.{0,10}(実装済み|完了|完成)/,
-    /不足.{0,10}(ありません|見当たりません|ございません)/,
-    /追加.{0,10}(不要|ありません|必要ありません)/,
-    /task.{0,5}(complete|done|finished)/i,
-    /all.{0,10}(implemented|complete|done)/i,
-    /nothing.{0,10}(left|remaining|to do)/i,
-  ];
-  return completionPatterns.some((p) => p.test(text));
-}
 
 export class AgentLoop {
   private history: MessageHistory;
@@ -96,7 +67,6 @@ export class AgentLoop {
   private toolExecutor: ToolExecutor;
   private session: SessionData;
   private planManager: PlanManager | null = null;
-  private contextModeManager: ContextModeManager | null = null;
   /** Discord Interaction Server などから並行処理を避けるためのフラグ */
   public isProcessing = false;
   /** true: テキストをリアルタイムにストリーミング表示。false: スピナー+完了後Markdownレンダリング */
@@ -115,6 +85,8 @@ export class AgentLoop {
   private samplingParams: SamplingParams;
   /** LLM I/O ロガー */
   private llmLogger: LLMLogger;
+  /** 意図分類器（ヒューリスティック + LLM併用） */
+  private intentClassifier: IntentClassifier;
   /** 直前ターンのプロンプトトークン数（待機スピナーでの文脈サイズ表示用） */
   private lastPromptTokens = 0;
 
@@ -125,7 +97,6 @@ export class AgentLoop {
     private permissions: PermissionManager,
     contextWindow: number,
     compressionThreshold: number,
-    contextModeManager?: ContextModeManager,
     hookManager?: HookManager,
     skills?: SkillInfo[],
     agentId: string = "main",
@@ -140,13 +111,13 @@ export class AgentLoop {
     this.maxParallelTools = maxParallelTools;
     this.contextWindow = contextWindow;
     this.samplingParams = samplingParams;
-    this.contextModeManager = contextModeManager ?? null;
-    const systemPrompt = buildSystemPrompt(contextModeManager, skills, hasSecondLLM, hasObsidian);
+    const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian);
     this.history = new MessageHistory(systemPrompt);
     this.contextManager = new ContextManager(provider, model, contextWindow, compressionThreshold);
     this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager);
     this.session = createSession(model);
     this.llmLogger = new LLMLogger(agentId, sessionId);
+    this.intentClassifier = new IntentClassifier(provider, model);
     logger.debug(`LLM I/O log: ${this.llmLogger.getFilePath()}`);
   }
 
@@ -562,14 +533,23 @@ export class AgentLoop {
       // テキストのみ応答（ツール未呼び出し）の検出とリプロンプト
       // 会話的入力（挨拶など）では発火しない
       // ツール実行後のテキスト応答は結果報告なのでそのまま返す（再プロンプトしない）
-      if (
-        toolCalls.length === 0 &&
+      const shouldReprompt = toolCalls.length === 0 &&
         !codeBlockRetried &&
         !hasExecutedTools &&
-        textContent.trim().length > 0 &&
-        isTaskRequest(userMessageText) &&
-        !isCompletionResponse(textContent)
-      ) {
+        textContent.trim().length > 0;
+
+      let isTask = false;
+      let isCompleted = false;
+      if (shouldReprompt) {
+        const [intent, completion] = await Promise.all([
+          this.intentClassifier.classifyIntent(userMessageText, this.history.getRecentContext(3)),
+          this.intentClassifier.classifyCompletion(textContent),
+        ]);
+        isTask = intent === "task";
+        isCompleted = completion === "completed";
+      }
+
+      if (shouldReprompt && isTask && !isCompleted) {
         consecutiveTextOnly++;
 
         if (consecutiveTextOnly >= MAX_TEXT_ONLY_RETRIES) {
@@ -579,19 +559,26 @@ export class AgentLoop {
           return;
         }
 
+        // ユーザーの元の意図を保持したリプロンプト
+        const intentReminder = userMessageText.length > 200
+          ? userMessageText.slice(0, 200) + "..."
+          : userMessageText;
+
         if (consecutiveTextOnly >= 3) {
           // 3回以上: 前回の応答を履歴に入れず、強いリプロンプト
           console.log(chalk.dim(`  (テキストのみ応答 ${consecutiveTextOnly}回目 - 前回応答を破棄して再試行)`));
           this.history.addUserMessage(
-            "あなたの応答はテキストのみでした。テキストは不要です。" +
-            "次のアクションとして必要なツールを呼び出してください。説明せずにツールを実行してください。"
+            `ユーザーの元の依頼: 「${intentReminder}」\n` +
+            "この依頼に対してテキストで説明する必要はありません。" +
+            "依頼を達成するために必要なツールを呼び出してください。"
           );
         } else {
           // 1-2回目: 通常のリプロンプト
           this.history.addAssistantMessage(textContent);
           this.history.addUserMessage(
-            "ツールを呼び出して実装を開始してください。" +
-            "説明は不要です。最初のアクションとしてツールを呼び出してください。"
+            `ユーザーの元の依頼: 「${intentReminder}」\n` +
+            "この依頼を達成するためにツールを呼び出してください。" +
+            "説明は不要です。最初のアクションとしてツールを実行してください。"
           );
         }
         continue;
@@ -634,8 +621,9 @@ export class AgentLoop {
       }
 
       // Final response
-      if (!hasStartedOutput && toolCalls.length === 0) {
-        // ユーザーに見える出力がゼロ（thinking onlyや空レスポンス）
+      const isEmptyResponse = toolCalls.length === 0 && textContent.trim().length === 0;
+      if (isEmptyResponse || (!hasStartedOutput && toolCalls.length === 0)) {
+        // ユーザーに見える出力がゼロ（thinking onlyや空レスポンス、またはストリーム中のみ出力で最終テキスト空）
         if (emptyResponseRetries < MAX_EMPTY_RETRIES) {
           emptyResponseRetries++;
           // 何が起きていたか可視化: 思考のみ / max_tokens到達 / 完全な空レスポンス
@@ -648,9 +636,15 @@ export class AgentLoop {
             reason = "本文・思考ともに空";
           }
           console.log(chalk.yellow(`\n  空のレスポンス (${reason}) — 再試行します (${emptyResponseRetries}/${MAX_EMPTY_RETRIES})...`));
-          // 同じリクエストをそのまま再送しても同じ結果になるため、ナッジメッセージを追加する
+          // 同じリクエストをそのまま再送しても同じ結果になるため、元の意図を含むナッジメッセージを追加する
+          const nudgeIntent = userMessageText.length > 200
+            ? userMessageText.slice(0, 200) + "..."
+            : userMessageText;
           this.history.addAssistantMessage("（空のレスポンス）");
-          this.history.addUserMessage("続けてください。次に必要なアクションを実行してください。");
+          this.history.addUserMessage(
+            `ユーザーの依頼: 「${nudgeIntent}」\n` +
+            "この依頼に対して応答してください。テキストで回答するか、必要ならツールを呼び出してください。"
+          );
           continue;
         }
 
@@ -718,6 +712,12 @@ export class AgentLoop {
 
     // エラー時にアクショナブルなガイダンスを付加
     resultContent = enrichToolResult(toolCall.function.name, toolCall.function.arguments, result.success, resultContent);
+
+    // 段階的開示: ツール初回使用時にガイドテキストを注入
+    const guide = getFirstUseGuide(toolCall.function.name);
+    if (guide) {
+      resultContent += "\n\n" + guide;
+    }
 
     // file_edit 連続失敗追跡
     if (toolCall.function.name === "file_edit") {
@@ -798,6 +798,13 @@ export class AgentLoop {
           ? result.output
           : `Error: ${result.error}\n${result.output}`;
         resultContent = enrichToolResult(toolCall.function.name, toolCall.function.arguments, result.success, resultContent);
+
+        // 段階的開示: ツール初回使用時にガイドテキストを注入
+        const guide = getFirstUseGuide(toolCall.function.name);
+        if (guide) {
+          resultContent += "\n\n" + guide;
+        }
+
         this.history.addToolResult(toolCall.id, resultContent);
 
         if (result.abortExecution) {
@@ -823,7 +830,7 @@ export class AgentLoop {
 
   restoreSession(sessionData: SessionData): void {
     this.session = sessionData;
-    const systemPrompt = buildSystemPrompt(this.contextModeManager ?? undefined);
+    const systemPrompt = buildSystemPrompt();
     this.history = new MessageHistory(systemPrompt);
     for (const msg of sessionData.messages) {
       if (msg.role === "user") {

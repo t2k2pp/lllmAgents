@@ -1,17 +1,18 @@
 import type { LLMProvider } from "../providers/base-provider.js";
 import type { MessageHistory } from "./message-history.js";
 import { estimateMessageTokens } from "./token-counter.js";
-import { collectResponse } from "../providers/base-provider.js";
+import { HierarchicalCompressor } from "./hierarchical-compressor.js";
 import * as logger from "../utils/logger.js";
 
 export class ContextManager {
   private contextWindow: number;
   private threshold: number;
   private keepRecentMessages: number;
+  private compressor: HierarchicalCompressor;
 
   constructor(
-    private provider: LLMProvider,
-    private model: string,
+    provider: LLMProvider,
+    model: string,
     contextWindow: number,
     threshold = 0.8,
     keepRecentMessages = 10,
@@ -19,6 +20,7 @@ export class ContextManager {
     this.contextWindow = contextWindow;
     this.threshold = threshold;
     this.keepRecentMessages = keepRecentMessages;
+    this.compressor = new HierarchicalCompressor(provider, model);
   }
 
   setContextWindow(value: number): void {
@@ -39,36 +41,13 @@ export class ContextManager {
 
     const olderMessages = messages.slice(0, -this.keepRecentMessages);
 
-    // Build text to summarize
-    const textToSummarize = olderMessages
-      .map((m) => {
-        const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-        return `[${m.role}]: ${content}`;
-      })
-      .join("\n\n");
+    logger.info(`Compressing context: ${olderMessages.length} older messages → hierarchical summary...`);
 
-    logger.info(`Compressing context: ${olderMessages.length} older messages...`);
+    // 階層的圧縮を実行
+    const summary = await this.compressor.compress(olderMessages);
 
-    // Ask LLM to summarize
-    const summaryGen = this.provider.chat({
-      model: this.model,
-      messages: [
-        {
-          role: "system",
-          content: "あなたは会話履歴を要約するアシスタントです。",
-        },
-        {
-          role: "user",
-          content: `以下の会話履歴を簡潔に要約してください。重要な決定事項、ファイルパス、コード変更、ユーザーの要求を漏らさず含めてください。\n\n${textToSummarize}`,
-        },
-      ],
-      temperature: 0.3,
-      maxTokens: 2000,
-      stream: true,
-    });
-
-    const response = await collectResponse(summaryGen);
-    history.replaceOlderMessages(response.content, this.keepRecentMessages);
-    logger.info("Context compressed successfully.");
+    // 圧縮結果で古いメッセージを置き換え
+    history.replaceOlderMessages(summary, this.keepRecentMessages);
+    logger.info("Context compressed successfully (hierarchical).");
   }
 }

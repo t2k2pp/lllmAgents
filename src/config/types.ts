@@ -143,6 +143,8 @@ export interface Config {
   streamingDisplay?: boolean;
   /** ツールの最大並列実行数（デフォルト: 3）。vLLM KVキャッシュやリソースに合わせて調整 */
   maxParallelTools?: number;
+  /** 自律実行モード（再起動後も維持） */
+  autorunMode?: boolean;
 }
 
 // ヘルパー: セカンドLLMがクラウドかローカルかを判定

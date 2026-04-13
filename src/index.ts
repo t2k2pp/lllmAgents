@@ -39,7 +39,6 @@ import { PROVIDER_LABELS } from "./config/types.js";
 import { DiscordInteractionServer } from "./discord/interaction-server.js";
 import { CredentialVault } from "./security/credential-vault.js";
 import { getLatestSession } from "./agent/session-manager.js";
-import { ContextModeManager } from "./context/context-mode.js";
 import { HookManager } from "./hooks/hook-manager.js";
 import { MCPManager } from "./mcp/mcp-manager.js";
 import { SecondLLMManager } from "./second-llm/second-llm-manager.js";
@@ -158,8 +157,18 @@ async function main(): Promise<void> {
     }
   }
 
-  // Context mode
-  const contextModeManager = new ContextModeManager();
+  const restoredStates: string[] = [];
+
+  // Autorun mode (保存された状態があれば復元)
+  if (config.autorunMode) {
+    permissions.setAutorunMode(true);
+    restoredStates.push("autorun: ON");
+  }
+
+  // maxParallelTools がデフォルト(3)以外なら表示
+  if (config.maxParallelTools && config.maxParallelTools !== 3) {
+    restoredStates.push(`parallel: ${config.maxParallelTools}`);
+  }
 
   // Skill registry (before AgentLoop to inject into system prompt)
   const skillRegistry = new SkillRegistry();
@@ -223,7 +232,6 @@ async function main(): Promise<void> {
     permissions,
     contextWindow,
     config.context.compressionThreshold,
-    contextModeManager,
     hookManager,
     skillInfos,
     "main",
@@ -361,8 +369,13 @@ async function main(): Promise<void> {
     secondLlmConfig
   );
 
+  // 復元された状態を表示
+  if (restoredStates.length > 0) {
+    console.log(`  Restored: ${restoredStates.join(", ")}`);
+  }
+
   // Start REPL
-  const repl = new REPL(agent, config, skillRegistry, planManager, contextModeManager, secondLLMManager);
+  const repl = new REPL(agent, config, skillRegistry, planManager, secondLLMManager);
   await repl.start();
 
   // Cleanup

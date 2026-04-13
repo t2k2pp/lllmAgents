@@ -23,7 +23,6 @@ import { parseTokenCount } from "../config/types.js";
 import type { Config, SecondLLMProviderType } from "../config/types.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { PlanManager } from "../agent/plan-mode.js";
-import type { ContextModeManager, ContextMode } from "../context/context-mode.js";
 import { sendDiscordNotification, isValidDiscordWebhookUrl } from "../utils/discord.js";
 import { sendSlackNotification, isValidSlackWebhookUrl } from "../utils/slack.js";
 import { DiscordInteractionServer } from "../discord/interaction-server.js";
@@ -47,7 +46,6 @@ export class REPL {
     private config: Config,
     private skillRegistry?: SkillRegistry,
     private planManager?: PlanManager,
-    private contextModeManager?: ContextModeManager,
     private secondLLMManager?: SecondLLMManager,
   ) {
     // スキル情報を取得してメニュープロバイダーに渡す
@@ -1229,7 +1227,9 @@ export class REPL {
           console.log(chalk.dim("  変更: /parallel <数値>"));
         } else {
           this.agent.setMaxParallelTools(n);
-          console.log(chalk.green(`  並列実行上限を ${this.agent.getMaxParallelTools()} に設定しました`));
+          this.config.maxParallelTools = this.agent.getMaxParallelTools();
+          saveConfig(this.config);
+          console.log(chalk.green(`  並列実行上限を ${this.agent.getMaxParallelTools()} に設定しました (設定に保存)`));
         }
         break;
       }
@@ -1411,20 +1411,28 @@ export class REPL {
         const subArg = args[0];
         if (subArg === "on") {
           permissions.setAutorunMode(true);
-          console.log(chalk.green("  自律実行モード ON"));
+          this.config.autorunMode = true;
+          saveConfig(this.config);
+          console.log(chalk.green("  自律実行モード ON (設定に保存)"));
           console.log(chalk.dim("  作業フォルダ内の操作は削除以外すべて自動承認されます"));
           console.log(chalk.dim("  中断: Ctrl+C / 停止: /autorun off"));
         } else if (subArg === "off") {
           permissions.setAutorunMode(false);
-          console.log(chalk.yellow("  自律実行モード OFF"));
+          this.config.autorunMode = false;
+          saveConfig(this.config);
+          console.log(chalk.yellow("  自律実行モード OFF (設定に保存)"));
         } else {
           const current = permissions.isAutorunMode();
           if (current) {
             permissions.setAutorunMode(false);
-            console.log(chalk.yellow("  自律実行モード OFF"));
+            this.config.autorunMode = false;
+            saveConfig(this.config);
+            console.log(chalk.yellow("  自律実行モード OFF (設定に保存)"));
           } else {
             permissions.setAutorunMode(true);
-            console.log(chalk.green("  自律実行モード ON"));
+            this.config.autorunMode = true;
+            saveConfig(this.config);
+            console.log(chalk.green("  自律実行モード ON (設定に保存)"));
             console.log(chalk.dim("  作業フォルダ内の操作は削除以外すべて自動承認されます"));
             console.log(chalk.dim("  中断: Ctrl+C / 停止: /autorun off"));
           }
@@ -1585,43 +1593,6 @@ export class REPL {
           console.log(chalk.dim(todoSummary));
         }
         console.log();
-        break;
-      }
-
-      case "/mode": {
-        if (!this.contextModeManager) {
-          console.log(
-            chalk.dim("  コンテキストモードシステムが初期化されていません。"),
-          );
-          break;
-        }
-        const modeArg = args[0] as ContextMode | undefined;
-        if (!modeArg) {
-          const info = this.contextModeManager.getModeInfo();
-          console.log(
-            chalk.dim(
-              `  Current mode: ${chalk.cyan(this.contextModeManager.currentMode)} (${info.name})`,
-            ),
-          );
-          console.log(chalk.dim(`  ${info.description}`));
-          console.log(chalk.dim(`  Priority: ${info.priority}`));
-        } else if (
-          modeArg === "dev" ||
-          modeArg === "review" ||
-          modeArg === "research"
-        ) {
-          this.contextModeManager.switchMode(modeArg);
-          const info = this.contextModeManager.getModeInfo();
-          console.log(
-            chalk.dim(
-              `  Switched to ${chalk.cyan(modeArg)} mode (${info.name})`,
-            ),
-          );
-          console.log(chalk.dim(`  Priority: ${info.priority}`));
-        } else {
-          console.log(chalk.yellow(`  Unknown mode: ${modeArg}`));
-          console.log(chalk.dim("  Available modes: dev, review, research"));
-        }
         break;
       }
 

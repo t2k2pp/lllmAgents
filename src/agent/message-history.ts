@@ -50,6 +50,17 @@ export class MessageHistory {
     ];
   }
 
+  /** 直近 N 往復の会話テキストを返す（意図分類の文脈提供用） */
+  getRecentContext(turns: number): string {
+    const recent = this.messages.slice(-(turns * 2));
+    return recent
+      .map((m) => {
+        const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+        return `[${m.role}]: ${content}`;
+      })
+      .join("\n");
+  }
+
   getFullText(): string {
     return this.messages
       .map((m) => {
