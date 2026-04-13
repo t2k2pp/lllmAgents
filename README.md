@@ -5,7 +5,7 @@
 ## 特徴
 
 - **ローカルLLM対応**: Ollama, LM Studio, llama.cpp, vLLM をサポート
-- **15種のツール**: ファイル操作、コマンド実行、ブラウザ操作、Web検索をLLMが自律的に実行
+- **21種のツール**: ファイル操作、コマンド実行、ブラウザ操作、Web検索をLLMが自律的に実行
 - **セキュリティ**: Claude Code準拠の3段階権限モデル（自動許可/要確認/禁止）+ 50以上の危険コマンド検出パターン
 - **サブエージェント**: タスク委譲による並列・バックグラウンド処理（explore / plan / general-purpose / bash）
 - **プランモード**: 読み取り専用の計画フェーズで設計を固めてから実装
@@ -83,9 +83,7 @@ $ npm start
 | `/clear` | 会話履歴クリア |
 | `/context` | コンテキスト使用状況（トークン数・進捗バー） |
 | `/compact` | コンテキストを手動圧縮 |
-| `/model` | 現在のモデル情報 |
-| `/model list` | 利用可能なモデル一覧 |
-| `/model <name>` | モデルを切り替え |
+| `/model` | 現在のモデル情報 / `/model list` / `/model <name>` |
 | `/todo` | タスクリスト表示 |
 | `/sessions` | 保存済みセッション一覧（直近10件） |
 | `/resume <id>` | セッション復元 |
@@ -96,7 +94,18 @@ $ npm start
 | `/plan` | プランモードに入る |
 | `/skills` | 利用可能なスキル一覧 |
 | `/status` | 全体ステータス（モデル・コンテキスト・タスク等） |
-| `/discord` | Discord通知のステータス確認・設定 (`status` / `enable` / `disable` / `url <URL>`) |
+| `/cost` | セッションのトークン使用量・コスト表示 |
+| `/autorun` | Autorunモード切替（非破壊操作の自動許可） |
+| `/parallel` | 並列ツール実行数の設定 |
+| `/second` | セカンドLLM委任の設定 |
+| `/stream` | ストリーミング表示切替 |
+| `/search` | Web検索 |
+| `/permission` | 権限設定の管理 |
+| `/loop` | 反復実行モード |
+| `/discord` | Discord通知設定 (`status` / `enable` / `disable` / `url <URL>`) |
+| `/slack` | Slack統合設定 (`status` / `bot-token` / `app-token`) |
+| `/knowledge` | Obsidianナレッジベース連携 (`save` / `search`) |
+| `/try` | 実験的機能の実行 |
 
 ### スキル（直接呼び出し）
 
@@ -106,15 +115,25 @@ $ npm start
 | `/pr-review` | PRコードレビュー |
 | `/tdd` | テスト駆動開発（Red-Green-Refactor） |
 | `/build-fix` | ビルドエラー修正 |
+| `/code-review` | コードレビュー（重要度分類+修正案） |
+| `/dev-workflow` | 開発ワークフロー戦略 |
+| `/refactoring` | リファクタリング・機能廃止ワークフロー |
+| `/research` | 調査・探索ワークフロー |
+| `/project` | マルチファイルプロジェクト新規作成 |
+| `/game-development` | ゲームアプリ実装 |
+| `/business-book-writing` | ビジネス書執筆 |
+| `/code-stats` | コードベース統計情報 |
+| `/add-repl-command` | REPLコマンド追加ガイド |
+| `/skill-creator` | スキル作成ガイド |
 
 ## ツール一覧
 
-LLMが自律的に呼び出す15種のツール:
+LLMが自律的に呼び出すツール:
 
 | ツール | 権限 | 説明 |
 |--------|------|------|
 | `file_read` | 自動 | ファイル読み取り（行番号付き、offset/limit対応） |
-| `file_write` | 要確認 | ファイル作成・上書き |
+| `file_write` | 要確認 | ファイル作成・上書き（構文チェック付き） |
 | `file_edit` | 要確認 | 文字列置換による部分編集 |
 | `glob` | 自動 | パターンによるファイル検索 |
 | `grep` | 自動 | 正規表現によるコンテンツ検索 |
@@ -128,6 +147,12 @@ LLMが自律的に呼び出す15種のツール:
 | `task` | 自動 | サブエージェントへのタスク委譲 |
 | `task_output` | 自動 | バックグラウンドタスクの結果取得 |
 | `skill` | 自動 | スキルテンプレートの実行 |
+| `second_llm` | 自動 | セカンドLLMへのタスク委任 |
+| `knowledge_save` | 自動 | Obsidianナレッジベースへの保存 |
+| `knowledge_search` | 自動 | Obsidianナレッジベースの検索 |
+| `current_datetime` | 自動 | 現在日時の取得 |
+| `vision` | 自動 | 画像認識（マルチモーダル対応時） |
+| `sandbox_info` | 自動 | サンドボックス情報の表示 |
 
 ### ブラウザツール（Playwright）
 
@@ -199,14 +224,14 @@ src/
 ├── tools/                  # ツールフレームワーク
 │   ├── tool-registry.ts    # ツール登録
 │   ├── tool-executor.ts    # 権限チェック・フック付き実行
-│   └── definitions/        # 15種のツール実装
+│   └── definitions/        # 21種のツール実装
 ├── agents/                 # サブエージェント定義
 │   ├── agent-loader.ts     # Markdown定義の読み込み
 │   └── builtin/            # 組み込みエージェント
 ├── skills/                 # スキル（ワークフローテンプレート）
 │   ├── skill-registry.ts   # スキル登録・トリガー管理
 │   ├── skill-loader.ts     # Markdown定義の読み込み
-│   └── builtin/            # 4つの組み込みスキル
+│   └── builtin/            # 14の組み込みスキル
 ├── rules/                  # ルールシステム
 │   ├── rule-loader.ts      # 3ソースからの読み込み
 │   └── builtin/            # coding-style, git-workflow, security
