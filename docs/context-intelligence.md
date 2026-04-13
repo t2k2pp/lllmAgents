@@ -208,6 +208,48 @@ Step 4: メッセージ履歴の再構成
 
 ---
 
+## コンテキストモード廃止とスキル化（2026-04-14）
+
+### 廃止理由
+
+旧 `/mode` コマンド（dev/review/research）はシステムプロンプトに「Preferred tools」と
+DEV_STRATEGY を常時注入する設計だった。以下の問題があった:
+
+1. **ツール制限が不自然**: 人間は開発中にもWeb検索し、調査中にもメモを書く。モードでツールを区切る意味がない
+2. **対症療法**: DEV_STRATEGYは27Bモデルの弱点を補うワークアラウンドでシステムプロンプトに埋め込まれていた
+3. **常時トークン消費**: 使わない場面でもコンテキストを消費し続ける
+4. **Claude Codeにも存在しない仕組み**: 業界標準でもない
+
+### 対処
+
+- `src/context/context-mode.ts` の参照を全削除（ContextModeManager, /mode コマンド, config.contextMode）
+- DEV_STRATEGYの内容を `src/skills/builtin/dev-workflow/SKILL.md` にスキルとして移行
+- review/research の行動指針も `code-review/SKILL.md`, `research/SKILL.md` にスキル化
+- LLMが必要に応じてスキルを選択する形に変更（常時注入から着脱可能に）
+
+### 削除したファイル参照（コードは残存、参照なし）
+- `src/context/context-mode.ts` — 次回クリーンアップで物理削除可
+
+### 新規スキル
+- `src/skills/builtin/dev-workflow/SKILL.md` — 開発ワークフロー（旧DEV_STRATEGY）
+- `src/skills/builtin/code-review/SKILL.md` — コードレビュー手順
+- `src/skills/builtin/research/SKILL.md` — 調査・探索手順
+
+---
+
+## ランタイム状態の永続化（2026-04-14）
+
+再起動でリセットされていた以下の状態を `config.json` に保存するように変更:
+
+| 項目 | config キー | コマンド |
+|------|-----------|---------|
+| autorunモード | `autorunMode` | `/autorun on/off` |
+| 並列ツール数 | `maxParallelTools` | `/parallel <N>` |
+
+起動時に復元し、非デフォルト値がある場合はウェルカムメッセージに `Restored: ...` を表示。
+
+---
+
 ## 実装順序
 
 1. **intent-classifier.ts** を新規作成、agent-loop.ts から呼び出し変更 ✅
@@ -216,4 +258,6 @@ Step 4: メッセージ履歴の再構成
 4. **context-manager.ts** を新コンプレッサーに接続 ✅
 5. リプロンプト文言にユーザー意図を保持 ✅
 6. 空応答（text空+tools空）の検出と対処 ✅
-7. 動作テスト（パイプモード）
+7. コンテキストモード廃止 + スキル化 ✅
+8. ランタイム状態永続化（autorun, parallel） ✅
+9. 動作テスト（パイプモード）
