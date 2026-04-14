@@ -72,9 +72,17 @@ export const fileEditTool: ToolHandler = {
     }
 
     fs.writeFileSync(filePath, content, "utf-8");
+    const replacedCount = replaceAll ? occurrences : 1;
     return {
       success: true,
-      output: `Edited ${filePath}: replaced ${replaceAll ? occurrences : 1} occurrence(s)`,
+      output: `Edited ${filePath}: replaced ${replacedCount} occurrence(s)`,
+      userDisplay: {
+        type: "edit-diff",
+        filePath,
+        oldString,
+        newString,
+        occurrences: replacedCount,
+      },
     };
   },
 };

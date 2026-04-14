@@ -5,6 +5,16 @@ export interface ToolResult {
   output: string;
   error?: string;
   abortExecution?: boolean;
+  /** ユーザー向け表示データ（LLMには送らない）。file_edit/file_writeのdiff表示等に使用 */
+  userDisplay?: {
+    type: "edit-diff" | "write-diff";
+    filePath: string;
+    oldString?: string;
+    newString?: string;
+    oldContent?: string | null;
+    newContent?: string;
+    occurrences?: number;
+  };
 }
 
 export interface ToolHandler {

@@ -7,7 +7,7 @@ import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
 import type { LLMProvider, ToolCall, ToolDefinition, ContentPart } from "../providers/base-provider.js";
-import type { ToolRegistry } from "../tools/tool-registry.js";
+import type { ToolRegistry, ToolResult } from "../tools/tool-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager, RequestSource } from "../security/permission-manager.js";
 import type { HookManager } from "../hooks/hook-manager.js";
@@ -27,6 +27,7 @@ import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
 import { getFirstUseGuide } from "./tool-guides.js";
 import { IntentClassifier } from "./intent-classifier.js";
 import type { ChatLogger } from "./chat-logger.js";
+import { renderEditDiff, renderWriteDiff } from "../cli/diff-display.js";
 
 // marked-terminal でMarkdownをターミナル向けにレンダリング
 marked.use(markedTerminal() as Parameters<typeof marked.use>[0]);
@@ -737,6 +738,10 @@ export class AgentLoop {
 
     if (result.success) {
       spinner.succeed(chalk.dim(`  ${summary}`));
+      // ファイル変更時はカラーdiffを表示
+      if (result.userDisplay) {
+        this.renderUserDisplay(result.userDisplay);
+      }
     } else {
       spinner.fail(chalk.dim(`  ${summary}: ${formatToolError(result.error, result.output)}`));
     }
@@ -817,6 +822,9 @@ export class AgentLoop {
         const icon = result.success ? chalk.green("✓") : chalk.red("✗");
         const suffix = result.success ? "" : `: ${formatToolError(result.error, result.output)}`;
         console.log(chalk.dim(`  ${icon} ${summary}${suffix}`));
+        if (result.success && result.userDisplay) {
+          this.renderUserDisplay(result.userDisplay);
+        }
         return { toolCall, result };
       } finally {
         release();
@@ -851,6 +859,19 @@ export class AgentLoop {
     }
 
     return shouldAbort;
+  }
+
+  /** ツール実行結果のユーザー向けカラーdiff表示 */
+  private renderUserDisplay(display: NonNullable<ToolResult["userDisplay"]>): void {
+    try {
+      if (display.type === "edit-diff" && display.oldString && display.newString) {
+        renderEditDiff(display.filePath, display.oldString, display.newString, display.occurrences ?? 1);
+      } else if (display.type === "write-diff" && display.newContent) {
+        renderWriteDiff(display.filePath, display.oldContent ?? null, display.newContent);
+      }
+    } catch {
+      // diff表示の失敗は無視（メイン処理に影響させない）
+    }
   }
 
   async forceCompress(): Promise<void> {

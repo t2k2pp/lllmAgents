@@ -106,6 +106,9 @@ export const fileWriteTool: ToolHandler = {
       fs.mkdirSync(dir, { recursive: true });
     }
 
+    // diff用: 上書き前の内容を保持
+    const oldContent = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : null;
+
     fs.writeFileSync(filePath, content, "utf-8");
 
     // 構文チェック
@@ -122,6 +125,15 @@ export const fileWriteTool: ToolHandler = {
     const output = summary
       ? `File written: ${filePath} (${lineCount} lines)\nExports: ${summary}`
       : `File written: ${filePath} (${lineCount} lines)`;
-    return { success: true, output };
+    return {
+      success: true,
+      output,
+      userDisplay: {
+        type: "write-diff",
+        filePath,
+        oldContent,
+        newContent: content,
+      },
+    };
   },
 };
