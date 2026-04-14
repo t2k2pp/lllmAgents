@@ -42,6 +42,7 @@ import { getLatestSession } from "./agent/session-manager.js";
 import { HookManager } from "./hooks/hook-manager.js";
 import { MCPManager } from "./mcp/mcp-manager.js";
 import { SecondLLMManager } from "./second-llm/second-llm-manager.js";
+import { ChatLogger } from "./agent/chat-logger.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -247,6 +248,13 @@ async function main(): Promise<void> {
   const planManager = new PlanManager();
   agent.setPlanManager(planManager);
   setPlanManager(planManager);
+
+  // Chat logger (Obsidian Vault にチャットログを保存)
+  if (config.chatLog?.enabled && config.chatLog.vaultPath) {
+    const chatLogger = new ChatLogger(config.chatLog);
+    agent.setChatLogger(chatLogger);
+    restoredStates.push(`chatlog: ${config.chatLog.vaultPath}`);
+  }
 
   // Sub-agent manager
   const subAgentManager = new SubAgentManager(provider, config.mainLLM.model, toolRegistry, permissions);

@@ -127,6 +127,13 @@ export interface ObsidianConfig {
   defaultTags?: string[];
 }
 
+export interface ChatLogConfig {
+  /** チャットログ保存の有効/無効 */
+  enabled: boolean;
+  /** 保存先 Obsidian Vault の絶対パス（ナレッジ用vaultとは別指定可） */
+  vaultPath: string;
+}
+
 export interface Config {
   mainLLM: LLMEndpoint;
   visionLLM: LLMEndpoint | null;
@@ -145,6 +152,8 @@ export interface Config {
   maxParallelTools?: number;
   /** 自律実行モード（再起動後も維持） */
   autorunMode?: boolean;
+  /** チャットログ保存設定（Obsidian Vault に会話ログを蓄積） */
+  chatLog?: ChatLogConfig;
 }
 
 // ヘルパー: セカンドLLMがクラウドかローカルかを判定

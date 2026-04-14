@@ -26,6 +26,7 @@ import { LLMLogger } from "./llm-logger.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
 import { getFirstUseGuide } from "./tool-guides.js";
 import { IntentClassifier } from "./intent-classifier.js";
+import type { ChatLogger } from "./chat-logger.js";
 
 // marked-terminal でMarkdownをターミナル向けにレンダリング
 marked.use(markedTerminal() as Parameters<typeof marked.use>[0]);
@@ -89,6 +90,8 @@ export class AgentLoop {
   private intentClassifier: IntentClassifier;
   /** 直前ターンのプロンプトトークン数（待機スピナーでの文脈サイズ表示用） */
   private lastPromptTokens = 0;
+  /** チャットログ（Obsidian Vault保存、null なら無効） */
+  private chatLogger: ChatLogger | null = null;
 
   constructor(
     private provider: LLMProvider,
@@ -125,6 +128,26 @@ export class AgentLoop {
     this.planManager = pm;
   }
 
+  getChatLogger(): ChatLogger | null {
+    return this.chatLogger;
+  }
+
+  setChatLogger(cl: ChatLogger | null): void {
+    this.chatLogger = cl;
+    // MessageHistoryにアシスタント応答のコールバックを設定
+    this.history.setAssistantMessageCallback(
+      cl
+        ? (content, toolCalls) => {
+            if (!content || content === "（空のレスポンス）") return;
+            const toolSummary = toolCalls && toolCalls.length > 0
+              ? toolCalls.map((tc) => tc.function.name).join(", ")
+              : undefined;
+            cl.logAssistant(content, toolSummary);
+          }
+        : null,
+    );
+  }
+
   /** 実行中の処理を中断する（Ctrl+C など）。次のイテレーション冒頭で停止する */
   abort(): void {
     this._aborted = true;
@@ -145,6 +168,16 @@ export class AgentLoop {
     this._aborted = false;
     try {
     this.history.addUserMessage(userMessage);
+    // チャットログ記録
+    if (this.chatLogger) {
+      const userText = typeof userMessage === "string"
+        ? userMessage
+        : (userMessage as ContentPart[])
+            .filter((p): p is { type: "text"; text: string } => p.type === "text")
+            .map((p) => p.text)
+            .join(" ");
+      this.chatLogger.logUser(userText);
+    }
     // ユーザーメッセージのテキスト部分を抽出（タスク判定用）
     const userMessageText = typeof userMessage === "string"
       ? userMessage
@@ -177,6 +210,8 @@ export class AgentLoop {
         try {
           await this.contextManager.compress(this.history);
           compressSpinner.succeed("コンテキストを圧縮しました");
+          // チャットログのパート分割
+          this.chatLogger?.onCompressed();
         } catch (e) {
           compressSpinner.fail("圧縮に失敗しました");
           logger.error("Context compression failed:", e);
@@ -820,6 +855,7 @@ export class AgentLoop {
 
   async forceCompress(): Promise<void> {
     await this.contextManager.compress(this.history);
+    this.chatLogger?.onCompressed();
   }
 
   saveCurrentSession(): void {

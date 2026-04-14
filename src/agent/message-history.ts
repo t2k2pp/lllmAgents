@@ -1,11 +1,19 @@
 import type { Message, ToolCall, ContentPart } from "../providers/base-provider.js";
 
+/** アシスタントメッセージ追加時のコールバック */
+export type AssistantMessageCallback = (content: string, toolCalls?: ToolCall[]) => void;
+
 export class MessageHistory {
   private messages: Message[] = [];
   private systemPrompt: string;
+  private onAssistantMessage: AssistantMessageCallback | null = null;
 
   constructor(systemPrompt: string) {
     this.systemPrompt = systemPrompt;
+  }
+
+  setAssistantMessageCallback(cb: AssistantMessageCallback | null): void {
+    this.onAssistantMessage = cb;
   }
 
   getMessages(): Message[] {
@@ -30,6 +38,7 @@ export class MessageHistory {
       msg.tool_calls = toolCalls;
     }
     this.messages.push(msg);
+    this.onAssistantMessage?.(content, toolCalls);
   }
 
   addToolResult(toolCallId: string, content: string): void {

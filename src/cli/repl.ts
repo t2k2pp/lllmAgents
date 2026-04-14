@@ -1440,6 +1440,88 @@ export class REPL {
         break;
       }
 
+      case "/chatlog": {
+        const subArg = args[0];
+        if (!subArg || subArg === "status") {
+          const cl = this.config.chatLog;
+          if (!cl?.vaultPath) {
+            console.log(chalk.yellow("  チャットログが未設定です。"));
+            console.log(chalk.dim("  設定: /chatlog vault <Obsidian Vaultのパス>"));
+          } else {
+            console.log(chalk.bold("  チャットログ:"));
+            console.log(`    状態:   ${cl.enabled ? chalk.green("ON") : chalk.yellow("OFF")}`);
+            console.log(`    Vault:  ${chalk.cyan(cl.vaultPath)}`);
+            const logDir = path.join(cl.vaultPath, "ChatLogs");
+            if (fs.existsSync(logDir)) {
+              const countMd = (dir: string): number => {
+                if (!fs.existsSync(dir)) return 0;
+                let count = 0;
+                for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                  if (e.isDirectory()) count += countMd(path.join(dir, e.name));
+                  else if (e.name.endsWith(".md")) count++;
+                }
+                return count;
+              };
+              console.log(`    ログ数: ${chalk.yellow(String(countMd(logDir)))}`);
+            }
+            const chatLogger = this.agent.getChatLogger();
+            if (chatLogger) {
+              console.log(`    現在:   ${chalk.dim(chatLogger.getCurrentFilePath())} (Part ${chatLogger.getPartNumber()})`);
+            }
+          }
+        } else if (subArg === "vault") {
+          const vaultPath = args.slice(1).join(" ").trim();
+          if (!vaultPath) {
+            console.log(chalk.yellow("  使い方: /chatlog vault <Obsidian Vaultのパス>"));
+            break;
+          }
+          const resolved = path.resolve(vaultPath);
+          if (!fs.existsSync(resolved)) {
+            console.log(chalk.red(`  パスが存在しません: ${resolved}`));
+            break;
+          }
+          if (!this.config.chatLog) {
+            this.config.chatLog = { enabled: true, vaultPath: resolved };
+          } else {
+            this.config.chatLog.vaultPath = resolved;
+          }
+          saveConfig(this.config);
+          // ChatLogger を起動/再作成
+          const { ChatLogger } = await import("../agent/chat-logger.js");
+          const cl2 = new ChatLogger(this.config.chatLog);
+          this.agent.setChatLogger(cl2);
+          console.log(chalk.green(`  チャットログ Vault を設定しました: ${resolved}`));
+          console.log(chalk.dim(`  ログは ${resolved}/ChatLogs/ に保存されます。`));
+        } else if (subArg === "enable" || subArg === "on") {
+          if (!this.config.chatLog?.vaultPath) {
+            console.log(chalk.yellow("  Vault が未設定です。/chatlog vault <パス> で設定してください。"));
+            break;
+          }
+          this.config.chatLog.enabled = true;
+          saveConfig(this.config);
+          // ChatLogger がなければ作成
+          if (!this.agent.getChatLogger()) {
+            const { ChatLogger } = await import("../agent/chat-logger.js");
+            const cl2 = new ChatLogger(this.config.chatLog);
+            this.agent.setChatLogger(cl2);
+          } else {
+            this.agent.getChatLogger()!.setEnabled(true);
+          }
+          console.log(chalk.green("  チャットログ ON (設定に保存)"));
+        } else if (subArg === "disable" || subArg === "off") {
+          if (this.config.chatLog) {
+            this.config.chatLog.enabled = false;
+            saveConfig(this.config);
+          }
+          const chatLogger = this.agent.getChatLogger();
+          if (chatLogger) chatLogger.setEnabled(false);
+          console.log(chalk.yellow("  チャットログ OFF (設定に保存)"));
+        } else {
+          console.log(chalk.dim("  使い方: /chatlog [status|vault <path>|enable|disable]"));
+        }
+        break;
+      }
+
       case "/sessions": {
         const sessions = listSessions(10);
         if (sessions.length === 0) {

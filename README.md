@@ -104,6 +104,7 @@ $ npm start
 | `/loop` | 反復実行モード |
 | `/discord` | Discord通知設定 (`status` / `enable` / `disable` / `url <URL>`) |
 | `/slack` | Slack統合設定 (`status` / `bot-token` / `app-token`) |
+| `/chatlog` | チャットログ保存設定 (`status` / `vault <path>` / `enable` / `disable`) |
 | `/knowledge` | Obsidianナレッジベース連携 (`save` / `search`) |
 | `/try` | 実験的機能の実行 |
 
