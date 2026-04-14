@@ -612,14 +612,16 @@ export class REPL {
         } else if (subCmd === "enable") {
            if (this.config.secondLLM) {
              this.config.secondLLM.enabled = true;
-             console.log(chalk.green("  Second LLM を有効化しました。（再起動後に完全適用される場合があります）"));
+             saveConfig(this.config);
+             console.log(chalk.green("  Second LLM を有効化しました (設定に保存)。（再起動後に完全適用される場合があります）"));
            } else {
              console.log(chalk.red("  Second LLM の設定が config.json に存在しません。"));
            }
         } else if (subCmd === "disable") {
            if (this.config.secondLLM) {
              this.config.secondLLM.enabled = false;
-             console.log(chalk.yellow("  Second LLM を無効化しました。"));
+             saveConfig(this.config);
+             console.log(chalk.yellow("  Second LLM を無効化しました (設定に保存)。"));
            }
         } else if (subCmd === "model" || subCmd === "list") {
           const newModel = subCmd === "model" ? args.slice(1).join(" ").trim() : "";
