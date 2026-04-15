@@ -85,6 +85,7 @@ export class LLMLogger {
     toolCalls?: unknown[];
     tokensIn?: number;
     tokensOut?: number;
+    finishReason?: string;
   }): void {
     this.write({
       ts: new Date().toISOString(),

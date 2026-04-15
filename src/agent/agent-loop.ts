@@ -462,6 +462,7 @@ export class AgentLoop {
             thinking: thinkingContent || undefined,
             text: textContent || undefined,
             toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+            finishReason,
           });
 
           success = true;
@@ -513,8 +514,18 @@ export class AgentLoop {
       if (!success) return;
 
       // finish_reason="length": max_tokensに達して出力が途中で切れた場合、自動的に続きを生成する
-      if (finishReason === "length" && textContent.trim().length > 0) {
-        console.log(chalk.dim("\n  (出力がmax_tokensに達したため、続きを生成します...)"));
+      // 安全ネット: vLLMがfinish_reason="stop"を誤って返す場合に備え、
+      // テキストが行の途中で切れている（最終行が不完全）場合も自動継続する
+      const isTruncatedByLength = finishReason === "length" && textContent.trim().length > 0;
+      const isTruncatedText = toolCalls.length === 0 && textContent.trim().length > 0 &&
+        !textContent.trimEnd().endsWith("\n") &&
+        !textContent.trimEnd().endsWith("。") &&
+        !textContent.trimEnd().endsWith("）") &&
+        !textContent.trimEnd().endsWith("```") &&
+        /\[x$|\[[  ]$|[-*]\s*\[/.test(textContent.slice(-10));
+      if (isTruncatedByLength || isTruncatedText) {
+        const reason = isTruncatedByLength ? "max_tokens到達" : "テキスト途中切れ検出";
+        console.log(chalk.dim(`\n  (${reason}のため、続きを生成します...)`));
         this.history.addAssistantMessage(textContent, toolCalls.length > 0 ? toolCalls : undefined);
         this.history.addUserMessage("続きを出力してください。途中から再開してください。");
         continue;
