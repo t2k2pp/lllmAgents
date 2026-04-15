@@ -629,10 +629,11 @@ export class AgentLoop {
         this.history.addUserMessage(
           `以下のファイルを作成/変更しましたが、動作確認が完了していません:\n${fileList}\n\n` +
           "bashで適切な検証コマンドを実行してください:\n" +
-          "- .ts/.js: node --check <file> またはnpm test\n" +
-          "- .py: python -c \"import ast; ast.parse(open('<file>').read())\"\n" +
-          "- ビルドプロジェクト: 該当するbuild/test/lintコマンド\n\n" +
-          "検証が成功したら結���を報告してください。問題があれば修正してください。"
+          "- .ts/.js: node --check <file>\n" +
+          "- .py: python -m py_compile <file>\n" +
+          "- ビルドプロジェクト: 該当するbuild/test/lintコマンド\n" +
+          "注意: GUIアプリ(pygame等)は構文チェックのみ。python <file> で起動しないこと（タイムアウトします）。\n\n" +
+          "検証が成功したら結果を報告してください。問題があれば修正してください。"
         );
         continue;
       }

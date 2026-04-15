@@ -37,11 +37,12 @@ export function buildSystemPrompt(skills?: SkillInfo[], hasSecondLLM?: boolean, 
 # 実装→検証→完了サイクル [必須]
 コード変更後は必ずbashで検証してから完了報告:
 - .ts/.js → \`node --check <file>\` で構文確認
+- .py → \`python -m py_compile <file>\` で構文確認
 - テストがある → \`npm test\` / \`pytest\` 等を実行
 - ビルドプロジェクト → 該当するbuild/lintコマンド
-- Webアプリ → 起動してbrowser_screenshotで確認
+- GUIアプリ(pygame/tkinter/Electron等) → 構文チェックのみ。\`python <file>\` で起動しない（タイムアウトする）
 検証失敗 → 修正→再検証を通るまで繰り返す。検証成功の事実を完了報告に含める。
-禁止: 検証なしの「完了しました」 / エラー無視で次へ / 検証なしの連続書き直し
+禁止: 検証なしの「完了しました」 / エラー無視で次へ / GUIアプリのbash起動
 
 # ツール使用
 - 編集前に file_read で必ず読む。新規作成より既存編集を優先
