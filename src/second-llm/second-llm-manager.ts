@@ -19,6 +19,13 @@ const EXCLUDED_TOOLS = [
   "exit_plan_mode"
 ];
 
+/** Evaluatorに許可する読み取り専用ツール */
+const EVALUATOR_ALLOWED_TOOLS = [
+  "file_read",
+  "grep",
+  "glob",
+];
+
 export class SecondLLMManager {
   private provider: LLMProvider | null = null;
   private config: SecondLLMConfig | null = null;
@@ -204,6 +211,114 @@ export class SecondLLMManager {
       return "Reached maximum iterations or completed.";
     } catch (e) {
       spinner.fail(chalk.red("Second LLM agent run failed."));
+      throw e;
+    }
+  }
+
+  /**
+   * Evaluator用エージェント実行。
+   * 読み取り専用ツール（file_read, grep, glob）のみ使用可能。
+   * ファイルパス一覧を渡し、Evaluator自身が必要な箇所を読んで評価する。
+   */
+  async runAsEvaluator(params: {
+    systemPrompt: string;
+    userPrompt: string;
+    maxIterations?: number;
+  }): Promise<string> {
+    if (!this.isAvailable() || !this.provider || !this.endpoint) {
+      throw new Error("Second LLM is not configured or enabled.");
+    }
+    // Evaluatorは delegationGuard の対象外（独立したレビュープロセス）
+
+    const toolDefs = this.toolRegistry.getDefinitions()
+      .filter(d => EVALUATOR_ALLOWED_TOOLS.includes(d.function.name));
+
+    const spinner = ora(chalk.cyan("  Evaluator reviewing...")).start();
+    try {
+      const messages: Message[] = [
+        { role: "system", content: params.systemPrompt },
+        { role: "user", content: params.userPrompt },
+      ];
+
+      const toolExecutor = new ToolExecutor(this.toolRegistry, this.permissions);
+      let iteration = 0;
+      const maxIter = params.maxIterations ?? 10;
+
+      while (iteration < maxIter) {
+        iteration++;
+        const stream = this.provider.chatWithTools({
+          model: this.endpoint.model,
+          messages,
+          tools: toolDefs,
+          temperature: 0.1,
+          stream: true,
+        });
+
+        let responseText = "";
+        const toolCalls: ToolCall[] = [];
+
+        for await (const chunk of stream) {
+          if (chunk.type === "text") {
+            responseText += chunk.text;
+          } else if (chunk.type === "tool_call") {
+            if (chunk.toolCall) toolCalls.push(chunk.toolCall);
+          } else if (chunk.type === "error") {
+            throw new Error(chunk.error);
+          } else if (chunk.type === "done" && chunk.usage) {
+            const cost = globalCostCalculator.calculateForModel(
+              this.endpoint.model,
+              chunk.usage.promptTokens ?? 0,
+              chunk.usage.completionTokens ?? 0,
+            );
+            globalTokenTracker.record({
+              timestamp: new Date().toISOString(),
+              provider: this.provider.providerType,
+              model: this.endpoint.model,
+              inputTokens: chunk.usage.promptTokens ?? 0,
+              outputTokens: chunk.usage.completionTokens ?? 0,
+              cachedTokens: 0,
+              estimatedCostUsd: cost,
+            });
+          }
+        }
+
+        if (responseText) {
+          messages.push({ role: "assistant", content: responseText });
+          if (toolCalls.length === 0) {
+            // ツールなしテキスト応答 = 最終回答
+            spinner.succeed(chalk.cyan(`  Evaluator completed (${iteration} iterations)`));
+            return responseText.trim();
+          }
+        }
+
+        if (toolCalls.length > 0) {
+          if (!responseText) {
+            messages.push({ role: "assistant", content: "", tool_calls: toolCalls });
+          } else {
+            messages[messages.length - 1].tool_calls = toolCalls;
+          }
+
+          for (const tc of toolCalls) {
+            const toolName = tc.function.name;
+            spinner.text = chalk.cyan(`  Evaluator: ${toolName}...`);
+
+            try {
+              const res = await toolExecutor.execute(tc);
+              messages.push({ role: "tool", content: res.output || res.error || "", tool_call_id: tc.id });
+            } catch (e) {
+              messages.push({ role: "tool", content: `Error: ${String(e)}`, tool_call_id: tc.id });
+            }
+          }
+          spinner.text = chalk.cyan("  Evaluator reviewing...");
+        } else {
+          break;
+        }
+      }
+
+      spinner.warn(chalk.cyan(`  Evaluator reached max iterations (${maxIter})`));
+      return "Evaluator reached maximum iterations.";
+    } catch (e) {
+      spinner.fail(chalk.red("  Evaluator failed."));
       throw e;
     }
   }

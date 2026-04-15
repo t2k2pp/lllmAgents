@@ -30,7 +30,6 @@ import { Evaluator } from "./evaluator.js";
 import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";
 import type { ChatLogger } from "./chat-logger.js";
 import { renderEditDiff, renderWriteDiff } from "../cli/diff-display.js";
-import * as fs from "node:fs";
 
 // marked-terminal でMarkdownをターミナル向けにレンダリング
 marked.use(markedTerminal() as Parameters<typeof marked.use>[0]);
@@ -206,8 +205,8 @@ export class AgentLoop {
     let repeatToolCount = 0;
     /** 検証待ちコードファイルのリスト（file_write/file_edit後、bash未実行ならここに溜まる） */
     let pendingVerification: string[] = [];
-    /** Evaluatorレビュー待ちドキュメントファイルのリスト */
-    let pendingDocReview: string[] = [];
+    /** Evaluatorレビュー待ちファイルのリスト（コード+ドキュメント両方） */
+    let pendingEvalFiles: string[] = [];
     /** 検証再プロンプトの回数（安全弁） */
     let verificationRetries = 0;
     const MAX_VERIFICATION_RETRIES = 3;
@@ -585,6 +584,7 @@ export class AgentLoop {
         }
 
         // pendingVerification 追跡: file_write/file_edit → 検証待ちに追加、bash → コード検証クリア
+        // pendingEvalFiles 追跡: 全ファイル（コード+ドキュメント）をEvaluatorレビュー用に蓄積
         for (const tc of toolCalls) {
           const toolName = tc.function.name;
           if (toolName === "file_write" || toolName === "file_edit") {
@@ -595,9 +595,11 @@ export class AgentLoop {
                 if (!pendingVerification.includes(filePath)) {
                   pendingVerification.push(filePath);
                 }
-              } else if (filePath && isDocumentFile(filePath)) {
-                if (!pendingDocReview.includes(filePath)) {
-                  pendingDocReview.push(filePath);
+              }
+              // Evaluator用: コード・ドキュメント両方を蓄積
+              if (filePath && (isCodeFile(filePath) || isDocumentFile(filePath))) {
+                if (!pendingEvalFiles.includes(filePath)) {
+                  pendingEvalFiles.push(filePath);
                 }
               }
             } catch { /* ignore parse error */ }
@@ -644,43 +646,31 @@ export class AgentLoop {
         pendingVerification = [];
       }
 
-      // Evaluatorレビュー: ドキュメントファイルを書いた後の完了時に自動レビュー
-      if (toolCalls.length === 0 && pendingDocReview.length > 0 &&
+      // Evaluatorレビュー: ファイル書き込み後の完了時に自動レビュー（コード+ドキュメント両方）
+      if (toolCalls.length === 0 && pendingEvalFiles.length > 0 &&
           evaluatorRetries < MAX_EVALUATOR_RETRIES &&
           textContent.trim().length > 0 &&
           !this.planManager?.isInPlanMode()) {
-        // ファイル内容を読み取ってEvaluatorに渡す
-        const files: { path: string; content: string }[] = [];
-        for (const filePath of pendingDocReview) {
-          try {
-            const content = fs.readFileSync(filePath, "utf-8");
-            files.push({ path: filePath, content });
-          } catch {
-            // ファイル読み取り失敗は無視
-          }
+        const result = await this.evaluator.evaluate({
+          filePaths: pendingEvalFiles,
+          originalRequest: userMessageText,
+          assistantResponse: textContent,
+        });
+        if (!result.passed) {
+          evaluatorRetries++;
+          const feedback = Evaluator.formatForInjection(result);
+          this.history.addAssistantMessage(textContent);
+          this.history.addUserMessage(feedback);
+          continue;
         }
-        if (files.length > 0) {
-          const result = await this.evaluator.evaluate({
-            files,
-            originalRequest: userMessageText,
-            assistantResponse: textContent,
-          });
-          if (!result.passed) {
-            evaluatorRetries++;
-            const feedback = Evaluator.formatForInjection(result);
-            this.history.addAssistantMessage(textContent);
-            this.history.addUserMessage(feedback);
-            continue;
-          }
-        }
-        // 合格 or ファイルなし → クリアして通常フローへ
-        pendingDocReview = [];
+        // 合格 → クリアして通常フローへ
+        pendingEvalFiles = [];
         evaluatorRetries = 0;
       }
       // Evaluatorリトライ上限到達: クリアして通常フローへ
-      if (pendingDocReview.length > 0 && evaluatorRetries >= MAX_EVALUATOR_RETRIES) {
+      if (pendingEvalFiles.length > 0 && evaluatorRetries >= MAX_EVALUATOR_RETRIES) {
         console.log(chalk.yellow(`\n  Evaluatorレビューを${MAX_EVALUATOR_RETRIES}回実施しましたが改善されませんでした。`));
-        pendingDocReview = [];
+        pendingEvalFiles = [];
       }
 
       // テキストのみ応答（ツール未呼び出し）の検出とリプロンプト

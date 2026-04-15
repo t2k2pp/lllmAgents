@@ -1,7 +1,8 @@
 # 評価ループ設計書
 
-> **ステータス**: 設計中
+> **ステータス**: 実装済み（エージェンティック版）
 > **作成日**: 2026-04-15
+> **最終更新**: 2026-04-16
 > **前提**: harness-engineering.md（Phase 1-4完了）の次のフェーズ
 > **参考**: [Anthropic: Harness Design for Long-Running Apps](https://www.anthropic.com/engineering/harness-design-long-running-apps)
 
@@ -63,83 +64,101 @@ file_write → (LLMがbashを呼ばずにテキスト応答)
 
 **利点**: LLM判定不要。ツール呼び出し履歴という客観的データのみで判断。
 
-#### メカニズムB: Evaluatorレビュー（文章・非コード系）
+#### メカニズムB: Evaluatorレビュー（全成果物）
 
-実装後、別コンテキストのLLMが成果物をレビューする。
-レビュー結果をメインLLMのコンテキストに注入し、問題があれば修正を促す。
+メインLLMがツールなしテキスト応答（完了報告）を返した時点で、
+ハーネスがEvaluatorを自動起動する。Evaluatorはファイルパス一覧だけ受け取り、
+**自身がエージェントとしてfile_read/grep/globを使って成果物を確認**する。
 
 ```
-file_write（文章） → ハーネスがEvaluatorを起動
-  → Evaluator: 「3.2節→3.3節の論理飛躍、第2章の伏線X未回収」
-  → メインLLM: フィードバックに基づいて修正 → 再評価 or 完了
+file_write（コード+文章） → pendingEvalFiles にパス蓄積
+  → LLM完了報告 → ハーネスがEvaluator起動
+  → Evaluator: file_readで各ファイルを読み、grepでimport整合性等を確認
+  → Evaluator: JSON形式で評価結果を返す
+  → 不合格 → メインLLMに指摘事項を注入して修正を促す
+  → 合格 → ユーザーに完了報告を返す
 ```
+
+**エージェンティック設計の利点**:
+- ファイル内容をプロンプトに埋め込まないため、大きなファイルでも問題なし
+- 必要な箇所をgrepで特定してからfile_readで読むため、効率的
+- ファイル間のimport整合性・クラス参照の確認が可能
 
 ---
 
 ## 3. Evaluatorアーキテクチャ
 
-### 3.1 LLM選択の抽象化
+### 3.1 エージェンティック評価（secondLLM使用時）
 
-Evaluatorが使うLLMは設定に応じて自動選択:
+secondLLMが利用可能な場合、Evaluatorは**エージェントループ**で動作する。
+プロンプトにはファイルパス一覧のみ渡し、ファイル内容はEvaluator自身がツールで読む。
 
 ```
-Evaluator LLM = secondLLM ?? mainLLM（別コンテキスト）
+Evaluator起動
+  → file_read でファイル内容を確認
+  → grep でimport先・クラス参照の整合性チェック
+  → glob で関連ファイルの有無を確認
+  → 全ファイル確認完了 → JSON形式で最終評価を出力
 ```
 
-| 構成 | メインLLM | Evaluator LLM | 想定シナリオ |
-|------|----------|---------------|-------------|
-| 最小構成 | 27B MoE | 同じ27B（別コンテキスト） | GPU 1台 |
-| 推奨構成 | 27B MoE（高速） | Dense 9B-14B（正確） | GPU余裕あり |
-| 最強構成 | 27B MoE | Claude Sonnet等 | クラウド併用 |
+**許可ツール**: `file_read`, `grep`, `glob`（読み取り専用。書き込み・実行は不可）
+**最大イテレーション**: 10回（安全弁）
+**実行メソッド**: `SecondLLMManager.runAsEvaluator()`
 
-**ポイント**: コード上の分岐は不要。Evaluatorのインターフェースは1つで、
-裏のLLMが何かは設定（`secondLLM` の有無）で決まる。
+### 3.2 フォールバック評価（mainLLM使用時）
 
-### 3.2 既存資産との関係
+secondLLMが利用不可の場合、mainLLMで1回呼び切りのフォールバック。
+この場合はファイル内容をプロンプトに埋め込む（mainLLMにツールループさせるとメインの会話と衝突するため）。
 
-- `second_llm_consult`: 現在はメインLLMが**自発的に**呼ぶツール
+### 3.3 LLM選択
+
+| 構成 | メインLLM | Evaluator LLM | 評価方式 |
+|------|----------|---------------|---------|
+| 推奨構成 | 27B | secondLLM | エージェンティック（ツール付きループ） |
+| 最小構成 | 27B | 同じ27B（別コンテキスト） | フォールバック（1回呼び切り） |
+
+### 3.4 既存資産との関係
+
+- `second_llm_consult`: メインLLMが**自発的に**呼ぶツール
+- `second_llm_agent`: メインLLMが**サブタスクを委任**するツール
 - Evaluator: **ハーネスが自動的に**起動する仕組み（メインLLMの意思に依存しない）
 
-この違いが重要。メインLLMが「完了しました」と言った後にハーネスがEvaluatorを起動するので、
-メインLLMの「早期完了」傾向を外部から制御できる。
+Evaluatorは `SecondLLMManager.runAsEvaluator()` を使うが、
+`runAsAgent()` とは異なり読み取り専用ツールのみ許可し、delegationGuardの対象外。
 
-### 3.3 Evaluator呼び出しインターフェース
+### 3.5 Evaluator呼び出しインターフェース
 
 ```typescript
 interface EvaluatorResult {
   passed: boolean;          // 合格/不合格
   issues: EvaluatorIssue[]; // 発見された問題のリスト
   summary: string;          // 総評（メインLLMに注入する）
+  reviewedFiles?: string[]; // レビュー対象ファイルパス一覧
 }
 
 interface EvaluatorIssue {
   severity: "critical" | "warning" | "suggestion";
   description: string;      // 問題の説明
-  location?: string;        // ファイルパス・行番号等
+  location?: string;        // ファイルパス:行番号
   suggestion?: string;      // 修正提案
 }
 ```
 
-### 3.4 Evaluatorプロンプト設計
+### 3.6 Evaluatorプロンプト設計（エージェンティック版）
 
 ```
-あなたは独立したコードレビュアー / 文章レビュアーです。
-以下の成果物を客観的に評価してください。
+あなたは独立したコードレビュアーです。別のAIが作成した成果物を客観的に評価します。
 
-## 評価基準
-- [タスク種別に応じた基準を動的に生成]
+## あなたの作業手順
+1. まずレビュー対象ファイル一覧を確認する
+2. file_read でファイル内容を読む。大きいファイルは必要な箇所を grep で特定してから読む
+3. 複数ファイルがある場合、ファイル間の整合性（import, クラス参照, 関数呼び出し）もチェックする
+4. 全ファイルの確認が完了したら、最終評価をJSON形式で出力する
 
 ## 評価ルール
-- 発見した問題は具体的に指摘すること（ファイルパス、行番号、該当箇所の引用）
-- 一度出した指摘を取り下げないこと
-- 「まあ大丈夫だろう」という甘い判定は禁止。問題があるなら問題として報告する
-- 軽微な問題（typo等）は severity: suggestion とし、合否判定には影響させない
-
-## 成果物
-[ファイル内容]
-
-## ユーザーの元の依頼
-[元のリクエスト]
+- 発見した問題は具体的に指摘すること（ファイルパス、行番号、該当コードの引用）
+- critical が1つでもあれば passed: false
+- warning のみ: 修正可能な実質的問題がある場合は passed: false
 ```
 
 ---
@@ -185,72 +204,51 @@ bashで適切な検証コマンドを実行してください:
 - ユーザーが会話的入力をした場合（intentClassifier で判定済み）
 - plan mode 中の場合
 
-### 4.2 メカニズムB: Evaluatorレビュー（文章・非コード系）
+### 4.2 メカニズムB: Evaluatorレビュー（全成果物）
 
-#### 新規ファイル: `src/agent/evaluator.ts`
+#### ファイル: `src/agent/evaluator.ts`
 
 ```typescript
 export class Evaluator {
-  private provider: LLMProvider;
-  private model: string;
-
-  constructor(
-    secondLLMManager: SecondLLMManager | null,
-    mainProvider: LLMProvider,
-    mainModel: string,
-  ) {
-    // secondLLM が利用可能ならそちらを使う、なければ mainLLM
-    if (secondLLMManager?.isAvailable()) {
-      this.provider = secondLLMManager.getProvider();
-      this.model = secondLLMManager.getModel();
-    } else {
-      this.provider = mainProvider;
-      this.model = mainModel;
-    }
-  }
-
-  /**
-   * 成果物を評価し、フィードバックを返す
-   */
+  // secondLLMがあればエージェンティック、なければmainLLMフォールバック
   async evaluate(params: {
-    taskType: "code" | "document" | "research";
-    files: { path: string; content: string }[];
+    filePaths: string[];        // ファイルパス一覧のみ（内容は渡さない）
     originalRequest: string;
-    additionalContext?: string;
-  }): Promise<EvaluatorResult> {
-    const prompt = this.buildEvaluationPrompt(params);
-    // ... LLM呼び出し、結果パース
-  }
+    assistantResponse?: string;
+  }): Promise<EvaluatorResult>;
 }
 ```
 
+エージェンティック版（secondLLM使用時）は `SecondLLMManager.runAsEvaluator()` を利用。
+読み取り専用ツール（file_read, grep, glob）のみ許可。最大10イテレーション。
+
 #### 発動条件
 
-メカニズムBは以下の条件で発動:
-
-1. `pendingVerification` にドキュメント系ファイル（`.md`, `.txt`, `.rst` 等）がある
-2. LLMが完了宣言をした（`classifyCompletion` で "completed" 判定）
-3. ユーザーの元の依頼が一定以上の複雑さ（単純な挨拶・質問ではない）
+`pendingEvalFiles`（コード+ドキュメント両方を蓄積）にファイルがある状態で、
+LLMがツールなしテキスト応答を返した時に発動。
 
 ```
-LLM「完了しました」→ classifyCompletion: "completed"
-  → pendingVerification にドキュメントファイルあり?
-    → Yes: Evaluator起動 → 結果に基づいて再プロンプト or ユーザーに返す
-    → No: 通常完了処理
+file_write/file_edit → pendingEvalFiles にパス追加（コード・ドキュメント両方）
+  → LLMがテキスト応答（toolCalls === 0）かつ pendingEvalFiles.length > 0
+  → plan mode でない
+  → evaluatorRetries < MAX_EVALUATOR_RETRIES (2)
+  → Evaluator起動
 ```
 
 #### Evaluator結果のメインLLMへの注入
 
 ```
 [自動レビュー結果]
-独立したレビュアーが成果物を確認しました:
+{summary}
 
-{evaluator.summary}
+レビュー対象: {reviewedFiles}
 
 指摘事項:
-{issues をフォーマットして列挙}
+- [severity] (location) description
+  → 修正案: suggestion
 
-上記の指摘に対応してください。修正が完了したら報告してください。
+上記の指摘事項を修正してください。該当ファイルをfile_edit/file_writeで修正し、
+修正完了後に報告してください。
 ```
 
 ### 4.3 タスク種別の自動判定
@@ -270,9 +268,10 @@ function classifyFileType(filePath: string): "code" | "document" {
 ```
 
 コードファイルとドキュメントファイルが混在する場合:
-- コードファイル → メカニズムA（bash検証を要求）
+- コードファイル → メカニズムA（bash検証を要求）+ メカニズムB（Evaluatorレビュー）
 - ドキュメントファイル → メカニズムB（Evaluatorレビュー）
-- 両方ある場合は両方実行
+- `pendingVerification`（bash検証用）と `pendingEvalFiles`（Evaluator用）は独立して蓄積
+- bash実行で `pendingVerification` はクリアされるが、`pendingEvalFiles` はクリアされない
 
 ### 4.4 システムプロンプト強化
 
@@ -353,19 +352,24 @@ options: [
 
 ## 6. 実装フェーズ
 
-### Phase 1: メカニズムA（ツール追跡）+ システムプロンプト強化
+### Phase 1: メカニズムA（ツール追跡）+ システムプロンプト強化 ✅ 完了
 - `agent-loop.ts` に `pendingVerification` 追跡を追加
 - bash未実行時の再プロンプト注入
 - システムプロンプトの検証ガイド具体化
-- **効果**: コーディングタスクの検証漏れを防止
 
-### Phase 2: Evaluatorの基盤
+### Phase 2: Evaluatorの基盤 ✅ 完了
 - `src/agent/evaluator.ts` 新規作成
 - secondLLM ?? mainLLM の自動選択
 - ドキュメント系ファイルの完了時にEvaluator自動起動
-- **効果**: 文章系タスクの品質向上
 
-### Phase 3: 評価基準のチューニング
+### Phase 2.5: Evaluatorのエージェンティック化 ✅ 完了（2026-04-16）
+- Evaluatorの評価方式を1回呼び切りからエージェントループに変更
+- `SecondLLMManager.runAsEvaluator()` 新規追加（読み取り専用ツール: file_read, grep, glob）
+- ファイル内容のプロンプト埋め込みを廃止、パス一覧のみ渡す設計に変更
+- `pendingDocReview`（ドキュメントのみ）→ `pendingEvalFiles`（コード+ドキュメント全体）に拡張
+- mainLLMフォールバック（secondLLM未設定時）は従来の1回呼び切りを維持
+
+### Phase 3: 評価基準のチューニング（未着手）
 - タスク種別ごとの評価プロンプト最適化
 - Evaluatorの厳しさ調整（few-shot例の追加）
 - 安全弁の閾値調整
