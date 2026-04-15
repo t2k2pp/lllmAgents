@@ -110,7 +110,7 @@ export const bashTool: BashToolHandler = {
   },
   killRunningProcess(): void {
     if (currentProcess && !currentProcess.killed) {
-      currentProcess.kill();
+      killProcessTree(currentProcess);
       currentProcess = null;
     }
   },
@@ -220,13 +220,41 @@ export const bashTool: BashToolHandler = {
         done({ success: false, output: "", error: err.message });
       });
 
+      // Ctrl+Cでのabort: agent-loop側のabortableIteratorが
+      // _aborted=trueにした後、repl.tsのsigintHandlerがkillRunningProcess()を呼ぶ。
+      // killProcessTree()でプロセスツリーごと殺す。
+
       // 独自タイムアウト: spawn の timeout は Windows で効かないことがあるため
       const timeoutTimer = setTimeout(() => {
         if (!resolved) {
-          try { proc.kill(); } catch { /* ignore */ }
+          killProcessTree(proc);
           done({ success: false, output: stdout.trim(), error: `Timeout: command exceeded ${timeout}ms` });
         }
       }, timeout);
     });
   },
 };
+
+/**
+ * プロセスツリーごと強制終了する。
+ * Windowsでは proc.kill() だと直接の子プロセスしか終了せず、
+ * 孫プロセス（bash→python→pygame等）が孤立して残る。
+ * taskkill /T /F でプロセスツリー全体を殺す。
+ */
+function killProcessTree(proc: ChildProcess): void {
+  if (proc.killed) return;
+  const pid = proc.pid;
+  if (pid && isWindows) {
+    try {
+      execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], {
+        timeout: 5000,
+        stdio: "ignore",
+      });
+      return;
+    } catch {
+      // taskkill が失敗した場合はフォールバック
+    }
+  }
+  // 非Windows or taskkill失敗時: 通常のkill
+  try { proc.kill(); } catch { /* ignore */ }
+}
