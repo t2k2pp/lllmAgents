@@ -34,10 +34,14 @@ export function buildSystemPrompt(skills?: SkillInfo[], hasSecondLLM?: boolean, 
 - 成果物は file_write/file_edit で作る（テキスト回答と分離）
 - 不明点 → ask_user / 複雑タスク → todo_write で管理 / 非自明な実装 → enter_plan_mode / 並列調査 → task で委任
 
-# 実装→検証サイクル [必須]
-実装(file_write/edit) → 検証(bash) → エラー修正 → 再検証。省略禁止。
-検証例: JS/TS=\`node --check\`, Py=\`python -c"import ast;..."\`, 汎用=build/test/lint
-禁止: 検証なしの完了報告 / エラー無視で別ファイルへ移動 / 検証なしの連続書き直し
+# 実装→検証→完了サイクル [必須]
+コード変更後は必ずbashで検証してから完了報告:
+- .ts/.js → \`node --check <file>\` で構文確認
+- テストがある → \`npm test\` / \`pytest\` 等を実行
+- ビルドプロジェクト → 該当するbuild/lintコマンド
+- Webアプリ → 起動してbrowser_screenshotで確認
+検証失敗 → 修正→再検証を通るまで繰り返す。検証成功の事実を完了報告に含める。
+禁止: 検証なしの「完了しました」 / エラー無視で次へ / 検証なしの連続書き直し
 
 # ツール使用
 - 編集前に file_read で必ず読む。新規作成より既存編集を優先

@@ -26,8 +26,11 @@ import { LLMLogger } from "./llm-logger.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
 import { getFirstUseGuide } from "./tool-guides.js";
 import { IntentClassifier } from "./intent-classifier.js";
+import { Evaluator } from "./evaluator.js";
+import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";
 import type { ChatLogger } from "./chat-logger.js";
 import { renderEditDiff, renderWriteDiff } from "../cli/diff-display.js";
+import * as fs from "node:fs";
 
 // marked-terminal でMarkdownをターミナル向けにレンダリング
 marked.use(markedTerminal() as Parameters<typeof marked.use>[0]);
@@ -93,6 +96,8 @@ export class AgentLoop {
   private lastPromptTokens = 0;
   /** チャットログ（Obsidian Vault保存、null なら無効） */
   private chatLogger: ChatLogger | null = null;
+  /** Evaluator（成果物の独立レビュー） */
+  private evaluator: Evaluator;
 
   constructor(
     private provider: LLMProvider,
@@ -110,6 +115,7 @@ export class AgentLoop {
     hasSecondLLM: boolean = false,
     samplingParams: SamplingParams = {},
     hasObsidian: boolean = false,
+    secondLLMManager: SecondLLMManager | null = null,
   ) {
     this.streamingDisplay = streamingDisplay;
     this.maxParallelTools = maxParallelTools;
@@ -122,6 +128,7 @@ export class AgentLoop {
     this.session = createSession(model);
     this.llmLogger = new LLMLogger(agentId, sessionId);
     this.intentClassifier = new IntentClassifier(provider, model);
+    this.evaluator = new Evaluator(secondLLMManager, provider, model);
     logger.debug(`LLM I/O log: ${this.llmLogger.getFilePath()}`);
   }
 
@@ -197,6 +204,16 @@ export class AgentLoop {
     /** 直前のツール呼び出しシグネチャ（反復検出用） */
     let lastToolSignature = "";
     let repeatToolCount = 0;
+    /** 検証待ちコードファイルのリスト（file_write/file_edit後、bash未実行ならここに溜まる） */
+    let pendingVerification: string[] = [];
+    /** Evaluatorレビュー待ちドキュメントファイルのリスト */
+    let pendingDocReview: string[] = [];
+    /** 検証再プロンプトの回数（安全弁） */
+    let verificationRetries = 0;
+    const MAX_VERIFICATION_RETRIES = 3;
+    /** Evaluatorレビューの回数（安全弁） */
+    let evaluatorRetries = 0;
+    const MAX_EVALUATOR_RETRIES = 2;
     const MAX_REPEAT_TOOL = 3; // 同じツール呼び出しがN回連続で失敗したら中断
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
@@ -556,6 +573,30 @@ export class AgentLoop {
           return;
         }
 
+        // pendingVerification 追跡: file_write/file_edit → 検証待ちに追加、bash → コード検証クリア
+        for (const tc of toolCalls) {
+          const toolName = tc.function.name;
+          if (toolName === "file_write" || toolName === "file_edit") {
+            try {
+              const args = JSON.parse(tc.function.arguments ?? "{}");
+              const filePath = (args.file_path ?? args.path ?? "") as string;
+              if (filePath && isCodeFile(filePath)) {
+                if (!pendingVerification.includes(filePath)) {
+                  pendingVerification.push(filePath);
+                }
+              } else if (filePath && isDocumentFile(filePath)) {
+                if (!pendingDocReview.includes(filePath)) {
+                  pendingDocReview.push(filePath);
+                }
+              }
+            } catch { /* ignore parse error */ }
+          } else if (toolName === "bash") {
+            // bash実行 = コード検証が行われたとみなしてクリア
+            pendingVerification = [];
+            verificationRetries = 0;
+          }
+        }
+
         continue;
       }
 
@@ -564,6 +605,70 @@ export class AgentLoop {
         console.log(chalk.yellow("\n  モデルの応答が解析できない形式です。プロンプトを変えて再度お試しください。"));
         this.history.addAssistantMessage(textContent);
         return;
+      }
+
+      // 検証未実施チェック: コードファイルを書いた後にbashを呼ばずにテキスト応答した場合
+      if (toolCalls.length === 0 && pendingVerification.length > 0 &&
+          verificationRetries < MAX_VERIFICATION_RETRIES &&
+          !this.planManager?.isInPlanMode()) {
+        verificationRetries++;
+        const fileList = pendingVerification.map(f => `  - ${f}`).join("\n");
+        console.log(chalk.dim(`  (検証未実施 - 変更ファイルの動作確認を要求 ${verificationRetries}/${MAX_VERIFICATION_RETRIES})`));
+        this.history.addAssistantMessage(textContent);
+        this.history.addUserMessage(
+          `以下のファイルを作成/変更しましたが、動作確認が完了していません:\n${fileList}\n\n` +
+          "bashで適切な検証コマンドを実行してください:\n" +
+          "- .ts/.js: node --check <file> またはnpm test\n" +
+          "- .py: python -c \"import ast; ast.parse(open('<file>').read())\"\n" +
+          "- ビルドプロジェクト: 該当するbuild/test/lintコマンド\n\n" +
+          "検証が成功したら結���を報告してください。問題があれば修正してください。"
+        );
+        continue;
+      }
+      // 検証リトライ上限到達: ユーザーに報告してクリア（以降は通常フローへ）
+      if (toolCalls.length === 0 && pendingVerification.length > 0 &&
+          verificationRetries >= MAX_VERIFICATION_RETRIES) {
+        console.log(chalk.yellow(`\n  検証を${MAX_VERIFICATION_RETRIES}回要求しましたが実行されませんでした。`));
+        pendingVerification = [];
+      }
+
+      // Evaluatorレビュー: ドキュメントファイルを書いた後の完了時に自動レビュー
+      if (toolCalls.length === 0 && pendingDocReview.length > 0 &&
+          evaluatorRetries < MAX_EVALUATOR_RETRIES &&
+          textContent.trim().length > 0 &&
+          !this.planManager?.isInPlanMode()) {
+        // ファイル内容を読み取ってEvaluatorに渡す
+        const files: { path: string; content: string }[] = [];
+        for (const filePath of pendingDocReview) {
+          try {
+            const content = fs.readFileSync(filePath, "utf-8");
+            files.push({ path: filePath, content });
+          } catch {
+            // ファイル読み取り失敗は無視
+          }
+        }
+        if (files.length > 0) {
+          const result = await this.evaluator.evaluate({
+            files,
+            originalRequest: userMessageText,
+            assistantResponse: textContent,
+          });
+          if (!result.passed) {
+            evaluatorRetries++;
+            const feedback = Evaluator.formatForInjection(result);
+            this.history.addAssistantMessage(textContent);
+            this.history.addUserMessage(feedback);
+            continue;
+          }
+        }
+        // 合格 or ファイルなし → クリアして通常フローへ
+        pendingDocReview = [];
+        evaluatorRetries = 0;
+      }
+      // Evaluatorリトライ上限到達: クリアして通常フローへ
+      if (pendingDocReview.length > 0 && evaluatorRetries >= MAX_EVALUATOR_RETRIES) {
+        console.log(chalk.yellow(`\n  Evaluatorレビューを${MAX_EVALUATOR_RETRIES}回実施しましたが改善されませんでした。`));
+        pendingDocReview = [];
       }
 
       // テキストのみ応答（ツール未呼び出し）の検出とリプロンプト
@@ -1227,3 +1332,27 @@ function enrichToolResult(toolName: string, _args: string, success: boolean, con
 
   return content;
 }
+
+/** コードファイル（bash検証が意味を持つファイル）かどうかを判定する */
+function isCodeFile(filePath: string): boolean {
+  const codeExtensions = new Set([
+    ".ts", ".js", ".tsx", ".jsx", ".mts", ".mjs", ".cjs",
+    ".py", ".rs", ".go", ".java", ".c", ".cpp", ".h", ".hpp",
+    ".css", ".scss", ".html", ".vue", ".svelte",
+    ".json", ".yaml", ".yml", ".toml", ".sql", ".sh", ".bash",
+  ]);
+  const ext = filePath.lastIndexOf(".") >= 0
+    ? filePath.slice(filePath.lastIndexOf(".")).toLowerCase()
+    : "";
+  return codeExtensions.has(ext);
+}
+
+/** ドキュメントファイ���（Evaluatorレビュー対象）かどうかを判定する */
+function isDocumentFile(filePath: string): boolean {
+  const docExtensions = new Set([".md", ".txt", ".rst", ".adoc", ".org"]);
+  const ext = filePath.lastIndexOf(".") >= 0
+    ? filePath.slice(filePath.lastIndexOf(".")).toLowerCase()
+    : "";
+  return docExtensions.has(ext);
+}
+

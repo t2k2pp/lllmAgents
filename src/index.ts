@@ -242,6 +242,7 @@ async function main(): Promise<void> {
     hasSecondLLM,
     samplingParams,
     !!config.obsidian?.vaultPath,
+    secondLLMManager,
   );
 
   // Plan manager
