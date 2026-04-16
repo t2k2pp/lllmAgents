@@ -17,6 +17,10 @@ output/
 # Windows null device artifact
 $null
 
+# Python artifacts
+__pycache__/
+*.pyc
+
 # Temporary/test files
 src/Level.js
 src/test-Level.js
