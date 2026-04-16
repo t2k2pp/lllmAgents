@@ -128,6 +128,10 @@ export class AgentLoop {
     this.llmLogger = new LLMLogger(agentId, sessionId);
     this.intentClassifier = new IntentClassifier(provider, model);
     this.evaluator = new Evaluator(secondLLMManager, provider, model);
+    // セカンドLLMにもセッションIDを共有（ログファイル名の統一用）
+    if (secondLLMManager && sessionId) {
+      secondLLMManager.setSessionId(sessionId);
+    }
     logger.debug(`LLM I/O log: ${this.llmLogger.getFilePath()}`);
   }
 
