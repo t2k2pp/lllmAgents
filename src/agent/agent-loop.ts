@@ -587,6 +587,27 @@ export class AgentLoop {
           return;
         }
 
+        // planモード中にコードファイルへの書き込みを検出 → 計画を先に確定するよう促す
+        if (this.planManager?.isInPlanMode()) {
+          const implTools = PlanManager.getImplementationTools();
+          for (const tc of toolCalls) {
+            if (implTools.has(tc.function.name)) {
+              try {
+                const args = JSON.parse(tc.function.arguments ?? "{}");
+                const filePath = (args.file_path ?? args.path ?? "") as string;
+                if (filePath && isCodeFile(filePath)) {
+                  this.history.addUserMessage(
+                    "[ハーネス] プランモード中にコードファイルへの書き込みが検出されました。" +
+                    "実装を開始する前に、exit_plan_mode で計画をユーザーに提示して承認を得てください。" +
+                    "設計書（.md等）の作成はプランモード中でも問題ありません。"
+                  );
+                  break;
+                }
+              } catch { /* ignore */ }
+            }
+          }
+        }
+
         // pendingVerification 追跡: file_write/file_edit → 検証待ちに追加、bash → コード検証クリア
         // pendingEvalFiles 追跡: 全ファイル（コード+ドキュメント）をEvaluatorレビュー用に蓄積
         for (const tc of toolCalls) {

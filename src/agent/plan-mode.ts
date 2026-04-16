@@ -136,11 +136,21 @@ export class PlanManager {
     return this.currentPlan;
   }
 
-  /** List of tools allowed during planning (investigation + documentation) */
+  /** planモードで許可するツール（調査+設計。実装系はブロックしないが注意喚起で制御） */
   static getPlanModeAllowedTools(): Set<string> {
+    // 全ツール許可。ツール制限ではなくシステムプロンプト+ハーネス検出で制御する
+    // （Claude Codeと同じアプローチ: 行動方針として制限、機械的ブロックはしない）
     return new Set([
-      "file_read", "file_write", "glob", "grep", "web_fetch", "web_search",
-      "bash", "ask_user", "todo_write", "exit_plan_mode",
+      "file_read", "file_write", "file_edit", "glob", "grep",
+      "web_fetch", "web_search", "bash",
+      "ask_user", "todo_write", "exit_plan_mode",
+      "enter_plan_mode", "knowledge_search", "knowledge_save",
+      "second_llm_consult", "second_llm_agent",
     ]);
+  }
+
+  /** planモード中に使うと「実装開始」とみなすツール */
+  static getImplementationTools(): Set<string> {
+    return new Set(["file_write", "file_edit"]);
   }
 }
