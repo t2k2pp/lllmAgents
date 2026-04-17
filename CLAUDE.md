@@ -10,6 +10,14 @@ Claude Codeがこのプロジェクトで作業する際のルール。
 - 参考資料と成果物を区別し、不要なものをリポジトリに入れない
 - アプリ内のファイルアクセスは絶対パスを使う（相対パス禁止）
 
+## ワークスペース構成（docs/workspace-separation.md 参照）
+- `src/` — 開発コード。`npm run start` (tsx) で直接実行
+- `dist/` — `npm run build` の tsc 出力（gitignore）
+- `deploy/` — 配布用スナップショット。Stop フックが自動で最新化（Git管理）
+- `sandbox/` — 動作検証用。PPT/Excel/Vision 等の検証スクリプト・成果物はここに置く
+- ユーザー検証成果物（生成 PPTX/XLSX/JSON/画像等）は必ず `sandbox/` 配下に出力する。リポジトリルートに置かない
+- Stop フック (`scripts/on-stop.js`) が発火時に src 差分同期と未 push コミット警告を行う
+
 ## デバッグ・テスト作業のルール
 
 ### 非TTYパイプモード

@@ -7,9 +7,16 @@ dist/
 coverage/
 .vitest/
 *.log
-screenshots/
-output/
 *.zip
+
+# Workspace separation (docs/workspace-separation.md)
+sandbox/artifacts/*
+sandbox/output/*
+sandbox/screenshots/*
+!sandbox/artifacts/.gitkeep
+!sandbox/output/.gitkeep
+!sandbox/screenshots/.gitkeep
+deploy/.deploy-meta.json
 
 # Local settings
 .claude/settings.local.json
