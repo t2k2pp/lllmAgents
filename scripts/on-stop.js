@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Stop フックエントリポイント
-// - sync-deploy.js を呼ぶ（ハッシュ一致なら即 no-op）
+// - sync-skills.js を呼ぶ（ハッシュ一致なら即 no-op）
 // - 未 push コミットがあれば警告
 // 設計書: docs/workspace-separation.md
+//
+// 注意: exe 再ビルドはここでは行わない（手動 `npm run build:deploy`）
 
 import { execSync, spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
@@ -10,8 +12,8 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
-const SYNC_SCRIPT = join(__dirname, 'sync-deploy.js');
-const TIMEOUT_MS = 60_000;
+const SYNC_SCRIPT = join(__dirname, 'sync-skills.js');
+const TIMEOUT_MS = 30_000;
 
 function sh(cmd) {
   try {
@@ -30,7 +32,7 @@ function isGitRepo() {
   }
 }
 
-function runSync() {
+function runSyncSkills() {
   const r = spawnSync('node', [SYNC_SCRIPT], {
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -42,7 +44,7 @@ function runSync() {
     if (err) console.error(err);
     return;
   }
-  console.error(`[on-stop] sync-deploy failed (code ${r.status})`);
+  console.error(`[on-stop] sync-skills failed (code ${r.status})`);
   if (err) console.error(err);
 }
 
@@ -58,7 +60,7 @@ function checkUnpushed() {
 
 function main() {
   if (!isGitRepo()) return;
-  runSync();
+  runSyncSkills();
   checkUnpushed();
 }
 

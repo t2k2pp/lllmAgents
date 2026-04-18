@@ -16,7 +16,15 @@ sandbox/screenshots/*
 !sandbox/artifacts/.gitkeep
 !sandbox/output/.gitkeep
 !sandbox/screenshots/.gitkeep
+
+# deploy/ はビルド成果物のみ ignore、配布用アセットは scripts/deploy-assets/ から組み立てる
+deploy/localllm.exe
+deploy/localllm
+deploy/skills/
 deploy/.deploy-meta.json
+deploy/install.bat
+deploy/install.sh
+deploy/README.md
 
 # Local settings
 .claude/settings.local.json

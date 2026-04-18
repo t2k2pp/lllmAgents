@@ -1,203 +1,221 @@
 # ワークスペース分離 & Stop フック自動化 設計書
 
-> **ステータス**: 実装中（ユーザー承認済 2026-04-17）
+> **ステータス**: 第 2 次改訂版（A 案確定 2026-04-18、実装完了 2026-04-18）
 > **起票日**: 2026-04-17
 > **関連**: ユーザールール「実装後は必ずpush」「参考資料と成果物を区別」
 
-## 確定事項（ユーザー判断 2026-04-17）
+## 改訂履歴
 
-1. **`deploy/` は Git 管理する** — リリーススナップショットとしての価値を優先
-2. **`dist/` は残す** — `npm run build` / `build-exe.bat` との互換性維持
-3. **`output.zip` は削除** — 用途不明のため
-4. **Stop フック方式で運用開始** — 問題があれば後日修正
+- **2026-04-17**: 初版。deploy/ を Node ベースの JS 配布として設計 → 実装後に「Node 前提の配布は不自然」と判明
+- **2026-04-18 (本版)**: exe 配布 + ホーム統合スキルモデルに全面改訂。A 案確定
+
+## 確定事項（ユーザー判断）
+
+| # | 判断 | 決定日 |
+|---|------|-------|
+| 1 | 配布形態は **SEA exe** 単体（Node 非依存） | 2026-04-18 |
+| 2 | ビルトインスキルとユーザースキルは **`~/.localllm/skills/` に同居**（A 案） | 2026-04-18 |
+| 3 | インストール方式は **任意フォルダに exe 配置 + PATH 追加**（Claude Code 風） | 2026-04-18 |
+| 4 | exe 再ビルドは **明示コマンド**（Stop フックでは行わない） | 2026-04-18 |
+| 5 | Stop フックは **開発時のスキル自動反映 + 未 push 警告** に限定 | 2026-04-18 |
+| 6 | `dist/` は残す（`build-exe.js` 中間成果物として） | 2026-04-17 |
+| 7 | `output.zip` は削除済 | 2026-04-17 |
 
 ## 背景と問題意識
 
-現状、本プロジェクトのルートは **開発コード・ビルド成果物・ユーザー検証成果物** が混在しており、以下の実害が出ている。
+現状、リポジトリルートに **開発コード・ビルド成果物・ユーザー検証成果物** が混在し、「何を配ればユーザーがすぐ使えるのか」が不明瞭。加えてユーザールール「実装後は push」の失念も散発していた。
 
-| 問題 | 具体例 |
-|------|--------|
-| デプロイ対象が不明瞭 | `dist/` が長期間更新されず放置（`package.json` の `main` が `dist/index.js` を指すが、実運用は `tsx src/index.ts`） |
-| 検証成果物のリポジトリ混入 | ルート直下に `extract_ppt_data.py`, `extracted_ppt_data.json`, `redesign_ppt_v{1,2,3}.py`, `output/`, `screenshots/`, `output.zip` など |
-| 開発物とユーザー生成物の境界不明 | スキル開発で生成したサンプル PPTX/XLSX がルートに散乱 |
-| リモート push 忘れ | ユーザールールで "実装後は push" と定めているが、CLAUDE 側でたびたび失念（`feedback_always_push.md` に記録） |
+初版実装で `deploy/` をコミットしたが、内容が `tsc` 出力の JS ミラーだったため、実使用時に `npm install` 必要・Node 前提・ビルトインスキルがロードされない等の問題が露呈し、方針転換に至った。
 
 ## 目標
 
-1. **3 層分離**: 開発 / デプロイ / 検証 を物理的に別ディレクトリへ
-2. **自動同期**: ソース変更後、Claude Code の応答終了タイミングで deploy 側を自動更新
-3. **push 忘れ防止**: 同タイミングで未 push コミットを検知してリマインド
-4. **既存ワークフロー不破壊**: `npm run start` (src 直実行) の即時反映ループは維持
-
-## 非目標
-
-- 自動 push の実行（暴発リスクが高いため警告に留める）
-- `dist/` の完全廃止（互換性のため残す）
-- ユーザー検証成果物のバージョン管理
+1. **3 層分離**: 開発 (`src/`) / 配布物 (`deploy/`) / 検証 (`sandbox/`)
+2. **配布物は exe 単体 + 付随ファイル**のみで、受け取ったユーザーが install → PATH 追加 → 実行で完結
+3. **Stop フック**で開発中のスキル変更を即座にローカル（`~/.localllm/skills/`）に反映
+4. **未 push 警告**で push 忘れ防止
+5. 開発ループ (`npm run start`) を破壊しない
 
 ---
 
 ## 全体アーキテクチャ
 
-### ディレクトリ構成（提案後）
+### ディレクトリ構成
 
 ```
 lllmAgents/
-├── src/                        # 開発コード（従来通り）
+├── src/                        # 開発コード（Claude/人間が編集）
 │   ├── agent/
-│   ├── skills/builtin/
+│   ├── skills/builtin/         # ビルトインスキルの原本
 │   └── ...
-├── dist/                       # tsc ビルド出力（従来通り、ncc/pkg 連携用）
-├── deploy/                     # ★新設: 配布用スナップショット
-│   ├── index.js                # dist/index.js のコピー
-│   ├── skills/                 # src/skills/builtin/ のコピー
-│   ├── package.json            # 依存関係のみ抽出（devDeps除外）
-│   ├── README.md
-│   └── .deploy-meta.json       # 最終同期日時・ソースcommit hash
-├── sandbox/                    # ★新設: 動作検証用ワークスペース
-│   ├── run.bat / run.sh        # deploy/ を参照して起動するラッパー
-│   ├── scripts/                # PPT/Excel 等の検証スクリプト退避先
-│   │   └── ppt/
-│   │       ├── extract_ppt_data.py
-│   │       └── redesign_ppt_v3.py
-│   ├── artifacts/              # 生成物（PPTX, XLSX, JSON出力）
-│   ├── output/                 # 従来のoutput/を移設
-│   ├── screenshots/
-│   └── .gitkeep
+├── dist/                       # tsc 出力 + build-exe.js 中間成果物（gitignore）
+│   ├── localllm.cjs
+│   ├── sea-prep.blob
+│   └── localllm.exe            # ← build-exe.bat の最終生成物
+├── deploy/                     # ★配布物（Git管理、exeのみgitignore）
+│   ├── localllm.exe            # dist/ からコピー（gitignore、ビルド時生成）
+│   ├── skills/                 # ビルトインスキル（install 時に ~/.localllm/skills/ へ）
+│   │   ├── powerpoint/
+│   │   ├── excel/
+│   │   └── ...
+│   ├── install.bat             # Windows 用インストーラ
+│   ├── install.sh              # Linux/macOS/git bash 用
+│   ├── README.md               # エンドユーザー向け使い方
+│   └── .deploy-meta.json       # 最終ビルド時刻・コミット・バージョン（gitignore）
+├── sandbox/                    # 動作検証（既存、維持）
+│   ├── run.bat / run.sh        # deploy/localllm.exe を叩くラッパー
+│   ├── scripts/
+│   ├── artifacts/
+│   └── ...
 ├── scripts/
-│   ├── sync-deploy.js          # ★新設: src → deploy 同期
-│   ├── on-stop.js              # ★新設: Stopフックエントリポイント
-│   ├── reset-sandbox.js        # ★新設: sandbox 初期化（任意）
+│   ├── sync-skills.js          # ★src/skills/builtin/ → ~/.localllm/skills/ 差分同期
+│   ├── build-deploy.js         # ★build-exe + deploy/ 全体組み立て（手動）
+│   ├── on-stop.js              # ★Stop フック（sync-skills + 未push警告）
 │   └── ...
-├── .claude/
-│   └── settings.json           # ★更新: Stopフック定義追加
-└── .gitignore                  # ★更新: sandbox/artifacts 等を除外
+├── build-exe.bat               # 既存、deploy/ からも呼ばれる
+├── build-exe.js                # 既存
+└── .claude/settings.json       # Stop フック定義（既存を置き換え）
 ```
 
 ### 各層の責務
 
 | 層 | 配置 | 更新タイミング | Git 管理 |
 |----|------|---------------|----------|
-| **開発** | `src/` | ユーザー/Claude が随時編集 | 対象 |
-| **デプロイ** | `deploy/` | Stop フック（差分時のみ） | 対象（スナップショット） |
-| **検証** | `sandbox/` | ユーザー/Claude が検証作業で生成 | 除外（`.gitkeep` のみ） |
-| **ビルド中間** | `dist/` | `npm run build` 明示実行時 | 除外（既に） |
+| **開発** | `src/` | 随時編集 | 対象 |
+| **ビルド中間** | `dist/` | `npm run build:exe` 時 | 除外 |
+| **配布物** | `deploy/` | `npm run build:deploy` 時 | 対象（exe とメタは除外） |
+| **検証** | `sandbox/` | ユーザー/Claude の検証作業で生成 | scripts のみ対象 |
+| **ホーム設定** | `~/.localllm/` | 初回起動 + install 実行時 | 管理外 |
+
+### ユーザー環境のインストール後構成
+
+```
+<任意のフォルダ>/localllm.exe   # PATH に追加
+~/.localllm/
+├── config.json                 # 初回起動ウィザードで生成
+├── skills/                     # install 時にビルトイン展開、以後ユーザー編集可能
+│   ├── powerpoint/SKILL.md
+│   ├── excel/SKILL.md
+│   ├── tdd/SKILL.md
+│   └── <ユーザー追加スキル>/
+├── sessions/
+├── plans/
+├── memory/
+└── ...
+```
+
+**重要**: ビルトイン/ユーザースキルは区別せず同一ディレクトリに同居。ユーザーはビルトインを自由に編集・削除可。
 
 ---
 
-## 同期ロジック（`scripts/sync-deploy.js`）
+## スキルローダーの改修
 
-### 入出力
+### 現状（問題あり）
 
-- **入力**: `src/` の現在状態、前回同期時のソース内容ハッシュ（`deploy/.deploy-meta.json.sourceHash`）
-- **出力**: `deploy/` 配下の更新、`.deploy-meta.json` 更新
-
-### 処理フロー（実装版）
-
-```
-1. src/** + package.json + README.md + tsconfig.json を走査して
-   sha1 コンテンツハッシュ (sourceHash) を算出
-2. 前回メタの sourceHash と一致 → no-op 終了（約250ms）
-3. 不一致 → 以下を実行:
-   a. npx tsc で dist/ を再生成
-   b. dist/** を deploy/ にミラー（マップ/exe/sea-* 除外）
-   c. src/skills/builtin → deploy/skills-assets にコピー
-   d. package.json の devDependencies を除去して deploy/package.json に書き出し
-   e. README.md コピー
-   f. .deploy-meta.json に {syncedAt, commit, sourceHash, node} を記録
+`src/skills/skill-loader.ts:94-103`:
+```ts
+const srcBuiltinDir = path.join(selfDir, "builtin");            // ← exe化時に破綻
+const rootBuiltinDir = path.join(selfDir, "..", "..", "builtin"); // ← 同上
 ```
 
-**hash 方式を採用した理由**: commit hash 比較だと作業ツリーが dirty な間は毎 Stop フックで再同期が走る（5秒 × 毎ターン）。コンテンツハッシュなら「実際に保存されたファイルが変わったとき」だけ同期する。
+### 改修後
 
-### パフォーマンス目標
+```ts
+// 1. ~/.localllm/skills/ （ビルトイン＋ユーザー同居）
+const userSkillsDir = path.join(os.homedir(), ".localllm", "skills");
+skills.push(...loadSkillsFromDir(userSkillsDir, true));
 
-- 差分ゼロ判定: 50ms 以内（git diff のみ）
-- 通常同期（数ファイル変更）: 500ms 以内
-- フル再同期: 5秒以内
+// 2. CWD .claude/skills/ （プロジェクト拡張）
+const projectClaudeSkillsDir = path.join(process.cwd(), ".claude", "skills");
+skills.push(...loadSkillsFromDir(projectClaudeSkillsDir, false));
 
-### 冪等性
+// 3. CWD .localllm/skills/ （プロジェクト拡張）
+const projectLocalSkillsDir = path.join(process.cwd(), ".localllm", "skills");
+skills.push(...loadSkillsFromDir(projectLocalSkillsDir, false));
+```
 
-- 同じ hash で複数回呼ばれても no-op
-- 途中失敗時は `.deploy-meta.json` を更新しない（次回リトライで回復）
+`selfDir` ベースの検索は全廃。`~/.localllm/skills/` が存在しない場合 0 件返し、初回起動時にセットアップウィザードで「install.bat を先に実行してください」とガイドする（または自動展開オプション）。
+
+### 開発時のフロー
+
+`src/skills/builtin/` に新規スキルを追加したら、Stop フック（`scripts/sync-skills.js` 呼び出し）が自動で `~/.localllm/skills/` にコピー。開発者は `npm run start` でそのまま動作確認できる。
 
 ---
 
-## Stop フック設計
+## Stop フックの役割（改訂版）
 
-### `.claude/settings.json` の追加内容
+`scripts/on-stop.js` は以下だけ行う:
 
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node scripts/on-stop.js"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
+1. **スキル同期** (`sync-skills.js`): `src/skills/builtin/` の内容ハッシュが前回と変わっていれば `~/.localllm/skills/` へ差分コピー（ビルトイン名のディレクトリのみ対象。ユーザーが独自追加したスキルには触れない）
+2. **未 push コミット警告**: `git log @{u}..HEAD` で未 push があれば stderr に警告
 
-### `scripts/on-stop.js` の処理
+**exe の再ビルドは行わない**（30〜60 秒かかるため毎ターン実行は非現実的）。
+
+### `scripts/sync-skills.js` の動作
 
 ```
-1. プロジェクトルートを CWD として確定
-2. git rev-parse で現在コミット取得
-3. git diff --quiet HEAD -- src/ で作業ツリーの変更確認
-4. deploy/.deploy-meta.json の hash と HEAD を比較
-5. いずれか差分あり → sync-deploy.js を spawn（同期実行）
-   - 結果を stdout へ 1 行サマリ（例: "✓ deploy synced (3 files, 240ms)"）
-6. git log @{u}..HEAD --oneline で未 push コミット確認
-   - 1件以上 → stderr へ警告（例: "⚠ 2 unpushed commits on main — run: git push"）
-7. 全体で exit 0（Claude のターン継続を妨げない）
+入力: src/skills/builtin/**、前回のソースハッシュ (~/.localllm/.skills-sync-meta.json)
+出力: ~/.localllm/skills/<ビルトイン名>/ の最新化
+
+処理:
+1. src/skills/builtin/ 直下のディレクトリ名一覧を「ビルトイン名」として記録
+2. それぞれについて、~/.localllm/skills/<name>/ と比較:
+   - 存在しなければコピー
+   - コンテンツハッシュが異なれば上書き（ただしユーザー編集を検出したら .user.bak に退避）
+3. 前回同期時に存在したが今回 src/ から消えたビルトインは `~/.localllm/skills/<name>.removed/` にリネーム（安全策）
+4. ユーザーが独自追加したスキル（src/skills/builtin/ に存在しない名前）は完全に無視
+5. メタ更新: ~/.localllm/.skills-sync-meta.json
 ```
 
-### エラーハンドリング
-
-- 同期失敗時: stderr にエラー出力、exit 0（ブロックしない）
-- git コマンド不在/非 git ディレクトリ: サイレント終了
-- タイムアウト: スクリプト内で 5 秒上限を設定
-
-### ループ防止
-
-- Claude が hook 出力を受けて続行することがある → スクリプトは**冪等**かつ**出力を最小限**に
-- 同期後は `.deploy-meta.json` の hash が HEAD と一致するため、次回 Stop では no-op
+**ユーザー編集検出**: 前回同期時のハッシュを保存しておき、現在のファイルハッシュと照合。一致しなければユーザーが編集したとみなして `.user.bak` 退避。
 
 ---
 
-## sandbox の使い方
+## `npm run build:deploy` の動作
 
-### 作業ルール
+手動またはリリース前に実行する、deploy/ 全体の組み立てコマンド。
 
-- PPT/Excel/PDF などの検証スクリプトは `sandbox/scripts/<用途>/` 配下に置く
-- 生成物は `sandbox/artifacts/` へ出力する（ルート直下に出力しない）
-- `output/`, `screenshots/` は `sandbox/` 配下へ移設
-- sandbox 内のファイルは gitignore されるため、長期保存したいものは別途コミット対象ディレクトリに移す
+```
+scripts/build-deploy.js の処理:
+1. npm run build:exe （= node build-exe.js）で dist/localllm.exe 生成
+2. dist/localllm.exe を deploy/localllm.exe へコピー
+3. src/skills/builtin/ を deploy/skills/ へコピー（ファイル実体）
+4. deploy/install.bat, install.sh, README.md を最新版で書き出し
+5. deploy/.deploy-meta.json 更新（バージョン、ビルド日時、コミット）
+```
 
-### 既存ファイルの移設
-
-| 現在の場所 | 移設先 |
-|-----------|-------|
-| `extract_ppt_data.py` | `sandbox/scripts/ppt/extract_ppt_data.py` |
-| `extracted_ppt_data.json` | `sandbox/artifacts/extracted_ppt_data.json` |
-| `redesign_ppt.py` / `redesign_ppt_v{2,3}.py` | `sandbox/scripts/ppt/` |
-| `output/` | `sandbox/output/` |
-| `screenshots/` | `sandbox/screenshots/` |
-| `output.zip` | 削除（用途不明なら） or `sandbox/artifacts/` |
-| `test-vision.mjs` | 要確認（テストコードなら `tests/` へ、検証用なら sandbox へ） |
-
-### CLAUDE.md への追記
-
-「ユーザー検証成果物は `sandbox/` 配下に置く。リポジトリルートに検証ファイルを生成しない」を User Rules に追加。
+所要時間: 30〜60 秒（esbuild + SEA blob + postject がボトルネック）。
 
 ---
 
-## `.gitignore` 変更
+## インストーラの動作
+
+### `deploy/install.bat` (Windows)
+
+```
+@echo off
+rem 1. 任意のインストールディレクトリを選択（デフォルト: %LOCALAPPDATA%\lllmAgents\）
+rem 2. localllm.exe をそこにコピー
+rem 3. %USERPROFILE%\.localllm\skills\ にビルトインをコピー（既存あれば .user.bak 退避）
+rem 4. PATH に追加する方法を表示（自動追加 or 手動）
+rem 5. "完了。localllm --help で確認してください"
+```
+
+### `deploy/install.sh` (Linux/macOS/git bash)
+
+```
+#!/usr/bin/env bash
+# 同等の処理を bash で実装
+# デフォルト配置先: ~/.local/bin/localllm または /usr/local/bin/localllm
+```
+
+### インストーラの判断
+
+- **既存 skills あり**: 各ファイル単位でハッシュ比較、ユーザー編集らしきものは `.user.bak` に退避
+- **既存 exe あり**: 上書き確認（またはバージョン表示して自動判断）
+
+---
+
+## `.gitignore` 更新
 
 ```diff
  node_modules/
@@ -209,24 +227,21 @@ lllmAgents/
  coverage/
  .vitest/
  *.log
--screenshots/
--output/
  *.zip
 
-+# Workspace separation
-+sandbox/**
-+!sandbox/.gitkeep
-+!sandbox/run.bat
-+!sandbox/run.sh
-+!sandbox/scripts/
-+!sandbox/scripts/**
+ # Workspace separation
+ sandbox/artifacts/*
+ sandbox/output/*
+ sandbox/screenshots/*
+ !sandbox/artifacts/.gitkeep
+ !sandbox/output/.gitkeep
+ !sandbox/screenshots/.gitkeep
+-deploy/.deploy-meta.json
++deploy/localllm.exe
 +deploy/.deploy-meta.json
-
- # Local settings
- .claude/settings.local.json
 ```
 
-※ `sandbox/scripts/` は再利用前提なので残す（`feedback_keep_generate_scripts.md` に整合）。`artifacts/`, `output/`, `screenshots/` は除外。
+deploy/skills/, deploy/install.*, deploy/README.md はコミット対象。
 
 ---
 
@@ -234,61 +249,57 @@ lllmAgents/
 
 | # | タスク | 依存 | 見積 |
 |---|--------|------|------|
-| T1 | `docs/workspace-separation.md` レビュー&承認 | - | - |
-| T2 | `scripts/sync-deploy.js` 実装 | T1 | 中 |
-| T3 | `scripts/on-stop.js` 実装 | T2 | 小 |
-| T4 | `.claude/settings.json` に Stop フック追加 | T3 | 小 |
-| T5 | sandbox ディレクトリ作成 + ルート散乱ファイル移設 | T1 | 中 |
-| T6 | `.gitignore` 更新 | T5 | 小 |
-| T7 | `sandbox/run.bat` / `run.sh` ラッパー作成 | T2 | 小 |
-| T8 | `CLAUDE.md` に sandbox 運用ルール追記 | T5 | 小 |
-| T9 | 初回 `sync-deploy.js` 実行で `deploy/` を初期化 | T2 | 小 |
-| T10 | 動作確認（Stop フック発火、差分同期、push 警告） | T1-9 | 中 |
+| T1 | 本設計書をユーザーがレビュー・承認 | - | - |
+| T2 | 既存 deploy/ の JS ミラー大量ファイルを削除（クリーンアップ） | T1 | 小 |
+| T3 | `skill-loader.ts` を改修（`selfDir/builtin` 廃止） | T1 | 中 |
+| T4 | `scripts/sync-skills.js` を新規作成 | T1 | 中 |
+| T5 | `scripts/build-deploy.js` を新規作成 | T1 | 中 |
+| T6 | `scripts/on-stop.js` を書き直し（sync-skills 呼び出し + 未push警告） | T4 | 小 |
+| T7 | `scripts/sync-deploy.js` を廃止（deploy は build コマンドで明示更新） | T5 | 小 |
+| T8 | `deploy/install.bat` と `install.sh` を作成 | T1 | 中 |
+| T9 | `deploy/README.md`（配布版）を作成 | T1 | 中 |
+| T10 | `package.json` スクリプト更新（`build:exe`, `build:deploy` 整理） | T5 | 小 |
+| T11 | `.gitignore` 更新 | T1 | 小 |
+| T12 | 初回 `npm run build:deploy` 実行で deploy/ を組み立て | T2-10 | 小 |
+| T13 | 初回 `sync-skills` で `~/.localllm/skills/` にビルトイン展開（テラさん環境） | T4 | 小 |
+| T14 | `sandbox/run.{bat,sh}` を exe 起動に切替 | T12 | 小 |
+| T15 | `CLAUDE.md` 更新 | T1 | 小 |
+| T16 | 動作確認（sync-skills 冪等性、未push警告、build:deploy、install） | T12-14 | 中 |
+| T17 | コミット & push | T16 | 小 |
 
 ---
 
-## トレードオフ・オープン項目
+## オープン項目
 
-### 採用した選択
+1. **ユーザー編集スキルの扱いの詳細**
+   - 「ハッシュ不一致 = ユーザー編集」判定で足りるか？（編集直後に公式更新が重なると誤検出あり）
+   - 当面は `.user.bak` 退避＋警告で運用、不都合あれば改善
+2. **PATH 自動追加の可否**
+   - Windows: `setx PATH` は動くが副作用大きい → install.bat は手順表示に留める案
+   - Linux: `.bashrc` への追記は敬遠されやすい → 同上
+3. **exe の Git 管理**
+   - 93MB。バージョンタグ付きリリース時だけ `git lfs` で管理する選択肢あり → 当面は完全 gitignore とし、GitHub Releases で配布する運用
+4. **Playwright 依存**
+   - exe には Chromium バイナリは入らない。初回使用時に `npx playwright install` が必要 → install.bat に案内
+5. **セキュリティ警告**
+   - SmartScreen / Gatekeeper の「未署名」警告は不可避。README に対処法を明記
 
-- **Stop フック一本化** vs PostToolUse 逐次同期 → Stop 採用（無駄が少ない）
-- **警告のみ** vs 自動 push → 警告のみ（暴発リスク回避）
-- **sandbox gitignore** vs コミット → gitignore（ユーザー検証物はリポジトリ外）
-- **差分コピー** vs フル再同期 → 差分（初回のみフル）
+---
 
-### 未決事項（ユーザー判断が欲しい箇所）
-
-1. **`deploy/` を Git 管理するか**
-   - (A) 管理する: リリースタグで配布可、レビューで差分追跡可能、ただしリポジトリサイズ増
-   - (B) gitignore: サイズ抑制、ただし "ビルドしないと動かない" 状態
-   - **推奨: (A)** （スナップショットとしての価値）
-
-2. **旧 `dist/` の扱い**
-   - (A) そのまま残す: `npm run build` 用、ncc/pkg 連携を温存
-   - (B) `deploy/` に統合して廃止
-   - **推奨: (A)** （既存 `build-exe.bat` との互換性）
-
-3. **`output.zip` の処分**
-   - 用途不明。削除 or sandbox 退避の判断をユーザーに委ねる
-
-4. **Stop フック遅延許容**
-   - 同期に数百 ms 掛かる → ユーザー体感でどこまで許容するか
-   - 許容できない場合は `PostToolUse` で非同期化する代替案あり
-
-### 想定リスク
+## トレードオフと想定リスク
 
 | リスク | 対策 |
 |--------|------|
-| Stop フックが毎ターン遅延する | 差分ゼロ早期 exit、5秒タイムアウト |
-| 同期中に再度 Stop が呼ばれる | `.deploy-meta.json` の hash で冪等化 |
-| Windows/Unix 間のパス差異 | `path.join` 徹底、改行コード注意 |
-| Hook がサイレント失敗 | 初回実装時に `--verbose` モードでログ出力確認 |
+| ユーザー編集が `.user.bak` で埋まる | 差分コピー時に内容ハッシュが前回の「公式ハッシュ」と一致するファイルのみ上書き、違えば skip（ログに残す）という方針を検討 |
+| `~/.localllm/skills/` が既に存在し別用途で使われていた場合 | install 時に `ls` して確認、既存あれば統合 or 別パス提示 |
+| Stop フックが重くなる | sync-skills はハッシュ一致なら 100ms 未満、src/skills/builtin/ は小さいため許容範囲 |
+| 複数端末で開発する際の skills 不整合 | `~/.localllm/` はローカル、リポジトリにコミットされる `src/skills/builtin/` が source of truth |
 
 ---
 
 ## 参照
 
-- `CLAUDE.md` 「参考資料と成果物を区別し、不要なものをリポジトリに入れない」
-- `feedback_always_push.md` 「実装後は必ず push」
-- `feedback_keep_generate_scripts.md` 「生成スクリプトは残す」
-- Claude Code Hooks 仕様（`Stop` イベント）
+- 前版設計書（初版、本版で完全置き換え）
+- `build-exe.js` / `build-exe.bat` （既存の SEA ビルドパイプライン）
+- `src/skills/skill-loader.ts` （要改修）
+- `feedback_always_push.md` / `feedback_no_workarounds.md`

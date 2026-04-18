@@ -11,12 +11,20 @@ Claude Codeがこのプロジェクトで作業する際のルール。
 - アプリ内のファイルアクセスは絶対パスを使う（相対パス禁止）
 
 ## ワークスペース構成（docs/workspace-separation.md 参照）
-- `src/` — 開発コード。`npm run start` (tsx) で直接実行
-- `dist/` — `npm run build` の tsc 出力（gitignore）
-- `deploy/` — 配布用スナップショット。Stop フックが自動で最新化（Git管理）
-- `sandbox/` — 動作検証用。PPT/Excel/Vision 等の検証スクリプト・成果物はここに置く
+- `src/` — 開発コード。`npm run start` (tsx) で直接実行。Claude はここを直接編集する
+- `dist/` — `npm run build` / `npm run build:exe` の出力（gitignore）
+- `deploy/` — 配布用フォルダ（exe ベース、手動ビルド）。成果物は gitignore、`scripts/deploy-assets/` から組み立てる
+  - 中身: `localllm.exe` + `skills/`(= ビルトイン同梱) + `install.bat` + `install.sh` + `README.md`
+  - 組み立て: `npm run build:deploy`
+- `sandbox/` — 動作検証用。`sandbox/run.bat` / `run.sh` で deploy/localllm.exe を起動
 - ユーザー検証成果物（生成 PPTX/XLSX/JSON/画像等）は必ず `sandbox/` 配下に出力する。リポジトリルートに置かない
-- Stop フック (`scripts/on-stop.js`) が発火時に src 差分同期と未 push コミット警告を行う
+
+## ビルトインスキルと ~/.localllm/skills/
+- ビルトインスキルのソース: `src/skills/builtin/<name>/SKILL.md`
+- スキルローダーは `~/.localllm/skills/` と作業フォルダの `.claude/skills/` / `.localllm/skills/` を見る
+- 開発時は Stop フック (`scripts/on-stop.js`) が `scripts/sync-skills.js` を呼び、`src/skills/builtin/` → `~/.localllm/skills/` を差分同期する
+- Stop フックは未 push コミットがあれば警告（実装後は必ずpushルールの補助）
+- **exe の再ビルドは Stop フックでは行わない**。`npm run build:deploy` を手動で実行
 
 ## デバッグ・テスト作業のルール
 

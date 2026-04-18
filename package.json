@@ -9,7 +9,9 @@
   },
   "scripts": {
     "build": "tsc",
-    "sync:deploy": "node scripts/sync-deploy.js --verbose",
+    "build:exe": "node build-exe.js",
+    "build:deploy": "node scripts/build-deploy.js --verbose",
+    "sync:skills": "node scripts/sync-skills.js --verbose",
     "start": "tsx src/index.ts",
     "setup": "tsx src/index.ts --setup",
     "dev": "tsx watch src/index.ts",

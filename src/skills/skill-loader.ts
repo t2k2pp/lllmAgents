@@ -5,7 +5,10 @@ import type { SkillDefinition } from "./skill-registry.js";
 
 /** Parse skill markdown with YAML frontmatter */
 function parseSkillFile(content: string, filePath: string, builtIn: boolean): SkillDefinition | null {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  // CRLF/BOMを正規化してから frontmatter を抽出する
+  // （Windowsで編集されたSKILL.mdがCRLFでも正しくパースされるように）
+  const normalized = content.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+  const frontmatterMatch = normalized.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!frontmatterMatch) return null;
 
   const frontmatter = frontmatterMatch[1];
@@ -85,34 +88,26 @@ function loadSkillsFromDir(dir: string, builtIn: boolean): SkillDefinition[] {
   return skills;
 }
 
-/** Load all skills from all sources */
+/** Load all skills from all sources
+ *  設計: docs/workspace-separation.md
+ *  - ビルトインとユーザー追加は ~/.localllm/skills/ に同居（install 時に展開）
+ *  - 開発時は scripts/sync-skills.js が src/skills/builtin/ → ~/.localllm/skills/ を同期
+ *  - exe 化後も同じパスを参照するため、selfDir 相対の検索は廃止
+ */
 export function loadAllSkills(): SkillDefinition[] {
   const skills: SkillDefinition[] = [];
 
-  const selfDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"));
-
-  // 1. Source built-in skills (src/skills/builtin/ in dev, dist/skills/builtin/ in prod)
-  //    新しいスキルをソースツリーに追加すれば即座に有効化される
-  const srcBuiltinDir = path.join(selfDir, "builtin");
-  skills.push(...loadSkillsFromDir(srcBuiltinDir, true));
-
-  // 2. Root built-in skills (builtin/ at project root)
-  //    .skill パッケージとして外部からインストールされたスキルの格納場所
-  //    src/skills/builtin/ と同名のスキルがある場合はこちらが優先される
-  const rootBuiltinDir = path.join(selfDir, "..", "..", "builtin");
-  skills.push(...loadSkillsFromDir(rootBuiltinDir, true));
-
-  // 3. User-global skills (~/.localllm/skills/)
+  // 1. ~/.localllm/skills/ — ビルトイン＋ユーザー同居
   const userSkillsDir = path.join(os.homedir(), ".localllm", "skills");
-  skills.push(...loadSkillsFromDir(userSkillsDir, false));
+  skills.push(...loadSkillsFromDir(userSkillsDir, true));
 
-  // 4. Project skills (.claude/skills/ in CWD)
-  const projectSkillsDir = path.join(process.cwd(), ".claude", "skills");
-  skills.push(...loadSkillsFromDir(projectSkillsDir, false));
+  // 2. CWD .claude/skills/ — プロジェクト拡張（Claude Code プラグイン互換）
+  const projectClaudeSkillsDir = path.join(process.cwd(), ".claude", "skills");
+  skills.push(...loadSkillsFromDir(projectClaudeSkillsDir, false));
 
-  // 5. Project skills (.localllm/skills/ in CWD)
-  const localSkillsDir = path.join(process.cwd(), ".localllm", "skills");
-  skills.push(...loadSkillsFromDir(localSkillsDir, false));
+  // 3. CWD .localllm/skills/ — プロジェクト拡張（アプリ独自）
+  const projectLocalSkillsDir = path.join(process.cwd(), ".localllm", "skills");
+  skills.push(...loadSkillsFromDir(projectLocalSkillsDir, false));
 
   return skills;
 }
