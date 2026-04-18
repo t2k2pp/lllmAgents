@@ -246,7 +246,7 @@ export class InteractiveInput {
           }
         }
 
-        if (items.length > 0 && items.length <= 50) {
+        if (items.length > 0) {
           menuItems = items;
           selectedIndex = 0;
           menuVisible = true;
@@ -367,6 +367,11 @@ export class InteractiveInput {
 
         const totalToVisit = Math.max(newMenuLineCount, renderedMenuLines);
 
+        // ターミナル幅を超えると自動折り返しで描画が崩れるため、
+        // 1行分の最大表示幅を算出して label/description を切り詰める。
+        const columns = process.stdout.columns || 80;
+        const maxLineWidth = Math.max(10, columns - 1);
+
         for (let i = 0; i < totalToVisit; i++) {
           // 1行下へ移動
           if (i < renderedMenuLines) {
@@ -382,17 +387,24 @@ export class InteractiveInput {
           if (i < maxVisible) {
             const idx = startIdx + i;
             const item = menuItems[idx];
+            const isSelected = idx === selectedIndex;
 
-            if (idx === selectedIndex) {
-              stdout.write(`  ${chalk.bgBlue.white(` ${item.label} `)}`);
-              if (item.description) {
-                stdout.write(chalk.dim(` ${item.description}`));
-              }
+            // マージン幅: 選択時 "  " + label両端スペース2 = 4、非選択時 "   " + label末尾スペース1 = 4
+            const marginW = 4;
+            const labelTruncated = truncateToWidth(item.label, Math.max(1, maxLineWidth - marginW));
+            const labelTruncatedW = getDisplayWidth(labelTruncated);
+            const descBudget = maxLineWidth - marginW - labelTruncatedW - 1;
+            const descText = item.description
+              ? truncateToWidth(item.description, Math.max(0, descBudget))
+              : "";
+
+            if (isSelected) {
+              stdout.write(`  ${chalk.bgBlue.white(` ${labelTruncated} `)}`);
             } else {
-              stdout.write(chalk.dim(`   ${item.label} `));
-              if (item.description) {
-                stdout.write(chalk.dim(` ${item.description}`));
-              }
+              stdout.write(chalk.dim(`   ${labelTruncated} `));
+            }
+            if (descText) {
+              stdout.write(chalk.dim(` ${descText}`));
             }
           } else if (i === maxVisible && hasScroll) {
             stdout.write(chalk.dim(`  ↕ ${selectedIndex + 1}/${menuItems.length}`));
@@ -785,4 +797,22 @@ export function getDisplayWidth(str: string): number {
     width += isFullwidthCodePoint(code) ? 2 : 1;
   }
   return width;
+}
+
+/**
+ * 表示幅でstrを切り詰める。maxCols を超える場合は末尾に "…" を付けて返す。
+ * メニュー行がターミナル幅を超えて折り返すと描画が崩れるため使用。
+ */
+function truncateToWidth(str: string, maxCols: number): string {
+  if (maxCols <= 0) return "";
+  if (getDisplayWidth(str) <= maxCols) return str;
+  let w = 0;
+  let out = "";
+  for (const ch of str) {
+    const cw = getDisplayWidth(ch);
+    if (w + cw + 1 > maxCols) break; // "…"の1カラム分を確保
+    out += ch;
+    w += cw;
+  }
+  return out + "…";
 }
