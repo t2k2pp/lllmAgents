@@ -94,6 +94,10 @@ export class InteractiveInput {
 
       stdin.setRawMode(true);
       stdin.resume();
+      // ブラケット貼り付けモードを有効化（モダンターミナル: Windows Terminal/iTerm2/kitty/mintty等）
+      // マルチライン貼り付け時、端末は \x1b[200~ ... \x1b[201~ で内容を囲む。
+      // これによりペースト内の \r を Enter と誤認せず改行として取り込める。
+      stdout.write("\x1b[?2004h");
 
       // ─── 状態 ──────────────────────────────────
 
@@ -107,6 +111,14 @@ export class InteractiveInput {
       /** カーソルが現在いるターミナル行 (入力行0からの相対) */
       let cursorTermRow = 0;
       let savedHistoryBuffer = "";
+      /** ブラケット貼り付け中フラグ */
+      let inPaste = false;
+      /** 貼り付け中に蓄積される文字（終了マーカー受信時に一括で buffer に反映） */
+      let pasteAccumulated = "";
+      /** 直前キーイベントの時刻（ms） — ブラケット貼り付け非対応端末向けのフォールバック */
+      let lastKeyTimeMs = 0;
+      /** 連続キー検出閾値 — これ未満の間隔で届いた \r は貼り付けとみなし改行として扱う */
+      const FAST_PASTE_DELTA_MS = 10;
 
       const prefixLen = getDisplayWidth(stripAnsi(prefix));
       // 継続行のプレフィックス（プロンプトと同じ幅のスペース）
@@ -444,6 +456,8 @@ export class InteractiveInput {
 
       const cleanup = (): void => {
         clearMenuDisplay();
+        // ブラケット貼り付けモードを無効化
+        stdout.write("\x1b[?2004l");
         if (stdin.isTTY) {
           stdin.setRawMode(false);
         }
@@ -488,6 +502,42 @@ export class InteractiveInput {
       ): void => {
         if (!key) return;
 
+        // ── ブラケット貼り付け: 開始マーカー ──
+        if (key.sequence === "\x1b[200~") {
+          inPaste = true;
+          pasteAccumulated = "";
+          return;
+        }
+        // ── ブラケット貼り付け: 終了マーカー ──
+        if (key.sequence === "\x1b[201~") {
+          inPaste = false;
+          if (pasteAccumulated.length > 0) {
+            if (menuVisible) dismissMenu();
+            buffer = buffer.slice(0, cursorPos) + pasteAccumulated + buffer.slice(cursorPos);
+            cursorPos += pasteAccumulated.length;
+            pasteAccumulated = "";
+            renderInput();
+          }
+          return;
+        }
+        // ── ブラケット貼り付け中: 内容を蓄積 (\r/\n を改行に正規化) ──
+        if (inPaste) {
+          if (key.name === "return" || key.name === "enter") {
+            pasteAccumulated += "\n";
+          } else if (_ch) {
+            pasteAccumulated += _ch;
+          } else if (key.sequence) {
+            pasteAccumulated += key.sequence;
+          }
+          return;
+        }
+
+        // ── 連続キー時刻を更新（ブラケット貼り付け非対応端末向けフォールバック判定用） ──
+        const now = Date.now();
+        const keyDelta = lastKeyTimeMs === 0 ? Infinity : now - lastKeyTimeMs;
+        lastKeyTimeMs = now;
+        const isPasteBurst = keyDelta < FAST_PASTE_DELTA_MS;
+
         // ── Ctrl+C ──
         if (key.ctrl && key.name === "c") {
           cleanup();
@@ -524,6 +574,15 @@ export class InteractiveInput {
 
         // ── Enter ──
         if (key.name === "return") {
+          // フォールバック: ブラケット貼り付け非対応端末で貼り付けの \r が届いた場合、
+          // 直前のキーとの間隔が極端に短い (< FAST_PASTE_DELTA_MS) なら改行として扱う
+          if (isPasteBurst && !key.shift) {
+            if (menuVisible) dismissMenu();
+            buffer = buffer.slice(0, cursorPos) + "\n" + buffer.slice(cursorPos);
+            cursorPos++;
+            renderInput();
+            return;
+          }
           if (menuVisible && menuItems.length > 0) {
             const selectedValue = menuItems[selectedIndex].value;
             selectItem();
