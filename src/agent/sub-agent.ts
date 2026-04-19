@@ -7,6 +7,7 @@ import { collectResponse } from "../providers/base-provider.js";
 import { AgentDefinitionLoader } from "../agents/agent-loader.js";
 import type { AgentDefinition } from "../agents/agent-loader.js";
 import * as logger from "../utils/logger.js";
+import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
 
 const MAX_SUB_ITERATIONS = 30;
 
@@ -216,6 +217,8 @@ export class SubAgent {
     let finalResult = "";
 
     let codeBlockRetried = false;
+    let continuationAttempts = 0;
+    const MAX_CONTINUATION_ATTEMPTS = 3;
     for (let iteration = 0; iteration < maxTurns; iteration++) {
       try {
         const defs = this.filteredRegistry.getDefinitions();
@@ -248,6 +251,19 @@ export class SubAgent {
         }
 
         // Final response - no tool calls
+        // 構造的に不完全（未閉じコードブロック/テーブル/単語途中終端）なら継続要求
+        // メインエージェントと同じ補正: vLLM の finish_reason='stop' 誤報に対する I/O 境界補正
+        if (continuationAttempts < MAX_CONTINUATION_ATTEMPTS) {
+          const structural = isStructurallyIncomplete(response.content);
+          if (structural.incomplete) {
+            continuationAttempts++;
+            logger.debug(`SubAgent: continuation requested (${structural.reason})`);
+            this.history.addAssistantMessage(response.content);
+            this.history.addUserMessage("続きを出力してください。途中から再開してください。");
+            continue;
+          }
+        }
+
         // コードブロックをテキストで返した場合のリプロンプト（file_write未使用検出）
         if (!codeBlockRetried && hasLargeCodeBlock(response.content)) {
           codeBlockRetried = true;

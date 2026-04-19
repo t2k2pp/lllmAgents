@@ -23,6 +23,7 @@ import { PlanManager } from "./plan-mode.js";
 import type { SamplingParams } from "../config/types.js";
 import * as logger from "../utils/logger.js";
 import { LLMLogger } from "./llm-logger.js";
+import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
 import { getFirstUseGuide } from "./tool-guides.js";
 import { IntentClassifier } from "./intent-classifier.js";
@@ -535,16 +536,14 @@ export class AgentLoop {
 
       // finish_reason="length": max_tokensに達して出力が途中で切れた場合、自動的に続きを生成する
       // 安全ネット: vLLMがfinish_reason="stop"を誤って返す場合に備え、
-      // テキストが行の途中で切れている（最終行が不完全）場合も自動継続する
+      // 構造的に不完全（未閉じコードブロック/テーブル、単語途中終端など）を検出して自動継続する
       const isTruncatedByLength = finishReason === "length" && textContent.trim().length > 0;
-      const isTruncatedText = toolCalls.length === 0 && textContent.trim().length > 0 &&
-        !textContent.trimEnd().endsWith("\n") &&
-        !textContent.trimEnd().endsWith("。") &&
-        !textContent.trimEnd().endsWith("）") &&
-        !textContent.trimEnd().endsWith("```") &&
-        /\[x$|\[[  ]$|[-*]\s*\[/.test(textContent.slice(-10));
-      if (isTruncatedByLength || isTruncatedText) {
-        const reason = isTruncatedByLength ? "max_tokens到達" : "テキスト途中切れ検出";
+      const structural = toolCalls.length === 0 && textContent.trim().length > 0
+        ? isStructurallyIncomplete(textContent)
+        : { incomplete: false as const };
+      if (isTruncatedByLength || structural.incomplete) {
+        const structReason = "reason" in structural ? structural.reason : undefined;
+        const reason = isTruncatedByLength ? "max_tokens到達" : `構造的不完全: ${structReason}`;
         console.log(chalk.dim(`\n  (${reason}のため、続きを生成します...)`));
         this.history.addAssistantMessage(textContent, toolCalls.length > 0 ? toolCalls : undefined);
         this.history.addUserMessage("続きを出力してください。途中から再開してください。");
