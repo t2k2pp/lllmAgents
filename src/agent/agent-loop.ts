@@ -50,6 +50,24 @@ const MAX_TOOL_ITERATIONS = 50;
 const MAX_CONNECTION_RETRIES = 3;
 
 /**
+ * 自己点検メッセージの整形。
+ *
+ * 「偽ユーザー発言」として詰めるのではなく、
+ * `[自己点検 N/M]` マーカーで**ハーネス通知であることを明示**してLLMに自問自答を促す。
+ * LLMは response_complete を呼ぶか、必要なツールを呼ぶかを選ぶ。
+ */
+function formatSelfCheck(round: number, max: number, userIntent: string, concern: string): string {
+  const intent = userIntent.length > 200 ? userIntent.slice(0, 200) + "..." : userIntent;
+  return (
+    `[自己点検 ${round}/${max}] 今の応答を確認してください:\n` +
+    `  ・ユーザーの依頼「${intent}」に応えていますか？\n` +
+    `  ・${concern}\n` +
+    `  ・追加作業が不要なら response_complete ツールを呼んでください\n` +
+    `  ・作業が残っているなら該当ツールを呼んでください`
+  );
+}
+
+/**
  * モデルのアーティファクト/ガベージ出力を検出する。
  * `<12000:` のようなトークンID漏れや [TOOL_CALLS] 形式のネイティブツール呼び出し形式など。
  */
@@ -201,8 +219,6 @@ export class AgentLoop {
     let emptyResponseRetries = 0;
     const MAX_EMPTY_RETRIES = 3;
     let codeBlockRetried = false;
-    let consecutiveTextOnly = 0; // ツール未呼び出しテキスト応答の連続回数
-    const MAX_TEXT_ONLY_RETRIES = 5;
     let hasExecutedTools = false; // この run() 内でツールを1回でも実行したか
     /** 直前のツール呼び出しシグネチャ（反復検出用） */
     let lastToolSignature = "";
@@ -211,12 +227,13 @@ export class AgentLoop {
     let pendingVerification: string[] = [];
     /** Evaluatorレビュー待ちファイルのリスト（コード+ドキュメント両方） */
     let pendingEvalFiles: string[] = [];
-    /** 検証再プロンプトの回数（安全弁） */
-    let verificationRetries = 0;
-    const MAX_VERIFICATION_RETRIES = 3;
-    /** Evaluatorレビューの回数（安全弁） */
-    let evaluatorRetries = 0;
-    const MAX_EVALUATOR_RETRIES = 2;
+    /**
+     * 自己点検の累積回数（統合カウンタ）。
+     * verification, evaluator, text-only, code-block の4種類の懸念すべてで共有する。
+     * 上限到達で追加の自己点検注入は停止しターン終了。
+     */
+    let selfCheckRounds = 0;
+    const MAX_SELF_CHECK_ROUNDS = 3;
     const MAX_REPEAT_TOOL = 3; // 同じツール呼び出しがN回連続で失敗したら中断
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
@@ -548,7 +565,6 @@ export class AgentLoop {
 
       // Tool calls: execute (parallel when multiple) and continue
       if (toolCalls.length > 0) {
-        consecutiveTextOnly = 0; // ツール呼び出し成功でリセット
         hasExecutedTools = true;
 
         // 同じツール呼び出しの反復検出
@@ -631,8 +647,21 @@ export class AgentLoop {
           } else if (toolName === "bash") {
             // bash実行 = コード検証が行われたとみなしてクリア
             pendingVerification = [];
-            verificationRetries = 0;
           }
+        }
+
+        // response_complete が呼ばれたらターン終了（自己点検ループから明示的に抜ける）
+        const rcCall = toolCalls.find(tc => tc.function.name === "response_complete");
+        if (rcCall) {
+          let summary = "";
+          try {
+            const args = JSON.parse(rcCall.function.arguments ?? "{}");
+            summary = (args.summary as string) ?? "";
+          } catch { /* ignore */ }
+          if (summary.length > 0) {
+            console.log("\n" + chalk.dim(`  [response_complete] ${summary}`));
+          }
+          return;
         }
 
         continue;
@@ -647,33 +676,32 @@ export class AgentLoop {
 
       // 検証未実施チェック: コードファイルを書いた後にbashを呼ばずにテキスト応答した場合
       if (toolCalls.length === 0 && pendingVerification.length > 0 &&
-          verificationRetries < MAX_VERIFICATION_RETRIES &&
+          selfCheckRounds < MAX_SELF_CHECK_ROUNDS &&
           !this.planManager?.isInPlanMode()) {
-        verificationRetries++;
-        const fileList = pendingVerification.map(f => `  - ${f}`).join("\n");
-        console.log(chalk.dim(`  (検証未実施 - 変更ファイルの動作確認を要求 ${verificationRetries}/${MAX_VERIFICATION_RETRIES})`));
+        selfCheckRounds++;
+        const fileList = pendingVerification.map(f => `    - ${f}`).join("\n");
+        console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] 検証未実施`));
         this.history.addAssistantMessage(textContent);
         this.history.addUserMessage(
-          `以下のファイルを作成/変更しましたが、動作確認が完了していません:\n${fileList}\n\n` +
-          "bashで適切な検証コマンドを実行してください:\n" +
-          "- .ts/.js: node --check <file>\n" +
-          "- .py: python -m py_compile <file>\n" +
-          "- ビルドプロジェクト: 該当するbuild/test/lintコマンド\n" +
-          "注意: GUIアプリ(pygame等)は構文チェックのみ。python <file> で起動しないこと（タイムアウトします）。\n\n" +
-          "検証が成功したら結果を報告してください。問題があれば修正してください。"
+          formatSelfCheck(
+            selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
+            `以下のファイルの動作確認が未完了です:\n${fileList}\n` +
+            `    bash で検証コマンドを実行してください（.ts/.js: node --check, .py: python -m py_compile, プロジェクト全体: build/test/lint）。\n` +
+            `    注意: GUIアプリ(pygame等)は構文チェックのみ。直接起動するとタイムアウト。`
+          )
         );
         continue;
       }
-      // 検証リトライ上限到達: ユーザーに報告してクリア（以降は通常フローへ）
+      // 検証リトライ上限到達: クリアして通常フローへ
       if (toolCalls.length === 0 && pendingVerification.length > 0 &&
-          verificationRetries >= MAX_VERIFICATION_RETRIES) {
-        console.log(chalk.yellow(`\n  検証を${MAX_VERIFICATION_RETRIES}回要求しましたが実行されませんでした。`));
+          selfCheckRounds >= MAX_SELF_CHECK_ROUNDS) {
+        console.log(chalk.yellow(`\n  自己点検を${MAX_SELF_CHECK_ROUNDS}回要求しましたが完了しませんでした。`));
         pendingVerification = [];
       }
 
       // Evaluatorレビュー: ファイル書き込み後の完了時に自動レビュー（コード+ドキュメント両方）
       if (toolCalls.length === 0 && pendingEvalFiles.length > 0 &&
-          evaluatorRetries < MAX_EVALUATOR_RETRIES &&
+          selfCheckRounds < MAX_SELF_CHECK_ROUNDS &&
           textContent.trim().length > 0 &&
           !this.planManager?.isInPlanMode()) {
         const result = await this.evaluator.evaluate({
@@ -682,19 +710,23 @@ export class AgentLoop {
           assistantResponse: textContent,
         });
         if (!result.passed) {
-          evaluatorRetries++;
+          selfCheckRounds++;
           const feedback = Evaluator.formatForInjection(result);
+          console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`));
           this.history.addAssistantMessage(textContent);
-          this.history.addUserMessage(feedback);
+          this.history.addUserMessage(
+            formatSelfCheck(
+              selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
+              `Evaluatorから以下の指摘があります:\n${feedback}`
+            )
+          );
           continue;
         }
         // 合格 → クリアして通常フローへ
         pendingEvalFiles = [];
-        evaluatorRetries = 0;
       }
-      // Evaluatorリトライ上限到達: クリアして通常フローへ
-      if (pendingEvalFiles.length > 0 && evaluatorRetries >= MAX_EVALUATOR_RETRIES) {
-        console.log(chalk.yellow(`\n  Evaluatorレビューを${MAX_EVALUATOR_RETRIES}回実施しましたが改善されませんでした。`));
+      // 自己点検上限到達: Evaluatorもクリアして通常フローへ
+      if (pendingEvalFiles.length > 0 && selfCheckRounds >= MAX_SELF_CHECK_ROUNDS) {
         pendingEvalFiles = [];
       }
 
@@ -718,49 +750,38 @@ export class AgentLoop {
       }
 
       if (shouldReprompt && isTask && !isCompleted) {
-        consecutiveTextOnly++;
-
-        if (consecutiveTextOnly >= MAX_TEXT_ONLY_RETRIES) {
-          // 限界到達: ユーザーに報告して中断
-          console.log(chalk.yellow("\n  モデルがツール呼び出しを行えません。プロンプトを変えて再度お試しください。"));
+        if (selfCheckRounds >= MAX_SELF_CHECK_ROUNDS) {
+          // 上限到達: ユーザーに報告して中断
+          console.log(chalk.yellow(`\n  自己点検を${MAX_SELF_CHECK_ROUNDS}回実施しましたが response_complete が呼ばれませんでした。`));
           this.history.addAssistantMessage(textContent);
           return;
         }
 
-        // ユーザーの元の意図を保持したリプロンプト
-        const intentReminder = userMessageText.length > 200
-          ? userMessageText.slice(0, 200) + "..."
-          : userMessageText;
-
-        if (consecutiveTextOnly >= 3) {
-          // 3回以上: 前回の応答を履歴に入れず、強いリプロンプト
-          console.log(chalk.dim(`  (テキストのみ応答 ${consecutiveTextOnly}回目 - 前回応答を破棄して再試行)`));
-          this.history.addUserMessage(
-            `ユーザーの元の依頼: 「${intentReminder}」\n` +
-            "この依頼に対してテキストで説明する必要はありません。" +
-            "依頼を達成するために必要なツールを呼び出してください。"
-          );
-        } else {
-          // 1-2回目: 通常のリプロンプト
-          this.history.addAssistantMessage(textContent);
-          this.history.addUserMessage(
-            `ユーザーの元の依頼: 「${intentReminder}」\n` +
-            "この依頼を達成するためにツールを呼び出してください。" +
-            "説明は不要です。最初のアクションとしてツールを実行してください。"
-          );
-        }
+        selfCheckRounds++;
+        console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ツール未呼び出し`));
+        this.history.addAssistantMessage(textContent);
+        this.history.addUserMessage(
+          formatSelfCheck(
+            selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
+            `テキスト応答のみでツール呼び出しがありません。依頼の遂行に必要なツール（file_write, bash, 等）を実行してください。`
+          )
+        );
         continue;
       }
 
       // コードブロックをテキスト返した場合のリプロンプト（file_write未使用検出）
-      if (toolCalls.length === 0 && !codeBlockRetried && hasLargeCodeBlock(textContent)) {
+      if (toolCalls.length === 0 && !codeBlockRetried && hasLargeCodeBlock(textContent) &&
+          selfCheckRounds < MAX_SELF_CHECK_ROUNDS) {
         codeBlockRetried = true;
-        console.log(chalk.yellow("\n  コードがテキストで返されました。file_writeツールを使って実際にファイルを作成します..."));
+        selfCheckRounds++;
+        console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] コードがテキスト応答に含まれています`));
         this.history.addAssistantMessage(textContent);
         this.history.addUserMessage(
-          "コードをテキストで返しましたが、実際にファイルを作成してください。" +
-          "file_writeツールを呼び出して、指定されたパスにファイルを保存してください。" +
-          "コードをチャットに書くのではなく、必ずfile_writeツールを使用してください。"
+          formatSelfCheck(
+            selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
+            `コードをテキストで返しましたが、実際のファイル作成には file_write ツールが必要です。` +
+            `意図したパスにファイルを保存する場合は file_write を呼んでください。`
+          )
         );
         continue;
       }
@@ -861,9 +882,13 @@ export class AgentLoop {
     // 確認が必要なツールではスピナーを一時停止してから execute する。
     // execute 内部で permission check → inquirer prompt が走るため、
     // スピナーが stdout を専有していると入力が見えなくなる。
-    const needsApproval = this.permissions.getPermissionLevel(toolCall.function.name) === "ask"
+    // ask_user / exit_plan_mode は INHERENTLY_SAFE で permission ask されないが
+    // ツール内部で inquirer prompt を出すため同じく停止が必要。
+    const toolName = toolCall.function.name;
+    const isInteractiveTool = toolName === "ask_user" || toolName === "exit_plan_mode";
+    const needsApproval = this.permissions.getPermissionLevel(toolName) === "ask"
       && this.currentSource === "cli";
-    if (needsApproval) {
+    if (needsApproval || (isInteractiveTool && this.currentSource === "cli")) {
       spinner.stop();
     }
     const result = await this.toolExecutor.execute(toolCall, this.currentSource);

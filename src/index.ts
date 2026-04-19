@@ -32,6 +32,7 @@ import { skillTool, setSkillRegistry, setSkillPermissionManager, setSkillSubAgen
 import { secondLLMConsultTool, secondLLMAgentTool, setSecondLLMManager } from "./tools/definitions/second-llm.js";
 import { knowledgeSaveTool, setObsidianConfig } from "./tools/definitions/knowledge-save.js";
 import { knowledgeSearchTool } from "./tools/definitions/knowledge-search.js";
+import { responseCompleteTool } from "./tools/definitions/response-complete.js";
 
 import { displayWelcome } from "./cli/renderer.js";
 import { REPL } from "./cli/repl.js";
@@ -101,6 +102,7 @@ async function main(): Promise<void> {
   // Interactive tools
   toolRegistry.register(todoWriteTool);
   toolRegistry.register(askUserTool);
+  toolRegistry.register(responseCompleteTool);
 
   // Plan mode tools
   toolRegistry.register(enterPlanModeTool);

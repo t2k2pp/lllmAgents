@@ -290,3 +290,161 @@ Exports: class Board { constructor(width, height), addPiece(piece), clearLines()
 | **Phase 4** | D2: file_write結果のインターフェース要約 | ファイル間整合性向上 | 中 |
 | **Phase 4** | D1: 設計書のコンテキスト常駐 | 設計との整合性向上 | 中 |
 | **Phase 5** | D3: ツール結果の経年劣化圧縮 | コンテキスト効率化 | 大 |
+
+---
+
+## Phase 6: スコープ越境とループ対策 (2026-04-19 追記)
+
+### 契機となった事故
+
+**セッション**: `Issue_実行ログ.txt` (2026-04-19)
+
+**経緯**:
+1. ユーザーが `@output/flutter/saleslogger/PriceLoggerApp.html` を添付し「Flutter（Android）向けに作成してほしい」と明示スコープを与えた
+2. LLMは添付済みファイルを **再 file_read**（無確認・autoApprove済み）
+3. `enter_plan_mode` 突入
+4. `bash $ ls -R C:\...\lllmAgents\sandbox` を「bashをセッション中常に許可」で承認
+5. 約1200行のファイル一覧（大半がタスク無関係なminecraftスクリーンショット等）がコンテキストに投入
+6. さらに類似スキャンを繰り返し、ユーザーがCTRL+Cで強制中断
+
+**ユーザーからの指摘（本質）**:
+- ① カレントフォルダ配下以外を参照するbashは、session-allowでも確認を挟むべき
+- ② ハーネスの「自動リプロンプト」が **ユーザーが言ってもないセリフを history に注入** し、LLMに「ユーザーが不満を言っている」誤解を与えて自己批判ループを誘発している
+
+### 問題5: bash権限の粒度がCWDスコープに沿っていない
+
+現在 `checkAutorunPermission()` は `AUTORUN_DESTRUCTIVE_PATTERNS`（`rm` `rmdir` `dd` 等）のみチェック。
+非破壊であれば sandbox 内のどこでも読める。結果:
+
+- `ls -R sandbox全体` のような**コンテキスト爆撃級**のスキャンがフリーパス
+- sandbox は広い（sandbox/output/games/minecraft2d/*.png 等が無関係に混入）
+- ユーザーが期待するスコープは「タスクで触るCWDとその配下」であり、sandbox ≠ タスクスコープ
+
+### 問題6: 自動リプロンプトが「偽ユーザーメッセージ」として注入されている
+
+`agent-loop.ts` で LLM応答後に `history.addUserMessage(...)` で user ロールのメッセージを注入する箇所が5つ存在する:
+
+| 箇所 | 注入内容 |
+|---|---|
+| L656 verification retry | "動作確認が完了していません。bashで検証コマンドを実行してください" |
+| L686 Evaluator review | "critical問題があります、修正してください" |
+| L738 textOnly reprompt (3回目〜) | "テキストで説明する必要はありません。ツールを呼び出してください" |
+| L746 textOnly reprompt (1-2回目) | "説明は不要です。最初のアクションとしてツールを実行してください" |
+| L760 codeBlock retry | "実際にファイルを作成してください。file_writeを使ってください" |
+
+これらは**ローカルLLMに粘り強く思考させる**ための仕組みとして設計されたもので、削除はできない（弱モデル補助のため必要）。
+問題は **ユーザー発話として混ぜている** 点。LLMから見ると「今後気を付けますと言ったのに、ユーザーがさらに詰めてきた」状況に見え:
+
+- 元のタスクスコープを見失い、焦って雑なツール呼び出しをする
+- 履歴内で真のユーザー意図が偽の苛立ちに埋もれる
+- 自己批判ループに入り、類似ツールを繰り返し呼び出す（上記事故のリピート行動）
+
+---
+
+## 設計
+
+### E1. CWD外bashの確認必須化 (問題5対応)
+
+**方針**: `checkAutorunPermission()` の bash 判定に **CWD スコープチェック** を追加する。
+
+**実装**:
+```typescript
+// permission-manager.ts: checkAutorunPermission() のbash分岐
+if (toolName === "bash") {
+  const command = (params.command as string) ?? "";
+  if (AUTORUN_DESTRUCTIVE_PATTERNS.some((p) => p.test(command))) return null;
+  const dangerousRule = checkCommand(command);
+  if (dangerousRule?.action === "block") {
+    return { allowed: false, reason: dangerousRule.message };
+  }
+  // 【追加】コマンド本文に CWD 外のパスが含まれるか検査
+  if (referencesOutsideCwd(command, this.cwd)) {
+    return null; // 通常確認フローへフォールバック
+  }
+  return { allowed: true };
+}
+```
+
+**`referencesOutsideCwd()` の判定**:
+- コマンド文字列から絶対パス・`..` 含みパスを抽出
+- 抽出したパスを `path.resolve(cwd, ...)` で解決し、CWD 配下か確認
+- 再帰スキャン系（`ls -R`, `find`, `tree -R`）は CWD 配下でも出力量が爆発するため別途 warning
+- 対象外（CWDのみ言及 or 相対パスで配下のみ）→ 自動承認
+
+**セッション許可の粒度変更**（副次）:
+- 現在: 「bash をセッション中常に許可」で全bashがフリー
+- 将来: `bash:cwd-only` と `bash:any-path` を分離し、「bash:cwd-only をセッション中常に許可」を提供
+
+### E2. 自己点検フェーズと `response_complete` ツール (問題6対応)
+
+**方針**: 「偽ユーザーメッセージで詰める」をやめ、「**自己点検メッセージ**として明示し、LLM側に `response_complete` ツールで完了宣言させる」設計に切り替える。
+
+**新規ツール `response_complete`**:
+```typescript
+{
+  name: "response_complete",
+  description: "ユーザーの依頼を完了した、または追加作業が不要と判断した場合に必ず呼ぶ。このツールを呼ぶまでハーネスは自己点検を要求する。",
+  parameters: {
+    summary: { type: "string", description: "今回のターンで行った作業の要約" }
+  }
+}
+```
+
+**自己点検メッセージの形（例）**:
+```
+[自己点検 N/3] 今の応答を確認してください:
+  ・ユーザーの依頼「<元の依頼>」に応えていますか？
+  ・必要なツール（file_write、検証コマンド等）は全て実行しましたか？
+  ・追加作業が不要なら response_complete ツールを呼んでください
+  ・作業が残っているなら該当ツールを呼んでください
+```
+
+**重要な設計決定**:
+- **role は `user` 維持**（ChatMLモデル互換性のため）だが、本文先頭に `[自己点検 N/3]` マーカーで**明示的に識別可能**に
+- ユーザーが実際に発した文字列は混ぜない（偽装の排除）
+- ハーネス通知であることをLLMが認識できるため、「詰められている」誤解が消える
+
+**既存5箇所のリプロンプトを統合**:
+現状の5つの個別リプロンプトは、以下の共通パターンに統合できる:
+
+```
+[自己点検 N/3] <具体的な懸念>。
+response_complete で完了宣言するか、必要なツールを呼んでください。
+```
+
+| 旧リプロンプト | 新・自己点検の具体的懸念 |
+|---|---|
+| verification retry | "以下のファイルの動作確認が未完了です: <list>。node --check 等で検証してください" |
+| Evaluator review | Evaluator出力を「第三者レビューから以下の指摘があります」として提示 |
+| textOnly reprompt | "テキスト応答のみでツール呼び出しがありません。ユーザー依頼の遂行に必要なツールを実行してください" |
+| codeBlock retry | "コードがテキストで返されました。file_writeで保存してください" |
+
+**無限ループ対策**:
+- `MAX_SELF_CHECK_ROUNDS = 3` で打ち止め
+- 自己点検メッセージに **残回数を明示** (`[自己点検 2/3]`) → LLMが「あと1回で打ち切り」を把握しサボりにくい
+- 上限到達時: ユーザーに「3回の自己点検で response_complete が呼ばれませんでした」と報告し turn 終了
+- 既存 `MAX_TEXT_ONLY_RETRIES` 等のカウンタは廃止し、`selfCheckRounds` 1本に統一
+
+**自己点検のスキップ条件**:
+- `plan mode` 中はユーザー承認待ちなので自己点検しない
+- LLMが `response_complete` を呼んだ直後は当然スキップ
+- 会話的入力（挨拶等、`intentClassifier` が "task" と判定しないもの）はスキップ
+
+### E3. 実装順序と依存
+
+E1 と E2 は独立。ただしユーザー体感としては **E2 が最優先**（本質的な行動改善）。
+
+**推奨順序**:
+1. E1 先行（小工数・即効性・事故の直接再発防止）
+2. E2 本体（設計合意後。既存5リプロンプトを段階的に `response_complete` 方式へ移行）
+3. E2 移行完了後、旧リプロンプトの dead code を削除
+
+---
+
+## Phase 6 実装優先度
+
+| Phase | 内容 | 効果 | 工数 |
+|-------|------|------|------|
+| **Phase 6-A** | E1: CWD外bash確認必須化 | スコープ越境事故の直接防止 | 小 |
+| **Phase 6-B** | E2: response_complete ツール新設 + 自己点検メッセージ導入 | 偽ユーザー発言除去、ループ誘発の根本解消 | 中 |
+| **Phase 6-C** | E2: 既存5リプロンプトを自己点検へ段階統合 + 旧コード削除 | ハーネスロジック単純化 | 中 |

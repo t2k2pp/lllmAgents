@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import inquirer from "inquirer";
 import chalk from "chalk";
 import type { SecurityConfig, SecurityRuleConfig } from "../config/types.js";
@@ -20,6 +21,7 @@ const INHERENTLY_SAFE_TOOLS = new Set([
   "task_output",
   "current_datetime",
   "sandbox_info",
+  "response_complete",
 ]);
 
 /**
@@ -32,6 +34,52 @@ const AUTORUN_DESTRUCTIVE_PATTERNS = [
   /\bmkfs\b/, /\bformat\b/, /\bdd\s/,
   />\s*\/dev\//, /\bgit\s+clean\b/, /\bgit\s+reset\s+--hard\b/,
 ];
+
+/**
+ * bashコマンド文字列が CWD 外のパスを参照しているか判定。
+ * 絶対パス（Windows/Unix）や ../ を含むパスを抽出し、cwd 配下以外を指していれば true。
+ */
+function referencesOutsideCwd(command: string, cwd: string): boolean {
+  const absoluteWin = /[A-Za-z]:[\\/][^\s'"`|;&<>(){}]+/g;
+  const absoluteUnix = /(?<![\w.\-/])\/[\w.\-/]+/g;
+  const parentRef = /\.\.[\\/][\w.\-/\\]*/g;
+
+  const candidates = [
+    ...(command.match(absoluteWin) ?? []),
+    ...(command.match(absoluteUnix) ?? []),
+    ...(command.match(parentRef) ?? []),
+  ];
+  if (candidates.length === 0) return false;
+
+  const resolvedCwd = path.resolve(cwd).toLowerCase();
+  for (const candidate of candidates) {
+    try {
+      const resolved = path.resolve(cwd, candidate).toLowerCase();
+      if (!resolved.startsWith(resolvedCwd)) return true;
+    } catch {
+      // 解決不能なパスは安全側に倒して true（確認が必要）
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 広域再帰スキャン系コマンドを検出（ls -R / find / tree / dir /s 等）。
+ * これらは CWD 内でも大量出力でコンテキストを汚染するため、session-allow でも確認を挟む。
+ */
+function hasBroadRecursiveScan(command: string): boolean {
+  if (/\bls\b[^|;&\n]*\s-[a-zA-Z]*R/.test(command)) return true;
+  if (/(^|[|;&\s])find\s+[^|;&\n]+/.test(command)) return true;
+  if (/(^|[|;&\s])tree\b/.test(command)) return true;
+  if (/(^|[|;&\s])dir\s+[^|;&\n]*\/s\b/i.test(command)) return true;
+  return false;
+}
+
+/** auto-approve されていても「都度確認」が必要な bash コマンドか判定 */
+function bashNeedsExplicitAsk(command: string, cwd: string): boolean {
+  return referencesOutsideCwd(command, cwd) || hasBroadRecursiveScan(command);
+}
 
 export class PermissionManager {
   private sandbox: Sandbox;
@@ -275,7 +323,18 @@ export class PermissionManager {
           return { allowed: false, reason: `パス ${filePath} はサンドボックス外です` };
         }
       }
-      return { allowed: true };
+      // bash: auto-approve でも CWD 外参照・広域再帰スキャンは確認を挟む
+      if (toolName === "bash") {
+        const command = (params.command as string) ?? "";
+        if (bashNeedsExplicitAsk(command, process.cwd())) {
+          console.log(chalk.dim(`  [CWD外参照または広域スキャンのため auto-approve をバイパスして確認]`));
+          // fall through to ask flow
+        } else {
+          return { allowed: true };
+        }
+      } else {
+        return { allowed: true };
+      }
     }
 
     // Deny
@@ -350,6 +409,10 @@ export class PermissionManager {
       const dangerousRule = checkCommand(command);
       if (dangerousRule?.action === "block") {
         return { allowed: false, reason: dangerousRule.message };
+      }
+      // CWD 外参照 / 広域再帰スキャンは autorun でも確認を挟む
+      if (bashNeedsExplicitAsk(command, process.cwd())) {
+        return null; // 通常フローへフォールバック
       }
       return { allowed: true };
     }
@@ -493,8 +556,12 @@ export class PermissionManager {
         return `取得: ${params.url}`;
       case "web_search":
         return `検索: ${params.query}`;
+      case "second_llm_consult":
+        return `相談:\n${params.prompt}`;
+      case "second_llm_agent":
+        return `委任タスク:\n${params.task}`;
       default:
-        return JSON.stringify(params).slice(0, 120);
+        return JSON.stringify(params, null, 2);
     }
   }
 }
