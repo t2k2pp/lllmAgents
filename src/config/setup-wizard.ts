@@ -112,6 +112,23 @@ export async function runSetupWizard(): Promise<Config> {
     contextWindow: contextWindow || defaultCtx,
   };
 
+  // 5.5 モデル特性説明 (任意)
+  console.log(chalk.dim("\n  モデルの特性を記述しておくと、サブエージェント委任時の判断材料になります。"));
+  console.log(chalk.dim("  例: \"MoE 32B。日本語堅牢で推論・企画に強い。中速\""));
+  console.log(chalk.dim("      \"Dense 13B。高速・コーディング特化・日本語苦手\""));
+  console.log(chalk.dim("  (空のままEnterで後から /model description で設定可)"));
+  const { mainDescription } = await inquirer.prompt<{ mainDescription: string }>([
+    {
+      type: "input",
+      name: "mainDescription",
+      message: "メインLLMの特性説明 (100〜300文字推奨、任意):",
+      default: "",
+    },
+  ]);
+  if (mainDescription.trim()) {
+    config.mainLLM.description = mainDescription.trim();
+  }
+
   // 6. Vision sub-LLM
   const { useVisionLLM } = await inquirer.prompt<{ useVisionLLM: boolean }>([
     {
@@ -134,6 +151,9 @@ export async function runSetupWizard(): Promise<Config> {
   console.log(chalk.green("\n  設定を保存しました。\n"));
   console.log(chalk.dim(`  Model: ${config.mainLLM.model} @ ${config.mainLLM.baseUrl}`));
   console.log(chalk.dim(`  Context: ${formatContextSize(config.mainLLM.contextWindow ?? defaultCtx)}`));
+  if (config.mainLLM.description) {
+    console.log(chalk.dim(`  特性:  ${config.mainLLM.description}`));
+  }
   if (config.visionLLM) {
     console.log(chalk.dim(`  Vision: ${config.visionLLM.model} @ ${config.visionLLM.baseUrl}`));
   }

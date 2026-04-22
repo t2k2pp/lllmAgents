@@ -13,7 +13,7 @@ import type { PermissionManager, RequestSource } from "../security/permission-ma
 import type { HookManager } from "../hooks/hook-manager.js";
 import { MessageHistory } from "./message-history.js";
 import { ContextManager } from "./context-manager.js";
-import { buildSystemPrompt, type SkillInfo } from "./system-prompt.js";
+import { buildSystemPrompt, type SkillInfo, type LLMProfiles } from "./system-prompt.js";
 import {
   createSession,
   saveSession,
@@ -116,6 +116,8 @@ export class AgentLoop {
   private chatLogger: ChatLogger | null = null;
   /** Evaluator（成果物の独立レビュー） */
   private evaluator: Evaluator;
+  /** LLMプロファイル情報（システムプロンプト再構築用。/model description 等の更新時に差し替え可） */
+  private llmProfiles?: LLMProfiles;
 
   constructor(
     private provider: LLMProvider,
@@ -134,12 +136,14 @@ export class AgentLoop {
     samplingParams: SamplingParams = {},
     hasObsidian: boolean = false,
     secondLLMManager: SecondLLMManager | null = null,
+    llmProfiles?: LLMProfiles,
   ) {
     this.streamingDisplay = streamingDisplay;
     this.maxParallelTools = maxParallelTools;
     this.contextWindow = contextWindow;
     this.samplingParams = samplingParams;
-    const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian);
+    this.llmProfiles = llmProfiles;
+    const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian, llmProfiles);
     this.history = new MessageHistory(systemPrompt);
     this.contextManager = new ContextManager(provider, model, contextWindow, compressionThreshold);
     this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager);
@@ -1041,9 +1045,20 @@ export class AgentLoop {
     logger.debug(`Session saved: ${this.session.meta.id}`);
   }
 
+  /**
+   * LLMプロファイル（description等）を差し替えてシステムプロンプトを再構築する。
+   * REPL で /model description / /second description を実行した直後に呼ぶと、
+   * 次ターン以降のLLM呼び出しで新しい特性説明が反映される。
+   */
+  updateLLMProfiles(profiles: LLMProfiles, skills?: SkillInfo[], hasSecondLLM?: boolean, hasObsidian?: boolean): void {
+    this.llmProfiles = profiles;
+    const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian, profiles);
+    this.history.updateSystemPrompt(systemPrompt);
+  }
+
   restoreSession(sessionData: SessionData): void {
     this.session = sessionData;
-    const systemPrompt = buildSystemPrompt();
+    const systemPrompt = buildSystemPrompt(undefined, undefined, undefined, this.llmProfiles);
     this.history = new MessageHistory(systemPrompt);
     for (const msg of sessionData.messages) {
       if (msg.role === "user") {

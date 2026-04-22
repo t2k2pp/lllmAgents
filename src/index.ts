@@ -37,6 +37,7 @@ import { responseCompleteTool } from "./tools/definitions/response-complete.js";
 import { displayWelcome } from "./cli/renderer.js";
 import { REPL } from "./cli/repl.js";
 import { PROVIDER_LABELS } from "./config/types.js";
+import { buildLLMProfiles } from "./agent/llm-profiles.js";
 import { DiscordInteractionServer } from "./discord/interaction-server.js";
 import { CredentialVault } from "./security/credential-vault.js";
 import { getLatestSession } from "./agent/session-manager.js";
@@ -228,6 +229,8 @@ async function main(): Promise<void> {
     ...(config.mainLLM.repetition_penalty !== undefined && { repetition_penalty: config.mainLLM.repetition_penalty }),
   };
 
+  const llmProfiles = buildLLMProfiles(config, hasSecondLLM);
+
   const agent = new AgentLoop(
     provider,
     config.mainLLM.model,
@@ -245,6 +248,7 @@ async function main(): Promise<void> {
     samplingParams,
     !!config.obsidian?.vaultPath,
     secondLLMManager,
+    llmProfiles,
   );
 
   // Plan manager

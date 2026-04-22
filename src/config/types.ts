@@ -17,6 +17,8 @@ export interface LLMEndpoint extends SamplingParams {
   baseUrl: string;
   model: string;
   contextWindow?: number;
+  /** モデル特性の自由記述 (100〜300文字程度)。サブ/セカンドエージェント選択の判断材料としてシステムプロンプトに注入される */
+  description?: string;
 }
 
 export interface SecondLLMEndpoint {
@@ -32,6 +34,8 @@ export interface SecondLLMEndpoint {
   endpoint?: string;
   apiKey?: string;
   deploymentName?: string;
+  /** モデル特性の自由記述 (100〜300文字程度) */
+  description?: string;
 }
 
 export interface BudgetConfig {

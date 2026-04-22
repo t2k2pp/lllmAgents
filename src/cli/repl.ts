@@ -31,6 +31,7 @@ import { select } from "@inquirer/prompts";
 import { saveConfig } from "../config/config-manager.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
+import { buildLLMProfiles } from "../agent/llm-profiles.js";
 
 export class REPL {
   private input: InteractiveInput;
@@ -205,6 +206,20 @@ export class REPL {
       console.log(chalk.red(`  ❌ Interaction Server の起動に失敗しました: ${e}`));
       this.interactionServer = null;
     }
+  }
+
+  /**
+   * LLMプロファイル (main/second の description・baseUrl等) を Config から再構築し、
+   * AgentLoop のシステムプロンプトを差し替える。
+   * /model description, /second description 等、profile に影響する設定を変更した直後に呼ぶ。
+   */
+  private refreshLLMProfiles(): void {
+    const hasSecondLLM = this.secondLLMManager?.isAvailable() ?? false;
+    const profiles = buildLLMProfiles(this.config, hasSecondLLM);
+    const skillInfos = this.skillRegistry
+      ? this.skillRegistry.list().map((s) => ({ name: s.name, trigger: s.trigger, description: s.description }))
+      : undefined;
+    this.agent.updateLLMProfiles(profiles, skillInfos, hasSecondLLM, !!this.config.obsidian?.vaultPath);
   }
 
   // ─── プロンプトプレフィックス ────────────────────────
@@ -500,8 +515,49 @@ export class REPL {
           if (this.config.secondLLM?.enabled) {
             console.log(chalk.bold("\n  ── セカンドLLM ──"));
             console.log(chalk.dim(`  モデル: ${this.config.secondLLM.endpoint.model} (${this.config.secondLLM.endpoint.providerType})`));
+            const secDesc = this.config.secondLLM.endpoint.description?.trim();
+            if (secDesc) {
+              console.log(chalk.dim(`  特性:   ${chalk.cyan(secDesc)}`));
+            }
+          }
+          // メインLLMの特性説明
+          const mainDesc = this.config.mainLLM.description?.trim();
+          if (mainDesc) {
+            console.log(chalk.bold("\n  ── メイン特性 ──"));
+            console.log(chalk.dim(`  ${chalk.cyan(mainDesc)}`));
           }
           console.log("");
+        } else if (args[0] === "description") {
+          const text = args.slice(1).join(" ").trim();
+          if (!text) {
+            const cur = this.config.mainLLM.description?.trim();
+            console.log(chalk.bold("\n  ── メインLLM特性説明 ──"));
+            console.log(chalk.dim(`  現在: ${cur ? chalk.cyan(cur) : chalk.yellow("(未設定)")}`));
+            console.log(chalk.dim(`  使い方: /model description <説明文>`));
+            console.log(chalk.dim(`  クリア: /model description clear`));
+            console.log(chalk.dim(`  推奨: 100〜300文字程度でモデルの得意/不得意、速度感、用途を記載`));
+            console.log(chalk.bold("\n  ── 記載例 ──"));
+            console.log(chalk.dim(`    "MoE 32B。日本語堅牢で推論・企画・対話が得意。応答は中速。マルチモーダル非対応"`));
+            console.log(chalk.dim(`    "Dense 13B。高速でコード生成が得意。日本語はやや不自然。長文要約やリファクタリング向き"`));
+            console.log(chalk.dim(`    "Vision対応27B。画像解析+日本語OK。スクリーンショット/図表の読み取りに最適。やや遅い"`));
+            console.log();
+          } else if (text.toLowerCase() === "clear") {
+            this.config.mainLLM.description = undefined;
+            saveConfig(this.config);
+            this.refreshLLMProfiles();
+            console.log(chalk.yellow("  メインLLMの特性説明をクリアしました (次ターンのシステムプロンプトから削除)"));
+          } else {
+            this.config.mainLLM.description = text;
+            saveConfig(this.config);
+            this.refreshLLMProfiles();
+            console.log(chalk.green(`  メインLLMの特性説明を設定しました (${text.length}文字):`));
+            console.log(chalk.dim(`  ${text}`));
+            if (text.length < 30) {
+              console.log(chalk.yellow(`  ※ 短すぎて委任判断の材料になりにくいかもしれません。100文字以上推奨`));
+            } else if (text.length > 500) {
+              console.log(chalk.yellow(`  ※ 長すぎるとシステムプロンプトを圧迫します。300文字以内推奨`));
+            }
+          }
         } else if (args[0] === "context") {
           // /model context <数値|128k|256K|1m> — コンテキストウィンドウサイズ変更
           const val = args[1] ? parseTokenCount(args[1]) : NaN;
@@ -607,8 +663,43 @@ export class REPL {
             const ctxW = cfg.endpoint.contextWindow;
             const ctxLabel = ctxW ? (ctxW >= 1000 ? `${Math.round(ctxW / 1000)}K` : `${ctxW}`) : "(メインLLMと共通)";
             console.log(chalk.dim(`  コンテキスト: ${ctxLabel}`));
+            const secDesc = cfg.endpoint.description?.trim();
+            console.log(chalk.dim(`  特性:         ${secDesc ? chalk.cyan(secDesc) : chalk.yellow("(未設定 — /second description で設定)")}`));
           }
           console.log();
+        } else if (subCmd === "description") {
+          const text = args.slice(1).join(" ").trim();
+          if (!this.config.secondLLM) {
+            console.log(chalk.red("  Second LLM の設定が存在しません。/second setup で初期設定してください。"));
+          } else if (!text) {
+            const cur = this.config.secondLLM.endpoint.description?.trim();
+            console.log(chalk.bold("\n  ── セカンドLLM特性説明 ──"));
+            console.log(chalk.dim(`  現在: ${cur ? chalk.cyan(cur) : chalk.yellow("(未設定)")}`));
+            console.log(chalk.dim(`  使い方: /second description <説明文>`));
+            console.log(chalk.dim(`  クリア: /second description clear`));
+            console.log(chalk.dim(`  推奨: 100〜300文字程度でモデルの得意/不得意、速度感、用途を記載`));
+            console.log(chalk.bold("\n  ── 記載例 ──"));
+            console.log(chalk.dim(`    "Dense 13B。高速・コーディング特化・日本語苦手。コード生成やリファクタ委任向き"`));
+            console.log(chalk.dim(`    "MoE 70B。推論品質は最高峰だが遅い。重要な設計判断・複雑レビュー委任向き"`));
+            console.log(chalk.dim(`    "軽量7B。超高速だが精度中程度。要約・grep結果の絞り込み・機械的委任向き"`));
+            console.log();
+          } else if (text.toLowerCase() === "clear") {
+            this.config.secondLLM.endpoint.description = undefined;
+            saveConfig(this.config);
+            this.refreshLLMProfiles();
+            console.log(chalk.yellow("  セカンドLLMの特性説明をクリアしました"));
+          } else {
+            this.config.secondLLM.endpoint.description = text;
+            saveConfig(this.config);
+            this.refreshLLMProfiles();
+            console.log(chalk.green(`  セカンドLLMの特性説明を設定しました (${text.length}文字):`));
+            console.log(chalk.dim(`  ${text}`));
+            if (text.length < 30) {
+              console.log(chalk.yellow(`  ※ 短すぎて委任判断の材料になりにくいかもしれません。100文字以上推奨`));
+            } else if (text.length > 500) {
+              console.log(chalk.yellow(`  ※ 長すぎるとシステムプロンプトを圧迫します。300文字以内推奨`));
+            }
+          }
         } else if (subCmd === "enable") {
            if (this.config.secondLLM) {
              this.config.secondLLM.enabled = true;
@@ -749,13 +840,14 @@ export class REPL {
           console.log(chalk.dim(`  (反映には再起動が必要です)`));
         } else {
            console.log(chalk.yellow("  使い方:"));
-           console.log(chalk.dim("    /second                     状態確認"));
+           console.log(chalk.dim("    /second                       状態確認"));
            console.log(chalk.dim("    /second setup [provider] [url] [model]  初期設定"));
-           console.log(chalk.dim("    /second enable / disable    有効化・無効化"));
-           console.log(chalk.dim("    /second model <名前>        モデル変更"));
-           console.log(chalk.dim("    /second url <URL>           エンドポイントURL変更"));
-           console.log(chalk.dim("    /second provider <タイプ>   プロバイダー変更"));
-           console.log(chalk.dim("    /second context <128k>      コンテキスト長変更"));
+           console.log(chalk.dim("    /second enable / disable      有効化・無効化"));
+           console.log(chalk.dim("    /second model <名前>          モデル変更"));
+           console.log(chalk.dim("    /second url <URL>             エンドポイントURL変更"));
+           console.log(chalk.dim("    /second provider <タイプ>     プロバイダー変更"));
+           console.log(chalk.dim("    /second context <128k>        コンテキスト長変更"));
+           console.log(chalk.dim("    /second description <text>    特性説明 (サブエージェント選択の材料)"));
         }
         break;
       }

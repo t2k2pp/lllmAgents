@@ -20,7 +20,30 @@ export interface SkillInfo {
   description: string;
 }
 
-export function buildSystemPrompt(skills?: SkillInfo[], hasSecondLLM?: boolean, hasObsidian?: boolean): string {
+export interface LLMProfileInfo {
+  /** モデル名 (例: "qwen2.5-coder:32b") */
+  model: string;
+  /** プロバイダ種別 (例: "vllm", "ollama", "vertex-ai") */
+  providerType: string;
+  /** エンドポイントURL (ローカルLLMのみ。クラウドなら undefined) */
+  baseUrl?: string;
+  /** ユーザーが設定した特性説明 (100〜300文字程度)。未設定なら undefined */
+  description?: string;
+}
+
+export interface LLMProfiles {
+  main: LLMProfileInfo;
+  second?: LLMProfileInfo;
+  /** true: メインとセカンドが異なるマシンで動作しており、task と second_llm_agent を並列起動してGPU競合なく総時間短縮できる */
+  parallelCapable?: boolean;
+}
+
+export function buildSystemPrompt(
+  skills?: SkillInfo[],
+  hasSecondLLM?: boolean,
+  hasObsidian?: boolean,
+  llmProfiles?: LLMProfiles,
+): string {
   const memory = loadMemory();
   const projectInstructions = loadProjectInstructions();
   const gitInfo = getGitInfo();
@@ -111,8 +134,45 @@ ${truncateAtLine(memory, 2000)}`);
 ${skillLines}`);
   }
 
-  // Second LLM (詳細ガイドは初回使用時に注入)
-  if (hasSecondLLM) {
+  // LLMモデルプロフィール + 委任ツールの選択指針
+  if (llmProfiles) {
+    const mainDesc = llmProfiles.main.description?.trim();
+    const mainLine = `あなた (メインLLM): ${llmProfiles.main.model} (${llmProfiles.main.providerType}${llmProfiles.main.baseUrl ? ` @ ${llmProfiles.main.baseUrl}` : ""})`;
+    const mainCharLine = mainDesc
+      ? `特性: ${mainDesc}`
+      : `特性: (未設定 — ユーザーが /model description <text> で設定可能)`;
+
+    const sections: string[] = [`# 利用可能なLLMモデル`, mainLine, mainCharLine];
+
+    if (llmProfiles.second && hasSecondLLM) {
+      const s = llmProfiles.second;
+      const secDesc = s.description?.trim();
+      const parallelNote = llmProfiles.parallelCapable
+        ? "  ← 別マシンで動作 (task と second_llm_agent の並列起動でGPU競合なく総時間短縮可)"
+        : "  ← 同一マシン (並列起動するとGPU KVキャッシュを取り合うため逐次実行推奨)";
+      sections.push("");
+      sections.push(`セカンドLLM: ${s.model} (${s.providerType}${s.baseUrl ? ` @ ${s.baseUrl}` : ""})${parallelNote}`);
+      sections.push(secDesc
+        ? `特性: ${secDesc}`
+        : `特性: (未設定 — ユーザーが /second description <text> で設定可能)`);
+
+      sections.push("");
+      sections.push(`サブタスク委任時の選択指針:`);
+      sections.push(`- task ツール → メインLLM (あなた自身) を別コンテキストで起動。メイン特性に合うタスクに使う`);
+      sections.push(`- second_llm_agent ツール → セカンドLLMをツール付きエージェントとして起動。セカンド特性に合うタスクに使う`);
+      sections.push(`- second_llm_consult ツール → セカンドLLMに単発質問 (ツールなし)。コードレビュー・壁打ち・要約でコンテキスト節約したいとき`);
+      sections.push(`両モデルの特性を見て、タスクの性質に合う方を選ぶこと。どちらでも良い場合はコンテキスト節約のため second_llm_* を優先。`);
+      if (llmProfiles.parallelCapable) {
+        sections.push(`独立した複数タスクがあるときは task と second_llm_agent を並列起動することで総所要時間を短縮できる。`);
+      }
+    } else {
+      sections.push("");
+      sections.push(`サブタスク委任: task ツールでメインLLM (あなた自身) を別コンテキスト起動できる。セカンドLLMは未設定のため委任先は1系統のみ。`);
+    }
+
+    parts.push("\n" + sections.join("\n"));
+  } else if (hasSecondLLM) {
+    // llmProfiles未提供だがセカンドLLMあり（旧経路・フォールバック）
     parts.push(`
 セカンドLLMツール利用可能: second_llm_consult(単発質問), second_llm_agent(複合タスク委任)。コンテキスト節約・レビュー・壁打ちに自発的に使用すること。`);
   }
