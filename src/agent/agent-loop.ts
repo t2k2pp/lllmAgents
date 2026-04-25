@@ -1097,6 +1097,22 @@ export class AgentLoop {
 
   setModel(model: string): void {
     this.model = model;
+    // 内部コンポーネントにも伝播（contextManager 内のcompressor、intent-classifier、evaluator）
+    this.contextManager.setProvider(this.provider, model);
+    this.intentClassifier.setProvider(this.provider, model);
+    this.evaluator.setMainProvider(this.provider, model);
+  }
+
+  /**
+   * メインLLMのProviderを差し替える。/model url, /model provider 経由で
+   * 接続先を実行時に変更する際に呼ぶ。modelも同時に渡せば一括反映される。
+   */
+  setProvider(provider: LLMProvider, model?: string): void {
+    this.provider = provider;
+    if (model) this.model = model;
+    this.contextManager.setProvider(provider, this.model);
+    this.intentClassifier.setProvider(provider, this.model);
+    this.evaluator.setMainProvider(provider, this.model);
   }
 
   getStreamingDisplay(): boolean {

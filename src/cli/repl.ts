@@ -32,6 +32,10 @@ import { saveConfig } from "../config/config-manager.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
 import { buildLLMProfiles } from "../agent/llm-profiles.js";
+import { createProvider } from "../providers/provider-factory.js";
+import { getSubAgentManager } from "../tools/definitions/task.js";
+import { DEFAULT_PORTS } from "../config/types.js";
+import type { ProviderType } from "../config/types.js";
 
 export class REPL {
   private input: InteractiveInput;
@@ -206,6 +210,57 @@ export class REPL {
       console.log(chalk.red(`  ❌ Interaction Server の起動に失敗しました: ${e}`));
       this.interactionServer = null;
     }
+  }
+
+  /**
+   * メインLLMの接続先 (providerType / baseUrl / model) 変更を実行時に反映する。
+   * Configを保存後に呼ぶと、新しいProviderインスタンスを作成して AgentLoop と
+   * SubAgentManager に注入し、システムプロンプトのプロファイル情報も更新する。
+   * 接続テストを行い、失敗時は警告を出すが処理は続行する（ユーザーがリトライできる）。
+   */
+  private async applyMainLLMEndpoint(): Promise<void> {
+    let newProvider;
+    try {
+      newProvider = createProvider(this.config.mainLLM);
+    } catch (e) {
+      console.log(chalk.red(`  Provider生成に失敗しました: ${e instanceof Error ? e.message : String(e)}`));
+      return;
+    }
+
+    // 接続テスト
+    try {
+      const ok = await newProvider.testConnection();
+      if (!ok) {
+        console.log(chalk.yellow(`  ⚠ ${this.config.mainLLM.baseUrl} への接続テストに失敗しました。設定は反映しましたが次の応答でエラーになる可能性があります。`));
+      }
+    } catch {
+      console.log(chalk.yellow(`  ⚠ 接続テスト中にエラーが発生しました。設定は反映済み。`));
+    }
+
+    this.agent.setProvider(newProvider, this.config.mainLLM.model);
+    const subAgentMgr = getSubAgentManager();
+    if (subAgentMgr) {
+      subAgentMgr.setProvider(newProvider, this.config.mainLLM.model);
+    }
+    this.refreshLLMProfiles();
+  }
+
+  /**
+   * セカンドLLMの接続先 (providerType / baseUrl / model / description) 変更を実行時に反映する。
+   * SecondLLMManager を再初期化して新しいProviderを作成する。
+   */
+  private applySecondLLMEndpoint(): void {
+    if (!this.config.secondLLM || !this.secondLLMManager) {
+      return;
+    }
+    try {
+      this.secondLLMManager.initialize(this.config.secondLLM);
+    } catch (e) {
+      console.log(chalk.red(`  セカンドLLM再初期化に失敗: ${e instanceof Error ? e.message : String(e)}`));
+      console.log(chalk.dim(`  設定は保存済み。Cloud LLMで合言葉が必要な場合は再起動が必要です。`));
+      return;
+    }
+    this.refreshLLMProfiles();
   }
 
   /**
@@ -599,6 +654,9 @@ export class REPL {
                 this.agent.setModel(chosen);
                 this.config.mainLLM.model = chosen;
                 saveConfig(this.config);
+                const subAgentMgr = getSubAgentManager();
+                subAgentMgr?.setProvider(this.agent.getProvider(), chosen);
+                this.refreshLLMProfiles();
                 console.log(chalk.dim(`  モデルを ${chalk.yellow(currentModel)} から ${chalk.cyan(chosen)} に切り替えました`));
               } else {
                 console.log(chalk.dim(`  モデルは変更されませんでした。`));
@@ -610,6 +668,50 @@ export class REPL {
               console.log(chalk.red(`  モデル一覧の取得に失敗しました: ${e instanceof Error ? e.message : String(e)}`));
             }
           }
+        } else if (args[0] === "url") {
+          const newUrl = args.slice(1).join(" ").trim();
+          if (!newUrl) {
+            console.log(chalk.dim(`  現在のURL: ${this.config.mainLLM.baseUrl}`));
+            console.log(chalk.dim(`  使い方: /model url <URL>`));
+            console.log(chalk.dim(`  例: /model url http://192.168.1.201:8000`));
+          } else {
+            const oldUrl = this.config.mainLLM.baseUrl;
+            this.config.mainLLM.baseUrl = newUrl;
+            saveConfig(this.config);
+            console.log(chalk.dim(`  メインLLM URL: ${chalk.yellow(oldUrl)} → ${chalk.cyan(newUrl)}`));
+            await this.applyMainLLMEndpoint();
+            console.log(chalk.green(`  実行時に反映しました。`));
+          }
+        } else if (args[0] === "provider") {
+          const newProvider = args[1]?.trim();
+          const validProviders: ProviderType[] = ["ollama", "lmstudio", "llamacpp", "vllm"];
+          if (!newProvider) {
+            console.log(chalk.dim(`  現在のプロバイダー: ${this.config.mainLLM.providerType}`));
+            console.log(chalk.dim(`  使い方: /model provider <タイプ> [<URL>]`));
+            console.log(chalk.dim(`  選択肢: ${validProviders.join(", ")}`));
+            console.log(chalk.dim(`  デフォルトポート: ${validProviders.map((p) => `${p}=${DEFAULT_PORTS[p]}`).join(", ")}`));
+          } else if (!validProviders.includes(newProvider as ProviderType)) {
+            console.log(chalk.red(`  無効なプロバイダー: ${newProvider}`));
+            console.log(chalk.dim(`  選択肢: ${validProviders.join(", ")}`));
+          } else {
+            const oldProvider = this.config.mainLLM.providerType;
+            this.config.mainLLM.providerType = newProvider as ProviderType;
+            // URLが2番目に渡されていれば同時に変更。なければ既存URLを維持
+            const newUrl = args[2]?.trim();
+            if (newUrl) {
+              this.config.mainLLM.baseUrl = newUrl;
+            }
+            saveConfig(this.config);
+            console.log(chalk.dim(`  メインLLMプロバイダー: ${chalk.yellow(oldProvider)} → ${chalk.cyan(newProvider)}`));
+            if (newUrl) {
+              console.log(chalk.dim(`  URL: ${chalk.cyan(newUrl)}`));
+            } else {
+              const port = DEFAULT_PORTS[newProvider as ProviderType];
+              console.log(chalk.dim(`  URL: ${this.config.mainLLM.baseUrl} (変更なし — 必要なら /model url で更新。${newProvider}のデフォルトポートは ${port})`));
+            }
+            await this.applyMainLLMEndpoint();
+            console.log(chalk.green(`  実行時に反映しました。`));
+          }
         } else {
           const newModel = args[0];
           const oldModel = this.agent.getModel();
@@ -619,6 +721,9 @@ export class REPL {
             this.agent.setModel(newModel);
             this.config.mainLLM.model = newModel;
             saveConfig(this.config);
+            const subAgentMgr = getSubAgentManager();
+            subAgentMgr?.setProvider(this.agent.getProvider(), newModel);
+            this.refreshLLMProfiles();
             console.log(
               chalk.dim(
                 `  モデルを ${chalk.yellow(oldModel)} から ${chalk.cyan(newModel)} に切り替えました`,
@@ -746,6 +851,7 @@ export class REPL {
                   if (chosen !== currentModel) {
                     this.config.secondLLM.endpoint.model = chosen;
                     saveConfig(this.config);
+                    this.applySecondLLMEndpoint();
                     console.log(chalk.dim(`  セカンドLLMモデル: ${chalk.yellow(currentModel)} → ${chalk.cyan(chosen)}`));
                   } else {
                     console.log(chalk.dim(`  モデルは変更されませんでした。`));
@@ -762,6 +868,7 @@ export class REPL {
             const oldModel = this.config.secondLLM.endpoint.model;
             this.config.secondLLM.endpoint.model = newModel;
             saveConfig(this.config);
+            this.applySecondLLMEndpoint();
             console.log(chalk.dim(`  セカンドLLMモデル: ${chalk.yellow(oldModel)} → ${chalk.cyan(newModel)}`));
           }
         } else if (subCmd === "context") {
@@ -780,6 +887,7 @@ export class REPL {
             const oldLabel = old ? (old >= 1000 ? `${Math.round(old / 1000)}K` : `${old}`) : "(未設定)";
             this.config.secondLLM.endpoint.contextWindow = val;
             saveConfig(this.config);
+            this.applySecondLLMEndpoint();
             const newLabel = val >= 1000 ? `${Math.round(val / 1000)}K` : `${val}`;
             console.log(chalk.dim(`  セカンドLLMコンテキスト長: ${chalk.yellow(oldLabel)} → ${chalk.cyan(newLabel)} トークン`));
           }
@@ -793,8 +901,9 @@ export class REPL {
             const oldUrl = this.config.secondLLM.endpoint.baseUrl ?? "(未設定)";
             this.config.secondLLM.endpoint.baseUrl = newUrl;
             saveConfig(this.config);
+            this.applySecondLLMEndpoint();
             console.log(chalk.dim(`  URL: ${chalk.yellow(oldUrl)} → ${chalk.cyan(newUrl)}`));
-            console.log(chalk.dim(`  (反映には再起動が必要な場合があります)`));
+            console.log(chalk.green(`  実行時に反映しました。`));
           } else {
             console.log(chalk.red("  Second LLM の設定が存在しません。/second setup で初期設定してください。"));
           }
@@ -812,8 +921,14 @@ export class REPL {
             const oldProvider = this.config.secondLLM.endpoint.providerType;
             this.config.secondLLM.endpoint.providerType = newProvider as SecondLLMProviderType;
             saveConfig(this.config);
+            this.applySecondLLMEndpoint();
             console.log(chalk.dim(`  プロバイダー: ${chalk.yellow(oldProvider)} → ${chalk.cyan(newProvider)}`));
-            console.log(chalk.dim(`  (反映には再起動が必要な場合があります)`));
+            const isCloud = ["vertex-ai", "azure-openai", "azure-claude"].includes(newProvider);
+            if (isCloud) {
+              console.log(chalk.dim(`  クラウドプロバイダーは追加の認証情報が必要な場合があります。/second status で確認してください。`));
+            } else {
+              console.log(chalk.green(`  実行時に反映しました。`));
+            }
           } else {
             console.log(chalk.red("  Second LLM の設定が存在しません。/second setup で初期設定してください。"));
           }

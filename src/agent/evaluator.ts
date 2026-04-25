@@ -47,6 +47,12 @@ export class Evaluator {
     this.source = secondLLMManager?.isAvailable() ? "secondLLM" : "mainLLM";
   }
 
+  setMainProvider(provider: LLMProvider, model: string): void {
+    this.mainProvider = provider;
+    this.mainModel = model;
+    this.source = this.secondLLMManager?.isAvailable() ? "secondLLM" : "mainLLM";
+  }
+
   /**
    * 成果物を評価し、フィード���ックを返す。
    * secondLLMが使える場合はエージェンティック（ツール付きループ）で評価。

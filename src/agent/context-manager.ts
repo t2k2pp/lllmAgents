@@ -27,6 +27,10 @@ export class ContextManager {
     this.contextWindow = value;
   }
 
+  setProvider(provider: LLMProvider, model: string): void {
+    this.compressor.setProvider(provider, model);
+  }
+
   shouldCompress(history: MessageHistory): boolean {
     const messages = history.getMessages();
     const tokens = estimateMessageTokens(messages);

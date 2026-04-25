@@ -335,6 +335,15 @@ export class SubAgentManager {
     private permissions: PermissionManager,
   ) {}
 
+  /**
+   * サブエージェント起動に使うProvider/Modelを差し替える。
+   * /model url, /model provider 等でメインLLMの接続先が変わったときに呼ぶ。
+   */
+  setProvider(provider: LLMProvider, model: string): void {
+    this.provider = provider;
+    this.model = model;
+  }
+
   launchBackground(type: SubAgentType, description: string, prompt: string): string {
     const agent = new SubAgent(
       this.provider,

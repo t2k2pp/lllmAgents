@@ -103,6 +103,11 @@ export class HierarchicalCompressor {
     private model: string,
   ) {}
 
+  setProvider(provider: LLMProvider, model: string): void {
+    this.provider = provider;
+    this.model = model;
+  }
+
   getSummaryBlocks(): SummaryBlock[] {
     return [...this.summaryBlocks];
   }

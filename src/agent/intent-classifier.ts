@@ -123,6 +123,11 @@ export class IntentClassifier {
     private model: string,
   ) {}
 
+  setProvider(provider: LLMProvider, model: string): void {
+    this.provider = provider;
+    this.model = model;
+  }
+
   /**
    * ユーザーメッセージがタスクリクエストか判定する。
    * ヒューリスティック → LLM の2段構え。
