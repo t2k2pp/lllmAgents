@@ -15,7 +15,8 @@ Claude Codeがこのプロジェクトで作業する際のルール。
 - `dist/` — `npm run build` / `npm run build:exe` の出力（gitignore）
 - `deploy/` — 配布用フォルダ（exe ベース、手動ビルド）。成果物は gitignore、`scripts/deploy-assets/` から組み立てる
   - 中身: `localllm.exe` + `skills/`(= ビルトイン同梱) + `install.bat` + `install.sh` + `README.md`
-  - 組み立て: `npm run build:deploy`
+  - 組み立て: `npm run build:deploy`（または同等の `build-exe.bat`）
+  - 注意: `node build-exe.js` 単独では `dist/` のみ更新で `deploy/` は古いまま。常に `build:deploy` 経由でビルドすること。`build-exe.bat` も内部で `npm run build:deploy` を呼ぶ仕様 (2026-04-25 修正)
 - `sandbox/` — 動作検証用。`sandbox/run.bat` / `run.sh` で deploy/localllm.exe を起動
 - ユーザー検証成果物（生成 PPTX/XLSX/JSON/画像等）は必ず `sandbox/` 配下に出力する。リポジトリルートに置かない
 
