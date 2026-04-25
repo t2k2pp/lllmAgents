@@ -45,6 +45,9 @@ export class InteractiveInput {
   private history: string[] = [];
   private historyIndex = -1;
   private keypressInitialized = false;
+  private dataListenerInstalled = false;
+  /** stdin に複数バイト+改行 chunk が届いた直近時刻 + 猶予 (ms) — この時刻まで届く \r は改行扱い */
+  private pasteBurstUntilMs = 0;
 
   constructor(options: InteractiveInputOptions = {}) {
     this.commandProvider = options.commandProvider ?? (() => []);
@@ -92,6 +95,25 @@ export class InteractiveInput {
         this.keypressInitialized = true;
       }
 
+      // 生 stdin チャンクを観測して貼り付けを検出（ブラケット貼り付け非対応端末向け）。
+      // emitKeypressEvents の data 購読と並行して動き、keypress イベントより前に発火する。
+      // 同じ chunk から keypress イベントが順次発火するため、その間 isPasteBurst を有効化する。
+      if (!this.dataListenerInstalled) {
+        stdin.on("data", (chunk: Buffer) => {
+          // chunk が複数バイト + 改行 (\r/\n) を含む = 貼り付けほぼ確実。
+          // 単一バイト改行は人間の Enter 押下と区別できないので除外。
+          // 単独マルチバイト文字（日本語入力など）も length > 1 だが改行は含まないので誤判定しない。
+          if (
+            chunk.length > 1 &&
+            (chunk.includes(0x0d) || chunk.includes(0x0a))
+          ) {
+            // 200ms の余裕を持たせる: 同じ貼り付けから後続の keypress が発火し終わるまで保持
+            this.pasteBurstUntilMs = Date.now() + 200;
+          }
+        });
+        this.dataListenerInstalled = true;
+      }
+
       stdin.setRawMode(true);
       stdin.resume();
       // ブラケット貼り付けモードを有効化（モダンターミナル: Windows Terminal/iTerm2/kitty/mintty等）
@@ -117,8 +139,11 @@ export class InteractiveInput {
       let pasteAccumulated = "";
       /** 直前キーイベントの時刻（ms） — ブラケット貼り付け非対応端末向けのフォールバック */
       let lastKeyTimeMs = 0;
-      /** 連続キー検出閾値 — これ未満の間隔で届いた \r は貼り付けとみなし改行として扱う */
-      const FAST_PASTE_DELTA_MS = 10;
+      /** 直前のキーが \r (CR) だったか — \r\n が連続して届いた場合に \n を吸収するために使う */
+      let lastKeyWasReturn = false;
+      /** 連続キー検出閾値 — これ未満の間隔で届いた \r は貼り付けとみなし改行として扱う。
+       *  人間の最速タイプは概ね 130ms/key なので 30ms なら安全に区別できる。 */
+      const FAST_PASTE_DELTA_MS = 30;
 
       const prefixLen = getDisplayWidth(stripAnsi(prefix));
       // 継続行のプレフィックス（プロンプトと同じ幅のスペース）
@@ -536,7 +561,16 @@ export class InteractiveInput {
         const now = Date.now();
         const keyDelta = lastKeyTimeMs === 0 ? Infinity : now - lastKeyTimeMs;
         lastKeyTimeMs = now;
-        const isPasteBurst = keyDelta < FAST_PASTE_DELTA_MS;
+        // 二段構えの貼り付け検出:
+        //   (a) 生 stdin chunk で複数バイト+改行を観測 → pasteBurstUntilMs まで保持
+        //   (b) 直前キーから FAST_PASTE_DELTA_MS 未満で連続発火 → 貼り付け中とみなす
+        const isPasteBurst =
+          now < this.pasteBurstUntilMs || keyDelta < FAST_PASTE_DELTA_MS;
+
+        // \r の直後でも \n 以外のキーが来たら CRLF 吸収状態を解除
+        if (lastKeyWasReturn && key.name !== "enter") {
+          lastKeyWasReturn = false;
+        }
 
         // ── Ctrl+C ──
         if (key.ctrl && key.name === "c") {
@@ -561,6 +595,13 @@ export class InteractiveInput {
           (key.name === "return" && key.shift) ||
           key.name === "enter"
         ) {
+          // CRLF 吸収: 直前のキーが \r で、これが直後に届いた \n なら、既に \r 側で
+          // 改行処理済みなので無視する。Ctrl+J 単独入力の場合は lastKeyWasReturn=false。
+          if (key.name === "enter" && lastKeyWasReturn) {
+            lastKeyWasReturn = false;
+            return;
+          }
+          lastKeyWasReturn = false;
           // メニューが表示中なら先に閉じる
           if (menuVisible) {
             dismissMenu();
@@ -575,14 +616,17 @@ export class InteractiveInput {
         // ── Enter ──
         if (key.name === "return") {
           // フォールバック: ブラケット貼り付け非対応端末で貼り付けの \r が届いた場合、
-          // 直前のキーとの間隔が極端に短い (< FAST_PASTE_DELTA_MS) なら改行として扱う
+          // pasteBurst 中なら改行として扱う（次の \n が CRLF の続きとして来た場合は吸収）
           if (isPasteBurst && !key.shift) {
             if (menuVisible) dismissMenu();
             buffer = buffer.slice(0, cursorPos) + "\n" + buffer.slice(cursorPos);
             cursorPos++;
             renderInput();
+            lastKeyWasReturn = true;
             return;
           }
+          // 通常の Enter は確定動作 — lastKeyWasReturn は立てない（直後の \n は別入力扱い）
+          lastKeyWasReturn = false;
           if (menuVisible && menuItems.length > 0) {
             const selectedValue = menuItems[selectedIndex].value;
             selectItem();
