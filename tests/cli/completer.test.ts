@@ -160,6 +160,40 @@ describe("createCommandMenuProvider", () => {
     expect(labels).toContain("/second description");
   });
 
+  it("ハイパーパラメータ系コマンドが補完候補に出る", () => {
+    const provider = createCommandMenuProvider();
+    const items = provider("model ");
+    const labels = items.map((i) => i.label);
+    expect(labels).toContain("/model temperature");
+    expect(labels).toContain("/model top_p");
+    expect(labels).toContain("/model top_k");
+    expect(labels).toContain("/model rep_penalty");
+  });
+
+  it("/discord/slack/search/loop の主要サブコマンドが補完候補に出る", () => {
+    const provider = createCommandMenuProvider();
+    const dItems = provider("discord ").map((i) => i.label);
+    expect(dItems).toContain("/discord url");
+    expect(dItems).toContain("/discord test");
+    expect(dItems).toContain("/discord bot-token");
+    expect(dItems).toContain("/discord listen start");
+
+    const sItems = provider("slack ").map((i) => i.label);
+    expect(sItems).toContain("/slack url");
+    expect(sItems).toContain("/slack bot-token");
+    expect(sItems).toContain("/slack app-token");
+
+    const searchItems = provider("search ").map((i) => i.label);
+    expect(searchItems).toContain("/search searxng");
+    expect(searchItems).toContain("/search duckduckgo");
+    expect(searchItems).toContain("/search test");
+
+    const loopItems = provider("loop").map((i) => i.label);
+    expect(loopItems).toContain("/loop");
+    expect(loopItems).toContain("/loop list");
+    expect(loopItems).toContain("/loop stop");
+  });
+
   it("スキルトリガーも候補に含む", () => {
     const provider = createCommandMenuProvider([
       { trigger: "/commit", description: "コミットワークフロー" },

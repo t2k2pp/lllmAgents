@@ -527,10 +527,10 @@ export class REPL {
           // サンプリングパラメータ: 設定値があれば表示、なければ "auto (サーバーデフォルト)"
           const sp = this.config.mainLLM;
           const fmt = (v: number | undefined) => v !== undefined ? String(v) : chalk.gray("auto");
-          console.log(chalk.dim(`  temperature:    ${fmt(sp.temperature)}`));
-          console.log(chalk.dim(`  top_p:          ${fmt(sp.top_p)}`));
-          console.log(chalk.dim(`  top_k:          ${fmt(sp.top_k)}`));
-          console.log(chalk.dim(`  rep_penalty:    ${fmt(sp.repetition_penalty)}`));
+          console.log(chalk.dim(`  temperature:    ${fmt(sp.temperature)}    ${chalk.gray("(/model temperature <値> で変更)")}`));
+          console.log(chalk.dim(`  top_p:          ${fmt(sp.top_p)}    ${chalk.gray("(/model top_p <値>)")}`));
+          console.log(chalk.dim(`  top_k:          ${fmt(sp.top_k)}    ${chalk.gray("(/model top_k <値>)")}`));
+          console.log(chalk.dim(`  rep_penalty:    ${fmt(sp.repetition_penalty)}    ${chalk.gray("(/model rep_penalty <値>)")}`));
           console.log(chalk.dim(`  ストリーミング: ${this.agent.getStreamingDisplay() ? "ON" : "OFF"}`));
 
           // --- サーバーからモデル詳細を取得 ---
@@ -666,6 +666,51 @@ export class REPL {
             // Ctrl+C でキャンセルされた場合は何もしない
             if (!(e instanceof Error && e.message.includes("User force closed"))) {
               console.log(chalk.red(`  モデル一覧の取得に失敗しました: ${e instanceof Error ? e.message : String(e)}`));
+            }
+          }
+        } else if (args[0] === "temperature" || args[0] === "top_p" || args[0] === "top_k" || args[0] === "rep_penalty") {
+          // ハイパーパラメータ設定（メインLLM）
+          // /model temperature [<値>|auto|clear]
+          const paramKeyMap: Record<string, "temperature" | "top_p" | "top_k" | "repetition_penalty"> = {
+            temperature: "temperature",
+            top_p: "top_p",
+            top_k: "top_k",
+            rep_penalty: "repetition_penalty",
+          };
+          const paramKey = paramKeyMap[args[0]];
+          const ranges: Record<string, { min: number; max: number; recommended: string; integer?: boolean }> = {
+            temperature: { min: 0, max: 2, recommended: "0.0〜1.0 (推論重視は 0.2、創造性重視は 0.8前後)" },
+            top_p: { min: 0, max: 1, recommended: "0.85〜0.95 (1.0で無効化)" },
+            top_k: { min: 1, max: 1000, recommended: "20〜50 (大きいほど多様、Ollama系で有効)", integer: true },
+            repetition_penalty: { min: 0, max: 2, recommended: "1.0〜1.15 (1.0で中立、>1で繰り返し抑制)" },
+          };
+          const r = ranges[paramKey];
+          const valArg = args[1]?.trim().toLowerCase();
+          const cur = this.config.mainLLM[paramKey];
+          const curStr = cur !== undefined ? String(cur) : chalk.gray("auto (サーバーデフォルト)");
+
+          if (!valArg) {
+            console.log(chalk.bold(`\n  ── ${args[0]} ──`));
+            console.log(chalk.dim(`  現在値: ${curStr}`));
+            console.log(chalk.dim(`  推奨値: ${r.recommended}`));
+            console.log(chalk.dim(`  範囲:   ${r.min} 〜 ${r.max}${r.integer ? " (整数)" : ""}`));
+            console.log(chalk.dim(`  使い方: /model ${args[0]} <値>`));
+            console.log(chalk.dim(`  クリア: /model ${args[0]} auto  (または clear)`));
+          } else if (valArg === "auto" || valArg === "clear") {
+            this.agent.setSamplingParam(paramKey, undefined);
+            delete this.config.mainLLM[paramKey];
+            saveConfig(this.config);
+            console.log(chalk.yellow(`  ${args[0]} を auto (サーバーデフォルト) に戻しました`));
+          } else {
+            const num = r.integer ? parseInt(valArg, 10) : parseFloat(valArg);
+            if (isNaN(num) || num < r.min || num > r.max) {
+              console.log(chalk.red(`  無効な値: ${valArg}`));
+              console.log(chalk.dim(`  範囲: ${r.min} 〜 ${r.max}${r.integer ? " (整数)" : ""}`));
+            } else {
+              this.agent.setSamplingParam(paramKey, num);
+              this.config.mainLLM[paramKey] = num;
+              saveConfig(this.config);
+              console.log(chalk.green(`  ${args[0]} を ${chalk.cyan(String(num))} に設定しました (次のLLM呼び出しから反映)`));
             }
           }
         } else if (args[0] === "url") {

@@ -1115,6 +1115,23 @@ export class AgentLoop {
     this.evaluator.setMainProvider(provider, this.model);
   }
 
+  getSamplingParams(): SamplingParams {
+    return { ...this.samplingParams };
+  }
+
+  /**
+   * 単一サンプリングパラメータを更新する。
+   * value === undefined で「未指定（サーバーデフォルトに委ねる）」へ戻す。
+   * 次のLLM呼び出しから即時反映される。
+   */
+  setSamplingParam(name: keyof SamplingParams, value: number | undefined): void {
+    if (value === undefined) {
+      delete this.samplingParams[name];
+    } else {
+      this.samplingParams[name] = value;
+    }
+  }
+
   getStreamingDisplay(): boolean {
     return this.streamingDisplay;
   }
