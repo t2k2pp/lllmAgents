@@ -142,6 +142,24 @@ describe("createCommandMenuProvider", () => {
     expect(labels).toContain("/model list");
   });
 
+  it("model系のサブコマンドが補完候補に出る (url/provider/description)", () => {
+    const provider = createCommandMenuProvider();
+    const items = provider("model ");
+    const labels = items.map((i) => i.label);
+    expect(labels).toContain("/model url");
+    expect(labels).toContain("/model provider");
+    expect(labels).toContain("/model description");
+  });
+
+  it("second系のサブコマンドが補完候補に出る (description含む)", () => {
+    const provider = createCommandMenuProvider();
+    const items = provider("second ");
+    const labels = items.map((i) => i.label);
+    expect(labels).toContain("/second url");
+    expect(labels).toContain("/second provider");
+    expect(labels).toContain("/second description");
+  });
+
   it("スキルトリガーも候補に含む", () => {
     const provider = createCommandMenuProvider([
       { trigger: "/commit", description: "コミットワークフロー" },

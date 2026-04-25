@@ -83,7 +83,8 @@ $ npm start
 | `/clear` | 会話履歴クリア |
 | `/context` | コンテキスト使用状況（トークン数・進捗バー） |
 | `/compact` | コンテキストを手動圧縮 |
-| `/model` | 現在のモデル情報 / `/model list` / `/model <name>` |
+| `/model` | 現在のモデル情報 / `/model list` / `/model <name>` / `/model url <URL>` / `/model provider <type>` / `/model description <text>` |
+| `/second` | セカンドLLM管理 (status/enable/disable/setup/url/provider/model/context/description) |
 | `/todo` | タスクリスト表示 |
 | `/sessions` | 保存済みセッション一覧（直近10件） |
 | `/resume <id>` | セッション復元 |
