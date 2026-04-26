@@ -1,16 +1,15 @@
 @echo off
 setlocal
 
-rem build-exe.bat — exeビルド + 配布フォルダ更新までを一括で行う
+rem build-exe.bat - build exe and update deploy/ folder
 rem
-rem 旧版は `node build-exe.js` のみで dist/localllm.exe しか更新せず、
-rem deploy/localllm.exe や sandbox/run.bat 経由の起動が古いまま、という罠だった。
-rem 現在は `npm run build:deploy` に統一し、内部で build-exe.js を呼んでから
-rem deploy/ まで同期する。
+rem The legacy version only ran `node build-exe.js` which updated dist/localllm.exe
+rem but left deploy/localllm.exe stale - a silent footgun. This now calls
+rem `npm run build:deploy` which builds the exe AND syncs deploy/ assets.
 
 echo =========================================
-echo Building Node.js Single Executable (SEA)
-echo and updating deploy/ folder
+echo  Building Node.js Single Executable (SEA)
+echo  and updating deploy/ folder
 echo =========================================
 
 call npm run build:deploy

@@ -29,9 +29,49 @@ const META = join(DEPLOY, '.deploy-meta.json');
 const argv = new Set(process.argv.slice(2));
 const SKIP_EXE = argv.has('--skip-exe');
 const VERBOSE = argv.has('--verbose');
+const FORCE = argv.has('--force');
 
 function log(msg) {
   console.error(`[build-deploy] ${msg}`);
+}
+
+/**
+ * Windows で localllm.exe が起動中だと exe がファイルロックされ、
+ * ビルドが「成功っぽく」見えても実体は古いままになる罠を防ぐ。
+ * --force で警告のみにできる（ユーザーが意図的に上書きしたい場合）。
+ */
+function checkExeNotRunning() {
+  if (process.platform !== 'win32') return;
+  const r = spawnSync('tasklist', ['/FI', 'IMAGENAME eq localllm.exe', '/NH'], {
+    encoding: 'utf8',
+    shell: false,
+  });
+  if (r.status !== 0) {
+    log('WARN: tasklist 実行に失敗。プロセスチェックをスキップします');
+    return;
+  }
+  const out = r.stdout ?? '';
+  if (!/localllm\.exe/i.test(out)) return; // 起動なし — OK
+
+  // 起動中: PID 抽出 (tasklist の出力は "name PID Session SessionNo MemUsage" の固定幅っぽい列)
+  const pids = out
+    .split(/\r?\n/)
+    .filter((l) => /localllm\.exe/i.test(l))
+    .map((l) => l.trim().split(/\s+/)[1] ?? '?');
+
+  const msg =
+    `localllm.exe が起動中です (PID: ${pids.join(', ')})。\n` +
+    `  Windows では実行中の exe はロックされ、ビルドが上書きできず古いまま残ります。\n` +
+    `  対処:\n` +
+    `    1. REPL を /quit で終了する  または\n` +
+    `    2. taskkill /PID ${pids[0]} /F で強制終了する\n` +
+    `  --force でこのチェックを無視できますが、ロック解除前のビルドは無音で失敗します。`;
+
+  if (FORCE) {
+    log(`WARN: ${msg}`);
+    return;
+  }
+  throw new Error(msg);
 }
 
 function runBuildExe() {
@@ -86,6 +126,8 @@ function writeMeta() {
 
 function main() {
   const start = Date.now();
+
+  checkExeNotRunning();
 
   if (!SKIP_EXE) runBuildExe();
 
