@@ -1,6 +1,6 @@
 export type ProviderType = "ollama" | "lmstudio" | "llamacpp" | "vllm";
 
-export type CloudProviderType = "vertex-ai" | "azure-openai" | "azure-claude";
+export type CloudProviderType = "vertex-ai" | "azure-openai" | "azure-claude" | "azure-foundry";
 
 // セカンドLLMはローカルまたはクラウドのいずれかを指定可能
 export type SecondLLMProviderType = ProviderType | CloudProviderType;
@@ -13,10 +13,23 @@ export interface SamplingParams {
 }
 
 export interface LLMEndpoint extends SamplingParams {
-  providerType: ProviderType;
-  baseUrl: string;
+  /** ローカル系 (ollama/lmstudio/llamacpp/vllm) またはクラウド系 (vertex-ai/azure-*) */
+  providerType: SecondLLMProviderType;
+  /** ローカル系で必須。クラウド系では未使用 */
+  baseUrl?: string;
   model: string;
   contextWindow?: number;
+  // ── クラウド用フィールド (providerType がクラウド系の時に必須) ──
+  /** Vertex AI: GCP プロジェクト ID */
+  projectId?: string;
+  /** Vertex AI: GCP リージョン */
+  region?: string;
+  /** Azure: リソース endpoint (https://...) */
+  endpoint?: string;
+  /** Azure: API Key (env:VAR / encrypted:... / 平文) */
+  apiKey?: string;
+  /** Azure OpenAI / Azure Claude: deployment name (Foundry では未使用) */
+  deploymentName?: string;
   /** モデル特性の自由記述 (100〜300文字程度)。サブ/セカンドエージェント選択の判断材料としてシステムプロンプトに注入される */
   description?: string;
 }
@@ -162,7 +175,7 @@ export interface Config {
 
 // ヘルパー: セカンドLLMがクラウドかローカルかを判定
 export function isCloudProvider(type: SecondLLMProviderType): boolean {
-  return (["vertex-ai", "azure-openai", "azure-claude"] as string[]).includes(type);
+  return (["vertex-ai", "azure-openai", "azure-claude", "azure-foundry"] as string[]).includes(type);
 }
 
 export interface ModelInfo {
@@ -204,11 +217,15 @@ export const DEFAULT_PORTS: Record<ProviderType, number> = {
   vllm: 8000,
 };
 
-export const PROVIDER_LABELS: Record<ProviderType, string> = {
+export const PROVIDER_LABELS: Record<SecondLLMProviderType, string> = {
   ollama: "Ollama",
   lmstudio: "LM Studio",
   llamacpp: "llama.cpp",
   vllm: "vLLM",
+  "vertex-ai": "Vertex AI",
+  "azure-openai": "Azure OpenAI",
+  "azure-claude": "Azure Claude",
+  "azure-foundry": "Azure AI Foundry",
 };
 
 export function getDefaultConfig(): Config {

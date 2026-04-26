@@ -148,11 +148,19 @@ export class OpenAICompatProvider implements LLMProvider {
     }
 
     let streamBody: ReadableStream<Uint8Array>;
+    const chatUrl = this.getChatUrl();
     try {
       const headers = await this.getRequestHeaders();
-      streamBody = await httpPostStream(this.getChatUrl(), body, undefined, undefined, headers);
+      if (process.env.LLM_DEBUG_HTTP) {
+        console.error(`[LLM_DEBUG_HTTP] POST ${chatUrl}  model=${body.model}  msgs=${(body.messages as unknown[])?.length}`);
+      }
+      streamBody = await httpPostStream(chatUrl, body, undefined, undefined, headers);
     } catch (e) {
-      yield { type: "error", error: String(e) };
+      // 失敗時は URL と model を含めて原因特定を容易にする (404/401/403 デバッグ向け)
+      yield {
+        type: "error",
+        error: `${String(e)} [provider=${this.providerType} url=${chatUrl} model=${body.model}]`,
+      };
       return;
     }
 

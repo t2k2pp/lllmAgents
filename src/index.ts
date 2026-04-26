@@ -68,8 +68,34 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Create provider
-  const provider = createProvider(config.mainLLM);
+  // メインLLM が暗号化された apiKey を持つクラウド系の場合、起動時に合言葉を取得する。
+  // セカンドLLM 側でも同じパスフレーズを使い回せるよう shared scope で保持。
+  let sharedPassphrase: string | undefined = undefined;
+  if (config.mainLLM.apiKey && CredentialVault.isEncrypted(config.mainLLM.apiKey)) {
+    const { default: inquirer } = await import("inquirer");
+    const { secret } = await inquirer.prompt([
+      {
+        type: "password",
+        name: "secret",
+        message: `メインLLM (${config.mainLLM.providerType})の暗号化キーを復号するための合言葉:\n >`,
+        mask: "*",
+      },
+    ]);
+    sharedPassphrase = secret;
+  }
+
+  // Create provider (クラウド系は passphrase で apiKey を復号、ローカル系は無視される)
+  let provider;
+  try {
+    provider = createProvider(config.mainLLM, sharedPassphrase);
+  } catch (e) {
+    console.error(
+      `\nメインLLMの初期化に失敗しました: ${e instanceof Error ? e.message : String(e)}\n` +
+      `  /model setup または config.json で設定を確認してください。\n` +
+      `  暗号化キーの場合、合言葉が間違っている可能性があります。\n`
+    );
+    process.exit(1);
+  }
 
   // Create tool registry with ALL tools
   const toolRegistry = new ToolRegistry();
@@ -125,7 +151,7 @@ async function main(): Promise<void> {
 
   // Vision tool
   const visionProvider = config.visionLLM
-    ? createProvider(config.visionLLM)
+    ? createProvider(config.visionLLM, sharedPassphrase)
     : provider;
   const visionModel = config.visionLLM?.model ?? config.mainLLM.model;
   const visionService = new VisionService(visionProvider, visionModel);
@@ -187,23 +213,41 @@ async function main(): Promise<void> {
   const secondLLMManager = new SecondLLMManager(toolRegistry, permissions);
   const secondLlmConfig = config.secondLLM ?? undefined;
   if (secondLlmConfig && secondLlmConfig.enabled && secondLlmConfig.endpoint) {
-    let passphrase: string | undefined = undefined;
+    // メインLLMで合言葉を取得済みなら使い回す。それでも復号失敗時のみ再プロンプト。
+    let passphrase: string | undefined = sharedPassphrase;
     if (secondLlmConfig.endpoint.apiKey && CredentialVault.isEncrypted(secondLlmConfig.endpoint.apiKey)) {
-      const { default: inquirer } = await import("inquirer");
-      const { secret } = await inquirer.prompt([
-        {
-          type: "password",
-          name: "secret",
-          message: `Second LLM (${secondLlmConfig.endpoint.providerType})の暗号化キーを復号するための合言葉:\n >`,
-          mask: "*",
-        },
-      ]);
-      passphrase = secret;
+      // メイン側パスフレーズで復号できるかテスト
+      const testDecrypt = passphrase
+        ? CredentialVault.resolve(secondLlmConfig.endpoint.apiKey, passphrase)
+        : "";
+      if (!testDecrypt) {
+        // メイン用と異なる、もしくは未設定なので別途プロンプト
+        const { default: inquirer } = await import("inquirer");
+        const { secret } = await inquirer.prompt([
+          {
+            type: "password",
+            name: "secret",
+            message: `Second LLM (${secondLlmConfig.endpoint.providerType})の暗号化キーを復号するための合言葉:\n >`,
+            mask: "*",
+          },
+        ]);
+        passphrase = secret;
+      }
     }
-    if (passphrase) {
-      secondLLMManager.initialize(secondLlmConfig, passphrase);
-    } else {
-      secondLLMManager.initialize(secondLlmConfig);
+    // 初期化失敗（設定不備など）でアプリ自体が起動不能になるのを防ぐ。
+    // セカンドLLMは無効化したまま起動を続行し、ユーザーが /second-llm で設定を直せるようにする。
+    try {
+      if (passphrase) {
+        secondLLMManager.initialize(secondLlmConfig, passphrase);
+      } else {
+        secondLLMManager.initialize(secondLlmConfig);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `\n⚠️  セカンドLLMの初期化に失敗しました: ${msg}\n` +
+        `   セカンドLLMを無効化して起動を続行します。/second で設定を確認してください。\n`
+      );
     }
     if (secondLLMManager.isAvailable()) {
       setSecondLLMManager(secondLLMManager);
@@ -377,7 +421,8 @@ async function main(): Promise<void> {
   // Display welcome
   displayWelcome(
     config.mainLLM.model,
-    config.mainLLM.baseUrl,
+    // クラウド系は baseUrl が無いので endpoint を表示
+    config.mainLLM.baseUrl ?? config.mainLLM.endpoint,
     PROVIDER_LABELS[config.mainLLM.providerType],
     contextWindow,
     skills.length,

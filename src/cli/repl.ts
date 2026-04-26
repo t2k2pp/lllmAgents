@@ -27,7 +27,9 @@ import { sendDiscordNotification, isValidDiscordWebhookUrl } from "../utils/disc
 import { sendSlackNotification, isValidSlackWebhookUrl } from "../utils/slack.js";
 import { DiscordInteractionServer } from "../discord/interaction-server.js";
 import { registerAskCommand } from "../discord/slash-commands.js";
-import { select } from "@inquirer/prompts";
+import { select, input, password, confirm } from "@inquirer/prompts";
+import { CredentialVault } from "../security/credential-vault.js";
+import { AzureFoundryProvider } from "../providers/azure-foundry.js";
 import { saveConfig } from "../config/config-manager.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
@@ -243,6 +245,207 @@ export class REPL {
       subAgentMgr.setProvider(newProvider, this.config.mainLLM.model);
     }
     this.refreshLLMProfiles();
+  }
+
+  /**
+   * Azure 系 LLM (azure-openai / azure-claude / azure-foundry) を対話プロンプトでセットアップする。
+   * メインLLM (target=main) / セカンドLLM (target=second) の両方をカバーする共通実装。
+   * endpoint / (deploymentName) / apiKey / model を順に質問し、apiKey は
+   * 平文 / 環境変数参照 / パスフレーズ暗号化のいずれかで保存する。
+   *
+   * - azure-openai/azure-claude: Azure OpenAI Service。/openai/deployments/{name} パスを使う
+   * - azure-foundry: Azure AI Foundry (Models as a Service)。/models/chat/completions パスを使い、
+   *                  deploymentName は不要、model 名でルーティング
+   */
+  private async setupAzureLLM(
+    target: "main" | "second",
+    provider: "azure-openai" | "azure-claude" | "azure-foundry",
+  ): Promise<void> {
+    const targetLabel = target === "main" ? "メインLLM" : "セカンドLLM";
+    console.log(chalk.bold(`\n  ── ${targetLabel} ${provider} セットアップ ──`));
+    console.log(chalk.dim("  キャンセルは Ctrl+C\n"));
+
+    const existing =
+      target === "main" ? this.config.mainLLM : this.config.secondLLM?.endpoint;
+    const existingIsAzure =
+      existing?.providerType === "azure-openai" ||
+      existing?.providerType === "azure-claude" ||
+      existing?.providerType === "azure-foundry";
+
+    const isFoundry = provider === "azure-foundry";
+    const endpointHint = isFoundry
+      ? "例: https://your-resource.services.ai.azure.com  (完全URLを貼っても可)"
+      : "例: https://your-resource.openai.azure.com";
+
+    const endpointUrl = await input({
+      message: `Azure endpoint URL (${endpointHint}):`,
+      default: existingIsAzure ? existing?.endpoint : undefined,
+      validate: (v: string) => {
+        if (!v.trim()) return "endpoint URL は必須です";
+        if (!/^https?:\/\//i.test(v.trim())) return "http(s):// で始めてください";
+        return true;
+      },
+    });
+
+    let deploymentName = "";
+    if (!isFoundry) {
+      deploymentName = await input({
+        message: "Deployment name:",
+        default: existingIsAzure ? existing?.deploymentName : undefined,
+        validate: (v: string) => v.trim().length > 0 || "deployment name は必須です",
+      });
+    }
+
+    const modelHint = isFoundry
+      ? "Model 名 (Azure Foundry 上の model ID。例: Kimi-K2-Instruct-0905):"
+      : "モデル識別子 (空欄なら deployment name と同じ):";
+    const model = await input({
+      message: modelHint,
+      default: existingIsAzure ? existing?.model : (isFoundry ? undefined : deploymentName),
+      validate: isFoundry
+        ? (v: string) => v.trim().length > 0 || "Foundry では model 名が必須です"
+        : undefined,
+    });
+
+    const storageMode = await select({
+      message: "API Key の保存方法:",
+      choices: [
+        { name: "パスフレーズで暗号化保存 (推奨)", value: "encrypt" },
+        { name: "環境変数参照 (env:VAR_NAME)", value: "env" },
+        { name: "平文で保存 (非推奨)", value: "plain" },
+      ],
+      default: "encrypt",
+    });
+
+    let storedApiKey = "";
+    let needsRestart = false;
+
+    if (storageMode === "env") {
+      const envName = await input({
+        message: "環境変数名 (例: AZURE_OPENAI_API_KEY):",
+        validate: (v: string) =>
+          /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim()) || "有効な環境変数名を入力してください",
+      });
+      storedApiKey = `env:${envName.trim()}`;
+      if (!process.env[envName.trim()]) {
+        console.log(chalk.yellow(`  ⚠ 環境変数 ${envName.trim()} は現在未設定です。アプリ起動時にセットしてください。`));
+      }
+    } else if (storageMode === "plain") {
+      const ok = await confirm({
+        message: "平文保存は config.json にそのまま記録されます。本当に続行しますか？",
+        default: false,
+      });
+      if (!ok) {
+        console.log(chalk.yellow("  セットアップを中止しました。"));
+        return;
+      }
+      const apiKey = await password({
+        message: "API Key (入力は表示されません):",
+        mask: "*",
+      });
+      if (!apiKey.trim()) {
+        console.log(chalk.red("  API Key が空です。中止しました。"));
+        return;
+      }
+      storedApiKey = apiKey.trim();
+    } else {
+      // encrypt
+      const apiKey = await password({
+        message: "API Key (入力は表示されません):",
+        mask: "*",
+      });
+      if (!apiKey.trim()) {
+        console.log(chalk.red("  API Key が空です。中止しました。"));
+        return;
+      }
+      const passphrase = await password({
+        message: "暗号化用パスフレーズ:",
+        mask: "*",
+      });
+      const passphrase2 = await password({
+        message: "もう一度入力 (確認):",
+        mask: "*",
+      });
+      if (passphrase !== passphrase2) {
+        console.log(chalk.red("  パスフレーズが一致しません。中止しました。"));
+        return;
+      }
+      if (passphrase.length < 4) {
+        console.log(chalk.red("  パスフレーズが短すぎます (4文字以上)。中止しました。"));
+        return;
+      }
+      storedApiKey = CredentialVault.encrypt(apiKey.trim(), passphrase);
+      needsRestart = true; // 暗号化済みは初回起動時に合言葉を聞くため再起動が必要
+    }
+
+    // Foundry は base URL のみに正規化 (完全URL を貼った場合に対応)
+    const finalEndpoint = isFoundry
+      ? AzureFoundryProvider.normalizeEndpoint(endpointUrl.trim())
+      : endpointUrl.trim();
+
+    const finalModel = model.trim() || deploymentName.trim();
+    const finalDeployment = isFoundry ? undefined : deploymentName.trim();
+
+    if (target === "main") {
+      // メインLLM: 既存のサンプリングパラメータ・contextWindow・description を保持
+      const cur = this.config.mainLLM;
+      this.config.mainLLM = {
+        ...cur,
+        providerType: provider,
+        model: finalModel,
+        endpoint: finalEndpoint,
+        apiKey: storedApiKey,
+        deploymentName: finalDeployment,
+        baseUrl: undefined, // クラウドでは未使用
+        // projectId/region は Vertex AI 用なのでクリア
+        projectId: undefined,
+        region: undefined,
+      };
+    } else {
+      this.config.secondLLM = {
+        enabled: true,
+        endpoint: {
+          providerType: provider,
+          model: finalModel,
+          endpoint: finalEndpoint,
+          apiKey: storedApiKey,
+          deploymentName: finalDeployment,
+          description: existingIsAzure ? existing?.description : undefined,
+          contextWindow: existingIsAzure ? existing?.contextWindow : undefined,
+        },
+        budget: this.config.secondLLM?.budget ?? null,
+        cost: this.config.secondLLM?.cost ?? { referenceModels: [] },
+      };
+    }
+    saveConfig(this.config);
+
+    console.log(chalk.green(`\n  ✓ ${targetLabel} (Azure) を設定しました:`));
+    console.log(chalk.dim(`    プロバイダー:    ${provider}`));
+    console.log(chalk.dim(`    Endpoint:        ${finalEndpoint}`));
+    if (!isFoundry) {
+      console.log(chalk.dim(`    Deployment:      ${deploymentName.trim()}`));
+    }
+    console.log(chalk.dim(`    Model:           ${finalModel}`));
+    console.log(chalk.dim(`    API Key:         ${storageMode === "encrypt" ? "暗号化保存" : storageMode === "env" ? `環境変数 (${storedApiKey})` : "平文保存"}`));
+
+    if (needsRestart) {
+      console.log(chalk.yellow("\n  ⚠ 暗号化保存のため、反映にはアプリの再起動と合言葉入力が必要です。"));
+    } else {
+      // 平文 / 環境変数参照 ならその場で反映可能
+      if (target === "main") {
+        await this.applyMainLLMEndpoint();
+        console.log(chalk.green("  実行時に反映しました。"));
+      } else {
+        this.applySecondLLMEndpoint();
+        const isAvail = this.secondLLMManager?.isAvailable() ?? false;
+        if (isAvail) {
+          console.log(chalk.green("  実行時に反映しました。"));
+        } else {
+          console.log(chalk.yellow("  反映時に接続失敗しました。/second status で確認してください。"));
+        }
+      }
+    }
+    console.log();
   }
 
   /**
@@ -521,7 +724,20 @@ export class REPL {
           const ctxLabel = ctxWindow >= 1000 ? `${Math.round(ctxWindow / 1000)}K` : `${ctxWindow}`;
           console.log(chalk.bold("\n  ── モデル情報 ──"));
           console.log(chalk.dim(`  モデル:         ${chalk.cyan(modelName)}`));
-          console.log(chalk.dim(`  プロバイダー:   ${this.config.mainLLM.providerType} @ ${this.config.mainLLM.baseUrl}`));
+          {
+            const m = this.config.mainLLM;
+            const loc = m.baseUrl ?? m.endpoint ?? "(クラウド)";
+            console.log(chalk.dim(`  プロバイダー:   ${m.providerType} @ ${loc}`));
+            if (m.deploymentName) console.log(chalk.dim(`  Deployment:     ${m.deploymentName}`));
+            if (m.apiKey) {
+              const kind = m.apiKey.startsWith("encrypted:")
+                ? "暗号化保存"
+                : m.apiKey.startsWith("env:")
+                  ? `環境変数 (${m.apiKey})`
+                  : "平文保存";
+              console.log(chalk.dim(`  API Key:        ${kind}`));
+            }
+          }
           console.log(chalk.dim(`  コンテキスト長: ${chalk.yellow(ctxLabel)} トークン (設定値)`));
           console.log(chalk.dim(`  max_tokens:     ${chalk.yellow(ctxLabel)} (= コンテキスト長から自動設定)`));
           // サンプリングパラメータ: 設定値があれば表示、なければ "auto (サーバーデフォルト)"
@@ -565,7 +781,8 @@ export class REPL {
           // --- Vision / SecondLLM ---
           if (this.config.visionLLM) {
             console.log(chalk.bold("\n  ── Vision LLM ──"));
-            console.log(chalk.dim(`  モデル: ${this.config.visionLLM.model} @ ${this.config.visionLLM.baseUrl}`));
+            const v = this.config.visionLLM;
+            console.log(chalk.dim(`  モデル: ${v.model} @ ${v.baseUrl ?? v.endpoint ?? "(クラウド)"}`));
           }
           if (this.config.secondLLM?.enabled) {
             console.log(chalk.bold("\n  ── セカンドLLM ──"));
@@ -729,15 +946,22 @@ export class REPL {
           }
         } else if (args[0] === "provider") {
           const newProvider = args[1]?.trim();
-          const validProviders: ProviderType[] = ["ollama", "lmstudio", "llamacpp", "vllm"];
+          const localProviders: ProviderType[] = ["ollama", "lmstudio", "llamacpp", "vllm"];
+          const cloudProviders = ["vertex-ai", "azure-openai", "azure-claude", "azure-foundry"];
+          const validProviders = [...localProviders, ...cloudProviders];
           if (!newProvider) {
             console.log(chalk.dim(`  現在のプロバイダー: ${this.config.mainLLM.providerType}`));
-            console.log(chalk.dim(`  使い方: /model provider <タイプ> [<URL>]`));
-            console.log(chalk.dim(`  選択肢: ${validProviders.join(", ")}`));
-            console.log(chalk.dim(`  デフォルトポート: ${validProviders.map((p) => `${p}=${DEFAULT_PORTS[p]}`).join(", ")}`));
-          } else if (!validProviders.includes(newProvider as ProviderType)) {
+            console.log(chalk.dim(`  使い方: /model provider <タイプ> [<URL>]   (ローカル系)`));
+            console.log(chalk.dim(`         /model setup azure-foundry        (クラウド系は対話セットアップ)`));
+            console.log(chalk.dim(`  ローカル: ${localProviders.join(", ")}`));
+            console.log(chalk.dim(`  クラウド: ${cloudProviders.join(", ")}`));
+            console.log(chalk.dim(`  デフォルトポート: ${localProviders.map((p) => `${p}=${DEFAULT_PORTS[p]}`).join(", ")}`));
+          } else if (!validProviders.includes(newProvider)) {
             console.log(chalk.red(`  無効なプロバイダー: ${newProvider}`));
             console.log(chalk.dim(`  選択肢: ${validProviders.join(", ")}`));
+          } else if (cloudProviders.includes(newProvider)) {
+            // クラウド系は endpoint/apiKey 等の追加情報が必要 → setup フローへ誘導
+            console.log(chalk.yellow(`  ${newProvider} はクラウド系です。endpoint/apiKey 設定が必要なので /model setup ${newProvider} を実行してください。`));
           } else {
             const oldProvider = this.config.mainLLM.providerType;
             this.config.mainLLM.providerType = newProvider as ProviderType;
@@ -746,16 +970,47 @@ export class REPL {
             if (newUrl) {
               this.config.mainLLM.baseUrl = newUrl;
             }
+            // クラウドからローカルへ切り替え時はクラウド用フィールドをクリア
+            this.config.mainLLM.endpoint = undefined;
+            this.config.mainLLM.apiKey = undefined;
+            this.config.mainLLM.deploymentName = undefined;
+            this.config.mainLLM.projectId = undefined;
+            this.config.mainLLM.region = undefined;
             saveConfig(this.config);
             console.log(chalk.dim(`  メインLLMプロバイダー: ${chalk.yellow(oldProvider)} → ${chalk.cyan(newProvider)}`));
             if (newUrl) {
               console.log(chalk.dim(`  URL: ${chalk.cyan(newUrl)}`));
             } else {
               const port = DEFAULT_PORTS[newProvider as ProviderType];
-              console.log(chalk.dim(`  URL: ${this.config.mainLLM.baseUrl} (変更なし — 必要なら /model url で更新。${newProvider}のデフォルトポートは ${port})`));
+              console.log(chalk.dim(`  URL: ${this.config.mainLLM.baseUrl ?? "(未設定)"} (必要なら /model url で更新。${newProvider}のデフォルトポートは ${port})`));
             }
             await this.applyMainLLMEndpoint();
             console.log(chalk.green(`  実行時に反映しました。`));
+          }
+        } else if (args[0] === "setup") {
+          const targetProvider = args[1]?.trim();
+          if (!targetProvider) {
+            console.log(chalk.yellow("  使い方: /model setup <provider>"));
+            console.log(chalk.dim("  例: /model setup azure-foundry  (Kimi/Mistral等のAzure AI Foundry)"));
+            console.log(chalk.dim("       /model setup azure-openai   (Azure OpenAI Service)"));
+            console.log(chalk.dim("       /model setup azure-claude   (Azure Claude)"));
+          } else if (
+            targetProvider === "azure-openai" ||
+            targetProvider === "azure-claude" ||
+            targetProvider === "azure-foundry"
+          ) {
+            try {
+              await this.setupAzureLLM("main", targetProvider);
+            } catch (e) {
+              if (!(e instanceof Error && e.message.includes("User force closed"))) {
+                console.log(chalk.red(`  Azure セットアップ中にエラー: ${e instanceof Error ? e.message : String(e)}`));
+              } else {
+                console.log(chalk.yellow("  セットアップを中止しました。"));
+              }
+            }
+          } else {
+            console.log(chalk.red(`  対話セットアップ未対応のプロバイダー: ${targetProvider}`));
+            console.log(chalk.dim("  ローカル系 (ollama/lmstudio/llamacpp/vllm) は /model provider <タイプ> [<URL>] で設定できます。"));
           }
         } else {
           const newModel = args[0];
@@ -954,7 +1209,7 @@ export class REPL {
           }
         } else if (subCmd === "provider") {
           const newProvider = args[1]?.trim();
-          const validProviders = ["ollama", "lmstudio", "llamacpp", "vllm", "vertex-ai", "azure-openai", "azure-claude"];
+          const validProviders = ["ollama", "lmstudio", "llamacpp", "vllm", "vertex-ai", "azure-openai", "azure-claude", "azure-foundry"];
           if (!newProvider) {
             console.log(chalk.dim(`  現在のプロバイダー: ${this.config.secondLLM?.endpoint.providerType ?? "(未設定)"}`));
             console.log(chalk.dim(`  使い方: /second provider <タイプ>`));
@@ -968,7 +1223,7 @@ export class REPL {
             saveConfig(this.config);
             this.applySecondLLMEndpoint();
             console.log(chalk.dim(`  プロバイダー: ${chalk.yellow(oldProvider)} → ${chalk.cyan(newProvider)}`));
-            const isCloud = ["vertex-ai", "azure-openai", "azure-claude"].includes(newProvider);
+            const isCloud = ["vertex-ai", "azure-openai", "azure-claude", "azure-foundry"].includes(newProvider);
             if (isCloud) {
               console.log(chalk.dim(`  クラウドプロバイダーは追加の認証情報が必要な場合があります。/second status で確認してください。`));
             } else {
@@ -980,28 +1235,43 @@ export class REPL {
         } else if (subCmd === "setup") {
           // 最小限の初期設定を作成
           const provider = (args[1] ?? "vllm") as SecondLLMProviderType;
-          const url = args[2] ?? "http://localhost:8000";
-          const model = args[3] ?? "";
-          this.config.secondLLM = {
-            enabled: true,
-            endpoint: {
-              providerType: provider,
-              model,
-              baseUrl: url,
-            },
-            budget: null,
-            cost: { referenceModels: [] },
-          };
-          saveConfig(this.config);
-          console.log(chalk.green("  セカンドLLMを初期設定しました:"));
-          console.log(chalk.dim(`  プロバイダー: ${provider}`));
-          console.log(chalk.dim(`  URL:          ${url}`));
-          console.log(chalk.dim(`  モデル:       ${model || "(未指定 — /second model で設定)"}`));
-          console.log(chalk.dim(`  (反映には再起動が必要です)`));
+          if (provider === "azure-openai" || provider === "azure-claude" || provider === "azure-foundry") {
+            try {
+              await this.setupAzureLLM("second", provider);
+            } catch (e) {
+              if (!(e instanceof Error && e.message.includes("User force closed"))) {
+                console.log(chalk.red(`  Azure セットアップ中にエラー: ${e instanceof Error ? e.message : String(e)}`));
+              } else {
+                console.log(chalk.yellow("  セットアップを中止しました。"));
+              }
+            }
+          } else {
+            const url = args[2] ?? "http://localhost:8000";
+            const model = args[3] ?? "";
+            this.config.secondLLM = {
+              enabled: true,
+              endpoint: {
+                providerType: provider,
+                model,
+                baseUrl: url,
+              },
+              budget: null,
+              cost: { referenceModels: [] },
+            };
+            saveConfig(this.config);
+            console.log(chalk.green("  セカンドLLMを初期設定しました:"));
+            console.log(chalk.dim(`  プロバイダー: ${provider}`));
+            console.log(chalk.dim(`  URL:          ${url}`));
+            console.log(chalk.dim(`  モデル:       ${model || "(未指定 — /second model で設定)"}`));
+            console.log(chalk.dim(`  (反映には再起動が必要です)`));
+          }
         } else {
            console.log(chalk.yellow("  使い方:"));
            console.log(chalk.dim("    /second                       状態確認"));
-           console.log(chalk.dim("    /second setup [provider] [url] [model]  初期設定"));
+           console.log(chalk.dim("    /second setup [provider] [url] [model]  初期設定 (ローカル系)"));
+           console.log(chalk.dim("    /second setup azure-openai             Azure OpenAI 対話セットアップ"));
+           console.log(chalk.dim("    /second setup azure-claude             Azure Claude 対話セットアップ"));
+           console.log(chalk.dim("    /second setup azure-foundry            Azure AI Foundry (Kimi/Mistral等) 対話セットアップ"));
            console.log(chalk.dim("    /second enable / disable      有効化・無効化"));
            console.log(chalk.dim("    /second model <名前>          モデル変更"));
            console.log(chalk.dim("    /second url <URL>             エンドポイントURL変更"));

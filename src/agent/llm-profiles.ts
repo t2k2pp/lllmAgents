@@ -30,14 +30,14 @@ export function buildLLMProfiles(config: Config, hasSecondLLM: boolean): LLMProf
   };
 
   let parallelCapable: boolean;
-  if (isCloudProvider(sec.providerType)) {
-    // クラウドは常に別マシン
+  if (isCloudProvider(sec.providerType) || isCloudProvider(config.mainLLM.providerType)) {
+    // どちらか一方でもクラウドなら別マシン扱い
     parallelCapable = true;
   } else {
     // ローカル同士: baseUrl が異なれば別マシン扱い
-    const mainUrl = normalizeUrl(config.mainLLM.baseUrl);
+    const mainUrl = config.mainLLM.baseUrl ? normalizeUrl(config.mainLLM.baseUrl) : "";
     const secUrl = sec.baseUrl ? normalizeUrl(sec.baseUrl) : "";
-    parallelCapable = !!secUrl && mainUrl !== secUrl;
+    parallelCapable = !!mainUrl && !!secUrl && mainUrl !== secUrl;
   }
 
   return { main, second, parallelCapable };

@@ -8,28 +8,17 @@ import { VLLMProvider } from "./vllm.js";
 import { VertexAIProvider } from "./vertex-ai.js";
 import { AzureOpenAIProvider } from "./azure-openai.js";
 import { AzureClaudeProvider } from "./azure-claude.js";
+import { AzureFoundryProvider } from "./azure-foundry.js";
 import { CredentialVault } from "../security/credential-vault.js";
 
-export function createProvider(endpoint: LLMEndpoint): LLMProvider {
-  return createProviderByType(endpoint.providerType, endpoint.baseUrl);
-}
-
-export function createProviderByType(type: ProviderType, baseUrl: string): LLMProvider {
-  switch (type) {
-    case "ollama":
-      return new OllamaProvider(baseUrl);
-    case "lmstudio":
-      return new LMStudioProvider(baseUrl);
-    case "llamacpp":
-      return new LlamaCppProvider(baseUrl);
-    case "vllm":
-      return new VLLMProvider(baseUrl);
-    default:
-      throw new Error(`Unknown provider type: ${type}`);
-  }
-}
-
-export function createSecondLLMProvider(endpoint: SecondLLMEndpoint, passphrase?: string): LLMProvider {
+/**
+ * LLMEndpoint / SecondLLMEndpoint 共通の Provider ファクトリ。
+ * クラウド系 (vertex-ai, azure-*) は apiKey の復号 (env: / encrypted: / 平文) も担う。
+ */
+function createProviderFromEndpoint(
+  endpoint: LLMEndpoint | SecondLLMEndpoint,
+  passphrase?: string,
+): LLMProvider {
   if (isCloudProvider(endpoint.providerType)) {
     switch (endpoint.providerType) {
       case "vertex-ai":
@@ -43,7 +32,7 @@ export function createSecondLLMProvider(endpoint: SecondLLMEndpoint, passphrase?
         });
 
       case "azure-openai":
-      case "azure-claude":
+      case "azure-claude": {
         if (!endpoint.endpoint || !endpoint.apiKey || !endpoint.deploymentName) {
           throw new Error(`Missing endpoint, apiKey, or deploymentName for ${endpoint.providerType}`);
         }
@@ -64,16 +53,62 @@ export function createSecondLLMProvider(endpoint: SecondLLMEndpoint, passphrase?
             deploymentName: endpoint.deploymentName,
           });
         }
+      }
+
+      case "azure-foundry": {
+        if (!endpoint.endpoint || !endpoint.apiKey || !endpoint.model) {
+          throw new Error("Missing endpoint, apiKey, or model for azure-foundry");
+        }
+        const foundryToken = CredentialVault.resolve(endpoint.apiKey, passphrase);
+        if (!foundryToken) {
+          throw new Error("Failed to decipher or resolve API Key for Azure Foundry");
+        }
+        return new AzureFoundryProvider({
+          endpoint: endpoint.endpoint,
+          apiKey: foundryToken,
+          model: endpoint.model,
+        });
+      }
 
       default:
         throw new Error(`Unknown cloud provider type: ${endpoint.providerType}`);
     }
-  } else {
-    // ローカルLLMの場合
-    if (!endpoint.baseUrl) {
-      throw new Error("Missing baseUrl for local LLM provider");
-    }
-    return createProviderByType(endpoint.providerType as ProviderType, endpoint.baseUrl);
+  }
+
+  // ローカルLLM
+  if (!endpoint.baseUrl) {
+    throw new Error("Missing baseUrl for local LLM provider");
+  }
+  return createProviderByType(endpoint.providerType as ProviderType, endpoint.baseUrl);
+}
+
+/**
+ * メインLLM (および visionLLM) 用の Provider ファクトリ。
+ * ローカル/クラウド両対応。クラウドの場合 passphrase で apiKey を復号する。
+ */
+export function createProvider(endpoint: LLMEndpoint, passphrase?: string): LLMProvider {
+  return createProviderFromEndpoint(endpoint, passphrase);
+}
+
+export function createProviderByType(type: ProviderType, baseUrl: string): LLMProvider {
+  switch (type) {
+    case "ollama":
+      return new OllamaProvider(baseUrl);
+    case "lmstudio":
+      return new LMStudioProvider(baseUrl);
+    case "llamacpp":
+      return new LlamaCppProvider(baseUrl);
+    case "vllm":
+      return new VLLMProvider(baseUrl);
+    default:
+      throw new Error(`Unknown provider type: ${type}`);
   }
 }
 
+/**
+ * セカンドLLM用の Provider ファクトリ。
+ * メインと同じ実装に委譲 (ローカル/クラウド両対応 + apiKey 復号)。
+ */
+export function createSecondLLMProvider(endpoint: SecondLLMEndpoint, passphrase?: string): LLMProvider {
+  return createProviderFromEndpoint(endpoint, passphrase);
+}
