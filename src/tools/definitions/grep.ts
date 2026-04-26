@@ -9,7 +9,16 @@ export const grepTool: ToolHandler = {
     type: "function",
     function: {
       name: "grep",
-      description: "正規表現パターンでファイル内容を検索します。",
+      description:
+        "正規表現でファイル内容を全文検索する。\n" +
+        "[使うべき場面] (1) 関数/シンボル定義の特定 (例: 'function foo')。 " +
+        "(2) 使用箇所列挙 (例: 'import.*foo')。 " +
+        "(3) エラーメッセージや TODO の横断調査。\n" +
+        "[使うべきでない] (1) ファイルパス列挙 → glob。 " +
+        "(2) 単一ファイル全体読み込み → file_read。\n" +
+        "[よくある誤用] (a) 普通の文字列検索なのに正規表現メタ文字 ('.', '*') を含めて意図せずワイルド化。 " +
+        "(b) include/glob 引数を忘れて巨大な検索範囲を走らせる。 " +
+        "(c) 大文字小文字違い → ignore_case=true で対処。",
       parameters: {
         type: "object",
         properties: {

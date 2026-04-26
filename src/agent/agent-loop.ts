@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import chalk from "chalk";
 import ora from "ora";
 import { globalTokenTracker } from "../cost/token-tracker.js";
@@ -100,6 +101,12 @@ export class AgentLoop {
   private _aborted = false;
   /** file_edit 連続失敗カウンタ（ファイルパス → 連続失敗回数） */
   private fileEditFailCounts = new Map<string, number>();
+  /** Phase 5-D: 壁ドンループ検出 — (toolName + 主要引数) ハッシュごとの連続失敗回数 */
+  private wallHitFailCounts = new Map<string, number>();
+  /** Phase 5-D: 連続委任ガード — second_llm_agent / task の直近呼び出しID列 (連続回数の検出用) */
+  private recentDelegations: { tool: string; ts: number }[] = [];
+  /** Phase 5-H: Read→Edit 契約 — 直近 file_read された絶対パス (LRU 風、最大 32 件) */
+  private recentReads = new Set<string>();
   /** ツールの最大並列実行数 */
   private maxParallelTools: number;
   /** モデルのコンテキストウィンドウサイズ（トークン数） — max_tokens算出に使用 */
@@ -919,7 +926,7 @@ export class AgentLoop {
       resultContent += "\n\n" + guide;
     }
 
-    // file_edit 連続失敗追跡
+    // file_edit 連続失敗追跡 (Phase 2 既存)
     if (toolCall.function.name === "file_edit") {
       let filePath = "";
       try {
@@ -935,8 +942,72 @@ export class AgentLoop {
             "file_write でファイル全体を書き直してください。";
         }
       } else if (result.success && filePath) {
-        // 成功したらカウンタリセット
         this.fileEditFailCounts.delete(filePath);
+      }
+    }
+
+    // Phase 5-D: 汎化された壁ドンループ検出 (file_read / glob / bash)
+    // 同一ツール × 同一主要引数で連続失敗が続いたら強い警告を挿入
+    if (!result.success) {
+      const key = wallHitKey(toolCall);
+      if (key) {
+        const cnt = (this.wallHitFailCounts.get(key) ?? 0) + 1;
+        this.wallHitFailCounts.set(key, cnt);
+        if (cnt >= 2) {
+          resultContent +=
+            `\n\n[システム][壁ドンループ警告] 同じツール×同じ引数で ${cnt} 回連続失敗。` +
+            ` 同じ呼び出しを繰り返さないこと。 別アプローチに切替えるか、 ask_user で状況共有を。` +
+            ` (key=${key.slice(0, 80)})`;
+        }
+      }
+    } else {
+      // 成功したらこのキーのカウンタを削除
+      const key = wallHitKey(toolCall);
+      if (key) this.wallHitFailCounts.delete(key);
+    }
+
+    // Phase 5-H: Read→Edit 契約 — file_edit が直近に file_read していないパスに走った場合の警告
+    if (toolCall.function.name === "file_edit") {
+      try {
+        const args = JSON.parse(toolCall.function.arguments ?? "{}");
+        const filePath = (args.file_path ?? args.path ?? "") as string;
+        if (filePath && !this.recentReads.has(path.resolve(filePath))) {
+          resultContent +=
+            `\n\n[システム][Read→Edit契約] このセッションで file_read していないパスに file_edit を実行しました: ${filePath}` +
+            `\n→ 次回からは編集前に file_read で現状を確認してください。 古い情報での編集は old_string 不一致の主因です。`;
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Phase 5-H: file_read 成功時に recentReads に追加 (LRU、 32 件まで)
+    if (toolCall.function.name === "file_read" && result.success) {
+      try {
+        const args = JSON.parse(toolCall.function.arguments ?? "{}");
+        const filePath = (args.file_path ?? args.path ?? "") as string;
+        if (filePath) {
+          const abs = path.resolve(filePath);
+          this.recentReads.delete(abs); // re-insert で LRU 風
+          this.recentReads.add(abs);
+          if (this.recentReads.size > 32) {
+            const first = this.recentReads.values().next().value;
+            if (first) this.recentReads.delete(first);
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Phase 5-B2: 連続委任ガード — second_llm_agent / task の連続呼び出し検出
+    if (toolCall.function.name === "second_llm_agent" || toolCall.function.name === "task") {
+      const now = Date.now();
+      this.recentDelegations.push({ tool: toolCall.function.name, ts: now });
+      // 過去 5 分以内の同一ツール委任のみ保持
+      this.recentDelegations = this.recentDelegations.filter((d) => now - d.ts < 5 * 60_000);
+      const sameToolRecent = this.recentDelegations.filter((d) => d.tool === toolCall.function.name).length;
+      if (sameToolRecent >= 3) {
+        resultContent +=
+          `\n\n[システム][連続委任警告] ${toolCall.function.name} を直近 ${sameToolRecent} 回連続で呼び出しています。` +
+          ` 修正リストを集約して 1 回の委任で完結させる方が効率的です (Delegation Cascade 回避)。` +
+          ` 次の委任が必要なら、 まず収まり切らない理由を整理してから。`;
       }
     }
 
@@ -1453,5 +1524,41 @@ function isDocumentFile(filePath: string): boolean {
     ? filePath.slice(filePath.lastIndexOf(".")).toLowerCase()
     : "";
   return docExtensions.has(ext);
+}
+
+/**
+ * Phase 5-D: 壁ドンループ検出キー生成。
+ * (toolName, 主要引数) を結合した識別子を返す。 識別子が等しいツール呼び出しが
+ * 連続失敗した場合、 「同じ呼び出しを繰り返している」 と判断できる。
+ * 主要引数の選び方:
+ *   - file_read / file_edit / file_write: file_path
+ *   - glob: pattern + path
+ *   - grep: pattern + path
+ *   - bash: command (先頭 80 文字)
+ *   - 上記以外は null (検出対象外)
+ */
+function wallHitKey(toolCall: ToolCall): string | null {
+  const name = toolCall.function.name;
+  let args: Record<string, unknown> = {};
+  try {
+    args = JSON.parse(toolCall.function.arguments ?? "{}");
+  } catch {
+    return null;
+  }
+  switch (name) {
+    case "file_read":
+    case "file_write":
+      return `${name}:${args.file_path ?? ""}`;
+    case "glob":
+      return `glob:${args.pattern ?? ""}|${args.path ?? ""}`;
+    case "grep":
+      return `grep:${args.pattern ?? ""}|${args.path ?? ""}`;
+    case "bash": {
+      const cmd = String(args.command ?? "").slice(0, 80);
+      return `bash:${cmd}`;
+    }
+    default:
+      return null;
+  }
 }
 

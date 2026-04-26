@@ -88,7 +88,19 @@ export const bashTool: BashToolHandler = {
     type: "function",
     function: {
       name: "bash",
-      description: "シェルコマンドを実行します。コマンドの結果（stdout/stderr）を返します。",
+      description:
+        "シェルコマンドを実行する (Windows では git bash、なければ cmd.exe)。\n" +
+        "[使うべき場面] (1) ファイル探索 (find, ls -la), " +
+        "(2) git/npm/python 等のツール実行, " +
+        "(3) 専用ツールが無い操作 (ファイル移動 mv, 圧縮 tar, etc.)。\n" +
+        "[使うべきでない] (1) ファイル中身確認 → file_read。 " +
+        "(2) ファイル一覧 → glob。 " +
+        "(3) 中身検索 → grep。 " +
+        "(4) ファイル編集 → file_edit/file_write (sed -i は不可視で扱いづらい)。\n" +
+        "[よくある誤用] (a) Windows で cmd 構文を期待 → git bash なので Unix 構文。 " +
+        "(b) パイプの中で対話入力を要するコマンド → 使わない。 " +
+        "(c) 長時間実行コマンド → timeout を増やすか run_in_background を検討。\n" +
+        "[副次情報] 成功時に exitCode/durationMs/stdoutBytes を末尾に付与。",
       parameters: {
         type: "object",
         properties: {
@@ -165,6 +177,7 @@ export const bashTool: BashToolHandler = {
         resolve(result);
       };
 
+      const startMs = Date.now();
       const proc = spawn(shell, shellArgs, {
         cwd: process.cwd(),
         env: { ...process.env },
@@ -202,10 +215,13 @@ export const bashTool: BashToolHandler = {
         }
         const output = (stdout + (stderrText ? `\nSTDERR:\n${stderrText}` : "")).trim();
         const truncated = output.length > 30000 ? output.slice(0, 30000) + "\n... (truncated)" : output;
+        // Phase 5-C2: 副次情報の標準同梱 (exitCode/duration/bytes)
+        const durationMs = Date.now() - startMs;
+        const meta = `\n[bash] exitCode=${code ?? "?"} | duration=${durationMs}ms | stdout=${stdout.length}B | stderr=${stderr.length}B`;
         if (code === 0) {
-          return { success: true, output: truncated };
+          return { success: true, output: truncated + meta };
         }
-        return { success: false, output: truncated, error: `Exit code: ${code}` };
+        return { success: false, output: truncated + meta, error: `Exit code: ${code}` };
       };
 
       // close と exit の両方を監視（Windowsでcloseが発火しないケース対策）

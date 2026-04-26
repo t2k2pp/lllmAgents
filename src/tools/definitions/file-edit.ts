@@ -8,7 +8,14 @@ export const fileEditTool: ToolHandler = {
     type: "function",
     function: {
       name: "file_edit",
-      description: "ファイル内の文字列を置換して編集します。old_stringが一意に特定できる必要があります。",
+      description:
+        "ファイル内の文字列を置換して部分編集する。old_string がファイル内で一意であることが前提。\n" +
+        "[使うべき場面] 数行〜数十行の修正。Read で確認した直後の編集。\n" +
+        "[使うべきでない] (1) ファイル全体の置換 → file_write の方が確実。 " +
+        "(2) Read していないファイル → 内容を知らずに old_string を当てるのは無理。先に file_read。\n" +
+        "[よくある誤用] (a) 空白・タブ・改行コードの違いで old_string が一致しない → ファイル先頭の方をそのままコピーして指定。 " +
+        "(b) 同じ文字列が複数箇所 → replace_all=true、または前後を含めて一意化。 " +
+        "[副次情報] 失敗時はファイル現状を添付。同ファイルで連続失敗時は file_write 推奨に切り替えて。",
       parameters: {
         type: "object",
         properties: {
@@ -73,9 +80,13 @@ export const fileEditTool: ToolHandler = {
 
     fs.writeFileSync(filePath, content, "utf-8");
     const replacedCount = replaceAll ? occurrences : 1;
+    // Phase 5-C1: 副次情報の標準同梱
+    const stat = fs.statSync(filePath);
+    const totalLines = content.split("\n").length;
+    const meta = `[file_edit] replaced ${replacedCount} occurrence(s) in ${filePath} | ${stat.size} bytes | ${totalLines} lines | mtime=${stat.mtime.toISOString()}`;
     return {
       success: true,
-      output: `Edited ${filePath}: replaced ${replacedCount} occurrence(s)`,
+      output: meta,
       userDisplay: {
         type: "edit-diff",
         filePath,
