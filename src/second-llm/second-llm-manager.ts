@@ -5,6 +5,11 @@ import { globalCostCalculator } from "../cost/cost-calculator.js";
 import { DelegationGuard } from "./delegation-guard.js";
 import { createSecondLLMProvider } from "../providers/provider-factory.js";
 import { LLMLogger } from "../agent/llm-logger.js";
+import {
+  HarnessState,
+  enrichToolResult,
+  buildSubAgentStrategyPrompt,
+} from "../agent/harness-intervention.js";
 import type { SecondLLMConfig, SecondLLMEndpoint } from "../config/types.js";
 import type { LLMProvider, Message, ToolCall } from "../providers/base-provider.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
@@ -103,8 +108,14 @@ export class SecondLLMManager {
     const log = this.createLogger("second-llm-consult");
     const spinner = ora(chalk.magenta("Consulting Second LLM...")).start();
     try {
+      // Phase 5 第2ラウンド: consult はツール無し単発質問。 戦略プロンプトはコンパクト版で十分。
+      const systemPrompt =
+        `あなたはメインLLMから単発相談を受けたサブエージェント。 直接的で完結した回答を返す。\n` +
+        `- 質問返しはしない (情報不足なら妥当な仮定を置いて回答+「仮定したこと」を併記)\n` +
+        `- 与えられた背景・コンテキストの中で答える。 推測の混入は最小限\n` +
+        `- ツール実行はできない。 純粋な推論で回答`;
       const messages: Message[] = [
-        { role: "system", content: "You are an expert AI assistant consulted by another AI agent. Provide a direct, factual, and complete answer. Do not ask questions back." },
+        { role: "system", content: systemPrompt },
         { role: "user", content: prompt }
       ];
 
@@ -147,12 +158,19 @@ export class SecondLLMManager {
 
     const spinner = ora(chalk.magenta("Second LLM working as Agent...")).start();
     try {
+      // Phase 5 第2ラウンド: メインLLMの system-prompt から戦略原則を継承する。
+      // メインとセカンドで「同じ原則を共有する」 ことが目的 (非対称性の解消)。
+      const systemPrompt = buildSubAgentStrategyPrompt();
       const messages: Message[] = [
-        { role: "system", content: "You are an expert AI sub-agent. Complete the task using available tools. Do not ask questions back to the user. Provide the final result of your task." },
+        { role: "system", content: systemPrompt },
         { role: "user", content: prompt }
       ];
 
       const toolExecutor = new ToolExecutor(this.toolRegistry, this.permissions);
+      // Phase 5 第2ラウンド: セカンドLLM 自身もハーネス介入レイヤを通す。
+      // メインから渡される警告 (連続委任警告等) は 既にメイン側で挿入済の prompt に乗ってくるが、
+      // セカンド内での失敗 (壁ドンループ・盲目編集) も検出するため independent な state を持つ。
+      const harnessState = new HarnessState();
       let iteration = 0;
       const MAX_ITERATIONS = 15;
 
@@ -223,7 +241,13 @@ export class SecondLLMManager {
 
             try {
               const res = await toolExecutor.execute(tc);
-              messages.push({ role: "tool", content: res.output || res.error || "", tool_call_id: tc.id });
+              const raw = res.success
+                ? (res.output ?? "")
+                : `Error: ${res.error ?? ""}\n${res.output ?? ""}`;
+              // Phase 5 第2ラウンド: セカンド側でも介入レイヤを通す。
+              // 壁ドンループ警告 / Read→Edit 契約 / 連続委任ガード / 旧エラーガイダンスを適用。
+              const enriched = enrichToolResult(tc, res.success, raw, harnessState);
+              messages.push({ role: "tool", content: enriched, tool_call_id: tc.id });
             } catch (e) {
               messages.push({ role: "tool", content: `Error: ${String(e)}`, tool_call_id: tc.id });
             }
@@ -269,6 +293,8 @@ export class SecondLLMManager {
       ];
 
       const toolExecutor = new ToolExecutor(this.toolRegistry, this.permissions);
+      // Phase 5 第2ラウンド: Evaluator にもハーネス介入を適用 (壁ドンループ検出等)
+      const harnessState = new HarnessState();
       let iteration = 0;
       const maxIter = params.maxIterations ?? 10;
 
@@ -341,7 +367,12 @@ export class SecondLLMManager {
 
             try {
               const res = await toolExecutor.execute(tc);
-              messages.push({ role: "tool", content: res.output || res.error || "", tool_call_id: tc.id });
+              const raw = res.success
+                ? (res.output ?? "")
+                : `Error: ${res.error ?? ""}\n${res.output ?? ""}`;
+              // Phase 5 第2ラウンド: Evaluator も介入レイヤを通す
+              const enriched = enrichToolResult(tc, res.success, raw, harnessState);
+              messages.push({ role: "tool", content: enriched, tool_call_id: tc.id });
             } catch (e) {
               messages.push({ role: "tool", content: `Error: ${String(e)}`, tool_call_id: tc.id });
             }
