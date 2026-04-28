@@ -723,17 +723,92 @@ Claude 4 系 (Sonnet 4.5/4.6, Opus 4.7, Haiku 4.5) の Anthropic Messages API �
 
 ---
 
-## 第 7 ラウンド以降の予定 (未着手)
+## 第 7 ラウンド (2026-04-29) — 観察可能性 + 進捗監視 + 委任ハードガード一括投入
 
-第 5 ラウンドのリトライ結果を見てから決める。 候補:
+第 6 ラウンドの max_tokens 修正を完了したので、 **リトライ待ちで止まらない範囲** の 5 項目を一括投入 (5-F / 5-F1 / 5-P2 / 5-D3 / 5-B3)。 主旨は「観察可能性を上げる + 暗黙の作業フローをハーネスで強制」。
+
+### 実装したもの
+
+| Phase | 内容 | 変更ファイル | ステータス |
+|---|---|---|---|
+| 5-F | **`scripts/eval-jsonl.js`** 新規作成。 セッション JSONL を再帰的に読んで集計: ターン/ツール内訳/失敗率/トークン (in/out)/出力上限張り付き事象/ハーネス警告挿入数/委任系内訳/エラーカテゴリ。 `--since YYYY-MM-DD` / `--agent <id>` で絞込可。 既存ログでスモークテスト OK (4/28 のログから tokensOut=4096 張り付き 2 件 + 経路保持原則警告 11 件を正しく検出) | `scripts/eval-jsonl.js` (新規) | ✅ |
+| 5-F1 | **progressTracker (進捗ゼロ警告)** を `enrichToolResult` に追加。 一度でも file_write/file_edit が成功した後 (= 実装モード突入後)、 8 回連続でそれらが現れないと `[システム][進捗ゼロ警告]` を挿入。 `silentWarningCooldown` で連発抑制 | `src/agent/harness-intervention.ts` | ✅ |
+| 5-P2 | **HTML 動作確認サジェスト** を `enrichToolResult` に追加。 `.html`/`.htm` を file_write すると `[システム][HTML検証ヒント]` が挿入され、 (1)構造確認 (2)JS 構文確認 (3)動作確認 (4)仕様遵守 の 4 段階を提示 | 同上 | ✅ |
+| 5-D3 | **計画→ToDo 誘導** を `enrichToolResult` に追加 + system-prompt 強化。 `exit_plan_mode` で承認 (`approved=true`) 後、 直後の tool が `todo_write` でなければ `[システム][計画→ToDo誘導]` 警告を 1 回挿入。 system-prompt の「計画モード」 セクションに「承認後は todo_write 必須」 を明文化 | 同上 + `src/agent/system-prompt.ts` | ✅ |
+| 5-B3 | **委任理由ハードガード** を `second_llm_agent` ツールに追加。 `reason` 引数 (`enum: context_protection \| parallelism \| specialty`) を **必須化**。 不正/欠落時は execute() で即拒否してエラー返却 (LLM に「3 条件のいずれにも該当しないならインライン処理を」 と促す) | `src/tools/definitions/second-llm.ts` | ✅ |
+| (継承) | セカンドLLM 用 `buildSubAgentStrategyPrompt()` のハーネス警告対応リストに 進捗ゼロ/HTML検証/計画→ToDo の 3 マーカーを追加。 セカンドにも同じ対応原則が継承される | `src/agent/harness-intervention.ts` | ✅ |
+
+### 動作変化のサンプル
+
+```
+# 例1: ログ集計
+$ node scripts/eval-jsonl.js --since 2026-04-29
+→ ハーネス警告マーカーごとの件数 / max_tokens 張り付き事象 / 委任系成功率 等が markdown 出力
+→ 効果検証で「定量的にどう変わったか」 がワンコマンドで分かる
+
+# 例2: 進捗ゼロ警告
+file_read → grep → file_read → glob → file_read → bash → file_read → grep → ...
+(8 回 file_write/edit なし)
+→ [システム][進捗ゼロ警告] 直近 8 回のツール呼び出しで file_write/file_edit が成功していません。
+   情報収集が長すぎる、 検証ループに陥っている可能性。
+   何が分かっていて何が不足しているか整理し、 次の 1 手を決めてから書き込みに入ること。
+
+# 例3: HTML 検証ヒント
+file_write /sandbox/race-game.html (8KB)
+→ [システム][HTML検証ヒント] HTML 生成は「ファイル存在=完了」 ではありません。 段階別に検証:
+  (1) 構造確認: file_read で <canvas>/<script>/...
+  (2) JS 構文確認: <script> ブロック内 JS の syntax error は構文チェック対象外...
+  (3) 動作確認: production レジスターでは browser_screenshot...
+  (4) 仕様遵守: grep で重要キーワード...
+
+# 例4: 計画→ToDo 誘導
+enter_plan_mode → file_read → grep → exit_plan_mode (approved=true) → file_write [!!]
+→ tool_result 末尾: [システム][計画→ToDo誘導] 直前に enter_plan_mode で計画が承認されました。
+   計画蒸発を防ぐため、 次の手は todo_write で計画を 3-5 項目の Acceptance Checklist に落とすこと。
+
+# 例5: 委任理由ハードガード
+second_llm_agent({ task: "..." })  ← reason 引数なし
+→ Error: [Phase 5-B3 ハードガード] second_llm_agent の reason 引数は必須で、
+  次のいずれかでなければなりません: context_protection / parallelism / specialty
+→ LLM は reason="context_protection" を補足して再呼び出し、 もしくは「これはインラインで十分」 と判断
+```
+
+### Claude Code 原則 (P1〜P10) との対応
+
+| 原則 | 第7ラウンドで強化 |
+|---|---|
+| P3 同じ間違いを2度させない | 5-F1 で「進捗ゼロループ」 という新パターンを検出対象に追加 ✅ |
+| P4 観察可能性 | 5-F でセッション全体の集計が可能に。 「効くか効かないか」 を定量議論できる ✅ |
+| P5 委任の閾値設計 | 5-B3 で 3 条件をハードガード化、 description 説得から強制力に格上げ ✅ |
+| P7 計画は重い案件のみ | 5-D3 で計画蒸発を構造的に防止 ✅ |
+| P9 ハーネス→モデルの気づき | 5-P2 で HTML 完成判定の薄さに自動で気づける ✅ |
+
+### 副作用・リスク
+
+- **5-F1 (進捗ゼロ警告) の閾値 8 は仮**: 法外に長い情報収集が正当なケース (例: 大規模仕様書の精読) で誤報する可能性あり。 cooldown で連発は抑えているが、 必要なら 12-15 に上げる
+- **5-P2 (HTML ヒント) は毎回出る**: rough レジスター (= MVP/サンプル) でも一律ヒントが入るので冗長感あり。 必要なら system-prompt 経由でレジスター連動に
+- **5-D3 (計画→ToDo) は 1 回限定**: 承認後の最初のツールでしか発火しない。 一度ハーネスを「やり過ごし」 て todo_write を呼ばないと再発火しないので、 強制力としては弱い。 本気でハード化するなら exit_plan_mode の output に「次は todo_write」 を強制する設計が必要 (将来検討)
+- **5-B3 (reason ハードガード) は既存呼び出しと非互換**: reason を渡していない呼び出しは全部失敗する → 利用側の LLM (メイン system-prompt) の更新が要る (今回 system-prompt 側に明示は入れていない、 description で reason 必須を伝える設計)
+- 5-F の集計スクリプトは markdown 出力のみ。 CSV / JSON 出力モード追加は次回検討
+
+### 第 7 ラウンド: リトライ結果ログ
+
+#### リトライ #1
+- 日時: (未実施)
+- セッションログ:
+- 観察:
+- 残課題:
+- 副作用:
+
+---
+
+## 第 8 ラウンド以降の予定 (未着手)
+
+リトライ結果を見て決める。 残候補:
 
 - **5-A2**: 全ツールに `selfHelpHints()` 共通インターフェース化
 - **5-A3**: ハーネス側のエラー分類器 + 連続失敗時の自動 `find` 実行
-- **5-B3**: second_llm_agent 引数に「委任理由 (3条件)」を要求するハードガード
 - **5-C3**: web_fetch / browser_screenshot 等への副次情報追加
-- **5-D3**: plan_mode 起動後の TaskWrite 強制
-- **5-F1**: progressTracker (進捗ゼロターン検出)
-- **5-F (評価系)**: `scripts/eval-jsonl.js` でログから自動集計
 - **5-H2**: Read→Edit 契約のハードガード化 (新規ファイル例外を扱える設計で)
 - **5-N4**: ハーネスが宣言レジスターを保持し、 完了報告時に self-review を促す
 - **5-O3**: ハーネスが Acceptance Checklist と完了報告を照合し、 不一致時は警告挿入

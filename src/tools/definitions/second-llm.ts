@@ -114,14 +114,38 @@ export const secondLLMAgentTool: ToolHandler = {
             type: "string",
             description: "セカンドLLMに実行させるタスクの詳細な説明。必要なコンテキスト・制約を全て含めること。",
           },
+          reason: {
+            type: "string",
+            enum: ["context_protection", "parallelism", "specialty"],
+            description:
+              "委任の理由 (3 条件のいずれか)。 [Phase 5-B3 ハードガード] " +
+              "context_protection=大量ファイル読込で本セッションのコンテキスト消費を避ける / " +
+              "parallelism=独立した複数タスクを同時に走らせる / " +
+              "specialty=セカンドLLMの特性 (高速・別モデル強み等) が活きるタスク。 " +
+              "3 条件のいずれにも該当しない委任は禁止 (= インライン処理が適切)。",
+          },
         },
-        required: ["task"],
+        required: ["task", "reason"],
       },
     }
   },
   async execute(params: Record<string, unknown>): Promise<ToolResult> {
     if (!secondLLMManager || !secondLLMManager.isAvailable()) {
       return { success: false, output: "", error: "Error: Second LLM is not configured or not enabled." };
+    }
+    // Phase 5-B3: 委任理由ハードガード — 3 条件のいずれかでなければ拒否
+    const VALID_REASONS = ["context_protection", "parallelism", "specialty"] as const;
+    const reason = params.reason as string | undefined;
+    if (!reason || !VALID_REASONS.includes(reason as typeof VALID_REASONS[number])) {
+      return {
+        success: false,
+        output: "",
+        error:
+          `[Phase 5-B3 ハードガード] second_llm_agent の reason 引数は必須で、 ` +
+          `次のいずれかでなければなりません: ${VALID_REASONS.join(" / ")}\n` +
+          `→ context_protection (大量読込でコンテキスト消費を避ける) / parallelism (独立並列タスク) / specialty (セカンドLLMの特性が活きる)\n` +
+          `3 条件いずれにも該当しないなら、 インラインで処理してください (file_read / bash / glob / grep などで十分なはず)。`,
+      };
     }
     const task = params.task as string;
     try {

@@ -33,6 +33,14 @@ export class HarnessState {
   recentToolSeq: string[] = [];
   /** 無限ループ警告を直近で出したか (重複抑制用) */
   loopWarningCooldown = 0;
+  /** Phase 5-F1: 一度でも file_write/file_edit 成功があったか (= 実装モード突入) */
+  hasEverWritten = false;
+  /** Phase 5-F1: 直近の "進捗" tool (file_write/file_edit 成功) からの非進捗 tool 数 */
+  toolsSinceLastWrite = 0;
+  /** Phase 5-F1: 進捗ゼロ警告のクールダウン (連発抑制) */
+  silentWarningCooldown = 0;
+  /** Phase 5-D3: enter_plan_mode 承認直後フラグ — 次に todo_write を期待 */
+  expectingTodoAfterPlan = false;
 }
 
 /**
@@ -224,6 +232,71 @@ export function enrichToolResult(
     }
   }
 
+  // ── (6) Phase 5-F1: progressTracker (進捗ゼロターン検出) ──
+  // file_write / file_edit が成功した = 実装が前進した。 それ以外は「観察」 とみなす。
+  // 一度でも書込が成功した後は、 観察 8 回連続で警告 (情報収集ループに陥っている可能性)。
+  const isProgressTool = success && (toolName === "file_write" || toolName === "file_edit");
+  if (isProgressTool) {
+    state.toolsSinceLastWrite = 0;
+    state.hasEverWritten = true;
+  } else {
+    state.toolsSinceLastWrite++;
+  }
+  if (state.silentWarningCooldown > 0) state.silentWarningCooldown--;
+  const SILENT_THRESHOLD = 8;
+  if (
+    state.hasEverWritten &&
+    state.toolsSinceLastWrite >= SILENT_THRESHOLD &&
+    state.silentWarningCooldown === 0
+  ) {
+    content +=
+      `\n\n[システム][進捗ゼロ警告] 直近 ${state.toolsSinceLastWrite} 回のツール呼び出しで file_write/file_edit が成功していません。 ` +
+      `情報収集が長すぎる、 検証ループに陥っている、 または同じ場所を何度も読んでいる可能性。 ` +
+      `\n→ 何が分かっていて何が不足しているか整理し、 次の 1 手を決めてから書き込みに入ること。 ` +
+      `判断材料が足りなければ ask_user で状況共有を。`;
+    state.silentWarningCooldown = SILENT_THRESHOLD; // 8 回置きにのみ警告
+  }
+
+  // ── (7) Phase 5-P2: HTML 生成後の動作確認サジェスト ──
+  // .html / .htm を file_write した直後、 「ファイル存在=完了」 と判定しないよう次の手を提示。
+  if (success && toolName === "file_write") {
+    const filePath = (args.file_path ?? args.path ?? "") as string;
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === ".html" || ext === ".htm") {
+      content +=
+        `\n\n[システム][HTML検証ヒント] HTML 生成は「ファイル存在=完了」 ではありません。 段階別に検証:\n` +
+        `  (1) **構造確認**: file_read で <canvas>/<script>/<body>/主要要素が含まれているか目視確認\n` +
+        `  (2) **JS 構文確認**: <script> ブロック内 JS の syntax error は file_write の構文チェック対象外。 ` +
+        `bash で 'grep -oP' (または sed) で JS 部分抽出 → tmp.js に出力 → \`node --check tmp.js\` で検証\n` +
+        `  (3) **動作確認**: production レジスターでは可能なら browser_screenshot、 不可なら「動作確認不可」 と完了報告に明記\n` +
+        `  (4) **仕様遵守**: 仕様ファイルがあれば grep で重要キーワード (色指定/状態名/操作キー等) の取り込みを確認`;
+    }
+  }
+
+  // ── (8) Phase 5-D3: enter_plan_mode 承認直後 → todo_write に落とす誘導 ──
+  if (success && toolName === "exit_plan_mode") {
+    // exit_plan_mode は output が JSON 文字列。 approved=true の場合のみフラグを立てる。
+    try {
+      const parsed = JSON.parse(rawContent);
+      if (parsed && parsed.approved === true) {
+        state.expectingTodoAfterPlan = true;
+      }
+    } catch { /* output が JSON でなければ無視 */ }
+  } else if (state.expectingTodoAfterPlan && toolName !== "exit_plan_mode") {
+    // 計画承認後の最初の "exit_plan_mode 以外" のツール呼び出しを検査
+    if (toolName === "todo_write") {
+      // 期待通り: 計画を todo に落としてくれた
+      state.expectingTodoAfterPlan = false;
+    } else {
+      // 期待外: 警告を 1 度出してリセット (連発させない)
+      content +=
+        `\n\n[システム][計画→ToDo誘導] 直前に enter_plan_mode で計画が承認されました。 ` +
+        `計画蒸発を防ぐため、 **次の手は todo_write で計画を 3-5 項目の Acceptance Checklist に落とすこと** が原則です。 ` +
+        `\n→ 既に todo を立てているなら本警告は無視可。 standard 以上のレジスターでは Acceptance Checklist 必須 (response_complete のゲートで弾かれます)。`;
+      state.expectingTodoAfterPlan = false;
+    }
+  }
+
   return content;
 }
 
@@ -314,6 +387,9 @@ tool_result に \`[システム][...]\` 形式のメッセージが含まれる�
 - \`[壁ドンループ警告]\` → 直近の同じ呼び出しを再試行しない。 アプローチを変える
 - \`[Read→Edit契約]\` → file_edit する前に file_read で現状確認
 - \`[連続委任警告]\` → 委任の集約を考える
+- \`[進捗ゼロ警告]\` (Phase 5-F1) → 観察ループ脱出。 何が分かっていて何が不足か整理し、 次の書き込みに進む
+- \`[HTML検証ヒント]\` (Phase 5-P2) → file_write した HTML は file_read で要素確認 + script ブロックの JS 構文チェック
+- \`[計画→ToDo誘導]\` (Phase 5-D3) → 計画承認直後は必ず todo_write で 3-5 項目の Checklist に落とす
 
 委任メッセージで「Output ONLY ...」 のような出力形式縛りがあっても、 ハーネス警告を受けたら **末尾コメントや補足セクション** で警告内容を報告すること (純粋な形式縛りより警告応答が優先)。
 
