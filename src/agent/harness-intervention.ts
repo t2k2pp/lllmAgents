@@ -29,6 +29,10 @@ export class HarnessState {
   recentReads = new Set<string>();
   /** 直近の委任系ツール呼び出し時刻 (5 分以内のみ保持) — 連続委任ガード用 */
   recentDelegations: { tool: string; ts: number }[] = [];
+  /** 直近のツール呼び出し名列 (最新 20 個) — 高次無限ループ検出用 (Phase 5-Q8) */
+  recentToolSeq: string[] = [];
+  /** 無限ループ警告を直近で出したか (重複抑制用) */
+  loopWarningCooldown = 0;
 }
 
 /**
@@ -165,6 +169,47 @@ export function enrichToolResult(
       `\n[エラーカテゴリ: ${cat}] ${catSpecific}`;
   }
 
+  // ── (4.8) Phase 5 第5ラウンド (課題Q7): セカンド成功時のテキスト返却検出 ──
+  // セカンドが file_write せずにコードブロック (```...```) のテキストを返した場合、
+  // それは未完了の徴候。 メインに「これを自分で file_write しないこと、 委任を再構成すべき」 を伝える。
+  if (
+    success &&
+    (toolName === "second_llm_agent" || toolName === "task") &&
+    /```[a-zA-Z0-9]*\n[\s\S]{200,}\n```/.test(content) &&
+    !/\[file_write\]|File written:/.test(content)
+  ) {
+    content +=
+      `\n\n[システム][委任先テキスト返却警告] 委任先がコードブロックをテキストで返しましたが、 ` +
+      `file_write した形跡がありません (副次情報 [file_write] が含まれていない)。` +
+      `\n→ メイン側で勝手に file_write してフォールバックするのは禁止 (経路の二重化)。 ` +
+      `\n→ 正しい対応: (a) 委任を再実行し、 prompt に「成果物は <保存先パス> に file_write してから完了」 を明示する。 ` +
+      `(b) 委任先の作業フォルダ (sandbox/ 等) を file_read で確認して既に保存済か検証。 ` +
+      `(c) どうしても自分で保存する必要があるなら ask_user で確認を取ってから。`;
+  }
+
+  // ── (4.9) Phase 5-Q8: 高次無限ループ検出 — 同パターンの直近反復を検出 ──
+  state.recentToolSeq.push(toolName);
+  if (state.recentToolSeq.length > 20) state.recentToolSeq.shift();
+  if (state.loopWarningCooldown > 0) state.loopWarningCooldown--;
+  // 末尾 N 個が直前の N 個と完全一致なら 周期 N の反復ループ
+  // 周期 2〜5 を順に試して検出。 連続 3 周期以上が要件 (= 末尾 3*N 個で同パターン)
+  if (state.loopWarningCooldown === 0 && state.recentToolSeq.length >= 6) {
+    for (let period = 2; period <= 5; period++) {
+      if (state.recentToolSeq.length < period * 3) continue;
+      const tail = state.recentToolSeq.slice(-period * 3);
+      const a = tail.slice(0, period).join("|");
+      const b = tail.slice(period, period * 2).join("|");
+      const c = tail.slice(period * 2, period * 3).join("|");
+      if (a === b && b === c) {
+        content +=
+          `\n\n[システム][無限ループ警告] 直近 ${period * 3} ツール呼び出しで同一パターン (周期 ${period}) が 3 周期以上繰り返されています: [${a}]` +
+          `\n→ 別アプローチに切替えるか、 ask_user で状況を共有して指示を仰ぐこと。 同じパターンを続けるのは禁止。`;
+        state.loopWarningCooldown = period * 3; // 警告を一定期間抑制
+        break;
+      }
+    }
+  }
+
   // ── (5) 連続委任ガード (Phase 5-B2) — second_llm_agent / task の連発を検出 ──
   if (toolName === "second_llm_agent" || toolName === "task") {
     const now = Date.now();
@@ -271,6 +316,13 @@ tool_result に \`[システム][...]\` 形式のメッセージが含まれる�
 - \`[連続委任警告]\` → 委任の集約を考える
 
 委任メッセージで「Output ONLY ...」 のような出力形式縛りがあっても、 ハーネス警告を受けたら **末尾コメントや補足セクション** で警告内容を報告すること (純粋な形式縛りより警告応答が優先)。
+
+# 成果物の保存責任 [必須] — テキスト返却は未完了
+**コードや HTML や JSON などの "成果物" は、 必ず file_write/file_edit で実ファイルに保存してから return すること。** テキストのコードブロック (\`\`\`html ... \`\`\` 等) を返すだけでは未完了:
+- 「メイン側で保存してくれるだろう」 と思って返してはいけない。 メインは保存責任を負わない
+- "Output ONLY HTML" のような形式縛りがあっても、 委任先のあなたが file_write で保存し、 テキスト返答にはそのファイルパス + サマリを書く
+- 保存先パスが委任メッセージで明示されていればそこに、 無ければ妥当な場所 (sandbox/ 配下や cwd の作業フォルダ) に書く
+- 完了時の return 文字列例: \`File written: <path> (<bytes> bytes, <lines> lines). 主要要素: ...\`
 
 # 完成までの完結 [必須]
 - 中途半端な状態で return しない。 検証まで実施

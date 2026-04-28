@@ -1079,8 +1079,8 @@ export class REPL {
             console.log(chalk.dim(`  URL:          ${cfg.endpoint.baseUrl ?? "(なし)"}`));
             console.log(chalk.dim(`  モデル:       ${cfg.endpoint.model}`));
             const ctxW = cfg.endpoint.contextWindow;
-            const ctxLabel = ctxW ? (ctxW >= 1000 ? `${Math.round(ctxW / 1000)}K` : `${ctxW}`) : "(メインLLMと共通)";
-            console.log(chalk.dim(`  コンテキスト: ${ctxLabel}`));
+            const ctxLabel = ctxW ? (ctxW >= 1000 ? `${Math.round(ctxW / 1000)}K` : `${ctxW}`) : "(未設定 — サーバ側デフォルト)";
+            console.log(chalk.dim(`  コンテキスト: ${ctxLabel}  ${chalk.gray("※会話履歴はメインと独立")}`));
             const secDesc = cfg.endpoint.description?.trim();
             console.log(chalk.dim(`  特性:         ${secDesc ? chalk.cyan(secDesc) : chalk.yellow("(未設定 — /second description で設定)")}`));
           }
@@ -1191,7 +1191,7 @@ export class REPL {
             console.log(chalk.red("  Second LLM の設定が config.json に存在しません。"));
           } else if (isNaN(val) || val <= 0) {
             const cur = this.config.secondLLM.endpoint.contextWindow;
-            const curLabel = cur ? (cur >= 1000 ? `${Math.round(cur / 1000)}K` : `${cur}`) : "(未設定 — メインLLMと共通)";
+            const curLabel = cur ? (cur >= 1000 ? `${Math.round(cur / 1000)}K` : `${cur}`) : "(未設定 — サーバ側デフォルト)";
             console.log(chalk.dim(`  セカンドLLMコンテキスト長: ${curLabel}`));
             console.log(chalk.dim(`  使い方: /second context <トークン数>`));
             console.log(chalk.dim(`  例: /second context 128k  /second context 32000`));
