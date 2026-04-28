@@ -7,6 +7,40 @@ export function setSecondLLMManager(manager: SecondLLMManager): void {
   secondLLMManager = manager;
 }
 
+/**
+ * Phase 5 第4ラウンド (課題Q1): セカンドLLM 失敗のエラーカテゴリを判別。
+ * カテゴリごとに対処手順が異なるため、 ハーネス側で 3 択提示するための情報源。
+ */
+type SecondLLMFailureCategory =
+  | "RATE_LIMIT"   // 429 / Quota exceeded
+  | "AUTH"         // 401 / 403 / API key invalid
+  | "NOT_FOUND"    // 404 / Resource not found / model not deployed
+  | "BAD_REQUEST"  // 400 / 422 / 不正なリクエスト
+  | "SERVER_ERROR" // 5xx
+  | "TIMEOUT"      // ECONNABORTED, ETIMEDOUT
+  | "NETWORK"      // ECONNREFUSED, ENOTFOUND
+  | "UNKNOWN";
+
+function classifySecondLLMError(e: unknown): SecondLLMFailureCategory {
+  const s = String(e);
+  if (/HTTP 429|RateLimit|Rate limit|TPM|RPM|Quota.*exceed/i.test(s)) return "RATE_LIMIT";
+  if (/HTTP 40[13]|Unauthorized|Forbidden|invalid api key|invalid_api_key/i.test(s)) return "AUTH";
+  if (/HTTP 404|Resource not found|deployment.*not found|model.*not found/i.test(s)) return "NOT_FOUND";
+  if (/HTTP 4(00|22)|Bad Request|invalid_request|invalid argument/i.test(s)) return "BAD_REQUEST";
+  if (/HTTP 5\d\d|server error|service unavailable|bad gateway/i.test(s)) return "SERVER_ERROR";
+  if (/timeout|ECONNABORTED|ETIMEDOUT|aborted/i.test(s)) return "TIMEOUT";
+  if (/ECONNREFUSED|ENOTFOUND|EAI_AGAIN|network/i.test(s)) return "NETWORK";
+  return "UNKNOWN";
+}
+
+/** ツール実行が失敗した時、 ハーネスに渡す error 文字列を組み立てる */
+function buildSecondLLMFailureError(toolName: string, e: unknown): string {
+  const category = classifySecondLLMError(e);
+  // ハーネス (harness-intervention.ts) が検出する固定マーカー
+  const marker = `[セカンドLLM失敗:${category}]`;
+  return `${marker} ${toolName} の呼び出しが失敗: ${String(e)}`;
+}
+
 export const secondLLMConsultTool: ToolHandler = {
   name: "second_llm_consult",
   definition: {
@@ -44,7 +78,11 @@ export const secondLLMConsultTool: ToolHandler = {
       const result = await secondLLMManager.consult(prompt);
       return { success: true, output: result };
     } catch (e) {
-      return { success: false, output: "", error: `Error from Second LLM: ${String(e)}` };
+      return {
+        success: false,
+        output: "",
+        error: buildSecondLLMFailureError("second_llm_consult", e),
+      };
     }
   },
 };
@@ -90,7 +128,11 @@ export const secondLLMAgentTool: ToolHandler = {
       const result = await secondLLMManager.runAsAgent(task);
       return { success: true, output: result };
     } catch (e) {
-      return { success: false, output: "", error: `Error from Second LLM: ${String(e)}` };
+      return {
+        success: false,
+        output: "",
+        error: buildSecondLLMFailureError("second_llm_agent", e),
+      };
     }
   },
 };

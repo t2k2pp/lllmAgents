@@ -126,6 +126,45 @@ export function enrichToolResult(
     }
   }
 
+  // ── (4.7) Phase 5 第4ラウンド (課題Q2): セカンドLLM 失敗の経路保持警告 ──
+  // ユーザーが second_llm_consult / second_llm_agent を使うようにメインに指示している場合、
+  // 失敗時にメインが勝手に「自分でやる」 と切替えるのは意図違反。 ハーネスから 3 択提示を促す。
+  if (
+    !success &&
+    (toolName === "second_llm_consult" || toolName === "second_llm_agent") &&
+    /\[セカンドLLM失敗:([A-Z_]+)\]/.test(content)
+  ) {
+    const m = content.match(/\[セカンドLLM失敗:([A-Z_]+)\]/);
+    const cat = m?.[1] ?? "UNKNOWN";
+    const catSpecific = (() => {
+      switch (cat) {
+        case "RATE_LIMIT":
+          return "Azure 側の TPM/RPM クォータを超過。 数十秒〜数分待ってリトライが第一選択。 連続発生なら別モデルへの切替を検討。";
+        case "AUTH":
+          return "API Key が無効/期限切れ/権限不足。 /second status で現在の保存形式を確認、 /second setup azure-* で再設定。";
+        case "NOT_FOUND":
+          return "endpoint URL の path / deployment 名 / model 名が不一致。 Azure Portal で正確な値を確認、 /second setup で再設定。";
+        case "BAD_REQUEST":
+          return "リクエスト形式の不適合。 model 名や endpoint パスが古い API バージョンの可能性。 /second status で確認。";
+        case "SERVER_ERROR":
+          return "サーバ側障害。 数分待ってリトライ。 継続するなら Azure 側の障害を疑う。";
+        case "TIMEOUT":
+          return "応答タイムアウト。 大きいプロンプトなら分割、 短時間ならリトライ。";
+        case "NETWORK":
+          return "ネットワーク到達不能。 endpoint URL のホスト名/プロキシを確認。";
+        default:
+          return "原因不明。 エラー本文を確認して /second status で設定確認。";
+      }
+    })();
+    content +=
+      `\n\n[システム][経路保持原則] ユーザーが「セカンドLLMで」 と指示している場合、` +
+      ` 失敗を理由にメインが独断で「自分でやる」 と切替えるのは意図違反。 必ず ask_user で 3 択を提示する:` +
+      `\n  (a) リトライする (一時的な失敗の可能性)` +
+      `\n  (b) メイン側で実行 (ユーザーが許可する場合のみ)` +
+      `\n  (c) モデル設定を見直す (/second status / /second setup azure-*)` +
+      `\n[エラーカテゴリ: ${cat}] ${catSpecific}`;
+  }
+
   // ── (5) 連続委任ガード (Phase 5-B2) — second_llm_agent / task の連発を検出 ──
   if (toolName === "second_llm_agent" || toolName === "task") {
     const now = Date.now();
