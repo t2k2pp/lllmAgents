@@ -802,14 +802,114 @@ second_llm_agent({ task: "..." })  ← reason 引数なし
 
 ---
 
-## 第 8 ラウンド以降の予定 (未着手)
+## 第 8 ラウンド (2026-04-29) — 育児の比喩: 監視官的介入の全廃 (Claude Code 流儀への寄せ)
 
-リトライ結果を見て決める。 残候補:
+### きっかけ (ユーザーからの哲学的指摘)
 
-- **5-A2**: 全ツールに `selfHelpHints()` 共通インターフェース化
-- **5-A3**: ハーネス側のエラー分類器 + 連続失敗時の自動 `find` 実行
-- **5-C3**: web_fetch / browser_screenshot 等への副次情報追加
-- **5-H2**: Read→Edit 契約のハードガード化 (新規ファイル例外を扱える設計で)
+第7ラウンドの実装直後、 ユーザーから次の問題提起:
+
+> 「生成AIとの接し方で悩む時、 私は育児。 つまり子供との付き合い、 対話をイメージして会話する。 何か一つできないからと警告や注意ばかりされては萎縮して本来の力を出せなくなるのではないか。 ハーネスエンジニアリングは "力で言うことを聞かせる、 矯正させる" とは違う。 人と馬とのつながりを表現する言葉をあえて使うあたり、 そこには愛に近い何かがある」
+
+第1〜7 ラウンドで積み上げた 10 種類超の `[システム][XXX]` 形式の **後付け警告挿入** は、 監視官的で、 モデルを萎縮させる懸念がある。 ユーザーは「Claude Code 流儀 (= A) に寄せたい」 と明示。
+
+### Claude Code との哲学差 (整理)
+
+| 流儀 | Claude Code | 第7ラウンドまでの lllmAgents |
+|---|---|---|
+| 原則伝達 | system-prompt + tool description (短文) | 同左 + tool_result への後付け警告挿入 |
+| 構造的境界 | tool 自身が拒否 (例: Edit は Read 必須) | tool_result に警告を出すパターンが多用 |
+| 監視 | しない (モデルを信用) | 失敗パターン検出 → 警告挿入 |
+
+第8ラウンドから **3 系統に整理**:
+
+| ハーネスの声 | 残す/捨てる |
+|---|---|
+| 原則の伝達 (system-prompt / tool description / sub-agent prompt) | **残す**。 育児で言う「家のルール」 |
+| 構造的前提条件で拒否 (hard gate, 例: 5-B3 reason 必須 / Acceptance Checklist 未消化エラー) | **残す**。 物理的境界に近い |
+| 後付け警告テキスト挿入 (`[システム][...]` 全種類) | **全廃**。 監視官をやめる |
+
+### 撤去したもの (= 第1〜7 ラウンドの遺産整理)
+
+`enrichToolResult` を **no-op に簡素化**。 以下 11 種の警告挿入を全廃:
+
+| 起源 | 警告マーカー | 用途 |
+|---|---|---|
+| Phase 2 | `[システム]` (file_edit 連続失敗) | 連続失敗 2 回で別アプローチ提案 |
+| Phase 5-D (第1) | `[壁ドンループ警告]` | 同 (toolName, args) で連続失敗検出 |
+| Phase 5-H1 (第1) | `[Read→Edit契約]` | file_read してないパスに file_edit する警告 |
+| Phase 5-B2 (第1) | `[連続委任警告]` | task / second_llm_agent の連発検出 |
+| 旧版 | `[ガイド]` (file_read directory / bash exit code) | エラー自助情報 |
+| Phase 5-Q3 (第4) | `[経路保持原則]` | セカンドLLM 失敗時の 3 択提示 |
+| Phase 5-Q7 (第5) | `[委任先テキスト返却警告]` | 委任先の text-only 返却検出 |
+| Phase 5-Q8 (第5) | `[無限ループ警告]` | 高次パターン反復検出 |
+| Phase 5-F1 (第7) | `[進捗ゼロ警告]` | 8 回 file_write/edit なしで警告 |
+| Phase 5-P2 (第7) | `[HTML検証ヒント]` | .html 生成後に検証手順を提示 |
+| Phase 5-D3 (第7) | `[計画→ToDo誘導]` | exit_plan_mode 後に todo_write 期待 |
+
+`HarnessState` も空クラスに縮小 (将来的な hard gate 実装の足場としては残置)。
+
+### 残したもの (= 哲学に整合する境界)
+
+| 項目 | 種別 | 理由 |
+|---|---|---|
+| 5-B3 reason ハードガード | tool 側拒否 (hard gate) | 構造的前提条件。 「3 条件いずれかでないと委任しない」 を tool 自身が表明 |
+| response_complete の Acceptance Checklist 未消化エラー | tool 側拒否 (hard gate) | 自分で立てた todo を満たすまで完了報告しない、 という自己拘束 |
+| file_read の自助エラー (候補/親dir 提示) | tool 自身のエラー応答 | 監視官ではなく、 ツールが「私の入力ではこうだった」 と自分の声で説明 |
+| file_write/edit/bash の副次情報 (bytes/lines/mtime/exitCode) | tool 自身の成功応答 | tool 自身の声、 介入ではない |
+| eval-jsonl.js (集計スクリプト) | 観察可能性 | 介入ではなく外部観測 |
+| Phase 6 max_tokens 既定値 64000 | プロバイダー設計 | 出力の上限を持て余す方針、 介入と無関係 |
+| system-prompt の対話レジスター / Acceptance Checklist / 委任原則 | 原則伝達 | 「家のルール」 として最初に伝える |
+
+### 変更ファイル
+
+| ファイル | 内容 |
+|---|---|
+| `src/agent/harness-intervention.ts` | `enrichToolResult` を no-op 化 (rawContent をそのまま返す)。 `HarnessState` を空クラスに。 `wallHitKey` 削除。 `buildSubAgentStrategyPrompt` から「ハーネス警告への対応」 セクションを削除 |
+| `src/agent/system-prompt.ts` | 「ユーザー指示の経路を勝手に変えない」 セクションから「ハーネスは警告を挿入する」 一文を削除。 「計画→ToDo」 「委任時の禁忌」 セクションからも警告参照を削除。 原則は維持 |
+
+`agent-loop.ts` / `second-llm-manager.ts` の呼出側は無修正 (no-op を呼ぶ形のまま)。 必要なら将来 hard gate を追加する seam として残す。
+
+### Claude Code 原則 (P1〜P10) との対応 — 第8ラウンドで再整理
+
+| 原則 | 第8ラウンドでの整理 |
+|---|---|
+| P1 自助情報 | tool 自身のエラー応答に集約 (file_read 候補提示 等)。 監視官的後付けは廃止 |
+| P2 読まずに書かない | system-prompt の原則のみ残す。 警告挿入は廃止。 将来 hard gate 化候補 |
+| P3 同じ間違いを2度させない | system-prompt の原則のみ。 「壁ドンループ警告」 は廃止 |
+| P4 観察可能性 | eval-jsonl.js (外部観測ツール) で対応。 内部介入ではない |
+| P5 委任の閾値設計 | 5-B3 ハードガード (reason 必須) で構造化 |
+| P6 エスカレーション ladder | system-prompt の原則 |
+| P7 計画は重い案件のみ | system-prompt の plan_mode 閾値 |
+| P8 ツール利用目的の明示 | tool description |
+| P9 ハーネス→モデルの気づき | **方針転換**: 監視官的「気づかせ」 はやめ、 モデルの判断を信用 |
+| P10 対話レジスターの明示合意 | system-prompt の原則 (チェックリストは hard gate として継続) |
+
+### 副作用・リスク
+
+- ローカル LLM (Qwen / Kimi 等) で従来の警告に救われていた「壁ドンループ」 「同じ場所を読み続ける」 等は **モデルの自己判断に委ねる** ことになる。 まず効果を観察し、 必要なら **特定パターンを hard gate として再導入** (例: file_read を同じパスで 3 回連続したら tool 側がエラーで拒否)
+- 既存ユーザーが警告挿入の動作を期待していたケースで、 挙動が変わって見える可能性あり (ただし `[システム][...]` が消えるだけで失敗自体は同じ)
+- 経路保持原則 (Round 4) の警告も廃止。 ユーザー指示経路の保護は **system-prompt の原則伝達 + ask_user の促し** に依存することになる。 効きが弱いとユーザーが感じたら、 第9ラウンドで「ユーザー指示経路を保持する hard gate」 を tool 側に実装する選択肢あり
+
+### 第 8 ラウンド: リトライ結果ログ
+
+#### リトライ #1
+- 日時: (未実施)
+- セッションログ:
+- 観察:
+- 残課題:
+- 副作用:
+
+---
+
+## 第 9 ラウンド以降の予定 (未着手)
+
+第8ラウンドのリトライ結果を見てから決める。 候補 (どれも「監視官的介入」 ではなく hard gate or 原則伝達ベース):
+
+- **5-H2**: Read→Edit を **hard gate 化** (新規ファイル例外を扱える設計で)。 file_edit 自身がセッション内 file_read を要求する Claude Code 流の前提条件
+- **5-A2 / 5-A3**: tool 自身のエラー応答内で自助情報を強化 (selfHelpHints インターフェース化、 連続失敗時の auto find 候補生成)
+- **5-C3**: tool 自身の成功応答に副次情報を追加 (web_fetch / browser_screenshot 等)
+- **第6/7 ラウンドで追加した max_tokens 既定値・eval-jsonl.js のリトライ検証** (ユーザーが build → 走行 → 集計)
+- ユーザー指示経路 hard gate (経路保持原則の代替): メイン側で「ユーザーが指示したモデル」 が失敗したら ask_user 呼出を強制する pre-check (現状は system-prompt の原則のみ)
 - **5-N4**: ハーネスが宣言レジスターを保持し、 完了報告時に self-review を促す
 - **5-O3**: ハーネスが Acceptance Checklist と完了報告を照合し、 不一致時は警告挿入
 - **5-P2**: file_write で .html 生成時、 ハーネスが自動で動作確認手順を tool_result に挿入
