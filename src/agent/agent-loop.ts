@@ -26,7 +26,7 @@ import * as logger from "../utils/logger.js";
 import { LLMLogger } from "./llm-logger.js";
 import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
-// import { getFirstUseGuide } from "./tool-guides.js";
+import { getFirstUseGuide } from "./tool-guides.js";
 import { IntentClassifier } from "./intent-classifier.js";
 import { Evaluator } from "./evaluator.js";
 import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";

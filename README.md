@@ -360,7 +360,7 @@ npm run lint
 
 ## 必要環境
 
-- Node.js 18+
+- Node.js 20+ （SEA ビルドのため。実行のみなら 18+ で動作するが、`build:exe` には 20 以上が必要）
 - ローカルLLMサーバー（Ollama / LM Studio / llama.cpp / vLLM）
 - Playwright（ブラウザ操作を使う場合）
 
