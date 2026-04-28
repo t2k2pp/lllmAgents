@@ -1,6 +1,6 @@
 export type ProviderType = "ollama" | "lmstudio" | "llamacpp" | "vllm";
 
-export type CloudProviderType = "vertex-ai" | "azure-openai" | "azure-claude" | "azure-foundry";
+export type CloudProviderType = "vertex-ai" | "azure-openai" | "azure-claude" | "azure-foundry" | "azure-anthropic";
 
 // セカンドLLMはローカルまたはクラウドのいずれかを指定可能
 export type SecondLLMProviderType = ProviderType | CloudProviderType;
@@ -175,7 +175,7 @@ export interface Config {
 
 // ヘルパー: セカンドLLMがクラウドかローカルかを判定
 export function isCloudProvider(type: SecondLLMProviderType): boolean {
-  return (["vertex-ai", "azure-openai", "azure-claude", "azure-foundry"] as string[]).includes(type);
+  return (["vertex-ai", "azure-openai", "azure-claude", "azure-foundry", "azure-anthropic"] as string[]).includes(type);
 }
 
 export interface ModelInfo {
@@ -226,6 +226,7 @@ export const PROVIDER_LABELS: Record<SecondLLMProviderType, string> = {
   "azure-openai": "Azure OpenAI",
   "azure-claude": "Azure Claude",
   "azure-foundry": "Azure AI Foundry",
+  "azure-anthropic": "Azure Anthropic (Messages API)",
 };
 
 export function getDefaultConfig(): Config {

@@ -9,6 +9,7 @@ import { VertexAIProvider } from "./vertex-ai.js";
 import { AzureOpenAIProvider } from "./azure-openai.js";
 import { AzureClaudeProvider } from "./azure-claude.js";
 import { AzureFoundryProvider } from "./azure-foundry.js";
+import { AzureAnthropicProvider } from "./azure-anthropic.js";
 import { CredentialVault } from "../security/credential-vault.js";
 
 /**
@@ -66,6 +67,21 @@ function createProviderFromEndpoint(
         return new AzureFoundryProvider({
           endpoint: endpoint.endpoint,
           apiKey: foundryToken,
+          model: endpoint.model,
+        });
+      }
+
+      case "azure-anthropic": {
+        if (!endpoint.endpoint || !endpoint.apiKey || !endpoint.model) {
+          throw new Error("Missing endpoint, apiKey, or model for azure-anthropic");
+        }
+        const anthToken = CredentialVault.resolve(endpoint.apiKey, passphrase);
+        if (!anthToken) {
+          throw new Error("Failed to decipher or resolve API Key for Azure Anthropic");
+        }
+        return new AzureAnthropicProvider({
+          endpoint: endpoint.endpoint,
+          apiKey: anthToken,
           model: endpoint.model,
         });
       }

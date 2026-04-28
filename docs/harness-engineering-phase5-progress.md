@@ -547,12 +547,36 @@ Claude Code のシステムプロンプトには明示的に以下のガイド�
 
 ### 第 4 ラウンド: リトライ結果ログ
 
-#### リトライ #1
-- 日時: (未実施)
-- セッションログ:
-- 観察:
-- 残課題:
-- 副作用:
+#### リトライ #1: 経路保持原則 + Azure Anthropic Messages API プロバイダー (2026-04-28)
+
+**観察した事象**:
+- セカンドLLM を `azure-claude` (OpenAI 互換ルート) で Sonnet 4.5 を呼び出していたが、 ユーザー入力した完全URL `https://...azure.com/anthropic/v1/messages` に対し `azure-claude` プロバイダーが **盲目的に `/openai/deployments/{name}/chat/completions?api-version=...` を末尾付加** していたことが判明
+- 結果: `https://...azure.com/anthropic/v1/messages/openai/deployments/claude-sonnet-4-5/chat/completions?api-version=2024-02-15-preview` という壊れた URL を叩いており、 **HTTP 401 (Access denied due to invalid subscription key or wrong API endpoint)** が返ってきていた
+- 前々ラウンドで「429 のみ」 と認識していたのは誤りで、 認証/エンドポイントの両方の問題が混在していた
+
+**追加実装** (Phase 5 とは別の系統だが連続イテレーションで対応):
+
+| 項目 | 内容 | 変更ファイル | ステータス |
+|---|---|---|---|
+| 新プロバイダー | `azure-anthropic` (Anthropic Messages API 形式) を新規実装。 ホスト URL に `/anthropic/v1/messages` を結合、 `x-api-key` + `anthropic-version: 2023-06-01` ヘッダー、 `system` 分離・`max_tokens` 必須のボディ。 SSE (message_start / content_block_delta / message_delta / message_stop) を OpenAI 互換 ChatChunk に変換、 tool_use/tool_result 双方向変換も実装 | `src/providers/azure-anthropic.ts` (新規 ~340 行) | ✅ |
+| 配線 | types.ts (CloudProviderType, PROVIDER_LABELS, isCloudProvider) / provider-factory.ts (case 追加) / repl.ts setupAzureLLM (azure-anthropic 受付、 `skipDeployment`/`isAnthropic` 分岐) / completer.ts (`/second setup azure-anthropic`, `/model setup azure-anthropic`) | 各ファイル | ✅ |
+| URL 正規化 | ユーザーが `/anthropic/v1/messages` 込みの完全URLを貼っても、 base 部分のみに正規化 (AzureFoundryProvider と同じ思想) | `azure-anthropic.ts` `normalizeEndpoint()` | ✅ |
+
+**意義**:
+- Azure 上の Claude は「Anthropic Messages API」 と「OpenAI 互換 (azure-claude/azure-foundry)」 の **2 系統** がデプロイ可能。 これまでは後者のみ対応していたため、 前者のリソースに 接続できなかった
+- 仕様差は重大: ヘッダー / ボディ形式 / レスポンスの SSE event 名 / tool 形式 すべて異なる。 OpenAI 互換プロバイダーで誤魔化す手段はなく、 **専用プロバイダーが必要不可欠だった**
+- これで設定切替で Claude を 2 系統使い分けられる:
+  - `azure-claude` / `azure-foundry`: OpenAI 互換ルート (`/openai/deployments/...` または `/models/chat/completions`)
+  - `azure-anthropic`: Anthropic Messages API (`/anthropic/v1/messages`) ← 今回追加
+
+**Phase 5 第4ラウンド 経路保持原則の効果**:
+- 上記のような複雑な経路問題が発生しても、 ユーザーが「セカンドLLMで」 と指示している以上は、 メインが勝手にフォールバックすべきではない (ハーネス警告で 3 択提示)
+- 401/429 のカテゴリ判別マーカーが入ったことで、 ユーザーへの説明も具体的になる: AUTH 系 → endpoint/apiKey 確認、 RATE_LIMIT → リトライ推奨
+
+**残課題**:
+- リトライによる動作確認は未実施 (再ビルド + `/second setup azure-anthropic` で Sonnet 4.5 を再設定 → タスクを試す、 が次の手順)
+- Anthropic Messages API の vision (画像入力) 対応はテスト未実施
+- tool_use/tool_result の round-trip もリトライで確認したい
 
 ---
 
