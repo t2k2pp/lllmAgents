@@ -26,7 +26,7 @@ import * as logger from "../utils/logger.js";
 import { LLMLogger } from "./llm-logger.js";
 import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
-import { getFirstUseGuide } from "./tool-guides.js";
+// import { getFirstUseGuide } from "./tool-guides.js";
 import { IntentClassifier } from "./intent-classifier.js";
 import { Evaluator } from "./evaluator.js";
 import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";
@@ -911,11 +911,13 @@ export class AgentLoop {
       ? result.output
       : `Error: ${result.error}\n${result.output}`;
 
+    /*
     // 段階的開示: ツール初回使用時にガイドテキストを注入
     const guide = getFirstUseGuide(toolCall.function.name);
     if (guide) {
       resultContent += "\n\n" + guide;
     }
+    */
 
     // Phase 5 第2ラウンド: ハーネス介入レイヤ (共通モジュール)。
     // file_edit 連続失敗 / 壁ドンループ / Read→Edit 契約 / 連続委任ガード / 旧エラーガイダンス
@@ -983,11 +985,13 @@ export class AgentLoop {
           ? result.output
           : `Error: ${result.error}\n${result.output}`;
 
+        /*
         // 段階的開示: ツール初回使用時にガイドテキストを注入
         const guide = getFirstUseGuide(toolCall.function.name);
         if (guide) {
           resultContent += "\n\n" + guide;
         }
+        */
 
         // Phase 5 第2ラウンド: ハーネス介入レイヤ (並列ルートでも適用)
         resultContent = enrichToolResult(toolCall, result.success, resultContent, this.harnessState);

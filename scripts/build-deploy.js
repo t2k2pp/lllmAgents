@@ -21,8 +21,9 @@ const ROOT = resolve(__dirname, '..');
 const DIST = join(ROOT, 'dist');
 const DEPLOY = join(ROOT, 'deploy');
 const SRC_BUILTIN = join(ROOT, 'src', 'skills', 'builtin');
-const EXE_SRC = join(DIST, 'localllm.exe');
-const EXE_DST = join(DEPLOY, 'localllm.exe');
+const EXE_NAME = process.platform === 'win32' ? 'localllm.exe' : 'localllm';
+const EXE_SRC = join(DIST, EXE_NAME);
+const EXE_DST = join(DEPLOY, EXE_NAME);
 const SKILLS_DST = join(DEPLOY, 'skills');
 const META = join(DEPLOY, '.deploy-meta.json');
 
@@ -93,6 +94,14 @@ function copyExe() {
   cpSync(EXE_SRC, EXE_DST);
   const sz = statSync(EXE_DST).size;
   log(`exe copied (${Math.round(sz / (1024 * 1024))}MB)`);
+
+  // Fallback mode 用に .cjs もコピー (SEAが失敗した時用)
+  const cjsSrc = EXE_SRC.replace(EXE_NAME, 'localllm.cjs');
+  const cjsDst = EXE_DST.replace(EXE_NAME, 'localllm.cjs');
+  if (existsSync(cjsSrc)) {
+    cpSync(cjsSrc, cjsDst);
+    log(`cjs bundle copied`);
+  }
 }
 
 function copySkills() {
@@ -143,6 +152,7 @@ function main() {
 
   writeMeta();
 
+  log(`done. deploy/${EXE_NAME} is up to date.`);
   log(`done (${Date.now() - start}ms)`);
 }
 
