@@ -658,7 +658,72 @@ Claude Code のシステムプロンプトには明示的に以下のガイド�
 
 ---
 
-## 第 6 ラウンド以降の予定 (未着手)
+## 第 6 ラウンド (2026-04-29) — Claude (Anthropic Messages API) max_tokens 出力切り
+
+### 観察 (2026-04-28T15-06-11_second-llm-agent.jsonl)
+
+セカンドLLM (`claude-sonnet-4-5` on `azure-anthropic`) のレスポンスで `tokensOut=4096` がぴったり張り付き、 toolCalls=0 / text に短いプリアンブルだけ残して途中切れ。 `azure-anthropic.ts` の `DEFAULT_MAX_TOKENS = 4096` ハードコードに刺さっていた。
+
+### 根本原因
+
+- **second-llm-manager.ts**: `consult()` / `runAsAgent()` / `runAsEvaluator()` のいずれも `maxTokens` を渡していなかった
+- **azure-anthropic.ts**: フォールバック既定値が 4096 で、 Claude 4 系のコード/HTML 生成タスクに対し小さすぎる
+- **agent-loop.ts** (構造リスク): `maxTokens: this.contextWindow` を渡しており、 contextWindow=200K を設定すると Anthropic 側で `max_tokens > model_max_output (64000)` で 400 エラーになる経路があった
+
+### 設計方針 (ユーザー指摘で修正)
+
+中途半端に小さい max_tokens を渡すと、 **「上限が近い」 とモデルが察知して出力を急ぐ** (= 省略/圧縮) 挙動が出る。 達成確率を最大化するため、 **常にモデル上限相当 (= 余らせる) を渡す** ことを基本方針とする。
+
+Claude 4 系 (Sonnet 4.5/4.6, Opus 4.7, Haiku 4.5) の Anthropic Messages API における max_tokens 上限 = **64000** (これを超えると API が 400 BadRequest)。 Claude Code 本体も内部的に同じ上限で投げている。
+
+### 実装したもの
+
+| Phase | 内容 | 変更ファイル | ステータス |
+|---|---|---|---|
+| 6-A | `azure-anthropic.ts` の `DEFAULT_MAX_TOKENS` を 4096 → **64000** (= Claude 4 系上限) に引き上げ。 「余らせる」 既定値で出力急ぎ挙動を回避 | `src/providers/azure-anthropic.ts` | ✅ |
+| 6-A | `MODEL_OUTPUT_HARD_LIMIT = 64000` で受信値をクランプ。 contextWindow=200K 等が agent-loop から渡されても API 400 を防止 | 同上 | ✅ |
+| 6-B | `second-llm-manager.ts` の 3 経路 (consult / runAsAgent / runAsEvaluator) は **小さな既定値を持たない** 設計に。 `maxTokens` には `endpoint.contextWindow` のみを渡し、 未設定時は `undefined` で プロバイダー既定値 (= 64000) を発火させる | `src/second-llm/second-llm-manager.ts` | ✅ |
+
+### 動作変化のサンプル
+
+```
+# 例: セカンドLLM (Claude Sonnet 4.5) で長文 HTML 生成依頼
+[第5ラウンドまで]
+  → tokensOut=4096 でぴったり張り付き、 HTML 出力が途中で止まる
+  → 短いプリアンブルだけ残って toolCalls=0 → silent failure
+
+[第6ラウンド以降]
+  → max_tokens=64000 で送出 (provider デフォルト or contextWindow)
+  → 出力が上限に張り付くことはほぼ無くなる
+  → かつ「もうすぐ尽きる」 を察知して急ぐ挙動も出にくい
+```
+
+### Claude Code 原則 (P1〜P10) との対応
+
+| 原則 | 第6ラウンドで強化 |
+|---|---|
+| P4 観察可能性 | max_tokens 切れによる silent failure を構造的に解消 ✅ |
+| P9 ハーネス→モデルの気づき | 出力上限超過時にプロバイダー側でクランプし、 API 400 エラーを防止 ✅ |
+
+### 副作用・リスク
+
+- 課金は **完了トークン数 (実際の出力長)** で決まるため、 max_tokens を 64K に上げても **短い応答時のコストは変わらない** (上限の予約金額は無い)。 長文出力時のみ素直に伸びる
+- `endpoint.contextWindow` を「コンテキスト窓 (入力+出力)」 として設定しているユーザーが居た場合、 それがそのまま `max_tokens` として送られる挙動は意味論的にズレるが、 プロバイダー側の clamp(64000) で必ず安全側に倒れる。 将来は `maxOutputTokens` フィールドを別途追加して用語を分離すべき
+- agent-loop メイン側の `maxTokens: this.contextWindow` は本ラウンドでは触らず、 azure-anthropic 側のクランプで防御。 他プロバイダー (azure-claude/azure-foundry/openai-compat) は既に多くがサーバ側でクランプしているため緊急性は低いが、 統一は次ラウンドの検討事項
+- Claude 3.7 Sonnet の `output-128k-2025-02-19` beta header 経由で 128K 出力を狙うルートは未対応 (Claude 4 系では 64K で十分なため後回し)
+
+### 第 6 ラウンド: リトライ結果ログ
+
+#### リトライ #1
+- 日時: (未実施)
+- セッションログ:
+- 観察:
+- 残課題:
+- 副作用:
+
+---
+
+## 第 7 ラウンド以降の予定 (未着手)
 
 第 5 ラウンドのリトライ結果を見てから決める。 候補:
 

@@ -33,6 +33,7 @@ import type {
 } from "./base-provider.js";
 import type { ModelInfo, ModelDetail, SecondLLMProviderType } from "../config/types.js";
 import { httpPostStream } from "../utils/http-client.js";
+import { getOpsLogger } from "../utils/ops-logger.js";
 
 interface AzureAnthropicConfig {
   /** ホスト部のみ または /anthropic/v1/messages を含む完全URL (内部で base に正規化) */
@@ -48,7 +49,12 @@ interface AzureAnthropicConfig {
 }
 
 const DEFAULT_ANTHROPIC_VERSION = "2023-06-01";
-const DEFAULT_MAX_TOKENS = 4096;
+// Claude 4 系 (Sonnet 4.5/4.6, Opus 4.7, Haiku 4.5) の Anthropic Messages API における
+// max_tokens の上限 = 64000。 これ以上は API が 400 BadRequest で弾く。
+// 中途半端に小さい値を入れると「上限が近い」 とモデルが察知して出力を急ぐ (= 圧縮/省略) 挙動が
+// 出やすいため、 既定値は **モデルの最大値そのもの** を使う。 持て余すのは構わない。
+const MODEL_OUTPUT_HARD_LIMIT = 64000;
+const DEFAULT_MAX_TOKENS = MODEL_OUTPUT_HARD_LIMIT;
 
 export class AzureAnthropicProvider implements LLMProvider {
   readonly providerType: SecondLLMProviderType = "azure-anthropic";
@@ -165,9 +171,14 @@ export class AzureAnthropicProvider implements LLMProvider {
     // 2. user/assistant/tool messages を Anthropic 形式に変換
     const anthMessages = convertOpenAIMessagesToAnthropic(nonSystem);
 
+    const requestedMaxTokens = params.maxTokens ?? this.config.defaultMaxTokens ?? DEFAULT_MAX_TOKENS;
+    // モデル出力上限を超えると Anthropic が 400 を返すので必ずクランプ。
+    // 同時に 1 未満は不正なため最低 1 を保証。
+    const clampedMaxTokens = Math.max(1, Math.min(requestedMaxTokens, MODEL_OUTPUT_HARD_LIMIT));
+
     const body: Record<string, unknown> = {
       model: this.config.model,
-      max_tokens: params.maxTokens ?? this.config.defaultMaxTokens ?? DEFAULT_MAX_TOKENS,
+      max_tokens: clampedMaxTokens,
       messages: anthMessages,
       stream: params.stream,
     };
@@ -201,14 +212,23 @@ export class AzureAnthropicProvider implements LLMProvider {
     try {
       stream = await httpPostStream(url, body, undefined, undefined, this.headers());
     } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      // 運用ログ ERROR: ネットワーク失敗・HTTP 非200 を context 付きで記録
+      getOpsLogger().error("stream", `${this.providerType} request failed`, {
+        provider: this.providerType,
+        url,
+        model: body.model,
+        error: err.message,
+        stack: err.stack,
+      });
       yield {
         type: "error",
-        error: `${String(e)} [provider=${this.providerType} url=${url} model=${body.model}]`,
+        error: `${err.message} [provider=${this.providerType} url=${url} model=${body.model}]`,
       };
       return;
     }
 
-    yield* parseAnthropicStream(stream);
+    yield* parseAnthropicStream(stream, this.providerType, body.model as string);
   }
 }
 
@@ -355,6 +375,8 @@ function normalizeContentToAnthropic(content: string | { type: string; text?: st
  */
 async function* parseAnthropicStream(
   stream: ReadableStream<Uint8Array>,
+  providerType: string = "azure-anthropic",
+  model: string = "",
 ): AsyncGenerator<ChatChunk> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -469,6 +491,14 @@ async function* parseAnthropicStream(
           }
           case "error": {
             const err = data.error as { type?: string; message?: string } | undefined;
+            // 運用ログ ERROR: SSE error イベントを context 付きで記録
+            getOpsLogger().error("stream", "anthropic SSE error event", {
+              provider: providerType,
+              model,
+              errorType: err?.type,
+              errorMessage: err?.message,
+              raw: data,
+            });
             yield {
               type: "error",
               error: `[anthropic] ${err?.type ?? "error"}: ${err?.message ?? JSON.stringify(data)}`,

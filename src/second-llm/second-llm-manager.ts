@@ -5,6 +5,7 @@ import { globalCostCalculator } from "../cost/cost-calculator.js";
 import { DelegationGuard } from "./delegation-guard.js";
 import { createSecondLLMProvider } from "../providers/provider-factory.js";
 import { LLMLogger } from "../agent/llm-logger.js";
+import { getOpsLogger } from "../utils/ops-logger.js";
 import {
   HarnessState,
   enrichToolResult,
@@ -31,6 +32,15 @@ const EVALUATOR_ALLOWED_TOOLS = [
   "grep",
   "glob",
 ];
+
+// セカンドLLM 呼び出しの max_tokens 設計指針:
+//   - 中途半端に小さい値を渡すと「上限が近い」とモデルが察知して出力を急ぐ (省略/圧縮) 挙動が
+//     出やすい。 余らせるのは構わないので、 常に **モデル上限相当** を狙う。
+//   - 具体値は呼び出し側ではなく **プロバイダー側のデフォルト** に委ねる
+//     (例: azure-anthropic は Claude 4 系の上限 64000 をデフォルトにしている)。
+//   - ユーザーが明示的に `endpoint.contextWindow` を設定していればそれを尊重する
+//     (上限超過分はプロバイダーが自動クランプする)。 未設定時は undefined を渡して
+//     プロバイダー既定値を発火させる。
 
 export class SecondLLMManager {
   private provider: LLMProvider | null = null;
@@ -126,6 +136,7 @@ export class SecondLLMManager {
         model: this.endpoint.model,
         messages,
         temperature: 0.2,
+        maxTokens: this.endpoint.contextWindow,
         stream: true
       });
 
@@ -142,6 +153,13 @@ export class SecondLLMManager {
       spinner.succeed(chalk.magenta("Second LLM replied."));
       return responseText.trim();
     } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      getOpsLogger().error("second-llm", "consult failed", {
+        model: this.endpoint?.model,
+        provider: this.endpoint?.providerType,
+        error: err.message,
+        stack: err.stack,
+      });
       spinner.fail(chalk.red("Second LLM consultation failed."));
       throw e;
     }
@@ -183,6 +201,7 @@ export class SecondLLMManager {
           model: this.endpoint.model,
           messages,
           tools: toolDefs,
+          maxTokens: this.endpoint.contextWindow,
           stream: true
         });
 
@@ -261,6 +280,13 @@ export class SecondLLMManager {
       spinner.succeed(chalk.magenta("Second LLM task reached max iterations or completed."));
       return "Reached maximum iterations or completed.";
     } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      getOpsLogger().error("second-llm", "agent run failed", {
+        model: this.endpoint?.model,
+        provider: this.endpoint?.providerType,
+        error: err.message,
+        stack: err.stack,
+      });
       spinner.fail(chalk.red("Second LLM agent run failed."));
       throw e;
     }
@@ -308,6 +334,7 @@ export class SecondLLMManager {
           messages,
           tools: toolDefs,
           temperature: 0.1,
+          maxTokens: this.endpoint.contextWindow,
           stream: true,
         });
 
