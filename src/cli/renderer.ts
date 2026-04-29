@@ -58,11 +58,12 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/slack")}          Slack設定 (status/url/test/bot-token/app-token)
     ${chalk.cyan("/search")}         Web検索プロバイダー設定 (SearXNG/DuckDuckGo)
     ${chalk.cyan("/todo")}           タスクリスト表示
-    ${chalk.cyan("/sessions")}       保存済みセッション一覧
-    ${chalk.cyan("/resume <id>")}    セッション復元
+    ${chalk.cyan("/sessions [N]")}   保存済みセッション一覧 (デフォルト 20 件)
+    ${chalk.cyan("/resume [id]")}    セッション復元 (引数なしで対話的選択)
     ${chalk.cyan("/continue")}       最新セッションを復元
     ${chalk.cyan("/memory")}         自動メモリ表示
     ${chalk.cyan("/remember <text>")} メモリに追記
+    ${chalk.cyan("/loglevel [lv]")}  運用ログのレベル変更 (trace/debug/info/warn/error)
     ${chalk.cyan("/diff")}           git diff表示
     ${chalk.cyan("/plan")}           プランモードに入る
     ${chalk.cyan("/skills")}         利用可能なスキル一覧

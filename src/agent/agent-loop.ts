@@ -1216,6 +1216,16 @@ export class AgentLoop {
     logger.debug(`Session saved: ${this.session.meta.id}`);
   }
 
+  /** 現在の会話セッション ID (resume 用)。 ~/.localllm/sessions/ 配下のファイル名と一致。 */
+  getCurrentSessionId(): string {
+    return this.session.meta.id;
+  }
+
+  /** 現在の会話メッセージ数 (system プロンプト等を除く保存対象数)。 */
+  getCurrentSessionMessageCount(): number {
+    return this.history.getRawMessages().length;
+  }
+
   /**
    * LLMプロファイル（description等）を差し替えてシステムプロンプトを再構築する。
    * REPL で /model description / /second description を実行した直後に呼ぶと、

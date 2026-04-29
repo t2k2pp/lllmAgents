@@ -36,6 +36,7 @@ import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
 import { buildLLMProfiles } from "../agent/llm-profiles.js";
 import { createProvider } from "../providers/provider-factory.js";
+import { getOpsLogger, setOpsLogLevel, parseOpsLogLevel } from "../utils/ops-logger.js";
 import { getSubAgentManager } from "../tools/definitions/task.js";
 import { DEFAULT_PORTS } from "../config/types.js";
 import type { ProviderType } from "../config/types.js";
@@ -588,11 +589,21 @@ export class REPL {
       }
 
       case "/quit":
-      case "/exit":
+      case "/exit": {
         this.agent.saveCurrentSession();
+        const sid = this.agent.getCurrentSessionId();
+        const msgCount = this.agent.getCurrentSessionMessageCount();
+        console.log();
+        if (msgCount > 0) {
+          console.log(chalk.dim(`  セッション保存: ${chalk.cyan(sid)}  (${msgCount} messages)`));
+          console.log(chalk.dim(`  続きから再開する場合:`));
+          console.log(chalk.dim(`    /resume ${sid}              ← REPL 起動後`));
+          console.log(chalk.dim(`    起動時: --resume ${sid}     ← または --continue`));
+        }
         process.removeAllListeners("SIGINT");
         console.log(chalk.dim("\n  Goodbye!\n"));
         return "quit";
+      }
 
       case "/clear":
         this.agent.getHistory().clear();
@@ -2061,38 +2072,69 @@ export class REPL {
       }
 
       case "/sessions": {
-        const sessions = listSessions(10);
+        const limitArg = parseInt(args[0] ?? "", 10);
+        const limit = Number.isFinite(limitArg) && limitArg > 0 ? limitArg : 20;
+        const sessions = listSessions(limit);
         if (sessions.length === 0) {
           console.log(chalk.dim("  保存されたセッションはありません。"));
+          console.log(chalk.dim("  会話を 1 ターン以上行ったあと /quit すると保存されます。"));
         } else {
-          console.log(chalk.dim("  保存されたセッション:"));
+          console.log(chalk.bold(`\n  保存されたセッション (新しい順、 上位 ${sessions.length} 件):`));
           for (const s of sessions) {
             const date = new Date(s.updatedAt).toLocaleString();
+            const title = (s.title || "(タイトルなし)").replace(/\s+/g, " ").slice(0, 60);
             console.log(
-              chalk.dim(`    ${s.id}  ${date}  ${s.title.slice(0, 50)}`),
+              `    ${chalk.cyan(s.id)}  ${chalk.dim(date)}  ${chalk.dim(`(${s.messageCount}msgs)`)}  ${title}`,
             );
           }
+          console.log(chalk.dim(`\n  復元方法:`));
+          console.log(chalk.dim(`    /resume                   ← 対話的にリストから選ぶ`));
+          console.log(chalk.dim(`    /resume <session-id>      ← ID 直接指定`));
+          console.log(chalk.dim(`    /continue                 ← 一番新しいセッションを即復元`));
+          console.log(chalk.dim(`    起動時: --resume <id> / --continue\n`));
         }
         break;
       }
 
       case "/resume": {
-        const sessionId = args[0];
+        let sessionId = args[0];
+        // 無引数なら対話的に選択させる (Claude Code 流儀)
         if (!sessionId) {
-          console.log(chalk.yellow("  使い方: /resume <session-id>"));
-          break;
+          const sessions = listSessions(20);
+          if (sessions.length === 0) {
+            console.log(chalk.dim("  保存されたセッションはありません。"));
+            console.log(chalk.dim("  会話を 1 ターン以上行ったあと /quit すると保存されます。"));
+            break;
+          }
+          try {
+            sessionId = await select({
+              message: "復元するセッションを選択 (Ctrl+C でキャンセル):",
+              choices: sessions.map((s) => {
+                const date = new Date(s.updatedAt).toLocaleString();
+                const title = (s.title || "(タイトルなし)").replace(/\s+/g, " ").slice(0, 50);
+                return {
+                  name: `${date}  (${s.messageCount}msgs)  ${title}`,
+                  value: s.id,
+                  description: `id=${s.id}  model=${s.model}`,
+                };
+              }),
+              pageSize: 10,
+            });
+          } catch {
+            console.log(chalk.dim("  キャンセルしました。"));
+            break;
+          }
         }
         const session = loadSession(sessionId);
         if (!session) {
-          console.log(
-            chalk.red(`  セッション ${sessionId} が見つかりません。`),
-          );
+          console.log(chalk.red(`  セッション ${sessionId} が見つかりません。`));
+          console.log(chalk.dim(`  /sessions で一覧を表示できます。`));
           break;
         }
         this.agent.restoreSession(session);
         console.log(
           chalk.dim(
-            `  セッション ${sessionId} を復元しました (${session.meta.messageCount} messages)`,
+            `  セッション ${chalk.cyan(sessionId)} を復元しました (${session.meta.messageCount} messages)`,
           ),
         );
         break;
@@ -2120,6 +2162,25 @@ export class REPL {
           console.log(chalk.dim(mem));
         } else {
           console.log(chalk.dim("  メモリは空です。"));
+        }
+        break;
+      }
+
+      case "/loglevel": {
+        const opsLogger = getOpsLogger();
+        const filePath = opsLogger.getFilePath();
+        if (args.length === 0) {
+          console.log(chalk.dim(`  運用ログ level: ${opsLogger.getLevel()}`));
+          console.log(chalk.dim(`  出力先: ${filePath ?? "(disabled)"}`));
+          console.log(chalk.dim("  変更: /loglevel [trace|debug|info|warn|error]"));
+        } else {
+          const level = parseOpsLogLevel(args[0]);
+          if (!level) {
+            console.log(chalk.yellow("  無効な level。 trace|debug|info|warn|error から選択してください。"));
+            break;
+          }
+          setOpsLogLevel(level);
+          console.log(chalk.dim(`  運用ログ level を ${level} に変更しました (このセッションのみ)`));
         }
         break;
       }
