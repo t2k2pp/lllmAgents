@@ -33,12 +33,53 @@ function classifySecondLLMError(e: unknown): SecondLLMFailureCategory {
   return "UNKNOWN";
 }
 
-/** ツール実行が失敗した時、 ハーネスに渡す error 文字列を組み立てる */
+/** カテゴリごとの対処ガイダンス (tool 自身の声で同梱、 ハーネス後付けではない) */
+function categoryGuidance(category: SecondLLMFailureCategory): string {
+  switch (category) {
+    case "RATE_LIMIT":
+      return "TPM/RPM クォータ超過。 数十秒〜数分待ってリトライが第一選択。 連続発生なら別モデルへの切替を検討。";
+    case "AUTH":
+      return "API Key が無効/期限切れ/権限不足。 /second status で現在の保存形式を確認、 /second setup azure-* で再設定。";
+    case "NOT_FOUND":
+      return "endpoint URL の path / deployment 名 / model 名が不一致。 Azure Portal で正確な値を確認、 /second setup で再設定。";
+    case "BAD_REQUEST":
+      return "リクエスト形式の不適合。 model 名や endpoint パスが古い API バージョンの可能性。 /second status で確認。";
+    case "SERVER_ERROR":
+      return "サーバ側障害。 数分待ってリトライ。 継続するなら Azure 側の障害を疑う。";
+    case "TIMEOUT":
+      return "応答タイムアウト。 大きいプロンプトなら分割、 短時間ならリトライ。";
+    case "NETWORK":
+      return "ネットワーク到達不能。 endpoint URL のホスト名/プロキシを確認。";
+    default:
+      return "原因不明。 エラー本文を確認して /second status で設定確認。";
+  }
+}
+
+/**
+ * ツール実行が失敗した時の error 文字列を組み立てる (tool 自身の声)。
+ *
+ * Phase 5 第9ラウンド (Gate 3): ユーザーが委任を明示している場合に備え、 ガイダンスを
+ * 同梱する。 これは「ハーネス後付け警告」 (Round 8 で全廃) ではなく、 **tool 自身の声**:
+ * 「私 (second_llm_agent) は失敗した。 こういう原因が考えられる。 こう対処を」 という
+ * tool 内エラー応答。 file_read の自助エラー (候補/親dir 提示) と同じ性格。
+ *
+ * 補足: ユーザーが「セカンドLLMで」 等の委任意図を示している場合、 agent-loop の Gate 2
+ * (delegationLockUntil) が file_write/file_edit を 2 分間 tool 層で拒否する。 ここでの
+ * 文言はあくまで model への気づきの提供で、 実際の hard barrier は agent-loop 側。
+ */
 function buildSecondLLMFailureError(toolName: string, e: unknown): string {
   const category = classifySecondLLMError(e);
-  // ハーネス (harness-intervention.ts) が検出する固定マーカー
   const marker = `[セカンドLLM失敗:${category}]`;
-  return `${marker} ${toolName} の呼び出しが失敗: ${String(e)}`;
+  const guidance = categoryGuidance(category);
+  return (
+    `${marker} ${toolName} の呼び出しが失敗: ${String(e)}\n` +
+    `[原因] ${guidance}\n` +
+    `[対処] ユーザーが委任を明示している場合は、 ask_user で 3 択を提示すること:\n` +
+    `  (a) リトライする (${category === "RATE_LIMIT" || category === "TIMEOUT" || category === "SERVER_ERROR" ? "推奨" : "効果薄"})\n` +
+    `  (b) メイン側で実行 (ユーザーが許可する場合のみ)\n` +
+    `  (c) モデル設定を見直す (/second status / /second setup azure-*)\n` +
+    `[禁忌] 独断でメイン側にフォールバック (= file_write/file_edit を直接呼ぶ) は意図違反。 委任意図がある状況ではハーネス側の hard gate で拒否される。`
+  );
 }
 
 export const secondLLMConsultTool: ToolHandler = {

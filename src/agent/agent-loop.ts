@@ -23,6 +23,7 @@ import {
 import { PlanManager } from "./plan-mode.js";
 import type { SamplingParams } from "../config/types.js";
 import * as logger from "../utils/logger.js";
+import { getOpsLogger } from "../utils/ops-logger.js";
 import { LLMLogger } from "./llm-logger.js";
 import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
@@ -101,6 +102,15 @@ export class AgentLoop {
   private _aborted = false;
   /** Phase 5 第2ラウンド: ハーネス介入の状態 (file_edit/壁ドン/Read→Edit/連続委任) を一元管理 */
   private harnessState = new HarnessState();
+  /**
+   * Phase 5 第9ラウンド (Gate 2): セカンドLLM 委任失敗後の hard lock。
+   * ユーザーが「セカンドLLMで」 等の委任意図を明示し、 second_llm_* が失敗したとき、
+   * 2 分間 file_write/file_edit を tool 層で拒否する。 ask_user / response_complete で解除。
+   * "older brother who interferes" を構造的に防止 (= 警告で促すのではなく、 行動を物理的に止める)。
+   */
+  private delegationLockUntil = 0;
+  /** 委任ロック発動契機のカテゴリ (エラーメッセージ用) */
+  private delegationLockReason = "";
   /** ツールの最大並列実行数 */
   private maxParallelTools: number;
   /** モデルのコンテキストウィンドウサイズ（トークン数） — max_tokens算出に使用 */
@@ -273,6 +283,8 @@ export class AgentLoop {
       let receivedTokens = 0; // スピナーモード: 受信トークンカウンター
       let thinkingStarted = false; // ストリーミングモード: [思考]ヘッダー表示済みフラグ
       let finishReason = "stop"; // LLMの終了理由（"length"なら出力が途中で切れた）
+      let tokensIn: number | undefined;
+      let tokensOut: number | undefined;
       // LLM呼び出しループ: 接続エラー時は自動リトライ、その他はユーザーに判断を委ねる
       let connectionRetries = 0;
 
@@ -450,6 +462,8 @@ export class AgentLoop {
                 if (chunk.usage) {
                   // 次回ターンの待機スピナー表示用にプロンプトトークン数を記憶
                   this.lastPromptTokens = chunk.usage.promptTokens ?? this.lastPromptTokens;
+                  tokensIn = chunk.usage.promptTokens;
+                  tokensOut = chunk.usage.completionTokens;
                   const cost = globalCostCalculator.calculateForModel(
                     this.model,
                     chunk.usage.promptTokens ?? 0,
@@ -488,6 +502,8 @@ export class AgentLoop {
             thinking: thinkingContent || undefined,
             text: textContent || undefined,
             toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+            tokensIn,
+            tokensOut,
             finishReason,
           });
 
@@ -500,6 +516,13 @@ export class AgentLoop {
           if (isConnectionError(err) && connectionRetries < MAX_CONNECTION_RETRIES) {
             connectionRetries++;
             const waitMs = 2000 * connectionRetries; // 2s, 4s, 6s
+            getOpsLogger().warn("retry", "connection retry scheduled", {
+              attempt: connectionRetries,
+              max: MAX_CONNECTION_RETRIES,
+              waitMs,
+              error: err.message,
+              model: this.model,
+            });
             console.log(chalk.yellow(`\n  接続エラー: ${err.message}`));
             console.log(chalk.yellow(`  サーバー復帰を待機中... (${connectionRetries}/${MAX_CONNECTION_RETRIES})`));
             await sleep(waitMs);
@@ -514,6 +537,12 @@ export class AgentLoop {
           }
 
           // その他のエラー or 接続リトライ上限: ユーザーに判断を委ねる
+          getOpsLogger().error("llm", "LLM call failed (asking user)", {
+            error: err.message,
+            stack: err.stack,
+            model: this.model,
+            connectionRetries,
+          });
           console.error(chalk.red(`\n  エラー: ${err.message}`));
           const action = await askUserOnError(err);
 
@@ -878,6 +907,51 @@ export class AgentLoop {
     return allDefs;
   }
 
+  /**
+   * Phase 5 第9ラウンド (Gate 2): ユーザー直近メッセージに委任意図キーワードがあるか?
+   * (「セカンドLLM」「セカンド LLM」「second llm」「サブエージェント」「委任」「頼んで」「依頼」 等)
+   */
+  private hasRecentDelegationIntent(): boolean {
+    const messages = this.history.getMessages();
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === "user") {
+        const content = typeof m.content === "string" ? m.content : "";
+        return /セカンド\s*(?:llm|エージェント|モデル)?|second\s*llm|サブ\s*エージェント|sub.?agent|委任|頼んで|依頼/i.test(content);
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Phase 5 第9ラウンド (Gate 2): tool 実行直前のロックチェック。
+   * 委任ロック中で禁止対象 (file_write/file_edit) なら、 toolExecutor に渡さず synthetic
+   * エラー結果を返す。 ask_user / response_complete でロック解除。
+   * 戻り値: lock 発動なら error 結果、 通常通り進めるなら null。
+   */
+  private checkDelegationLock(toolName: string): { error: string } | null {
+    // ask_user / response_complete はロック解除の合図
+    if (toolName === "ask_user" || toolName === "response_complete") {
+      if (this.delegationLockUntil > Date.now()) {
+        this.delegationLockUntil = 0;
+        this.delegationLockReason = "";
+      }
+      return null;
+    }
+    // ロック未発動 / 期限切れ
+    if (this.delegationLockUntil <= Date.now()) return null;
+    // ロック中の禁止対象は file_write / file_edit のみ (情報収集系・retry 系は通す)
+    if (toolName !== "file_write" && toolName !== "file_edit") return null;
+    return {
+      error:
+        `[委任失敗ロック] ユーザーが委任 (セカンドLLM等) を明示指示している状況で、 ` +
+        `直前にセカンドLLM 呼出が失敗しました (${this.delegationLockReason || "原因不明"})。 ` +
+        `メイン側で ${toolName} を直接実行する前に、 ask_user で 3 択を提示してください: ` +
+        `(a) リトライする / (b) メイン側で実行 (ユーザーが許可する場合のみ) / (c) モデル設定見直し。 ` +
+        `ask_user を呼ぶとロックが解除されます。`,
+    };
+  }
+
   /** Execute a single tool call, returning whether to abort the rest of the run loop */
   private async executeSingleTool(toolCall: ToolCall): Promise<boolean> {
     const summary = formatToolCall(toolCall);
@@ -895,7 +969,32 @@ export class AgentLoop {
     if (needsApproval || (isInteractiveTool && this.currentSource === "cli")) {
       spinner.stop();
     }
-    const result = await this.toolExecutor.execute(toolCall, this.currentSource);
+    const toolStartMs = Date.now();
+
+    // Phase 5 第9ラウンド (Gate 2): 委任失敗ロック中は file_write/file_edit を tool 層で拒否
+    const lockHit = this.checkDelegationLock(toolName);
+    let result: import("../tools/tool-registry.js").ToolResult;
+    if (lockHit) {
+      spinner.fail(chalk.dim(`  ${summary}: 委任失敗ロックにより拒否`));
+      console.log(chalk.yellow(`  ⛔ ${lockHit.error}`));
+      result = { success: false, output: "", error: lockHit.error };
+    } else {
+      result = await this.toolExecutor.execute(toolCall, this.currentSource);
+    }
+    const toolDurationMs = Date.now() - toolStartMs;
+
+    // Phase 5 第9ラウンド (Gate 2): 委任失敗時のロック発動
+    if (
+      !result.success &&
+      (toolName === "second_llm_agent" || toolName === "second_llm_consult") &&
+      this.hasRecentDelegationIntent()
+    ) {
+      this.delegationLockUntil = Date.now() + 2 * 60_000; // 2 min
+      const errStr = String(result.error ?? "");
+      const m = errStr.match(/\[セカンドLLM失敗:([A-Z_]+)\]/);
+      this.delegationLockReason = m?.[1] ?? "UNKNOWN";
+      console.log(chalk.yellow(`  🔒 委任失敗ロック発動 (2分間 file_write/file_edit 禁止、 ask_user で解除)`));
+    }
 
     if (result.success) {
       spinner.succeed(chalk.dim(`  ${summary}`));
@@ -910,6 +1009,16 @@ export class AgentLoop {
     let resultContent = result.success
       ? result.output
       : `Error: ${result.error}\n${result.output}`;
+
+    this.llmLogger.logToolResult({
+      toolCallId: toolCall.id,
+      toolName,
+      rawArguments: toolCall.function.arguments ?? "{}",
+      output: result.output ?? "",
+      success: result.success,
+      error: result.error,
+      durationMs: toolDurationMs,
+    });
 
     /*
     // 段階的開示: ツール初回使用時にガイドテキストを注入
@@ -958,18 +1067,40 @@ export class AgentLoop {
       // 中断チェック: 待機中にabortされた場合はスキップ
       if (this._aborted) {
         release();
-        return { toolCall, result: { success: false, output: "", error: "中断されました" } };
+        return { toolCall, result: { success: false, output: "", error: "中断されました" }, durationMs: 0 };
       }
       try {
         const summary = formatToolCall(toolCall);
-        const result = await this.toolExecutor.execute(toolCall, this.currentSource);
+        const startMs = Date.now();
+        // Phase 5 第9ラウンド (Gate 2): 並列ルートでも委任ロックを尊重
+        const lockHit = this.checkDelegationLock(toolCall.function.name);
+        let result: import("../tools/tool-registry.js").ToolResult;
+        if (lockHit) {
+          result = { success: false, output: "", error: lockHit.error };
+        } else {
+          result = await this.toolExecutor.execute(toolCall, this.currentSource);
+        }
+        const durationMs = Date.now() - startMs;
+        // 委任失敗ロック発動チェック (並列ルート)
+        const tn = toolCall.function.name;
+        if (
+          !result.success &&
+          (tn === "second_llm_agent" || tn === "second_llm_consult") &&
+          this.hasRecentDelegationIntent()
+        ) {
+          this.delegationLockUntil = Date.now() + 2 * 60_000;
+          const errStr = String(result.error ?? "");
+          const m = errStr.match(/\[セカンドLLM失敗:([A-Z_]+)\]/);
+          this.delegationLockReason = m?.[1] ?? "UNKNOWN";
+          console.log(chalk.yellow(`  🔒 委任失敗ロック発動 (2分間 file_write/file_edit 禁止、 ask_user で解除)`));
+        }
         const icon = result.success ? chalk.green("✓") : chalk.red("✗");
         const suffix = result.success ? "" : `: ${formatToolError(result.error, result.output)}`;
         console.log(chalk.dim(`  ${icon} ${summary}${suffix}`));
         if (result.success && result.userDisplay) {
           this.renderUserDisplay(result.userDisplay);
         }
-        return { toolCall, result };
+        return { toolCall, result, durationMs };
       } finally {
         release();
       }
@@ -980,7 +1111,16 @@ export class AgentLoop {
 
     for (const entry of settled) {
       if (entry.status === "fulfilled") {
-        const { toolCall, result } = entry.value;
+        const { toolCall, result, durationMs } = entry.value;
+        this.llmLogger.logToolResult({
+          toolCallId: toolCall.id,
+          toolName: toolCall.function.name,
+          rawArguments: toolCall.function.arguments ?? "{}",
+          output: result.output ?? "",
+          success: result.success,
+          error: result.error,
+          durationMs,
+        });
         let resultContent = result.success
           ? result.output
           : `Error: ${result.error}\n${result.output}`;
