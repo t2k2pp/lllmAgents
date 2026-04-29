@@ -34,22 +34,12 @@ export interface LLMEndpoint extends SamplingParams {
   description?: string;
 }
 
-export interface SecondLLMEndpoint {
-  providerType: SecondLLMProviderType;
-  model: string;
-  contextWindow?: number;
-  // ローカルLLM用
-  baseUrl?: string;
-  // Vertex AI用
-  projectId?: string;
-  region?: string;
-  // Azure用
-  endpoint?: string;
-  apiKey?: string;
-  deploymentName?: string;
-  /** モデル特性の自由記述 (100〜300文字程度) */
-  description?: string;
-}
+/**
+ * セカンドLLMのエンドポイント設定。
+ * メインLLM (LLMEndpoint) と完全に同一仕様。 サンプリングパラメータも保持できる。
+ * これにより /swap (メイン⇔セカンド入替) で情報が欠落しない。
+ */
+export type SecondLLMEndpoint = LLMEndpoint;
 
 export interface BudgetConfig {
   limitUsd: number;          // 予算上限 (USD)
@@ -151,6 +141,21 @@ export interface ChatLogConfig {
   vaultPath: string;
 }
 
+/** 運用ログ (人間がトレースする用)。詳細: docs/llm-logging.md */
+export interface OpsLogConfig {
+  /** 運用ログを書き出すか（デフォルト: true） */
+  enabled: boolean;
+  /** 出力レベル。 trace/debug/info/warn/error。 設定値以上のレコードのみ記録 */
+  level: "trace" | "debug" | "info" | "warn" | "error";
+  /** 出力先。 未指定なら ~/.localllm/logs/ops/<sid>.jsonl */
+  path?: string;
+}
+
+export interface LoggingConfig {
+  /** 運用ログ設定 */
+  ops?: OpsLogConfig;
+}
+
 export interface Config {
   mainLLM: LLMEndpoint;
   visionLLM: LLMEndpoint | null;
@@ -171,6 +176,8 @@ export interface Config {
   autorunMode?: boolean;
   /** チャットログ保存設定（Obsidian Vault に会話ログを蓄積） */
   chatLog?: ChatLogConfig;
+  /** ログ設定 (運用ログ等)。詳細: docs/llm-logging.md */
+  logging?: LoggingConfig;
 }
 
 // ヘルパー: セカンドLLMがクラウドかローカルかを判定
@@ -279,6 +286,12 @@ export function getDefaultConfig(): Config {
     slack: {
       enabled: false,
       webhookUrl: "",
+    },
+    logging: {
+      ops: {
+        enabled: true,
+        level: "info",
+      },
     },
   };
 }

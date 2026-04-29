@@ -109,6 +109,25 @@ export class SecondLLMManager {
     this.delegationGuard.recordDelegation();
   }
 
+  /**
+   * endpoint のサンプリングパラメータを反映した値を返す。
+   * 未設定なら fallback (consult/runAsAgent/runAsEvaluator が持つ既定温度) を使う。
+   */
+  private resolveSampling(fallbackTemperature: number): {
+    temperature: number;
+    top_p?: number;
+    top_k?: number;
+    repetition_penalty?: number;
+  } {
+    const ep = this.endpoint;
+    return {
+      temperature: ep?.temperature ?? fallbackTemperature,
+      ...(ep?.top_p !== undefined && { top_p: ep.top_p }),
+      ...(ep?.top_k !== undefined && { top_k: ep.top_k }),
+      ...(ep?.repetition_penalty !== undefined && { repetition_penalty: ep.repetition_penalty }),
+    };
+  }
+
   async consult(prompt: string): Promise<string> {
     if (!this.isAvailable() || !this.provider || !this.endpoint) {
       throw new Error("Second LLM is not configured or enabled.");
@@ -135,7 +154,7 @@ export class SecondLLMManager {
       const stream = this.provider.chat({
         model: this.endpoint.model,
         messages,
-        temperature: 0.2,
+        ...this.resolveSampling(0.2),
         maxTokens: this.endpoint.contextWindow,
         stream: true
       });
@@ -201,6 +220,7 @@ export class SecondLLMManager {
           model: this.endpoint.model,
           messages,
           tools: toolDefs,
+          ...this.resolveSampling(0.2),
           maxTokens: this.endpoint.contextWindow,
           stream: true
         });
@@ -333,7 +353,7 @@ export class SecondLLMManager {
           model: this.endpoint.model,
           messages,
           tools: toolDefs,
-          temperature: 0.1,
+          ...this.resolveSampling(0.1),
           maxTokens: this.endpoint.contextWindow,
           stream: true,
         });

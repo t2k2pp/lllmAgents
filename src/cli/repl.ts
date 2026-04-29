@@ -20,7 +20,7 @@ import {
   createFileMenuProvider,
 } from "./completer.js";
 import { parseTokenCount } from "../config/types.js";
-import type { Config, SecondLLMProviderType } from "../config/types.js";
+import type { Config, LLMEndpoint, SecondLLMEndpoint, SecondLLMProviderType } from "../config/types.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { PlanManager } from "../agent/plan-mode.js";
 import { sendDiscordNotification, isValidDiscordWebhookUrl } from "../utils/discord.js";
@@ -34,6 +34,7 @@ import { AzureAnthropicProvider } from "../providers/azure-anthropic.js";
 import { saveConfig } from "../config/config-manager.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
+import { secondLLMConsultTool, secondLLMAgentTool, setSecondLLMManager } from "../tools/definitions/second-llm.js";
 import { buildLLMProfiles } from "../agent/llm-profiles.js";
 import { createProvider } from "../providers/provider-factory.js";
 import { getOpsLogger, setOpsLogLevel, parseOpsLogLevel } from "../utils/ops-logger.js";
@@ -474,6 +475,15 @@ export class REPL {
       console.log(chalk.red(`  セカンドLLM再初期化に失敗: ${e instanceof Error ? e.message : String(e)}`));
       console.log(chalk.dim(`  設定は保存済み。Cloud LLMで合言葉が必要な場合は再起動が必要です。`));
       return;
+    }
+    // 起動時に secondLLM が無効/失敗だった場合、 second_llm_consult / second_llm_agent ツールが
+    // 未登録のまま起動している可能性がある。 利用可能になったタイミングで遅延登録する。
+    // (ToolRegistry.register は Map.set ベースで冪等なので再呼び出しは無害)
+    if (this.secondLLMManager.isAvailable()) {
+      setSecondLLMManager(this.secondLLMManager);
+      const reg = this.agent.getToolRegistry();
+      reg.register(secondLLMConsultTool);
+      reg.register(secondLLMAgentTool);
     }
     this.refreshLLMProfiles();
   }
@@ -1094,6 +1104,12 @@ export class REPL {
             console.log(chalk.dim(`  コンテキスト: ${ctxLabel}  ${chalk.gray("※会話履歴はメインと独立")}`));
             const secDesc = cfg.endpoint.description?.trim();
             console.log(chalk.dim(`  特性:         ${secDesc ? chalk.cyan(secDesc) : chalk.yellow("(未設定 — /second description で設定)")}`));
+            const sp = cfg.endpoint;
+            const fmt = (v: number | undefined) => v !== undefined ? chalk.cyan(String(v)) : chalk.gray("auto");
+            console.log(chalk.dim(`  temperature:  ${fmt(sp.temperature)}    ${chalk.gray("(/second temperature <値>)")}`));
+            console.log(chalk.dim(`  top_p:        ${fmt(sp.top_p)}    ${chalk.gray("(/second top_p <値>)")}`));
+            console.log(chalk.dim(`  top_k:        ${fmt(sp.top_k)}    ${chalk.gray("(/second top_k <値>)")}`));
+            console.log(chalk.dim(`  rep_penalty:  ${fmt(sp.repetition_penalty)}    ${chalk.gray("(/second rep_penalty <値>)")}`));
           }
           console.log();
         } else if (subCmd === "description") {
@@ -1289,6 +1305,54 @@ export class REPL {
             console.log(chalk.dim(`  モデル:       ${model || "(未指定 — /second model で設定)"}`));
             console.log(chalk.dim(`  (反映には再起動が必要です)`));
           }
+        } else if (subCmd === "temperature" || subCmd === "top_p" || subCmd === "top_k" || subCmd === "rep_penalty") {
+          // /second temperature [<値>|auto|clear] — メインLLMの /model XXX と同一仕様
+          if (!this.config.secondLLM) {
+            console.log(chalk.red("  Second LLM の設定が存在しません。/second setup で初期設定してください。"));
+          } else {
+            const paramKeyMap: Record<string, "temperature" | "top_p" | "top_k" | "repetition_penalty"> = {
+              temperature: "temperature",
+              top_p: "top_p",
+              top_k: "top_k",
+              rep_penalty: "repetition_penalty",
+            };
+            const paramKey = paramKeyMap[subCmd];
+            const ranges: Record<string, { min: number; max: number; recommended: string; integer?: boolean }> = {
+              temperature: { min: 0, max: 2, recommended: "0.0〜1.0 (推論重視は 0.2、創造性重視は 0.8前後)" },
+              top_p: { min: 0, max: 1, recommended: "0.85〜0.95 (1.0で無効化)" },
+              top_k: { min: 1, max: 1000, recommended: "20〜50 (大きいほど多様、Ollama系で有効)", integer: true },
+              repetition_penalty: { min: 0, max: 2, recommended: "1.0〜1.15 (1.0で中立、>1で繰り返し抑制)" },
+            };
+            const r = ranges[paramKey];
+            const valArg = args[1]?.trim().toLowerCase();
+            const cur = this.config.secondLLM.endpoint[paramKey];
+            const curStr = cur !== undefined ? String(cur) : chalk.gray("auto (consult=0.2 / agent=0.2 / evaluator=0.1 を内部既定として使用)");
+
+            if (!valArg) {
+              console.log(chalk.bold(`\n  ── セカンドLLM ${subCmd} ──`));
+              console.log(chalk.dim(`  現在値: ${curStr}`));
+              console.log(chalk.dim(`  推奨値: ${r.recommended}`));
+              console.log(chalk.dim(`  範囲:   ${r.min} 〜 ${r.max}${r.integer ? " (整数)" : ""}`));
+              console.log(chalk.dim(`  使い方: /second ${subCmd} <値>`));
+              console.log(chalk.dim(`  クリア: /second ${subCmd} auto  (または clear)`));
+            } else if (valArg === "auto" || valArg === "clear") {
+              delete this.config.secondLLM.endpoint[paramKey];
+              saveConfig(this.config);
+              this.applySecondLLMEndpoint();
+              console.log(chalk.yellow(`  セカンドLLM ${subCmd} を auto (内部既定) に戻しました`));
+            } else {
+              const num = r.integer ? parseInt(valArg, 10) : parseFloat(valArg);
+              if (isNaN(num) || num < r.min || num > r.max) {
+                console.log(chalk.red(`  無効な値: ${valArg}`));
+                console.log(chalk.dim(`  範囲: ${r.min} 〜 ${r.max}${r.integer ? " (整数)" : ""}`));
+              } else {
+                this.config.secondLLM.endpoint[paramKey] = num;
+                saveConfig(this.config);
+                this.applySecondLLMEndpoint();
+                console.log(chalk.green(`  セカンドLLM ${subCmd} を ${chalk.cyan(String(num))} に設定しました (次のLLM呼び出しから反映)`));
+              }
+            }
+          }
         } else {
            console.log(chalk.yellow("  使い方:"));
            console.log(chalk.dim("    /second                       状態確認"));
@@ -1302,8 +1366,74 @@ export class REPL {
            console.log(chalk.dim("    /second url <URL>             エンドポイントURL変更"));
            console.log(chalk.dim("    /second provider <タイプ>     プロバイダー変更"));
            console.log(chalk.dim("    /second context <128k>        コンテキスト長変更"));
+           console.log(chalk.dim("    /second temperature <値>      サンプリング温度 (auto/clear で内部既定に戻す)"));
+           console.log(chalk.dim("    /second top_p <値>            Top-p"));
+           console.log(chalk.dim("    /second top_k <値>            Top-k"));
+           console.log(chalk.dim("    /second rep_penalty <値>      繰り返しペナルティ"));
            console.log(chalk.dim("    /second description <text>    特性説明 (サブエージェント選択の材料)"));
         }
+        break;
+      }
+
+      case "/swap":
+      case "/switch": {
+        // メインLLM ⇔ セカンドLLM の入れ替え
+        if (!this.config.secondLLM) {
+          console.log(chalk.red("\n  セカンドLLM が未設定です。先に /second setup で設定してください。\n"));
+          break;
+        }
+        const cur = this.config.mainLLM;
+        const sec = this.config.secondLLM.endpoint;
+        if (!sec.model || !sec.providerType) {
+          console.log(chalk.red("\n  セカンドLLM のモデル/プロバイダーが未設定です。先に /second model 等で設定してください。\n"));
+          break;
+        }
+        if (!cur.model || !cur.providerType) {
+          console.log(chalk.red("\n  メインLLM のモデル/プロバイダーが未設定です。\n"));
+          break;
+        }
+
+        console.log(chalk.bold("\n  ── メインLLM ⇔ セカンドLLM 入れ替え ──"));
+        console.log(chalk.dim(`  メイン  (現在): ${cur.providerType} / ${cur.model}`));
+        console.log(chalk.dim(`  セカンド (現在): ${sec.providerType} / ${sec.model}`));
+
+        const skipConfirm = args[0] === "-y" || args[0] === "--yes";
+        let proceed = true;
+        if (!skipConfirm) {
+          try {
+            proceed = await confirm({ message: "  入れ替えますか?", default: true });
+          } catch {
+            proceed = false;
+          }
+        }
+        if (!proceed) {
+          console.log(chalk.yellow("  キャンセルしました。\n"));
+          break;
+        }
+
+        // SecondLLMEndpoint は LLMEndpoint と同一仕様のため単純な入れ替え。 サンプリング値も含めて全フィールド保持される。
+        const newMain: LLMEndpoint = { ...sec };
+        const newSecondEndpoint: SecondLLMEndpoint = { ...cur };
+
+        this.config.mainLLM = newMain;
+        this.config.secondLLM = {
+          ...this.config.secondLLM,
+          endpoint: newSecondEndpoint,
+        };
+        saveConfig(this.config);
+
+        console.log(chalk.green("\n  ✓ 設定を入れ替えました。"));
+        console.log(chalk.dim(`  メイン  (新): ${newMain.providerType} / ${newMain.model}`));
+        console.log(chalk.dim(`  セカンド (新): ${newSecondEndpoint.providerType} / ${newSecondEndpoint.model}`));
+
+        // 実行時反映: Provider再生成 / SecondLLMManager再初期化
+        await this.applyMainLLMEndpoint();
+        this.applySecondLLMEndpoint();
+        const isAvail = this.secondLLMManager?.isAvailable() ?? false;
+        if (!isAvail && this.config.secondLLM.enabled) {
+          console.log(chalk.yellow("  ※ セカンドLLM の接続テストに失敗しています。/second status で確認してください。"));
+        }
+        console.log();
         break;
       }
 

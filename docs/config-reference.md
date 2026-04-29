@@ -239,14 +239,19 @@
 
 ### SecondLLMEndpoint
 
+> **注**: 2026-04-29 以降、 `SecondLLMEndpoint` は `LLMEndpoint` (mainLLM 用) と完全に同一の型エイリアス。 `description` / `temperature` / `top_p` / `top_k` / `repetition_penalty` などすべてのフィールドが両者共通。 詳細は `docs/main_second_swap_design.md` を参照。
+
 ローカルLLMとクラウドLLMのどちらも指定可能。
 
-**ローカルLLMの場合:**
+**ローカルLLMの場合 (サンプリング値・特性説明込み):**
 ```json
 {
   "providerType": "vllm",
   "model": "qwen3:8b",
-  "baseUrl": "http://localhost:8001"
+  "baseUrl": "http://localhost:8001",
+  "description": "軽量7B。超高速だが精度中程度。要約・grep結果絞り込み・機械的委任向き",
+  "temperature": 0.2,
+  "top_p": 0.9
 }
 ```
 

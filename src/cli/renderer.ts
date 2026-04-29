@@ -54,7 +54,8 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/model provider")} プロバイダー(ollama/vllm等)を変更
     ${chalk.cyan("/model description")} モデル特性説明
     ${chalk.cyan("/model temperature")} 温度設定 (top_p/top_k/rep_penaltyも同様、各コマンドで)
-    ${chalk.cyan("/second")}         セカンドLLM管理 (status/url/provider/model/description等、/secondで全表示)
+    ${chalk.cyan("/second")}         セカンドLLM管理 (status/url/provider/model/description/temperature等、/secondで全表示)
+    ${chalk.cyan("/swap")}           メインLLM ⇔ セカンドLLM を入れ替え (-y で確認スキップ。alias: /switch)
     ${chalk.cyan("/slack")}          Slack設定 (status/url/test/bot-token/app-token)
     ${chalk.cyan("/search")}         Web検索プロバイダー設定 (SearXNG/DuckDuckGo)
     ${chalk.cyan("/todo")}           タスクリスト表示
