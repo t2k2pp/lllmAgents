@@ -103,14 +103,22 @@ export class AgentLoop {
   /** Phase 5 第2ラウンド: ハーネス介入の状態 (file_edit/壁ドン/Read→Edit/連続委任) を一元管理 */
   private harnessState = new HarnessState();
   /**
-   * Phase 5 第9ラウンド (Gate 2): セカンドLLM 委任失敗後の hard lock。
-   * ユーザーが「セカンドLLMで」 等の委任意図を明示し、 second_llm_* が失敗したとき、
-   * 2 分間 file_write/file_edit を tool 層で拒否する。 ask_user / response_complete で解除。
-   * "older brother who interferes" を構造的に防止 (= 警告で促すのではなく、 行動を物理的に止める)。
+   * Phase 5 第10ラウンド: 「対話必須」 ロック。 統合された 1 つの状態で扱う。
+   *
+   * 哲学: 拒否や委任失敗は「壁」 ではなく「対話のきっかけ」。 LLM が独断で再試行/
+   * 自分で代替する前に、 ask_user でユーザーに「理由」 を確認する流れを構造的に強制する。
+   * (Round 9 で deniedWritePaths による永続自動拒否を実装したが、 ユーザー指摘により
+   * 「ユーザーも操作ミスし得る、 心変わりもある」 ため hard barrier は不適切と判断。
+   * Round 10 で「対話を促す lock」 へ置換)
+   *
+   * 発動契機: (1) ユーザーが file_edit/file_write を拒否 (2) second_llm_* が失敗 +
+   * ユーザーが委任を明示。 解除契機: ask_user 呼出 / response_complete / 5 分タイムアウト。
+   * lock 中は file_write / file_edit を tool 層で拒否する。 file_read / grep / glob /
+   * bash / second_llm_* は通す (情報収集 / 検証 / retry 準備は許容)。
    */
-  private delegationLockUntil = 0;
-  /** 委任ロック発動契機のカテゴリ (エラーメッセージ用) */
-  private delegationLockReason = "";
+  private dialogueLockUntil = 0;
+  /** lock 発動の理由 (エラー文言用、 複数の理由が積もる可能性) */
+  private dialogueLockReasons: string[] = [];
   /** ツールの最大並列実行数 */
   private maxParallelTools: number;
   /** モデルのコンテキストウィンドウサイズ（トークン数） — max_tokens算出に使用 */
@@ -924,31 +932,87 @@ export class AgentLoop {
   }
 
   /**
-   * Phase 5 第9ラウンド (Gate 2): tool 実行直前のロックチェック。
-   * 委任ロック中で禁止対象 (file_write/file_edit) なら、 toolExecutor に渡さず synthetic
+   * Phase 5 第10ラウンド: tool 実行結果を受けて「対話必須ロック」 を発動する。
+   *
+   * 発動契機:
+   *   1. ユーザーが file_edit / file_write を拒否 (= permission deny)
+   *   2. second_llm_* が失敗 + ユーザーが委任意図キーワードを直近メッセージに含めていた
+   *
+   * 既にロック中なら理由を追加するだけ (タイムアウト延長はしない)。
+   */
+  private maybeTriggerDialogueLock(
+    toolName: string,
+    result: import("../tools/tool-registry.js").ToolResult,
+  ): void {
+    const reasons: string[] = [];
+
+    // 契機1: ユーザー拒否 (file_edit/file_write)
+    if (
+      !result.success &&
+      (toolName === "file_edit" || toolName === "file_write") &&
+      typeof result.error === "string" &&
+      result.error.includes("ユーザーがこの操作を拒否しました")
+    ) {
+      reasons.push(
+        `直前にユーザーが ${toolName} を拒否しました。 ` +
+          `「壁」 ではなく「対話のきっかけ」 として受け止め、 なぜ拒否されたか (パス違い/内容違い/操作ミス/心変わり等) をユーザーに確認すること`,
+      );
+    }
+
+    // 契機2: 委任失敗 + ユーザーが委任を明示
+    if (
+      !result.success &&
+      (toolName === "second_llm_agent" || toolName === "second_llm_consult") &&
+      this.hasRecentDelegationIntent()
+    ) {
+      const errStr = String(result.error ?? "");
+      const m = errStr.match(/\[セカンドLLM失敗:([A-Z_]+)\]/);
+      const cat = m?.[1] ?? "UNKNOWN";
+      reasons.push(
+        `セカンドLLM 呼出が失敗しました (${cat})。 ユーザーが委任を明示しているので、 ` +
+          `メイン側で代替実行する前に ask_user で 3 択 (リトライ / メイン側で実行 / モデル切替) を確認すること`,
+      );
+    }
+
+    if (reasons.length === 0) return;
+
+    // 既にロック中なら理由追加のみ。 新規ならタイマー設定。
+    if (this.dialogueLockUntil <= Date.now()) {
+      this.dialogueLockUntil = Date.now() + 5 * 60_000; // 5 min
+    }
+    this.dialogueLockReasons.push(...reasons);
+    console.log(chalk.yellow(`  🔒 対話必須ロック発動 (file_write/file_edit を拒否、 ask_user で解除)`));
+  }
+
+  /**
+   * Phase 5 第10ラウンド: tool 実行直前の「対話必須ロック」 チェック。
+   *
+   * lock 中で禁止対象 (file_write/file_edit) なら、 toolExecutor に渡さず synthetic
    * エラー結果を返す。 ask_user / response_complete でロック解除。
    * 戻り値: lock 発動なら error 結果、 通常通り進めるなら null。
    */
-  private checkDelegationLock(toolName: string): { error: string } | null {
-    // ask_user / response_complete はロック解除の合図
+  private checkDialogueLock(toolName: string): { error: string } | null {
+    // ask_user / response_complete はロック解除の合図 (= ユーザーとの対話/完了)
     if (toolName === "ask_user" || toolName === "response_complete") {
-      if (this.delegationLockUntil > Date.now()) {
-        this.delegationLockUntil = 0;
-        this.delegationLockReason = "";
+      if (this.dialogueLockUntil > Date.now()) {
+        this.dialogueLockUntil = 0;
+        this.dialogueLockReasons = [];
       }
       return null;
     }
     // ロック未発動 / 期限切れ
-    if (this.delegationLockUntil <= Date.now()) return null;
+    if (this.dialogueLockUntil <= Date.now()) return null;
     // ロック中の禁止対象は file_write / file_edit のみ (情報収集系・retry 系は通す)
     if (toolName !== "file_write" && toolName !== "file_edit") return null;
+    const reasons = this.dialogueLockReasons.length > 0
+      ? this.dialogueLockReasons.join(" / ")
+      : "対話が必要な状況";
     return {
       error:
-        `[委任失敗ロック] ユーザーが委任 (セカンドLLM等) を明示指示している状況で、 ` +
-        `直前にセカンドLLM 呼出が失敗しました (${this.delegationLockReason || "原因不明"})。 ` +
-        `メイン側で ${toolName} を直接実行する前に、 ask_user で 3 択を提示してください: ` +
-        `(a) リトライする / (b) メイン側で実行 (ユーザーが許可する場合のみ) / (c) モデル設定見直し。 ` +
-        `ask_user を呼ぶとロックが解除されます。`,
+        `[対話必須ロック] ${reasons}\n` +
+        `\nメイン側で ${toolName} を直接実行する前に、 ask_user でユーザーに状況確認 (なぜ拒否したか / 心変わりしたか / 別の方針か / 操作ミスか) を行ってください。\n` +
+        `\n[基本姿勢] まず受け止める → 理由を考える → 分かれば指示に従う / 分からなければ聞く。 機械的な再試行や独断のフォールバックは禁止。\n` +
+        `\nask_user を呼ぶとロックが解除されます。`,
     };
   }
 
@@ -971,11 +1035,11 @@ export class AgentLoop {
     }
     const toolStartMs = Date.now();
 
-    // Phase 5 第9ラウンド (Gate 2): 委任失敗ロック中は file_write/file_edit を tool 層で拒否
-    const lockHit = this.checkDelegationLock(toolName);
+    // Phase 5 第10ラウンド: 対話必須ロック中は file_write/file_edit を tool 層で拒否
+    const lockHit = this.checkDialogueLock(toolName);
     let result: import("../tools/tool-registry.js").ToolResult;
     if (lockHit) {
-      spinner.fail(chalk.dim(`  ${summary}: 委任失敗ロックにより拒否`));
+      spinner.fail(chalk.dim(`  ${summary}: 対話必須ロックにより拒否`));
       console.log(chalk.yellow(`  ⛔ ${lockHit.error}`));
       result = { success: false, output: "", error: lockHit.error };
     } else {
@@ -983,18 +1047,8 @@ export class AgentLoop {
     }
     const toolDurationMs = Date.now() - toolStartMs;
 
-    // Phase 5 第9ラウンド (Gate 2): 委任失敗時のロック発動
-    if (
-      !result.success &&
-      (toolName === "second_llm_agent" || toolName === "second_llm_consult") &&
-      this.hasRecentDelegationIntent()
-    ) {
-      this.delegationLockUntil = Date.now() + 2 * 60_000; // 2 min
-      const errStr = String(result.error ?? "");
-      const m = errStr.match(/\[セカンドLLM失敗:([A-Z_]+)\]/);
-      this.delegationLockReason = m?.[1] ?? "UNKNOWN";
-      console.log(chalk.yellow(`  🔒 委任失敗ロック発動 (2分間 file_write/file_edit 禁止、 ask_user で解除)`));
-    }
+    // Phase 5 第10ラウンド: 対話必須ロックの発動契機を判定
+    this.maybeTriggerDialogueLock(toolName, result);
 
     if (result.success) {
       spinner.succeed(chalk.dim(`  ${summary}`));
@@ -1072,8 +1126,8 @@ export class AgentLoop {
       try {
         const summary = formatToolCall(toolCall);
         const startMs = Date.now();
-        // Phase 5 第9ラウンド (Gate 2): 並列ルートでも委任ロックを尊重
-        const lockHit = this.checkDelegationLock(toolCall.function.name);
+        // Phase 5 第10ラウンド: 並列ルートでも対話必須ロックを尊重
+        const lockHit = this.checkDialogueLock(toolCall.function.name);
         let result: import("../tools/tool-registry.js").ToolResult;
         if (lockHit) {
           result = { success: false, output: "", error: lockHit.error };
@@ -1081,19 +1135,8 @@ export class AgentLoop {
           result = await this.toolExecutor.execute(toolCall, this.currentSource);
         }
         const durationMs = Date.now() - startMs;
-        // 委任失敗ロック発動チェック (並列ルート)
-        const tn = toolCall.function.name;
-        if (
-          !result.success &&
-          (tn === "second_llm_agent" || tn === "second_llm_consult") &&
-          this.hasRecentDelegationIntent()
-        ) {
-          this.delegationLockUntil = Date.now() + 2 * 60_000;
-          const errStr = String(result.error ?? "");
-          const m = errStr.match(/\[セカンドLLM失敗:([A-Z_]+)\]/);
-          this.delegationLockReason = m?.[1] ?? "UNKNOWN";
-          console.log(chalk.yellow(`  🔒 委任失敗ロック発動 (2分間 file_write/file_edit 禁止、 ask_user で解除)`));
-        }
+        // 対話必須ロックの発動契機を判定 (並列ルート)
+        this.maybeTriggerDialogueLock(toolCall.function.name, result);
         const icon = result.success ? chalk.green("✓") : chalk.red("✗");
         const suffix = result.success ? "" : `: ${formatToolError(result.error, result.output)}`;
         console.log(chalk.dim(`  ${icon} ${summary}${suffix}`));

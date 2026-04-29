@@ -93,9 +93,6 @@ export class PermissionManager {
   private sessionApprovals = new Set<string>();
   // Always-allow for specific tools in this session
   private alwaysAllowTools = new Set<string>();
-  // Phase 5 第9ラウンド (Gate 1): ユーザーが file_edit/file_write を拒否した絶対パス。
-  // 同セッション中、 同パスへの書込は再プロンプトせず即拒否する (拒否を hard barrier 化)。
-  private deniedWritePaths = new Set<string>();
   // 並列ツール実行時に権限確認を直列化するキュー
   private _permissionQueue: Promise<void> = Promise.resolve();
   // 自律実行モード: 作業フォルダ内の非破壊操作を自動承認
@@ -370,20 +367,6 @@ export class PermissionManager {
       if (filePath && !this.sandbox.isPathAllowed(filePath)) {
         return { allowed: false, reason: `パス ${filePath} はサンドボックス外です` };
       }
-      // Phase 5 第9ラウンド (Gate 1): ユーザーが直前に拒否したパスへの書込は即拒否
-      if (filePath) {
-        const abs = path.resolve(filePath);
-        if (this.deniedWritePaths.has(abs)) {
-          console.log(chalk.yellow(`  ⛔ [auto-deny] ユーザー拒否済みパス (${abs})`));
-          return {
-            allowed: false,
-            reason:
-              `ユーザーは直前に同じパス (${filePath}) への書込を明示的に拒否しています。 ` +
-              `同パスへの再試行は禁止。 ask_user で別の方針 (別パスに書く / 諦める / 内容を変える 等) を確認してから次の手を決めてください。 ` +
-              `もしユーザーが拒否を撤回したいなら、 それを明示するメッセージが必要です。`,
-          };
-        }
-      }
     }
 
     // browser_screenshot: save_path が指定された場合はサンドボックスチェック
@@ -534,27 +517,24 @@ export class PermissionManager {
   private resolvePermissionAction(
     action: string,
     toolName: string,
-    params: Record<string, unknown>,
+    _params: Record<string, unknown>,
     cacheKey: string,
   ): { allowed: boolean; reason?: string; abortExecution?: boolean } {
     if (action === "abort") {
       return { allowed: false, reason: "ユーザーが中止しました", abortExecution: true };
     }
     if (action === "deny") {
-      // Phase 5 第9ラウンド (Gate 1): file_edit/file_write の拒否は同パスへの hard barrier として記録
-      if (toolName === "file_edit" || toolName === "file_write") {
-        const filePath = (params.file_path ?? params.path) as string | undefined;
-        if (filePath) {
-          const abs = path.resolve(filePath);
-          this.deniedWritePaths.add(abs);
-          console.log(chalk.yellow(`  ⛔ ${toolName} の ${abs} 拒否を記録 (同セッション中、 同パスへの再書込は自動拒否されます)`));
-        }
-      }
+      // Phase 5 第10ラウンド: 拒否は「壁」 ではなく「対話のきっかけ」。
+      // hard barrier (= 同パス自動拒否) はやめ、 模型が「なぜ拒否されたか」 を考えて
+      // ask_user で確認する流れに任せる。 agent-loop 側の userRejectionLockUntil で
+      // 次の file_write/file_edit を ask_user 経由に強制する形で対話を促す。
       return {
         allowed: false,
         reason:
-          `ユーザーがこの操作を明示的に拒否しました。 同じパスへの再試行は禁止。 ` +
-          `「書けなかった」 のではなく「書くな」 という意思表示。 別アプローチ (別パスに書く / 諦める / 内容を変える) を取るか、 ask_user で意向確認をしてから次の手を決めてください。`,
+          `ユーザーがこの操作を拒否しました。 これは「書けなかった」 ではなく明示的な意思表示です。\n` +
+          `\n[基本姿勢] まず受け止める → 理由を考える → 分かれば指示に従う / 分からなければ聞く。\n` +
+          `\n考えられる理由 (例): (1) このパスへの書込自体を拒否 (2) この内容での編集が違う (3) タイミングの問題 (4) 操作ミスの可能性 (5) 心変わり (別の方針を考えている)。\n` +
+          `\n[対処] 理由が推測できるなら別アプローチへ。 不確かなら ask_user でユーザーに確認すること。 同じ操作を機械的に再試行しないこと。`,
       };
     }
     if (action === "permanent") {
