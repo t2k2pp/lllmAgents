@@ -1074,13 +1074,12 @@ export class AgentLoop {
       durationMs: toolDurationMs,
     });
 
-    /*
-    // 段階的開示: ツール初回使用時にガイドテキストを注入
+    // ID-001 §2 + §4 (2026-04-30): 段階的開示。 ツール初回使用時にガイドを末尾へ付加。
+    // verification / scopeStrict / delegation / secondLLM / obsidian の 5 種が tool-guides.ts に定義されている。
     const guide = getFirstUseGuide(toolCall.function.name);
     if (guide) {
       resultContent += "\n\n" + guide;
     }
-    */
 
     // Phase 5 第2ラウンド: ハーネス介入レイヤ (共通モジュール)。
     // file_edit 連続失敗 / 壁ドンループ / Read→Edit 契約 / 連続委任ガード / 旧エラーガイダンス
@@ -1168,13 +1167,11 @@ export class AgentLoop {
           ? result.output
           : `Error: ${result.error}\n${result.output}`;
 
-        /*
-        // 段階的開示: ツール初回使用時にガイドテキストを注入
+        // ID-001 §2 + §4 (2026-04-30): 段階的開示。 並列ルートでも同様にガイドを注入。
         const guide = getFirstUseGuide(toolCall.function.name);
         if (guide) {
           resultContent += "\n\n" + guide;
         }
-        */
 
         // Phase 5 第2ラウンド: ハーネス介入レイヤ (並列ルートでも適用)
         resultContent = enrichToolResult(toolCall, result.success, resultContent, this.harnessState);

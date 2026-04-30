@@ -37,7 +37,19 @@
 
 ## 検出項目
 
-### [ID-001] system-prompt: 「対話レジスター」 → 「Acceptance Checklist」 → 「検証ルール表」 が三層で重複し巨大化 (重大度: 重大)
+### [ID-001] system-prompt: 「対話レジスター」 → 「Acceptance Checklist」 → 「検証ルール表」 が三層で重複し巨大化 (重大度: 重大) — ✅ 一部対応済み (2026-04-30)
+> **対応方針 (ユーザー指示):**
+> 1. 保留 (system-prompt 残置 4 セクションは現状維持。 §2-4 の結果として減るのは許容)
+> 2. 実施 — `tool-guides.ts` への遅延注入。 ただし「ユーザー指示の経路を勝手に変えない」 は削除せず `second_llm_agent` 失敗エラーに統合
+> 3. 実施 — ハーネス実装詳細「ハーネスは ① ... 対話必須ロックを発動」 (旧 L141) を削除
+> 4. 実施 — `tool-guides.ts` の関数追加 (本実装はキー → ガイドテキスト辞書 + ツール → ガイドキー配列のマッピング方式)
+>
+> **修正サマリ**:
+> - `src/agent/tool-guides.ts` を再設計: `verification` / `scopeStrict` / `delegation` / `secondLLM` / `obsidian` の 5 ガイドキーを定義し、 ツール初回呼出時に該当する全ガイドを連結注入
+> - `src/agent/agent-loop.ts` のコメントアウトされていた `getFirstUseGuide()` 呼出を有効化 (シングル + 並列両ルート)
+> - `src/agent/system-prompt.ts` から「検証ルール (表)」「スコープ厳守」「委任の判断」「計画モード発動閾値」「ユーザー指示の経路」「ハーネス対話必須ロック」 の 6 セクションを削除し、 概要 1 行に置換
+> - `src/tools/definitions/second-llm.ts` の `buildSecondLLMFailureError` に「経路を勝手に変えない」 ガイダンスを統合 (ask_user 3 択 + 例外条件)
+> - 結果: system-prompt.ts 295 → 227 行 (約 23% 減)。 全 266 tests pass
 - **箇所**: `src/agent/system-prompt.ts:54-195`
 - **テキスト断片**:
   ```

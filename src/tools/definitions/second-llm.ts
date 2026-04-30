@@ -72,14 +72,18 @@ function buildSecondLLMFailureError(toolName: string, e: unknown): string {
   const category = classifySecondLLMError(e);
   const marker = `[セカンドLLM失敗:${category}]`;
   const guidance = categoryGuidance(category);
+  // ID-001 §2 (2026-04-30): system-prompt から「ユーザー指示の経路を勝手に変えない」 セクションを
+  // 削除した代わりに、 ここで明示する (= ユーザー委任意図がある場合の対処の核)。
   return (
     `${marker} ${toolName} の呼び出しが失敗: ${String(e)}\n` +
     `[原因] ${guidance}\n` +
-    `[対処] ユーザーが委任を明示している場合は、 ask_user で 3 択を提示すること:\n` +
+    `[原則] ユーザーが特定の経路 (例: 「セカンドLLM で」「task で並列に」「Kimi に頼んで」 等) を **明示指示** している場合、 ` +
+    `失敗してもメインが独断で経路変更 (= 自分でやる) してはいけない。 必ず ask_user で 3 択を提示:\n` +
     `  (a) リトライする (${category === "RATE_LIMIT" || category === "TIMEOUT" || category === "SERVER_ERROR" ? "推奨" : "効果薄"})\n` +
     `  (b) メイン側で実行 (ユーザーが許可する場合のみ)\n` +
-    `  (c) モデル設定を見直す (/second status / /second setup azure-*)\n` +
-    `[禁忌] 独断でメイン側にフォールバック (= file_write/file_edit を直接呼ぶ) は意図違反。 委任意図がある状況ではハーネス側の hard gate で拒否される。`
+    `  (c) モデル設定を見直す (/second status / /second setup azure-* 等)\n` +
+    `[例外] 経路の指示がユーザーから無く、 自分が「セカンド委任が適切」 と判断して呼んだだけのケースは、 ` +
+    `失敗してもメイン側でフォールバックしてよい (経路はあなた自身の選択だったため)。`
   );
 }
 
