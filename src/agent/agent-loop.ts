@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import ora from "ora";
 import { HarnessState, enrichToolResult } from "./harness-intervention.js";
+import { formatSelfCheck } from "./self-check-messages.js";
 import { globalTokenTracker } from "../cost/token-tracker.js";
 import { globalCostCalculator } from "../cost/cost-calculator.js";
 import { select } from "@inquirer/prompts";
@@ -21,7 +22,6 @@ import {
   type SessionData,
 } from "./session-manager.js";
 import { PlanManager } from "./plan-mode.js";
-import { formatSelfCheck } from "./self-check-messages.js";
 import type { SamplingParams } from "../config/types.js";
 import * as logger from "../utils/logger.js";
 import { getOpsLogger } from "../utils/ops-logger.js";

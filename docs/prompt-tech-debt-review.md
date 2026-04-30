@@ -20,13 +20,14 @@
 - 第 1 回調査 (2026-04-29): ID-001〜030 (中核 + ツール + スキル 5件)
 - 第 2 回追加調査 (2026-04-30): ID-031〜045 (外部 agent 定義 + 残スキル 12件 + ツールテンプレ統一)
 
-### 進捗 (2026-04-30 更新)
+### 進捗 (2026-05-01 更新)
 
 | 状態 | 件数 | ID |
 |------|------|-----|
-| ✅ 対応済み | 9 | ID-002, ID-003, ID-004, ID-005, ID-006, ID-013, ID-017, ID-018, ID-027 |
-| ✅ 一部対応済み | 3 | ID-001 (§2-4 実施 / §1 保留), ID-022 (§3 実施 / §1-2 残課題), ID-020 (定数化 + D9 反映済み) ※ID-021 も完了 |
-| ⏳ 未対応 | 残 | ID-007〜012, ID-014〜016, ID-019, ID-023〜026, ID-028〜045 |
+| ✅ 対応済み | 15 | ID-002, ID-003, ID-004, ID-005, ID-006, ID-007, ID-012, ID-013, ID-015, ID-016, ID-017, ID-018, ID-021, ID-027, (+ID-001 §2-4) |
+| ✅ 一部対応済み | 2 | ID-001 (§2-4 実施 / §1 保留), ID-022 (§3 実施 / §1-2 残課題) |
+| ⏸️ 保留 (ユーザー判断) | 3 | ID-008, ID-009, ID-010 |
+| ⏳ 未対応 | 残 | ID-011, ID-014, ID-019, ID-020 (※定数化済み, signature 拡張は残る), ID-023〜026, ID-028〜045 |
 
 > 「対応済み」 のうち ID-005 / 006 / 013 / 022 / 027 は ID-001 / ID-002 のリファクタの副次効果として達成された。 単独で意図的に修正したわけではないが、 結果として review の指摘事項が解消されている。
 
@@ -318,7 +319,8 @@
   3. **代わりに ID-005 で残す要約 3 行内に「成果物保存先パスを delegate メッセージに含める」 (④) で十分カバー** されているか確認
 - **判断ポイント**: 委任先が「Output ONLY」 と指示されることは現実にどれくらいあるか? → progress.md L596-597 由来の特定セッション症状であれば、 そのセッションは過去のもの。 削除可
 
-### [ID-007] system-prompt: 「ファイル内容確認は file_read（bash の cat/head 不可）」 が tool description と重複 (重大度: 軽)
+### [ID-007] system-prompt: 「ファイル内容確認は file_read（bash の cat/head 不可）」 が tool description と重複 (重大度: 軽) — ✅ 対応済み (2026-05-01)
+> **修正サマリ**: ID-002 で `shared-principles.ts:buildToolUsageRules()` に統合された「ファイル内容確認は file_read (bash の cat / head / type 不可)、 ファイル一覧は glob、 中身検索は grep」 1 行を削除。 同内容は `bash.ts` の tool description (`[使うべきでない] (1) ファイル中身確認 → file_read`) に集約され、 description が single source of truth に。 「編集前に file_read で必ず読む」 (Read→Edit 契約) と「各ツールの description は 3 要素テンプレを含む」 は別概念のため残置。 dev-workflow/SKILL.md の同重複は ID-028 で別途対応。
 - **箇所**: `src/agent/system-prompt.ts:121` と `src/tools/definitions/bash.ts:97` および `dev-workflow/SKILL.md:9`
 - **テキスト断片**:
   ```
@@ -336,7 +338,7 @@
      - `dev-workflow/SKILL.md:9` の「ファイル内容の確認には file_read を使う。bash (cat/type/head) は使わない」 1 行 → 削除 (ID-028 で他の重複と一括処理)
   3. **削減**: 3 重 → 1 重 (description 1 行のみ)
 
-### [ID-008] system-prompt: 「コードブロック retry」 系 / 自己点検メッセージのテキストが agent-loop と分散 (重大度: 中)
+### [ID-008] system-prompt: 「コードブロック retry」 系 / 自己点検メッセージのテキストが agent-loop と分散 (重大度: 中) — ⏸️ 保留 (2026-05-01: ユーザー判断)
 - **箇所**: `src/agent/system-prompt.ts:106-111` と `src/agent/agent-loop.ts:62-71, 718-828`
 - **テキスト断片** (system-prompt):
   ```
@@ -375,7 +377,7 @@
      ```
 - **判断ポイント**: モデルが `[自己点検]` マーカーを誤解するリスクが現状残っているか → メッセージ内部に「ハーネス通知」 と明記すれば system-prompt 側の説明は不要
 
-### [ID-009] system-prompt: 検証ルール表が言語ごとのコマンドを ハードコード (重大度: 中)
+### [ID-009] system-prompt: 検証ルール表が言語ごとのコマンドを ハードコード (重大度: 中) — ⏸️ 保留 (2026-05-01: ユーザー判断)
 - **箇所**: `src/agent/system-prompt.ts:88-96`
 - **テキスト断片**:
   ```
@@ -401,7 +403,7 @@
   3. **代わりに tool-guides.ts に `buildVerificationGuide(extension)` を追加** し、 `bash` 初回 or 検証コマンド初回呼出時に注入。 ID-001 と統合実装可
 - **判断ポイント**: ローカル LLM (~32B) が抽象表現で具体コマンドを思いつけるか? → 計測必要だが、 経験的に `node --check`/`pytest` 程度の典型コマンドは生成可能。 マイナーフレームワーク (Three.js 等) のみ tool-guides 側で補強
 
-### [ID-010] system-prompt: 環境情報セクションでシェル説明が isWindows 分岐 + 注釈付き (重大度: 軽)
+### [ID-010] system-prompt: 環境情報セクションでシェル説明が isWindows 分岐 + 注釈付き (重大度: 軽) — ⏸️ 保留 (2026-05-01: ユーザー判断)
 - **箇所**: `src/agent/system-prompt.ts:206`
 - **テキスト断片**:
   ```
@@ -462,7 +464,16 @@
      - `buildSubAgentStrategyPrompt({ readOnly })` のオプション化が必要。 readOnly=true の場合は L106-111 の「成果物の保存責任」 セクションをスキップ
 - **判断ポイント**: 「task ツールはレガシー、 second_llm_agent が後継」 という解釈で良いか? その場合 task は廃止候補 (ID-024 と連動して判断)
 
-### [ID-012] sub-agent.ts: hasLargeCodeBlock / extractFakeFileWriteCalls / 続き出力プロンプトが agent-loop と重複実装 (重大度: 中)
+### [ID-012] sub-agent.ts: hasLargeCodeBlock / extractFakeFileWriteCalls / 続き出力プロンプトが agent-loop と重複実装 (重大度: 中) — ✅ 対応済み (2026-05-01)
+> **修正サマリ**: ユーザー指示「統合対応」 に従い、 sub-agent.ts の偽ユーザー発言 3 種を `[自己点検]` フォーマットに統合:
+> - 新規 `src/agent/self-check-messages.ts` に `formatSelfCheck(round, max, intent, concern, actionHint?)` を切り出し。 SubAgent 用の `SUB_AGENT_ACTION_HINT` も export
+> - `agent-loop.ts` の旧 inline `formatSelfCheck` を撤去し、 共通モジュールから import に切替
+> - `sub-agent.ts:run()` の偽ユーザー発言を `formatSelfCheck` 呼出に置換 (3 箇所):
+>   - 「続きを出力してください」 → 「[自己点検 N/M] 応答が途中で切れています ...」
+>   - 「コードをテキストで返しましたが、 実際にファイルを作成してください」 → `[自己点検]` 形式
+>   - 「ファイルの作成が完了しました。 作業の結果を報告してください」 → `[自己点検]` 形式
+> - SubAgent 用の actionHint は「最終回答を出してタスクを完了」 と「該当ツールを呼ぶ」 の二択 (response_complete を持たないため)
+> - 全 266 tests pass、 型チェッククリーン
 - **箇所**: `src/agent/sub-agent.ts:69-90, 220-300`
 - **テキスト断片**:
   ```typescript
@@ -598,7 +609,11 @@
   - (c) ユーザー判断: どちらを取るか? Claude Code 流儀は「ビルトイン .md 同梱 + ユーザー上書き可能」 なので (a) を推奨。 ただし運用上 .md ファイル欠損時の安全網が要るなら (b) で `general-purpose` のみ FALLBACK 残し、 他は外部のみ
   - (d) (関連) `task` ツール自体を廃止して `second_llm_agent` 一本化する選択肢もあり (ID-024 と連動)
 
-### [ID-015] evaluator.ts: Evaluator system prompt が AGENTIC / FALLBACK で 95% 同一の重複 (重大度: 中)
+### [ID-015] evaluator.ts: Evaluator system prompt が AGENTIC / FALLBACK で 95% 同一の重複 (重大度: 中) — ✅ 対応済み (2026-05-01)
+> **修正サマリ**: `EVALUATOR_COMMON` 定数を切り出し、 AGENTIC / FALLBACK の両方が共通部分 (立場 / 評価ルール / 評価基準 / JSON 形式) を共有する形に再構築。 個別部分のみ各バリアントに inline で残す:
+> - **AGENTIC**: 「あなたの作業手順 (file_read / grep / glob を使った 4 ステップ)」 のみ
+> - **FALLBACK**: 「作業前提 (ツール利用不可)」 1 項目のみ
+> 結果として 75 行 + 35 行 = 110 行 → 共通 35 行 + AGENTIC 5 行 + FALLBACK 3 行 = 43 行に圧縮 (約 60% 減)。 文字化けも ID-016 と同時に全箇所修復
 - **箇所**: `src/agent/evaluator.ts:269-343`
 - **テキスト断片**:
   ```typescript
@@ -643,7 +658,14 @@
   文字化けは ID-016 で別途修復
 - **判断ポイント**: 文字化けによりモデルが意図を汲めない部分があるか (重要度に直結) → 「禁止」 が「���止」 になっている箇所はモデルが意味を取れない可能性大、 優先修復
 
-### [ID-016] evaluator.ts: 評価プロンプトに 文字化け (`���`) が多数残っている (重大度: 中)
+### [ID-016] evaluator.ts: 評価プロンプトに 文字化け (`���`) が多数残っている (重大度: 中) — ✅ 対応済み (2026-05-01)
+> **修正サマリ**: `evaluator.ts` 内の文字化け 21 箇所を全て修復。 修復対象:
+> - コメント: 「フィードバック」「フォーマットする」「ヒューリスティック」 等 (5 箇所)
+> - prompt 文字列: 「レビュー対象」「JSON形式で回答」「評価中にエラー」「指摘事項」「報告してください」 等 (4 箇所)
+> - 表示文字列: 「[自動レビュー結果]」 (2 箇所)
+> - system prompt: 「あなたは独立した」「指摘すること」「該当箇所の引用」「禁止」「問題があるなら」「修正可能な実質的問題」「ユーザーの依頼」「コードの場合」「論理エラー」「インポート不整合」「未定義参照」 (旧 FALLBACK 内、 ID-015 の共通化と同時に新 EVALUATOR_COMMON で正しい字に統一)
+> - grep `���` でファイル全体を再検証し、 1 件も残っていないことを確認
+> - 全 266 tests pass、 型チェッククリーン
 - **箇所**: `src/agent/evaluator.ts:57, 134, 136, 162, 244, 261, 310-326, 338` 等
 - **テキスト断片**:
   ```typescript

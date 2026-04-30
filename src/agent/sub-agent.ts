@@ -15,6 +15,7 @@ import {
   type AncestorTypes,
 } from "./delegation-context.js";
 import { HarnessState, enrichToolResult } from "./harness-intervention.js";
+import { formatSelfCheck, SUB_AGENT_ACTION_HINT } from "./self-check-messages.js";
 
 const MAX_SUB_ITERATIONS = 30;
 
@@ -215,6 +216,9 @@ export class SubAgent {
     let codeBlockRetried = false;
     let continuationAttempts = 0;
     const MAX_CONTINUATION_ATTEMPTS = 3;
+    // ID-012 (2026-04-30): 偽ユーザー発言の代わりに [自己点検] フォーマットを使う際、
+    // 委任プロンプトを intent として渡すための保持
+    const delegatePrompt = prompt;
     // D8: SubAgent もメイン / セカンドと同じハーネス介入レイヤを通す。
     // 壁ドンループ警告 / Read→Edit 契約 / 連続委任ガード / 旧エラーガイダンスが効く。
     const harnessState = new HarnessState();
@@ -260,7 +264,14 @@ export class SubAgent {
             continuationAttempts++;
             logger.debug(`SubAgent: continuation requested (${structural.reason})`);
             this.history.addAssistantMessage(response.content);
-            this.history.addUserMessage("続きを出力してください。途中から再開してください。");
+            // ID-012: 偽ユーザー発言ではなく [自己点検] フォーマットでハーネス通知を明示
+            this.history.addUserMessage(formatSelfCheck(
+              continuationAttempts,
+              MAX_CONTINUATION_ATTEMPTS,
+              delegatePrompt,
+              `応答が途中で切れています (${structural.reason})。 続きを出力してタスクを完成させてください。`,
+              SUB_AGENT_ACTION_HINT,
+            ));
             continue;
           }
         }
@@ -269,11 +280,12 @@ export class SubAgent {
         if (!codeBlockRetried && hasLargeCodeBlock(response.content)) {
           codeBlockRetried = true;
           this.history.addAssistantMessage(response.content);
-          this.history.addUserMessage(
-            "コードをテキストで返しましたが、実際にファイルを作成してください。" +
-            "file_writeツールを呼び出して、指定されたパスにファイルを保存してください。" +
-            "コードをチャットに書くのではなく、必ずfile_writeツールを使用してください。"
-          );
+          // ID-012: 偽ユーザー発言ではなく [自己点検] フォーマットでハーネス通知を明示
+          this.history.addUserMessage(formatSelfCheck(
+            1, 1, delegatePrompt,
+            "コードをテキストで返しましたが、 成果物として file_write ツールでファイル化してください。 コードをチャットに書くのではなく、 必ず file_write ツールを使用してください。",
+            SUB_AGENT_ACTION_HINT,
+          ));
           continue;
         }
 
@@ -295,7 +307,12 @@ export class SubAgent {
               const enriched = enrichToolResult(syntheticCall, result.success, raw, harnessState);
               this.history.addToolResult(syntheticCall.id, enriched);
             }
-            this.history.addUserMessage("ファイルの作成が完了しました。作業の結果を報告してください。");
+            // ID-012: 偽ユーザー発言ではなく [自己点検] フォーマットでハーネス通知を明示
+            this.history.addUserMessage(formatSelfCheck(
+              1, 1, delegatePrompt,
+              "ファイル作成が完了しました。 作業の最終結果を整理して回答してください。",
+              SUB_AGENT_ACTION_HINT,
+            ));
             continue;
           }
         }

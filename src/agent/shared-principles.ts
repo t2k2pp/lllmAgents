@@ -76,9 +76,12 @@ export function buildUnexpectedSignalRules(): string {
 
 /** ツール使用の基本原則 */
 export function buildToolUsageRules(): string {
+  // ID-007 (2026-04-30): 「ファイル内容確認は file_read」 1 行を削除。
+  // 同内容は bash.ts の tool description ([使うべきでない] (1) ファイル中身確認 → file_read) に
+  // 集約されており、 description が single source of truth。 「編集前に file_read」 (Read→Edit
+  // 契約) は別概念のため残す。
   return `# ツール使用の原則
 - 編集前に file_read で必ず読む。 古い情報での編集は失敗の主因
-- ファイル内容確認は file_read (bash の cat / head / type 不可)、 ファイル一覧は glob、 中身検索は grep
 - 各ツールの description は「使うべき場面」「使うべきでない場面」「よくある誤用」 を含む。 迷ったら description を再読
 - 新規作成より既存編集を優先`;
 }
