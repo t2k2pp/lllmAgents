@@ -97,7 +97,22 @@
   - (b) 「すべての原則を毎回見せた方がモデルが守る」 という直感が正しいか? → 計測が必要
   - (c) 「Phase 5 第3ラウンドで導入した対話レジスターは現行の Sonnet 4.5 / Opus 等のクラウドモデルに本当に必要か?」 を Claude Code の system-prompt と照合して判断
 
-### [ID-002] harness-intervention.ts: sub-agent prompt が system-prompt と独立に成長し原則重複 (重大度: 重大)
+### [ID-002] harness-intervention.ts: sub-agent prompt が system-prompt と独立に成長し原則重複 (重大度: 重大) — ✅ 対応済み (2026-04-30)
+> **ユーザー判断**: 「メイン・サブで乖離したいポイントはない」 → 機械的な共通化を実施
+>
+> **修正サマリ**:
+> - 新規 `src/agent/shared-principles.ts` を作成し、 7 つの共有ビルダーを定義:
+>   - `buildRegisterRules()` — 4 段階レジスターと完了基準
+>   - `buildAcceptanceRules()` — Acceptance Checklist / Criteria の遵守
+>   - `buildVerificationRules()` — 検証 (詳細は tool-guides で遅延注入)
+>   - `buildEscalationRules()` — 同種失敗 2 回 → 別アプローチ
+>   - `buildUnexpectedSignalRules()` — 想定外信号への基本姿勢
+>   - `buildToolUsageRules()` — ツール使用の基本原則
+>   - `buildSpecFileRules()` — 仕様ファイルがあるときの作法
+> - `system-prompt.ts:54` の本体を上記関数の組み立てに置換。 メイン固有 (コアアイデンティティ / 開始時のレジスター宣言 / 委任の概要 / 応答完了 / セキュリティ / 出力スタイル) のみ inline で残す
+> - `harness-intervention.ts:buildSubAgentStrategyPrompt()` も同関数群で組み立て。 サブ固有 (立場 / 成果物の保存責任 / 完成までの完結) のみ inline で残す
+> - これで同一概念が 2 箇所で定義される drift は解消。 表現を変えるなら `shared-principles.ts` の 1 箇所だけ変えればよい
+> - 全 266 tests pass
 - **箇所**: `src/agent/harness-intervention.ts:59-117`
 - **テキスト断片**:
   ```
