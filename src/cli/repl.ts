@@ -31,6 +31,9 @@ import { select, input, password, confirm } from "@inquirer/prompts";
 import { CredentialVault } from "../security/credential-vault.js";
 import { AzureFoundryProvider } from "../providers/azure-foundry.js";
 import { AzureAnthropicProvider } from "../providers/azure-anthropic.js";
+import { AzureGPTProvider } from "../providers/azure-gpt.js";
+import { AzureOpenAIProvider } from "../providers/azure-openai.js";
+import { AzureClaudeProvider } from "../providers/azure-claude.js";
 import { saveConfig } from "../config/config-manager.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
@@ -262,7 +265,7 @@ export class REPL {
    */
   private async setupAzureLLM(
     target: "main" | "second",
-    provider: "azure-openai" | "azure-claude" | "azure-foundry" | "azure-anthropic",
+    provider: "azure-openai" | "azure-gpt" | "azure-claude" | "azure-foundry" | "azure-anthropic",
   ): Promise<void> {
     const targetLabel = target === "main" ? "メインLLM" : "セカンドLLM";
     console.log(chalk.bold(`\n  ── ${targetLabel} ${provider} セットアップ ──`));
@@ -272,19 +275,24 @@ export class REPL {
       target === "main" ? this.config.mainLLM : this.config.secondLLM?.endpoint;
     const existingIsAzure =
       existing?.providerType === "azure-openai" ||
+      existing?.providerType === "azure-gpt" ||
       existing?.providerType === "azure-claude" ||
       existing?.providerType === "azure-foundry" ||
       existing?.providerType === "azure-anthropic";
 
     const isFoundry = provider === "azure-foundry";
     const isAnthropic = provider === "azure-anthropic";
-    // Foundry / Anthropic は deployment 名不要、model 名でルーティング
-    const skipDeployment = isFoundry || isAnthropic;
+    const isGpt = provider === "azure-gpt";
+    // Foundry / Anthropic / GPT(Responses) は deployment 名不要、model 名でルーティング
+    const skipDeployment = isFoundry || isAnthropic || isGpt;
+    // どのプロバイダでも完全URLを貼られても protocol+host だけに自動正規化される
     const endpointHint = isAnthropic
-      ? "例: https://your-resource.services.ai.azure.com  (完全URL '/anthropic/v1/messages' を貼っても可)"
+      ? "例: https://your-resource.services.ai.azure.com  (完全URL '/anthropic/v1/messages' を貼っても自動で host 部だけに切り詰めます)"
       : isFoundry
-        ? "例: https://your-resource.services.ai.azure.com  (完全URLを貼っても可)"
-        : "例: https://your-resource.openai.azure.com";
+        ? "例: https://your-resource.services.ai.azure.com  (完全URLを貼っても自動で host 部だけに切り詰めます)"
+        : isGpt
+          ? "例: https://your-resource.openai.azure.com  (完全URL '/openai/v1/responses' を貼っても自動で host 部だけに切り詰めます)"
+          : "例: https://your-resource.openai.azure.com  (Azure ポータルから貼った完全URLでも自動で host 部だけに切り詰めます)";
 
     const endpointUrl = await input({
       message: `Azure endpoint URL (${endpointHint}):`,
@@ -309,7 +317,9 @@ export class REPL {
       ? "Model 名 (Azure 上の Claude モデル ID。 例: claude-sonnet-4-5):"
       : isFoundry
         ? "Model 名 (Azure Foundry 上の model ID。例: Kimi-K2-Instruct-0905):"
-        : "モデル識別子 (空欄なら deployment name と同じ):";
+        : isGpt
+          ? "Model 名 (Azure 上の GPT/Codex モデル ID。例: gpt-5.3-codex):"
+          : "モデル識別子 (空欄なら deployment name と同じ):";
     const model = await input({
       message: modelHint,
       default: existingIsAzure ? existing?.model : (skipDeployment ? undefined : deploymentName),
@@ -389,12 +399,17 @@ export class REPL {
       needsRestart = true; // 暗号化済みは初回起動時に合言葉を聞くため再起動が必要
     }
 
-    // Foundry は base URL のみに正規化 (完全URL を貼った場合に対応)
+    // 全 Azure プロバイダ共通: 完全URLを貼られても protocol+host だけに正規化する
+    // (5 クラスの normalizeEndpoint は全て同じ実装。 ここではプロバイダに合わせて呼ぶ)
     const finalEndpoint = isAnthropic
       ? AzureAnthropicProvider.normalizeEndpoint(endpointUrl.trim())
       : isFoundry
         ? AzureFoundryProvider.normalizeEndpoint(endpointUrl.trim())
-        : endpointUrl.trim();
+        : isGpt
+          ? AzureGPTProvider.normalizeEndpoint(endpointUrl.trim())
+          : provider === "azure-claude"
+            ? AzureClaudeProvider.normalizeEndpoint(endpointUrl.trim())
+            : AzureOpenAIProvider.normalizeEndpoint(endpointUrl.trim());
 
     const finalModel = model.trim() || deploymentName.trim();
     const finalDeployment = skipDeployment ? undefined : deploymentName.trim();
@@ -979,7 +994,7 @@ export class REPL {
         } else if (args[0] === "provider") {
           const newProvider = args[1]?.trim();
           const localProviders: ProviderType[] = ["ollama", "lmstudio", "llamacpp", "vllm"];
-          const cloudProviders = ["vertex-ai", "azure-openai", "azure-claude", "azure-foundry", "azure-anthropic"];
+          const cloudProviders = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic"];
           const validProviders = [...localProviders, ...cloudProviders];
           if (!newProvider) {
             console.log(chalk.dim(`  現在のプロバイダー: ${this.config.mainLLM.providerType}`));
@@ -1025,10 +1040,12 @@ export class REPL {
             console.log(chalk.yellow("  使い方: /model setup <provider>"));
             console.log(chalk.dim("  例: /model setup azure-foundry    (Kimi/Mistral等のAzure AI Foundry)"));
             console.log(chalk.dim("       /model setup azure-anthropic (Azure Claude — Anthropic Messages API)"));
-            console.log(chalk.dim("       /model setup azure-openai    (Azure OpenAI Service)"));
+            console.log(chalk.dim("       /model setup azure-openai    (Azure OpenAI — Chat Completions API)"));
+            console.log(chalk.dim("       /model setup azure-gpt       (Azure OpenAI — Responses API。 gpt-5/codex系)"));
             console.log(chalk.dim("       /model setup azure-claude    (Azure Claude — OpenAI互換ルート)"));
           } else if (
             targetProvider === "azure-openai" ||
+            targetProvider === "azure-gpt" ||
             targetProvider === "azure-claude" ||
             targetProvider === "azure-foundry" ||
             targetProvider === "azure-anthropic"
@@ -1249,7 +1266,7 @@ export class REPL {
           }
         } else if (subCmd === "provider") {
           const newProvider = args[1]?.trim();
-          const validProviders = ["ollama", "lmstudio", "llamacpp", "vllm", "vertex-ai", "azure-openai", "azure-claude", "azure-foundry", "azure-anthropic"];
+          const validProviders = ["ollama", "lmstudio", "llamacpp", "vllm", "vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic"];
           if (!newProvider) {
             console.log(chalk.dim(`  現在のプロバイダー: ${this.config.secondLLM?.endpoint.providerType ?? "(未設定)"}`));
             console.log(chalk.dim(`  使い方: /second provider <タイプ>`));
@@ -1263,7 +1280,7 @@ export class REPL {
             saveConfig(this.config);
             this.applySecondLLMEndpoint();
             console.log(chalk.dim(`  プロバイダー: ${chalk.yellow(oldProvider)} → ${chalk.cyan(newProvider)}`));
-            const isCloud = ["vertex-ai", "azure-openai", "azure-claude", "azure-foundry", "azure-anthropic"].includes(newProvider);
+            const isCloud = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic"].includes(newProvider);
             if (isCloud) {
               console.log(chalk.dim(`  クラウドプロバイダーは追加の認証情報が必要な場合があります。/second status で確認してください。`));
             } else {
@@ -1275,7 +1292,7 @@ export class REPL {
         } else if (subCmd === "setup") {
           // 最小限の初期設定を作成
           const provider = (args[1] ?? "vllm") as SecondLLMProviderType;
-          if (provider === "azure-openai" || provider === "azure-claude" || provider === "azure-foundry" || provider === "azure-anthropic") {
+          if (provider === "azure-openai" || provider === "azure-gpt" || provider === "azure-claude" || provider === "azure-foundry" || provider === "azure-anthropic") {
             try {
               await this.setupAzureLLM("second", provider);
             } catch (e) {
@@ -1357,7 +1374,8 @@ export class REPL {
            console.log(chalk.yellow("  使い方:"));
            console.log(chalk.dim("    /second                       状態確認"));
            console.log(chalk.dim("    /second setup [provider] [url] [model]  初期設定 (ローカル系)"));
-           console.log(chalk.dim("    /second setup azure-openai             Azure OpenAI 対話セットアップ"));
+           console.log(chalk.dim("    /second setup azure-openai             Azure OpenAI (Chat Completions API) 対話セットアップ"));
+           console.log(chalk.dim("    /second setup azure-gpt                Azure OpenAI (Responses API、 gpt-5/codex系) 対話セットアップ"));
            console.log(chalk.dim("    /second setup azure-claude             Azure Claude (OpenAI互換ルート) 対話セットアップ"));
            console.log(chalk.dim("    /second setup azure-foundry            Azure AI Foundry (Kimi/Mistral等) 対話セットアップ"));
            console.log(chalk.dim("    /second setup azure-anthropic          Azure Claude (Anthropic Messages API) 対話セットアップ"));

@@ -7,6 +7,7 @@ import { LlamaCppProvider } from "./llamacpp.js";
 import { VLLMProvider } from "./vllm.js";
 import { VertexAIProvider } from "./vertex-ai.js";
 import { AzureOpenAIProvider } from "./azure-openai.js";
+import { AzureGPTProvider } from "./azure-gpt.js";
 import { AzureClaudeProvider } from "./azure-claude.js";
 import { AzureFoundryProvider } from "./azure-foundry.js";
 import { AzureAnthropicProvider } from "./azure-anthropic.js";
@@ -82,6 +83,21 @@ function createProviderFromEndpoint(
         return new AzureAnthropicProvider({
           endpoint: endpoint.endpoint,
           apiKey: anthToken,
+          model: endpoint.model,
+        });
+      }
+
+      case "azure-gpt": {
+        if (!endpoint.endpoint || !endpoint.apiKey || !endpoint.model) {
+          throw new Error("Missing endpoint, apiKey, or model for azure-gpt");
+        }
+        const gptToken = CredentialVault.resolve(endpoint.apiKey, passphrase);
+        if (!gptToken) {
+          throw new Error("Failed to decipher or resolve API Key for Azure GPT (Responses API)");
+        }
+        return new AzureGPTProvider({
+          endpoint: endpoint.endpoint,
+          apiKey: gptToken,
           model: endpoint.model,
         });
       }

@@ -14,12 +14,26 @@ export class AzureOpenAIProvider extends OpenAICompatProvider {
   private requestHeaders: Record<string, string>;
 
   constructor(config: AzureOpenAIConfig) {
-    const baseUrl = `${config.endpoint.replace(/\/$/, "")}/openai/deployments/${config.deploymentName}`;
+    // 完全URL (例: https://x.openai.azure.com/openai/deployments/foo/chat/completions?api-version=...) を
+    // 貼られても protocol+host だけに正規化する。 azure-anthropic 等と同じ挙動。
+    const normalized = AzureOpenAIProvider.normalizeEndpoint(config.endpoint);
+    const baseUrl = `${normalized}/openai/deployments/${config.deploymentName}`;
     super("azure-openai", baseUrl);
-    this.azureConfig = config;
+    this.azureConfig = { ...config, endpoint: normalized };
     this.requestHeaders = {
       "api-key": config.apiKey,
     };
+  }
+
+  /** 完全URLが貼られても base (protocol+host) だけに正規化する */
+  static normalizeEndpoint(input: string): string {
+    const trimmed = input.trim().replace(/\/$/, "");
+    try {
+      const u = new URL(trimmed);
+      return `${u.protocol}//${u.host}`;
+    } catch {
+      return trimmed;
+    }
   }
 
   async *chat(params: ChatParams): AsyncGenerator<ChatChunk, void, unknown> {
