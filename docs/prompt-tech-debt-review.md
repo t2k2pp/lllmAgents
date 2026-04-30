@@ -19,19 +19,33 @@
 - 検出件数: 計 44 件 (重大 11 / 中 19 / 軽 13、 + ID-032 は ID-039 へ統合済みスタブ)
 - 第 1 回調査 (2026-04-29): ID-001〜030 (中核 + ツール + スキル 5件)
 - 第 2 回追加調査 (2026-04-30): ID-031〜045 (外部 agent 定義 + 残スキル 12件 + ツールテンプレ統一)
-- 重大項目トップ3:
+
+### 進捗 (2026-04-30 更新)
+
+| 状態 | 件数 | ID |
+|------|------|-----|
+| ✅ 対応済み | 9 | ID-002, ID-003, ID-004, ID-005, ID-006, ID-013, ID-017, ID-018, ID-027 |
+| ✅ 一部対応済み | 3 | ID-001 (§2-4 実施 / §1 保留), ID-022 (§3 実施 / §1-2 残課題), ID-020 (定数化 + D9 反映済み) ※ID-021 も完了 |
+| ⏳ 未対応 | 残 | ID-007〜012, ID-014〜016, ID-019, ID-023〜026, ID-028〜045 |
+
+> 「対応済み」 のうち ID-005 / 006 / 013 / 022 / 027 は ID-001 / ID-002 のリファクタの副次効果として達成された。 単独で意図的に修正したわけではないが、 結果として review の指摘事項が解消されている。
+
+### 重大項目トップ3 (未対応):
   1. **[ID-031]** 外部 agent 定義 4 ファイルが英語短文 + ハーネス原則ゼロで `buildSubAgentStrategyPrompt()` の哲学とほぼ完全に断絶
-  2. **[ID-001]** system-prompt の「対話レジスター + Acceptance Checklist + 検証ルール表」 が二重三重に重複し肥大化
-  3. **[ID-014]** `sub-agent.ts` の FALLBACK_CONFIGS と外部 agent 定義が二重存在し fallback が常時生きている恐れ
-- 重大項目 (順位下) :
-  4. [ID-002] harness-intervention のセカンドLLM 用プロンプトが中核と内容重複
-  5. [ID-003] system-prompt の dialogueLockUntil 動作仕様の漏出
-  6. [ID-005] 委任 3 条件が system-prompt + tool description + hard gate の 3 重化
-  7. [ID-033] excel/powerpoint スキルが Python テンプレート 200 行強を SKILL.md 本文に内包 (References パターン違反)
-  8. [ID-034] skill-creator が完全英語 + 当プロジェクトに存在しないスクリプト (init_skill.py / package_skill.py) への参照を含む
-  9. [ID-035] excel/powerpoint/add-repl-command/skill-creator が `tools:` フロントマターを持つ一方、 game-development/dev-workflow 等は持たない (一貫性欠落)
-  10. [ID-039] code-review / pr-review / code-reviewer (3 件) が同じ責務でばらばらに存在
-  11. [ID-042] excel/powerpoint の「絶対ルール」 がレジスター無視で常に production 相当 (rough 依頼でもテンプレ全載せ)
+  2. **[ID-014]** `sub-agent.ts` の FALLBACK_CONFIGS と外部 agent 定義が二重存在し fallback が常時生きている恐れ
+  3. **[ID-033]** excel/powerpoint スキルが Python テンプレート 200 行強を SKILL.md 本文に内包 (References パターン違反)
+
+### 重大項目 (順位下、 未対応):
+  4. [ID-034] skill-creator が完全英語 + 当プロジェクトに存在しないスクリプト (init_skill.py / package_skill.py) への参照を含む
+  5. [ID-035] excel/powerpoint/add-repl-command/skill-creator が `tools:` フロントマターを持つ一方、 game-development/dev-workflow 等は持たない (一貫性欠落)
+  6. [ID-039] code-review / pr-review / code-reviewer (3 件) が同じ責務でばらばらに存在
+  7. [ID-042] excel/powerpoint の「絶対ルール」 がレジスター無視で常に production 相当 (rough 依頼でもテンプレ全載せ)
+
+### 対応済み (重大):
+  - ✅ [ID-001] system-prompt の三層重複 → ID-001 §2-4 で大幅縮小 (227 行)
+  - ✅ [ID-002] harness-intervention のセカンドLLM 用プロンプトが中核と内容重複 → shared-principles.ts に統合
+  - ✅ [ID-003] system-prompt の dialogueLockUntil 動作仕様の漏出 → 削除 + agent-loop エラー文言充実
+  - ✅ [ID-005] 委任 3 条件の 3 重化 → tool-guides.ts:delegation に集約 (1.5 重化)
 
 ---
 
@@ -239,7 +253,11 @@
   3. **「3 択提示」 という具体 UI 指示は `second_llm_agent` 失敗時のエラーメッセージ (`buildSecondLLMFailureError`、 ID-022) に集約**。 system-prompt 側はメッセージ仕様に依存しない
 - **判断ポイント**: ユーザー観点で「経路を勝手に変えない」 を 1 セクション独立で残す価値があるか。 → 価値が薄ければ完全削除、 「メイン LLM の自律フォールバック傾向への明示的歯止めが要る」 ならば 1 行に圧縮して L132 の番号付きリストに同居
 
-### [ID-005] system-prompt: 「委任の3条件 + 禁忌 + 委任時のレジスター継承」 が tool description (second_llm_agent.description) と重複 (重大度: 重大)
+### [ID-005] system-prompt: 「委任の3条件 + 禁忌 + 委任時のレジスター継承」 が tool description (second_llm_agent.description) と重複 (重大度: 重大) — ✅ 対応済み (2026-04-30, ID-001 §2 の副次効果)
+> **修正サマリ**: ID-001 §2 のコミット (`2d8df9a`) で system-prompt から「委任の判断」 セクション (旧 L151-176 約 25 行) を削除し、 `src/agent/tool-guides.ts:delegation` ガイドに集約。 結果として 3 重化 (system-prompt + description + hard gate) → 2 重化 (tool-guides + description / hard gate) に緩和。
+> - **§1 (system-prompt の 25 行を 3 行に圧縮)**: 達成。 現在は 1 行サマリ「3 条件 (コンテキスト保護 / 並列性 / 専門性) のいずれかでなければインライン処理。 ... 詳細はガイド注入 / 計画モードはツール description 参照」 のみ
+> - **§2 (`second_llm_agent.ts` の description は維持 = 第一の真実)**: 維持
+> - **§3 (system-prompt 側削除)**: 達成
 - **箇所**: `src/agent/system-prompt.ts:151-176` (system-prompt 側) と `src/tools/definitions/second-llm.ts:138-167` (tool description 側)
 - **テキスト断片** (system-prompt):
   ```
@@ -272,7 +290,8 @@
   - (b) ローカル LLM が tool description を読まない傾向があるなら、 system-prompt に詳細を残す必要あり (= 計測判断)
   - (c) 「3 重化」 を「1.5 重化」 に絞る代わりに、 description を強化する (3 重化解消の主流路は description) という方針で OK か
 
-### [ID-006] system-prompt: 「委任時の禁忌 (出力形式の固縛)」 (Output ONLY HTML 禁止) が極めて局所的事故対応 (重大度: 中)
+### [ID-006] system-prompt: 「委任時の禁忌 (出力形式の固縛)」 (Output ONLY HTML 禁止) が極めて局所的事故対応 (重大度: 中) — ✅ 対応済み (2026-04-30, ID-001 §2 の副次効果)
+> **修正サマリ**: ID-001 §2 のコミット (`2d8df9a`) で system-prompt から「委任の判断」 セクション全体を削除した結果、 「委任時の禁忌 (出力形式の固縛)」 部分も同時に削除済。 現在この内容は `src/agent/tool-guides.ts:delegation` ガイドに統合され、 task / second_llm_* 初回呼出時にのみ注入される (= 死文化リスクが下がった)。 「Output ONLY HTML」 のような形式縛り禁止のメッセージは残るが、 「常時注入」 から「該当 tool 初回時のみ」 に縮退。
 - **箇所**: `src/agent/system-prompt.ts:174-176`
 - **テキスト断片**:
   ```
@@ -476,7 +495,15 @@
   3. **削除**: `sub-agent.ts:222` の「続きを出力してください。途中から再開してください。」 等の偽ユーザー文言、 約 30-50 行
 - **判断ポイント**: 「ユーザー発話偽装の弊害」 (progress.md L321-340) は task ツールでも発生し得るか? → 同じハーネス哲学で動かすなら統一すべき
 
-### [ID-013] tool-guides.ts: secondLLM ガイドの「コードレビュー・方針の壁打ち」 が tool description と重複 (重大度: 軽)
+### [ID-013] tool-guides.ts: secondLLM ガイドの「コードレビュー・方針の壁打ち」 が tool description と重複 (重大度: 軽) — ✅ 対応済み (2026-04-30, ID-001 §4 の副次効果)
+> **修正サマリ**: ID-001 §4 のコミット (`2d8df9a`) で `tool-guides.ts` を再設計した際、 secondLLM ガイドを以下のようにコンパクト化:
+> ```
+> [ガイド: セカンドLLMの使い分け]
+> - second_llm_consult: 単発の質問・相談 (分析・要約・レビュー)。 ツール実行は伴わない
+> - second_llm_agent: ツール付きの複合タスク委任 (調査+生成+保存等)
+> 注意: 単純なファイル読み書きなど自分で直接できるタスクには使わない。
+> ```
+> 旧版にあった「コードレビュー: 自分が書いたコードの品質チェック」「方針の壁打ち: 実装アプローチに迷った時に相談」 など使い場面の詳細列挙は削除。 これらは tool description (`secondLLMConsultTool` / `secondLLMAgentTool` の `[使うべき場面]` ブロック) に集約され、 ガイドは「使い分けの 1 行」 のみ提示する形に縮退。
 - **箇所**: `src/agent/tool-guides.ts:24-34`
 - **テキスト断片**:
   ```
@@ -782,7 +809,12 @@
   ```
   L212 を `const MAX_ITERATIONS = MAX_AGENT_ITERATIONS;` に、 L345 を `const maxIter = params.maxIterations ?? DEFAULT_EVALUATOR_ITERATIONS;` に変更
 
-### [ID-022] tool: second-llm.ts buildSecondLLMFailureError の「メイン側にフォールバックは意図違反」 が経路保持原則に依存 (重大度: 中)
+### [ID-022] tool: second-llm.ts buildSecondLLMFailureError の「メイン側にフォールバックは意図違反」 が経路保持原則に依存 (重大度: 中) — ✅ 一部対応済み (2026-04-30, ID-001 §2 の副次効果)
+> **修正サマリ**: ID-001 §2 のコミット (`2d8df9a`) で `buildSecondLLMFailureError` を全面再構成:
+> - **§3 (「[禁忌] 独断でメイン側にフォールバック ... ハードガードで拒否される」 行を削除)**: 達成。 実装詳細 (hard gate の存在) の漏出は除去された
+> - 代わりに [原則] と [例外] の構造で書き直し: 「ユーザーが経路を明示指示した場合は ask_user 3 択 / 経路指示が無く自分で選んだケースはメインフォールバック OK」 と意図ベースの分岐を model に伝える
+> - 残課題: **§1 (signature 拡張で `userExplicitlyDelegated` フラグを判定)** は未実施。 現在は固定文言で常に同じガイダンスを出している。 model が自身で「ユーザー委任意図か / 自発呼出か」 を読み取って分岐する形。 ハーネス側で判定して文言を変える方が確実だが、 既存の意図キーワード判定 (`isUserExplicitDelegationIntent`) を渡す経路の追加が必要 → 実用上の effect が小さいため後送り
+> - 残課題: **§2 (agent-loop.ts が `userExplicitlyDelegated` を判定して buildSecondLLMFailureError に渡す)** は §1 とセットで未実施
 - **箇所**: `src/tools/definitions/second-llm.ts:70-83`
 - **テキスト断片**:
   ```typescript
@@ -914,7 +946,8 @@
   ```
   - 117 文字 → 38 文字 (68% 減)
 
-### [ID-027] tool: plan-mode.ts description に「以下の場合に使用」 のリストがあり system-prompt と重複 (重大度: 軽)
+### [ID-027] tool: plan-mode.ts description に「以下の場合に使用」 のリストがあり system-prompt と重複 (重大度: 軽) — ✅ 対応済み (2026-04-30, ID-001 §2 の副次効果)
+> **修正サマリ**: ID-001 §2 のコミット (`2d8df9a`) で system-prompt から「計画モード (enter_plan_mode) の発動閾値」 セクション (旧 L178-188) を削除。 現在は system-prompt の「委任の概要」 1 行サマリ末尾に「計画モード (enter_plan_mode) の発動条件はそのツール description を参照」 とポインタを残すのみ。 plan-mode.ts の description が単一の真実 (single source of truth) となり、 重複は解消された。
 - **箇所**: `src/tools/definitions/plan-mode.ts:20-29`
 - **テキスト断片**:
   ```
