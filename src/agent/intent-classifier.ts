@@ -98,6 +98,13 @@ AI応答（末尾200文字）:
 
 JSONのみ:`;
 
+/**
+ * 分類タスクは決定論的に: temperature=0 で再現性確保。
+ * 出力は JSON 1 行のみ (例: `{"intent":"task"}`) なので 50 tok で十分。
+ */
+const CLASSIFIER_TEMPERATURE = 0;
+const CLASSIFIER_MAX_TOKENS = 50;
+
 function extractClassification<T extends string>(raw: string, validValues: T[]): T | null {
   // JSON パース試行
   const jsonMatch = raw.match(/\{[^}]*\}/);
@@ -149,8 +156,8 @@ export class IntentClassifier {
       const gen = this.provider.chat({
         model: this.model,
         messages: [{ role: "user", content: prompt }],
-        temperature: 0,
-        maxTokens: 50,
+        temperature: CLASSIFIER_TEMPERATURE,
+        maxTokens: CLASSIFIER_MAX_TOKENS,
         stream: true,
       });
 
@@ -189,8 +196,8 @@ export class IntentClassifier {
       const gen = this.provider.chat({
         model: this.model,
         messages: [{ role: "user", content: prompt }],
-        temperature: 0,
-        maxTokens: 50,
+        temperature: CLASSIFIER_TEMPERATURE,
+        maxTokens: CLASSIFIER_MAX_TOKENS,
         stream: true,
       });
 

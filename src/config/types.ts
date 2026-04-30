@@ -51,11 +51,40 @@ export interface CostConfig {
   referenceModels: string[];  // ローカルLLM利用時の参考コスト比較対象
 }
 
+/**
+ * セカンドLLM の用途別サンプリング既定値 (D9: 2026-04-30 決定)。
+ * `endpoint.temperature` 等が指定されていればそちらが優先。 ここが未指定なら
+ * SecondLLMManager 内のハードコード fallback (consult/agent=0.2 / evaluator=0.1) が効く。
+ */
+export interface SecondLLMSamplingDefaults {
+  /** consult (単発相談) 用の既定温度 */
+  consultTemperature?: number;
+  /** runAsAgent (タスク委任) 用の既定温度 */
+  agentTemperature?: number;
+  /** runAsEvaluator (成果物レビュー) 用の既定温度 */
+  evaluatorTemperature?: number;
+}
+
+/**
+ * セカンドLLM のループ上限 (ID-021: 2026-04-30 設定化)。
+ * 既定値: agent=15 / evaluator=10。 増やすと「セカンドが試行錯誤に陥る」 リスク。
+ */
+export interface SecondLLMIterationLimits {
+  /** runAsAgent のツール呼出ループ上限 */
+  maxAgentIterations?: number;
+  /** runAsEvaluator のツール呼出ループ上限 */
+  maxEvaluatorIterations?: number;
+}
+
 export interface SecondLLMConfig {
   enabled: boolean;
   endpoint: SecondLLMEndpoint;
   budget: BudgetConfig | null;  // ローカルLLMの場合は null（予算不要）
   cost: CostConfig;
+  /** 用途別サンプリング既定値 (D9)。 endpoint.temperature が指定されていればそちら優先 */
+  samplingDefaults?: SecondLLMSamplingDefaults;
+  /** ループ上限の上書き (ID-021)。 未指定なら既定値 (agent=15/evaluator=10) */
+  iterationLimits?: SecondLLMIterationLimits;
 }
 
 export interface SecurityRuleConfig {

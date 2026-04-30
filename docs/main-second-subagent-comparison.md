@@ -478,7 +478,7 @@ export interface SecondLLMConfig {
 | D6 | `SubAgent` の Provider 任意性は将来拡張余地として残す | 現状維持 |
 | D7 | Evaluator 用に別 endpoint を持たせる構造は現状不要、 将来余地として記述 | 現状維持 |
 | D8 | `SubAgent` にもハーネス介入 (`HarnessState` + `enrichToolResult`) を入れる。 必須 | 後続実装 |
-| D9 | サンプリング fallback (温度等) を `config.secondLLM.samplingDefaults` に外出し | 後続実装 |
+| D9 | サンプリング fallback (温度等) を `config.secondLLM.samplingDefaults` に外出し | ✅ 実装済 (2026-04-30) — `prompt-tech-debt-review.md` ID-020 / ID-021 |
 
 ---
 

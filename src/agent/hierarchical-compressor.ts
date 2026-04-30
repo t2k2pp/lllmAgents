@@ -26,6 +26,21 @@ const BLOCK_SIZE = 10;
 /** Layer 1 ブロックがこの数を超えたら Layer 2 に統合 */
 const MAX_LAYER1_BLOCKS = 5;
 
+/**
+ * Layer 1 圧縮 (個別メッセージブロックの要約) のサンプリング設定。
+ *  temperature=0.3: 多少の表現揺れは許容、 但し決定論寄り。
+ *  maxTokens=1000: 1 ブロックあたりの要約上限。 これ以上はノイズが増える傾向。
+ */
+const COMPRESSOR_LAYER1_TEMPERATURE = 0.3;
+const COMPRESSOR_LAYER1_MAX_TOKENS = 1000;
+
+/**
+ * Layer 2 圧縮 (Layer 1 結果の統合要約) のサンプリング設定。
+ *  maxTokens=1500: 統合要約は Layer 1 より長くてよい。 ただし context 圧迫しない上限。
+ */
+const COMPRESSOR_LAYER2_TEMPERATURE = 0.3;
+const COMPRESSOR_LAYER2_MAX_TOKENS = 1500;
+
 // ─── 要約プロンプト ───
 
 const LAYER1_PROMPT = `以下の会話ブロックを要約してください。
@@ -153,8 +168,8 @@ export class HierarchicalCompressor {
       const gen = this.provider.chat({
         model: this.model,
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.3,
-        maxTokens: 1000,
+        temperature: COMPRESSOR_LAYER1_TEMPERATURE,
+        maxTokens: COMPRESSOR_LAYER1_MAX_TOKENS,
         stream: true,
       });
 
@@ -201,8 +216,8 @@ export class HierarchicalCompressor {
       const gen = this.provider.chat({
         model: this.model,
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.3,
-        maxTokens: 1500,
+        temperature: COMPRESSOR_LAYER2_TEMPERATURE,
+        maxTokens: COMPRESSOR_LAYER2_MAX_TOKENS,
         stream: true,
       });
 

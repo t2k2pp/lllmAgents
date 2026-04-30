@@ -601,7 +601,8 @@
   3. ファイルを UTF-8 で保存し直し、 `npx tsc --noEmit` で型エラーが出ないか確認
   4. 修復後の文字列を簡易ユニットテストで検証 (= prompt 文字列が JSON.stringify を経由しても破損しないことを確認)
 
-### [ID-017] hierarchical-compressor.ts: temperature=0.3 / maxTokens=1000/1500 がハードコード (重大度: 軽)
+### [ID-017] hierarchical-compressor.ts: temperature=0.3 / maxTokens=1000/1500 がハードコード (重大度: 軽) — ✅ 対応済み (2026-04-30)
+> 修正: `COMPRESSOR_LAYER1_TEMPERATURE` / `COMPRESSOR_LAYER1_MAX_TOKENS` / `COMPRESSOR_LAYER2_TEMPERATURE` / `COMPRESSOR_LAYER2_MAX_TOKENS` の 4 定数をファイル先頭に切り出し。 用途別 (Layer1/Layer2) のコメントで意図 (短い要約 vs 統合要約) を明示。
 - **箇所**: `src/agent/hierarchical-compressor.ts:156, 157, 204, 205`
 - **テキスト断片**:
   ```typescript
@@ -634,7 +635,8 @@
   ```
   L156-157 / L204-205 を上記定数に置換
 
-### [ID-018] intent-classifier.ts: temperature=0 / maxTokens=50 がハードコード (重大度: 軽)
+### [ID-018] intent-classifier.ts: temperature=0 / maxTokens=50 がハードコード (重大度: 軽) — ✅ 対応済み (2026-04-30)
+> 修正: `CLASSIFIER_TEMPERATURE` / `CLASSIFIER_MAX_TOKENS` の 2 定数を切り出し、 ファイル先頭で「分類タスクは決定論的に / 出力は JSON 1 行のみで 50 tok で十分」 という意図をコメントで明示。 `classifyIntent` / `classifyCompletion` の 2 箇所で参照。
 - **箇所**: `src/agent/intent-classifier.ts:152-153, 192-193`
 - **テキスト断片**:
   ```typescript
@@ -688,7 +690,12 @@
   ```
   - `second-llm-manager.ts:140-145` の `consult` 用インライン文字列を削除し、 `buildSubAgentStrategyPrompt({ withTools: false })` 呼出に置換
 
-### [ID-020] second-llm-manager.ts: temperature 既定値 0.2 / 0.1 がインライン (重大度: 軽)
+### [ID-020] second-llm-manager.ts: temperature 既定値 0.2 / 0.1 がインライン (重大度: 軽) — ✅ 対応済み (2026-04-30)
+> 修正:
+> 1. `DEFAULT_TEMPERATURE_CONSULT` (0.2) / `DEFAULT_TEMPERATURE_AGENT` (0.2) / `DEFAULT_TEMPERATURE_EVALUATOR` (0.1) の 3 定数を切り出し
+> 2. `resolveSampling(fallbackTemperature)` を `resolveSampling(mode: "consult" \| "agent" \| "evaluator")` に変更し、 用途ベースのインタフェースに
+> 3. **D9 (`docs/main-second-subagent-comparison.md`) の決定を反映**: `config.secondLLM.samplingDefaults.{consultTemperature\|agentTemperature\|evaluatorTemperature}` を新規追加 (`src/config/types.ts`)。 優先順位は `endpoint.temperature` → `config.samplingDefaults.*` → ハードコード fallback の 3 段階
+> 4. 各メソッドの呼出は `this.resolveSampling("consult")` / `("agent")` / `("evaluator")` に置換 (`consult:157`, `runAsAgent:223`, `runAsEvaluator:356`)
 - **箇所**: `src/second-llm/second-llm-manager.ts:157, 223, 356`
 - **テキスト断片**:
   ```typescript
@@ -708,7 +715,12 @@
   ```
   L157, L223, L356 のリテラルを上記定数に置換
 
-### [ID-021] second-llm-manager.ts: MAX_ITERATIONS=15 / 10 がハードコード (重大度: 軽)
+### [ID-021] second-llm-manager.ts: MAX_ITERATIONS=15 / 10 がハードコード (重大度: 軽) — ✅ 対応済み (2026-04-30)
+> 修正:
+> 1. `DEFAULT_MAX_AGENT_ITERATIONS` (15) / `DEFAULT_MAX_EVALUATOR_ITERATIONS` (10) の 2 定数を切り出し
+> 2. `config.secondLLM.iterationLimits.{maxAgentIterations\|maxEvaluatorIterations}` を新規追加 (`src/config/types.ts`)。 用途別に config から上書き可能
+> 3. `maxAgentIterations` getter と `resolveEvaluatorIterations(paramOverride?)` ヘルパーで「params 引数 → config → 既定値」 の優先順位を一元化
+> 4. `runAsAgent` の `MAX_ITERATIONS = 15` を `this.maxAgentIterations` 参照に置換、 `runAsEvaluator` の `params.maxIterations ?? 10` を `this.resolveEvaluatorIterations(params.maxIterations)` に置換
 - **箇所**: `src/second-llm/second-llm-manager.ts:212, 345`
 - **テキスト断片**:
   ```typescript
