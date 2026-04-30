@@ -153,7 +153,11 @@ describe("ToolExecutor", () => {
 
       await executor.execute(createToolCall("bash", { command: "ls -la" }));
 
-      expect(executeFn).toHaveBeenCalledWith({ command: "ls -la" });
+      // D1 (2026-04-30): ToolExecutor は ancestors を含む context を 2 引数目で渡す
+      expect(executeFn).toHaveBeenCalledWith(
+        { command: "ls -la" },
+        expect.objectContaining({ ancestors: expect.any(Set) }),
+      );
     });
 
     it("should handle tool execution errors gracefully", async () => {

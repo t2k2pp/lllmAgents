@@ -1,5 +1,6 @@
-import type { ToolHandler, ToolResult } from "../tool-registry.js";
+import type { ToolHandler, ToolResult, ToolExecutionContext } from "../tool-registry.js";
 import type { SecondLLMManager } from "../../second-llm/second-llm-manager.js";
+import { ROOT_ANCESTORS } from "../../agent/delegation-context.js";
 
 let secondLLMManager: SecondLLMManager | null = null;
 
@@ -110,13 +111,15 @@ export const secondLLMConsultTool: ToolHandler = {
       },
     }
   },
-  async execute(params: Record<string, unknown>): Promise<ToolResult> {
+  async execute(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
     if (!secondLLMManager || !secondLLMManager.isAvailable()) {
       return { success: false, output: "", error: "Error: Second LLM is not configured or not enabled." };
     }
     const prompt = params.prompt as string;
+    // D1: 呼出元の ancestors を SecondLLMManager に伝播
+    const parentAncestors = context?.ancestors ?? ROOT_ANCESTORS;
     try {
-      const result = await secondLLMManager.consult(prompt);
+      const result = await secondLLMManager.consult(prompt, parentAncestors);
       return { success: true, output: result };
     } catch (e) {
       return {
@@ -170,7 +173,7 @@ export const secondLLMAgentTool: ToolHandler = {
       },
     }
   },
-  async execute(params: Record<string, unknown>): Promise<ToolResult> {
+  async execute(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
     if (!secondLLMManager || !secondLLMManager.isAvailable()) {
       return { success: false, output: "", error: "Error: Second LLM is not configured or not enabled." };
     }
@@ -189,8 +192,10 @@ export const secondLLMAgentTool: ToolHandler = {
       };
     }
     const task = params.task as string;
+    // D1: 呼出元の ancestors を SecondLLMManager に伝播
+    const parentAncestors = context?.ancestors ?? ROOT_ANCESTORS;
     try {
-      const result = await secondLLMManager.runAsAgent(task);
+      const result = await secondLLMManager.runAsAgent(task, parentAncestors);
       return { success: true, output: result };
     } catch (e) {
       return {

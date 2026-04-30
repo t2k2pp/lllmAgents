@@ -470,14 +470,14 @@ export interface SecondLLMConfig {
 
 | ID | 決定内容 | 性質 |
 |----|----------|------|
-| D1 | `ancestorTypes` ベースの委任階層ガードを導入。 sub→second→sub と second→sub→second を構造的に拒否 | 後続実装 |
+| D1 | `ancestorTypes` ベースの委任階層ガードを導入。 sub→second→sub と second→sub→second を構造的に拒否 | ✅ 実装済 (2026-04-30) — `src/agent/delegation-context.ts` 新規 + `tests/agent/delegation-context.test.ts` 12 tests |
 | D2 | メインもセカンドもクラウドLLM可。 全クラウド構成を正規としてサポート | 後続文書更新 |
 | D3 | Evaluator はハーネス側の独立機構。 セカンドLLM 不在時はメインで 1 回呼び切りフォールバック (現状維持) | 文書整備 |
 | D4 | DelegationGuard 数値は実装値 (5/20/15) を正とし、 v030 設計書を揃える | 文書更新 |
 | D5 | `@second` プレフィックス / `/second ask` は **不採用**。 直接アクセスは `/swap` で代替 | 確定 |
 | D6 | `SubAgent` の Provider 任意性は将来拡張余地として残す | 現状維持 |
 | D7 | Evaluator 用に別 endpoint を持たせる構造は現状不要、 将来余地として記述 | 現状維持 |
-| D8 | `SubAgent` にもハーネス介入 (`HarnessState` + `enrichToolResult`) を入れる。 必須 | 後続実装 |
+| D8 | `SubAgent` にもハーネス介入 (`HarnessState` + `enrichToolResult`) を入れる。 必須 | ✅ 実装済 (2026-04-30) — `SubAgent.run()` に `HarnessState` インスタンスを生成、 通常ツール呼出 + synthetic file_write 両経路で `enrichToolResult` を通す |
 | D9 | サンプリング fallback (温度等) を `config.secondLLM.samplingDefaults` に外出し | ✅ 実装済 (2026-04-30) — `prompt-tech-debt-review.md` ID-020 / ID-021 |
 
 ---

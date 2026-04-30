@@ -8,6 +8,13 @@ import { AgentDefinitionLoader } from "../agents/agent-loader.js";
 import type { AgentDefinition } from "../agents/agent-loader.js";
 import * as logger from "../utils/logger.js";
 import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
+import {
+  ROOT_ANCESTORS,
+  extendAncestors,
+  filterRegistryForAncestors,
+  type AncestorTypes,
+} from "./delegation-context.js";
+import { HarnessState, enrichToolResult } from "./harness-intervention.js";
 
 const MAX_SUB_ITERATIONS = 30;
 
@@ -151,6 +158,8 @@ export class SubAgent {
   private toolExecutor: ToolExecutor;
   private filteredRegistry: ToolRegistry;
   private config: SubAgentConfig;
+  /** D1: 自分自身の ancestors (= 親の ancestors ∪ {"sub"})。 子エージェント生成時にさらに伝播 */
+  private readonly selfAncestors: AncestorTypes;
 
   constructor(
     private provider: LLMProvider,
@@ -160,6 +169,8 @@ export class SubAgent {
     type: SubAgentType,
     description: string,
     overrides?: SubAgentConfigOverrides,
+    /** D1: 親 (= 起動元エージェント) の ancestors。 メインから直接起動なら ROOT_ANCESTORS */
+    parentAncestors: AncestorTypes = ROOT_ANCESTORS,
   ) {
     this.agentId = `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -176,39 +187,24 @@ export class SubAgent {
       ...(overrides?.maxTurns !== undefined && { maxTurns: overrides.maxTurns }),
     };
 
-    this.filteredRegistry = this.createFilteredRegistry(toolRegistry, this.config);
+    // D1: 自分は親 ancestors に "sub" を追加した位置にいる
+    this.selfAncestors = extendAncestors(parentAncestors, "sub");
+    // D1: ancestors に基づき task / second_llm_* を構造的に除外。
+    //     allowedTools 指定があればそれと AND で交差させる (= ホワイトリスト ∩ 非除外)
+    this.filteredRegistry = filterRegistryForAncestors(
+      toolRegistry,
+      this.selfAncestors,
+      this.config.allowedTools,
+    );
     this.history = new MessageHistory(this.config.systemPrompt);
-    this.toolExecutor = new ToolExecutor(this.filteredRegistry, permissions);
+    // ToolExecutor にも自分の ancestors を渡し、 task / second_llm_* ツールが呼ばれた時に
+    // さらに 1 段拡張した ancestors を子に伝播できるようにする
+    this.toolExecutor = new ToolExecutor(this.filteredRegistry, permissions, undefined, this.selfAncestors);
   }
 
-  private createFilteredRegistry(registry: ToolRegistry, config: SubAgentConfig): ToolRegistry {
-    const filtered = new ToolRegistry();
-    const allTools = registry.getToolNames();
-
-    // If allowedTools is specified, use it as a whitelist
-    if (config.allowedTools && config.allowedTools.length > 0) {
-      const allowed = new Set(config.allowedTools);
-      for (const name of allTools) {
-        if (allowed.has(name)) {
-          const handler = registry.get(name);
-          if (handler) {
-            filtered.register(handler);
-          }
-        }
-      }
-      return filtered;
-    }
-
-    // No allowedTools specified: register all tools except "task" (prevent recursion)
-    for (const name of allTools) {
-      if (name === "task") continue;
-      const handler = registry.get(name);
-      if (handler) {
-        filtered.register(handler);
-      }
-    }
-
-    return filtered;
+  /** 自分の ancestors を返す (D1: 主にテスト・デバッグ用) */
+  getAncestors(): AncestorTypes {
+    return this.selfAncestors;
   }
 
   async run(prompt: string): Promise<SubAgentResult> {
@@ -219,6 +215,9 @@ export class SubAgent {
     let codeBlockRetried = false;
     let continuationAttempts = 0;
     const MAX_CONTINUATION_ATTEMPTS = 3;
+    // D8: SubAgent もメイン / セカンドと同じハーネス介入レイヤを通す。
+    // 壁ドンループ警告 / Read→Edit 契約 / 連続委任ガード / 旧エラーガイダンスが効く。
+    const harnessState = new HarnessState();
     for (let iteration = 0; iteration < maxTurns; iteration++) {
       try {
         const defs = this.filteredRegistry.getDefinitions();
@@ -242,10 +241,12 @@ export class SubAgent {
 
           for (const toolCall of response.toolCalls) {
             const result = await this.toolExecutor.execute(toolCall);
-            const resultContent = result.success
-              ? result.output
-              : `Error: ${result.error}\n${result.output}`;
-            this.history.addToolResult(toolCall.id, resultContent);
+            const raw = result.success
+              ? (result.output ?? "")
+              : `Error: ${result.error ?? ""}\n${result.output ?? ""}`;
+            // D8: ハーネス介入レイヤを通す (壁ドンループ警告 / Read→Edit 契約 等)
+            const enriched = enrichToolResult(toolCall, result.success, raw, harnessState);
+            this.history.addToolResult(toolCall.id, enriched);
           }
           continue;
         }
@@ -288,10 +289,11 @@ export class SubAgent {
                 function: { name: "file_write", arguments: JSON.stringify(fw) },
               };
               const result = await this.toolExecutor.execute(syntheticCall);
-              const resultContent = result.success
-                ? result.output
-                : `Error: ${result.error}\n${result.output}`;
-              this.history.addToolResult(syntheticCall.id, resultContent);
+              const raw = result.success
+                ? (result.output ?? "")
+                : `Error: ${result.error ?? ""}\n${result.output ?? ""}`;
+              const enriched = enrichToolResult(syntheticCall, result.success, raw, harnessState);
+              this.history.addToolResult(syntheticCall.id, enriched);
             }
             this.history.addUserMessage("ファイルの作成が完了しました。作業の結果を報告してください。");
             continue;
@@ -344,7 +346,12 @@ export class SubAgentManager {
     this.model = model;
   }
 
-  launchBackground(type: SubAgentType, description: string, prompt: string): string {
+  launchBackground(
+    type: SubAgentType,
+    description: string,
+    prompt: string,
+    parentAncestors: AncestorTypes = ROOT_ANCESTORS,
+  ): string {
     const agent = new SubAgent(
       this.provider,
       this.model,
@@ -352,6 +359,8 @@ export class SubAgentManager {
       this.permissions,
       type,
       description,
+      undefined,
+      parentAncestors,
     );
     const id = agent.getAgentId();
     const promise = agent.run(prompt);
@@ -359,7 +368,12 @@ export class SubAgentManager {
     return id;
   }
 
-  async launchForeground(type: SubAgentType, description: string, prompt: string): Promise<SubAgentResult> {
+  async launchForeground(
+    type: SubAgentType,
+    description: string,
+    prompt: string,
+    parentAncestors: AncestorTypes = ROOT_ANCESTORS,
+  ): Promise<SubAgentResult> {
     const agent = new SubAgent(
       this.provider,
       this.model,
@@ -367,12 +381,15 @@ export class SubAgentManager {
       this.permissions,
       type,
       description,
+      undefined,
+      parentAncestors,
     );
     return agent.run(prompt);
   }
 
   async launchParallel(
-    tasks: Array<{ type: SubAgentType; description: string; prompt: string }>
+    tasks: Array<{ type: SubAgentType; description: string; prompt: string }>,
+    parentAncestors: AncestorTypes = ROOT_ANCESTORS,
   ): Promise<SubAgentResult[]> {
     const promises = tasks.map((task) => {
       const agent = new SubAgent(
@@ -382,6 +399,8 @@ export class SubAgentManager {
         this.permissions,
         task.type,
         task.description,
+        undefined,
+        parentAncestors,
       );
       return agent.run(task.prompt);
     });
@@ -409,6 +428,7 @@ export class SubAgentManager {
     skillSystemPrompt: string,
     allowedTools: string[] | undefined,
     prompt: string,
+    parentAncestors: AncestorTypes = ROOT_ANCESTORS,
   ): Promise<SubAgentResult> {
     const agent = new SubAgent(
       this.provider,
@@ -418,6 +438,7 @@ export class SubAgentManager {
       "general-purpose",
       `skill:${skillName}`,
       { systemPrompt: skillSystemPrompt, allowedTools },
+      parentAncestors,
     );
     return agent.run(prompt);
   }

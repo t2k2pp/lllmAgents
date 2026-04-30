@@ -1,4 +1,5 @@
 import type { ToolDefinition } from "../providers/base-provider.js";
+import type { AncestorTypes } from "../agent/delegation-context.js";
 
 export interface ToolResult {
   success: boolean;
@@ -17,10 +18,20 @@ export interface ToolResult {
   };
 }
 
+/**
+ * ツール実行時に呼び出し元エージェントの状態を伝える context (D1: 委任階層ガード)。
+ * 大半のツールは無視してよい。 `task` / `second_llm_*` のみ ancestors を読み、
+ * 子エージェントに伝播させる。
+ */
+export interface ToolExecutionContext {
+  /** 呼出元エージェントの祖先系統 (メインなら空)。 子起動時に `extendAncestors` で 1 段拡張する */
+  ancestors: AncestorTypes;
+}
+
 export interface ToolHandler {
   name: string;
   definition: ToolDefinition;
-  execute(params: Record<string, unknown>): Promise<ToolResult>;
+  execute(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult>;
 }
 
 export class ToolRegistry {

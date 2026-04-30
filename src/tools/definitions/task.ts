@@ -1,6 +1,7 @@
 import chalk from "chalk";
-import type { ToolHandler } from "../tool-registry.js";
+import type { ToolHandler, ToolExecutionContext } from "../tool-registry.js";
 import type { SubAgentManager, SubAgentType } from "../../agent/sub-agent.js";
+import { ROOT_ANCESTORS } from "../../agent/delegation-context.js";
 
 let subAgentManager: SubAgentManager | null = null;
 
@@ -52,7 +53,7 @@ export const taskTool: ToolHandler = {
     },
   },
 
-  async execute(params: Record<string, unknown>) {
+  async execute(params: Record<string, unknown>, context?: ToolExecutionContext) {
     if (!subAgentManager) {
       return { success: false, output: "", error: "SubAgentManager not initialized" };
     }
@@ -61,11 +62,13 @@ export const taskTool: ToolHandler = {
     const description = params.description as string;
     const prompt = params.prompt as string;
     const background = params.run_in_background as boolean | undefined;
+    // D1: 呼出元の ancestors を SubAgentManager に伝播。 SubAgent 側で {sub} が追加される
+    const parentAncestors = context?.ancestors ?? ROOT_ANCESTORS;
 
     console.log(chalk.dim(`\n  [Task] ${type}: ${description}`));
 
     if (background) {
-      const agentId = subAgentManager.launchBackground(type, description, prompt);
+      const agentId = subAgentManager.launchBackground(type, description, prompt, parentAncestors);
       return {
         success: true,
         output: JSON.stringify({
@@ -76,7 +79,7 @@ export const taskTool: ToolHandler = {
       };
     }
 
-    const result = await subAgentManager.launchForeground(type, description, prompt);
+    const result = await subAgentManager.launchForeground(type, description, prompt, parentAncestors);
 
     return {
       success: result.success,

@@ -3,14 +3,25 @@ import type { ToolCall } from "../providers/base-provider.js";
 import type { ToolRegistry, ToolResult } from "./tool-registry.js";
 import type { PermissionManager, RequestSource } from "../security/permission-manager.js";
 import type { HookManager } from "../hooks/hook-manager.js";
+import { ROOT_ANCESTORS, type AncestorTypes } from "../agent/delegation-context.js";
 import * as logger from "../utils/logger.js";
 
 export class ToolExecutor {
+  /**
+   * 委任階層トラッキング (D1)。 メインなら ROOT_ANCESTORS、 SubAgent / SecondLLMManager
+   * が ToolExecutor を生成するときは祖先 ∪ {sub|second} を渡す。 task / second_llm_*
+   * のハンドラはこの値を context.ancestors として受け取り、 子エージェントに伝播させる。
+   */
+  private readonly ancestors: AncestorTypes;
+
   constructor(
     private registry: ToolRegistry,
     private permissions: PermissionManager,
     private hookManager?: HookManager,
-  ) {}
+    ancestors: AncestorTypes = ROOT_ANCESTORS,
+  ) {
+    this.ancestors = ancestors;
+  }
 
   async execute(toolCall: ToolCall, source: RequestSource = "cli"): Promise<ToolResult> {
     const toolName = toolCall.function.name;
@@ -64,7 +75,7 @@ export class ToolExecutor {
     // Execute
     try {
       logger.debug(`Executing tool: ${toolName}`, params);
-      const result = await handler.execute(params);
+      const result = await handler.execute(params, { ancestors: this.ancestors });
 
       // Post-tool hooks
       if (this.hookManager) {

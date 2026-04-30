@@ -16,15 +16,17 @@ import type { LLMProvider, Message, ToolCall } from "../providers/base-provider.
 import type { ToolRegistry } from "../tools/tool-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager } from "../security/permission-manager.js";
+import {
+  ROOT_ANCESTORS,
+  extendAncestors,
+  excludedToolsFor,
+  type AncestorTypes,
+} from "../agent/delegation-context.js";
 
-const EXCLUDED_TOOLS = [
-  "task",
-  "task_output",
-  "second_llm_consult", // avoid recursive calls
-  "second_llm_agent",
-  "enter_plan_mode",
-  "exit_plan_mode"
-];
+// D1 (2026-04-30): EXCLUDED_TOOLS のハードコードは廃止。
+// 代わりに `excludedToolsFor(extendAncestors(parentAncestors, "second"))` で動的に決定する。
+// メインから直接呼ばれた second は parent={second} → task は除外しない (孫として sub を 1 段呼べる)。
+// sub から呼ばれた second は parent={sub, second} → task も除外 (孫からの異種起動禁止)。
 
 /** Evaluatorに許可する読み取り専用ツール */
 const EVALUATOR_ALLOWED_TOOLS = [
@@ -188,11 +190,13 @@ export class SecondLLMManager {
     );
   }
 
-  async consult(prompt: string): Promise<string> {
+  async consult(prompt: string, parentAncestors: AncestorTypes = ROOT_ANCESTORS): Promise<string> {
     if (!this.isAvailable() || !this.provider || !this.endpoint) {
       throw new Error("Second LLM is not configured or enabled.");
     }
     this.checkDelegation();
+    // consult はツール無しなので ancestors の影響は無いが、 logging/将来拡張のため受け取っておく
+    void parentAncestors;
 
     const log = this.createLogger("second-llm-consult");
     const spinner = ora(chalk.magenta("Consulting Second LLM...")).start();
@@ -244,13 +248,18 @@ export class SecondLLMManager {
     }
   }
 
-  async runAsAgent(prompt: string): Promise<string> {
+  async runAsAgent(prompt: string, parentAncestors: AncestorTypes = ROOT_ANCESTORS): Promise<string> {
     if (!this.isAvailable() || !this.provider || !this.endpoint) {
       throw new Error("Second LLM is not configured or enabled.");
     }
     this.checkDelegation();
 
-    const toolDefs = this.toolRegistry.getDefinitions().filter(d => !EXCLUDED_TOOLS.includes(d.function.name));
+    // D1: 自分の ancestors = 親 ∪ {"second"}。 これに基づき除外ツールを決定
+    const selfAncestors = extendAncestors(parentAncestors, "second");
+    const excluded = excludedToolsFor(selfAncestors);
+    const toolDefs = this.toolRegistry.getDefinitions().filter(d => !excluded.has(d.function.name));
+    // D1: ToolExecutor 経由で task ツールが呼ばれた場合に正しい ancestors を伝播させるため、
+    //     selfAncestors を ToolExecutor に渡す (= sub に伝播する祖先)
     const log = this.createLogger("second-llm-agent");
 
     const spinner = ora(chalk.magenta("Second LLM working as Agent...")).start();
@@ -263,7 +272,7 @@ export class SecondLLMManager {
         { role: "user", content: prompt }
       ];
 
-      const toolExecutor = new ToolExecutor(this.toolRegistry, this.permissions);
+      const toolExecutor = new ToolExecutor(this.toolRegistry, this.permissions, undefined, selfAncestors);
       // Phase 5 第2ラウンド: セカンドLLM 自身もハーネス介入レイヤを通す。
       // メインから渡される警告 (連続委任警告等) は 既にメイン側で挿入済の prompt に乗ってくるが、
       // セカンド内での失敗 (壁ドンループ・盲目編集) も検出するため independent な state を持つ。
