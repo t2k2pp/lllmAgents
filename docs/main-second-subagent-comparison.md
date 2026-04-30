@@ -231,166 +231,279 @@ flowchart TD
 
 ---
 
-## 6. 設計意図と現状のズレ — 修正検討材料
+## 6. 設計意図と現状のズレ — 決定事項 (2026-04-30)
 
-ここからが本ドキュメントの本題。 **「v0.3.0 設計書」「main⇔second swap 設計書」 と現在のコードの間に生じている差分** を列挙する。 すべてが「直すべき問題」 とは限らない (進化として正当な変更もある) が、 **意図せずズレている可能性のあるもの** を分けて示す。
+> 初版では「修正検討材料」 として並べていた項目について、 ユーザーとの議論を経て方針を確定した。 各項に **【決定】** / **【現状維持】** / **【後続実装】** のラベルを付ける。
 
-### 6.1 サブエージェントの EXCLUDED_TOOLS が緩い (要検討)
+### 6.1 委任の階層ガードを再設計する 【決定 + 後続実装】
 
-| 比較項目 | v0.3.0 設計書 §2.3 | 現在の `src/agent/sub-agent.ts:184-211` |
-|---------|---------------------|------------------------------------------|
-| **C1 ルール** | 「Level 2 のメンバーは Level 2 以上のメンバーを起動できない」 (分身も task ツールを除外済み) | `allowedTools` 未指定のサブエージェント (= general-purpose) は **`task` のみ除外**。 `second_llm_consult` / `second_llm_agent` は呼べる |
+#### 許可される委任関係 (新ルール)
 
-**観察される結果**: `general-purpose` サブエージェント (= メインの分身) が `second_llm_agent` を呼べてしまう。 これは元設計の C1 違反。
+```mermaid
+graph TD
+    classDef main fill:#e1f5fe,stroke:#0288d1,stroke-width:3px;
+    classDef sub fill:#fff3e0,stroke:#f57c00;
+    classDef second fill:#f3e5f5,stroke:#8e24aa;
+    classDef block fill:#ffebee,stroke:#d32f2f,stroke-dasharray: 5 5;
 
-**判断材料**:
-- 一方で main_second_swap_design.md の対称性思想からすれば「サブエージェントもメインと同等の権限で良い」 という見方もできる
-- しかし「再帰的増殖」 のリスクは残っている。 サブエージェント A → second_llm_agent → サブエージェント A の親メインに戻る、 のような循環が原理的にあり得る (DelegationGuard で止まる想定だが、 構造的なバリアではない)
+    M["🎯 メインLLM<br/>ancestors: ∅"]:::main
+    S1["👤 サブエージェント<br/>ancestors: {sub}"]:::sub
+    L1["🌐 セカンドLLM<br/>ancestors: {second}"]:::second
+    S2["👤 サブエージェント<br/>ancestors: {second, sub}"]:::sub
+    L2["🌐 セカンドLLM<br/>ancestors: {sub, second}"]:::second
+    Block1["❌ 孫からの sub 起動 NG"]:::block
+    Block2["❌ 孫からの second 起動 NG"]:::block
 
-**修正候補**:
-- `sub-agent.ts:202-209` の filtering を `second-llm-manager.ts:20-27` の `EXCLUDED_TOOLS` と統一する
-- または「サブエージェントは second_llm_* を呼べる、 ただし再帰検出は DelegationGuard に一任」 を **明示的に文書化** する
+    M -- "task ✅" --> S1
+    M -- "second_llm_* ✅" --> L1
+    S1 -- "second_llm_* ✅" --> L2
+    L1 -- "task ✅" --> S2
+    S2 -. "second_llm_* ❌" .-> Block2
+    L2 -. "task ❌" .-> Block1
+    S1 -. "task (再帰) ❌" .-> Block1
+    L1 -. "second_llm_* (再帰) ❌" .-> Block2
+```
 
-### 6.2 メインLLMが「ローカルLLM のみ」 の前提が崩れている (進化済み・要文書更新)
+要約:
+- **メイン → sub**: OK / **メイン → second**: OK
+- **sub → second**: OK (子の異種起動は 1 段だけ許可)
+- **second → sub**: OK (同上)
+- **sub → second → sub**: ❌ (孫からの異種起動は禁止)
+- **second → sub → second**: ❌ (同上)
+- **sub → sub** (同種再帰): ❌ (現状 `task` 除外で実現済み)
+- **second → second** (同種再帰): ❌ (現状 `EXCLUDED_TOOLS` で実現済み)
 
-| 比較項目 | v0.3.0 設計書 §1.2 | main_second_swap_design.md §3.1 | 現在の実装 |
-|---------|---------------------|----------------------------------|--------------|
-| **メインLLMの想定** | 「ローカルLLM のみ。 変更なし」 | 「主従の対称性: 型を分けない」 | `config.mainLLM = LLMEndpoint`、 cloud (vertex-ai/azure-*) も指定可 |
+#### 実装方針 — `ancestorTypes` ベースの委任階層トラッキング
 
-**観察される結果**: 設計書 v0.3.0 が「メイン=ローカル限定」 を前提にした文章のまま残っており、 後発の swap 設計書と整合していない。 README やセットアップウィザードの想定もズレている可能性。
+各エージェント実行コンテキストに `ancestorTypes: ReadonlySet<"sub" | "second">` を持たせる:
 
-**修正候補**:
-- `docs/v030_second_llm_design.md` に「**注**: §1.2 の方針は v0.3.0 リリース時の方針であり、 main⇔second swap 機能 (`docs/main_second_swap_design.md`) で対称化された」 という追記
-- もしくは v030 設計書を「歴史的経緯」 として `archive/` に移し、 現在の方針を 1 本にまとめた上位設計を新規作成する
+```ts
+// 新規型 (src/agent/delegation-context.ts などに置く)
+export type DelegationOrigin = "sub" | "second";
+export type AncestorTypes = ReadonlySet<DelegationOrigin>;
 
-### 6.3 Evaluator が設計書に存在しない (後付け)
+export const ROOT_ANCESTORS: AncestorTypes = new Set();
 
-v0.3.0 設計書には `Evaluator` の記述が無い。 現在の実装では:
+export function extendAncestors(
+  current: AncestorTypes,
+  origin: DelegationOrigin,
+): AncestorTypes {
+  const next = new Set(current);
+  next.add(origin);
+  return next;
+}
 
-- `AgentLoop` がコンストラクタで `new Evaluator(secondLLMManager, provider, model)` を生成
-- file_write/edit が完了 → response_complete 直前で `evaluator.evaluate()` が自動実行
-- セカンドLLM があれば `runAsEvaluator()` (読取専用ツール 3 つ) で**エージェンティック評価**
-- 無ければメインLLMで 1 回呼び切り評価
+/** ancestorTypes から ToolRegistry の除外対象を計算する */
+export function excludedToolsFor(ancestors: AncestorTypes): Set<string> {
+  const excluded = new Set<string>([
+    // plan モード系は子では常に禁止 (リーダー専権)
+    "enter_plan_mode",
+    "exit_plan_mode",
+  ]);
+  if (ancestors.has("sub")) {
+    excluded.add("task");
+    excluded.add("task_output");
+  }
+  if (ancestors.has("second")) {
+    excluded.add("second_llm_consult");
+    excluded.add("second_llm_agent");
+  }
+  return excluded;
+}
+```
 
-これは `docs/harness-engineering.md` 系の Phase 5 で導入された (Anthropic "Harness Design for Long-Running Apps" の Evaluator パターン)。 v030 設計書 §1.3 のセカンドLLMの「動作モード」 にも `consult` / `agent` の 2 つしか書かれていないが、 実装は 3 つ目として `evaluator` がある。
+伝播経路:
 
-**修正候補**:
-- v030 設計書 §1.3, §4.1 (`SecondLLMMode` 型) に `evaluator` を追加
-- もしくは Evaluator は「セカンドLLMの利用形態」 ではなく「ハーネス側のレビュー機構」 として独立記述する。 `docs/harness-engineering.md` 群への参照を太字で v030 から張る
+| 呼出 | 親 ancestors | 子 ancestors |
+|------|--------------|---------------|
+| メイン → sub (`task`) | ∅ | {sub} |
+| メイン → second (`second_llm_*`) | ∅ | {second} |
+| sub → second (`second_llm_*`) | {sub} | {sub, second} |
+| second → sub (`task`) | {second} | {second, sub} |
+| sub → sub (`task`) | {sub} | **拒否** (`excludedToolsFor` で task が除外されているため、 そもそもツールが見えない) |
+| second → second (`second_llm_*`) | {second} | **拒否** (同上) |
+| 孫 → 何か | {sub, second} | task と second_llm_* の両方が除外 → 起動できない |
 
-### 6.4 DelegationGuard の数値が設計書と異なる (微差)
+#### 実装変更点 (概要)
 
-| 比較項目 | v0.3.0 設計書 §2.3, §4.2 | 現在の `src/second-llm/second-llm-manager.ts:74-78` |
-|---------|---------------------|------------------------------------------|
-| 連続呼出上限 | maxConsecutiveCalls = 3 | maxConsecutiveDelegations = **5** |
-| セッション全体上限 | maxSessionCalls = 50 | maxTotalDelegations = **20** |
-| エージェントモードのターン上限 | maxAgentTurns = 30 | `MAX_ITERATIONS = 15` (ハードコード) |
+| ファイル | 変更内容 |
+|---------|----------|
+| `src/agent/delegation-context.ts` (新規) | `AncestorTypes`, `ROOT_ANCESTORS`, `extendAncestors`, `excludedToolsFor` |
+| `src/agent/agent-loop.ts` | `ToolExecutor` 生成時に `ancestors = ROOT_ANCESTORS` を渡す |
+| `src/tools/tool-executor.ts` | `ancestors: AncestorTypes` フィールドを保持。 task / second_llm_* 実行時に子へ伝播 |
+| `src/agent/sub-agent.ts` | `parentAncestors` 引数を追加し、 `excludedToolsFor(parent ∪ {sub})` を `filteredRegistry` に適用 (現在の `task` のみ除外を置き換え) |
+| `src/second-llm/second-llm-manager.ts` | `consult` / `runAsAgent` に `parentAncestors` 引数追加。 ツール定義 (`tools/definitions/second-llm.ts`) では現状 hard-coded な `EXCLUDED_TOOLS` を `excludedToolsFor(parent ∪ {second})` に置き換え |
+| `src/tools/definitions/task.ts` | `subAgentManager.launchForeground` の呼び出しで `parentAncestors` を伝播 |
+| `src/tools/definitions/second-llm.ts` | `secondLLMManager.runAsAgent / consult` の呼び出しで `parentAncestors` を伝播 |
 
-数値が設計書より「セッション全体は厳しく / 連続は緩く / エージェントターンは半分」 にチューニングされている。 ハーネス Phase 5 の試行錯誤で調整された結果と推測。
+ガード破りの試み (現 `EXCLUDED_TOOLS` のような単純除外を回避するモデル) でも、 **ToolRegistry レベルでツール定義そのものが見えない** ため構造的に呼び出し不可。 これは v030 設計書 §2.3 の「C1 制約」 を ancestorTypes ベースで再構築したもの。
 
-**修正候補**: 設計書側の数値を実装値に合わせる、 または実装側のコメントで「v030 §2.3 から変更: 理由 X」 を記述。
+**Phase A**: 設計書反映 (本ドキュメント + v030 更新) → **Phase B**: コード実装 (上記の変更) → **Phase C**: テスト追加 (sub → second → sub が拒否されることを確認するユニットテスト)
 
-### 6.5 v030 にあった「@second」 プレフィックス / `/second ask` が実装されていない
+### 6.2 「メイン=ローカル限定」 の前提を撤回する 【決定 + 後続文書更新】
 
-v030 §7.3 では:
-1. `@second` プレフィックスで明示委任
-2. `/second ask` コマンドで直接相談
-3. メインLLMが自動判断
+**決定**: メインLLMもセカンドLLMも、 ローカル / クラウドの両方をサポート。 アプリケーション全体がクラウドLLMだけで動作する構成も正規構成として認める。
 
-の 3 経路があると記述。 現在の実装には経路 1, 2 が無く、 経路 3 (LLM が自発的に `second_llm_*` を呼ぶ) のみ。 REPL の `/second` は `setup`, `status`, `enable`, `disable`, `temperature` 系の管理コマンド中心。
+実装側はすでに `mainLLM: LLMEndpoint` で cloud Provider (vertex-ai / azure-openai / azure-anthropic) を指定可能 (型統一は `docs/main_second_swap_design.md` §2.1)。 残作業は **設計書側の表現修正のみ**:
 
-**観察される結果**: ユーザーが「セカンドに直接聞かせたい」 ときの導線が不明確。 メインLLMの判断にフルに任されており、 description 設定 (llm-profile-descriptions.md) が誘導の主役になっている。
+- `docs/v030_second_llm_design.md` §1.1 / §1.2: 「メインLLM (ローカルLLM) を補完する」「メインLLM = ローカルLLMのみ」 を撤回
+- README / setup-wizard ドキュメント: クラウドのみ構成の手順を併記
 
-**判断材料**:
-- 現状の方針 (description でルーティング誘導) は main_second_swap_design.md の対称性と整合
-- 一方で「ユーザーが特定経路を明示指定する」 体験は failed の場合のみ (system-prompt.ts:144-148 の 3 択提示) 顕在化する
+> 本ドキュメントの §2 / §3 では既に「メイン = `config.mainLLM`」 (provider を限定しない) という記述になっている。 v030 を本ドキュメントの方針に合わせて改訂する。
 
-**修正候補**:
-- `@second` プレフィックスを復活させる (v030 §7.3 を実装する)
-- もしくは v030 §7.3 を「不採用」 として明示的に取り消す (設計書側で削除 or strikethrough)
+### 6.3 Evaluator を設計書に追加する 【決定 + 後続文書更新】
 
-### 6.6 サブエージェント = 「メインの分身」 と書きつつ、 SubAgent は任意の Provider を受け取れる構造
+**決定**: Evaluator は **セカンドLLMの 3 用途のうちの 1 つ** ではなく、 **ハーネス側のレビュー機構** として独立記述する。 ただし「セカンドLLMが利用可能ならそちらを使う / 不可ならメインLLMで 1 回呼び切り」 のフォールバック挙動は維持。
 
-`SubAgent` のコンストラクタ (`src/agent/sub-agent.ts:155-163`) は `provider: LLMProvider` と `model: string` を任意に受け取れる構造。 現状は `SubAgentManager` が「メインの provider/model を保持」 する運用で実質的に分身となっているが、 **将来 task が `use_model: "main" | "second"` を取れる拡張余地が暗黙的に残っている**。
+理由: Evaluator は委任ガード (DelegationGuard) の対象外で、 ユーザーターンごとに必ず動く構造的な機構。 ユーザーの委任意図とは独立した責務。
 
-これは llm-profile-descriptions.md の §「将来拡張余地」 にも書かれているとおり想定済み。 ただし現状は task = メイン固定 / second_llm_agent = セカンド固定で十分という判断。
+設計書反映:
+- `docs/v030_second_llm_design.md` §1.3 「動作モード」 の表に注記を追加し、 詳細は `docs/harness-engineering*.md` に委ねる
+- `docs/v030_second_llm_design.md` §4.1 (`SecondLLMMode` 型) に `evaluator` を追加 (ただし「ハーネス起源」 と注記)
 
-**判断材料**: 現状で問題ないが、 「task はメイン固定」 のルールを `system-prompt.ts:262` の文言だけでなく **コードで型付けして閉じる** (= `SubAgentManager` のコンストラクタを 1 本に絞る) 方が安全。
+### 6.4 DelegationGuard の数値を実装に合わせる 【決定 + 後続文書更新】
 
-### 6.7 セカンドLLMの 3 用途 (consult / agent / evaluator) と「相談 / 委任 / 評価」 の責務境界
+実装値を正とし、 v030 設計書側を実装値に揃える:
 
-現在のセカンドLLMは 3 つの顔を持つ:
-1. **consult** (`SecondLLMManager.consult`): 単発相談、 ツール無し
-2. **agent** (`SecondLLMManager.runAsAgent`): タスク委任、 ツール有り、 DelegationGuard 対象
-3. **evaluator** (`SecondLLMManager.runAsEvaluator`): 自動レビュー、 読取専用ツール 3 つ、 DelegationGuard **対象外**
+| 項目 | 実装値 (`src/second-llm/second-llm-manager.ts:74-78`) |
+|------|------------------------------------------------------|
+| 連続委任上限 | `maxConsecutiveDelegations = 5` |
+| セッション全体上限 | `maxTotalDelegations = 20` |
+| エージェントモードのループ上限 | `MAX_ITERATIONS = 15` |
 
-evaluator が DelegationGuard の対象外なのは、 「ユーザーターンごとに 1〜N 回必ず走るレビュー機構なので、 委任ガードと別の論理で動かす」 という設計判断。 ただし**「レビュー」 と「委任」 の責務がセカンドLLM 1 個に乗っている** ことで:
+> Phase 5 のハーネス試行錯誤で実用最適点として落ち着いた値。 設計書 §2.3, §4.2 をこの値に書き換える。
 
-- セカンド endpoint の障害 → consult/agent だけでなく Evaluator も道連れ
-- セカンド endpoint の温度設定 → consult=0.2 / agent=0.2 / evaluator=0.1 と用途別、 これらの fallback 値はハードコード
-- セカンドLLMの description は 1 つしか持てない → 「相談に向く特性」 と「評価に向く特性」 を 1 文字列で表現する必要がある
+### 6.5 「@second」 プレフィックス / `/second ask` は不採用 【決定】
 
-**判断材料**:
-- 現状は実用上問題なし。 ただし「Evaluator は別 endpoint (例: 安いモデル) で走らせたい」 というニーズが出たら破綻する
-- 将来的な拡張余地として「evaluatorLLM endpoint を別建てする」 オプションを設計書に記述しておくと良い
+**決定**: v030 §7.3 の `@second` プレフィックスや `/second ask` コマンドは **採用しない**。 ユーザーがセカンドLLMに直接アクセスする手段としては、 後発機能の `/swap` (`docs/main_second_swap_design.md`) が代替する:
 
-### 6.8 サブエージェントのハーネス介入が無い
+- **通常運用**: メインLLMが自身の判断で `second_llm_consult` / `second_llm_agent` を呼ぶ (description によるルーティング誘導)
+- **明示切替**: ユーザーが一時的にセカンドを「メイン化」 したい場合は `/swap` で endpoint を入れ替え、 用件後に再度 `/swap` で戻す
+- 熟練ユーザーが「セカンドにだけ声がけ」 する操作は不要 (swap で目的を達成できる)
 
-セカンドLLM (consult を除く agent/evaluator) は `HarnessState` を独立に持ち、 壁ドンループ検出・Read→Edit 契約・連続委任ガードが効く (`src/second-llm/second-llm-manager.ts:210, 343`)。
+設計書反映:
+- `docs/v030_second_llm_design.md` §7.3 の経路 1 (`@second`) と経路 2 (`/second ask`) を **打ち消し線 + 「不採用、 swap で代替」** の注記に置き換え
+- 経路 3 (LLM の自発的呼出) のみを残す
 
-一方 **サブエージェント (`SubAgent`) には HarnessState の組み込みが無い** (`src/agent/sub-agent.ts:148-326`)。 ツールの直接呼び出しのみで、 `enrichToolResult` を通っていない。
+### 6.6 SubAgent コンストラクタの Provider 任意性は将来拡張余地として残す 【現状維持】
 
-**観察される結果**: 「分身が壁ドンループに陥っても、 ハーネスで助けが入らない」。 メインに比べて分身は **ハーネス支援が薄い**。
+`SubAgent` のコンストラクタが任意の `provider` / `model` を受け取れる現状は、 **設計思想通り**:
 
-**判断材料**:
-- v030 §2.1 では「コンテキスト分離」 を分身の主目的に挙げており、 ハーネスの再現は議論されていない
-- ただし harness-engineering Phase 5 でハーネス介入が「能力の発揮に必須」 と位置付けられているので、 分身にも同等の介入を入れた方が一貫性が高い
+- 現状は `SubAgentManager` 経由でメインの provider/model だけが渡される運用 (= task はメイン固定)
+- 将来 `task` ツールが `use_model: "main" | "second"` を取るような拡張をしたいとき、 `SubAgent` 側の構造を変更しなくて済むため、 任意 Provider 受け入れは「拡張余地」 として残す
+- 現時点ではそのメリットが見込まれないため、 コードを閉じる (型を絞る) 修正は **行わない**
 
-**修正候補**:
-- `SubAgent.run()` 内で `HarnessState` インスタンスを生成し、 ツール結果を `enrichToolResult` でラップする
-- これは sub-agent のロジックを `runAsAgent` (second-llm-manager) と統合するチャンス
+文書化のみ: `src/agent/sub-agent.ts` のコンストラクタ JSDoc に「現運用ではメインの provider/model のみ。 将来 task が `use_model` を取る場合の拡張余地として任意 Provider を受け付ける形を残してある」 を追記する (実装変更ではないので低優先)。
 
-### 6.9 サンプリング fallback の温度ハードコード
+### 6.7 セカンドLLMの 3 用途 — 現状維持 + 将来余地として記述 【現状維持】
 
-| 用途 | endpoint 未指定時の温度 |
-|------|---------------------------|
-| consult | 0.2 |
-| runAsAgent | 0.2 |
-| runAsEvaluator | 0.1 |
+評価器を別 endpoint で走らせるニーズが顕在化していないため現状維持。 ただし `docs/v030_second_llm_design.md` の Future Work 節に「`evaluatorLLM` endpoint を別建てするオプション」 を将来拡張候補として記載する。
 
-main_second_swap_design.md §2.2 で「ユーザーが `/second temperature` を設定すれば fallback を上書きできる」 と整理されているが、 **fallback の値そのものはコード固定**。 設定ファイル (`config.json`) や設計書ではユーザーから見えない。
+### 6.8 SubAgent にハーネス介入を必須化する 【決定 + 後続実装】
 
-**修正候補**: fallback を `config-reference.md` の §secondLLM に記載するか、 fallback 自体を設定可能にする (例: `config.secondLLM.endpoint.temperature_fallback`)。
+**決定**: SubAgent もメイン / セカンドと同等のハーネス介入レイヤを通す。
+
+実装方針 (`src/agent/sub-agent.ts:214` の `run()` 内):
+
+```ts
+import { HarnessState, enrichToolResult } from "./harness-intervention.js";
+
+async run(prompt: string): Promise<SubAgentResult> {
+  // ...
+  const harnessState = new HarnessState();
+  // 各 toolExecutor.execute(...) の直後で:
+  const enriched = enrichToolResult(toolCall, result.success, raw, harnessState);
+  this.history.addToolResult(toolCall.id, enriched);
+  // ...
+}
+```
+
+これにより `SubAgent` でも以下が効くようになる:
+- 壁ドンループ警告 (同一ツール / 同一エラーの連続検出)
+- Read→Edit 契約 (file_read を経ない盲目 file_edit のブロック)
+- 連続委任ガード (孫レベルでの想定外の sub→second 連打を 5 回で警告)
+- 旧エラーパターンへのガイダンス追加
+
+既存の `SubAgent` 専用ロジック (`hasLargeCodeBlock` / `extractFakeFileWriteCalls` / `isStructurallyIncomplete`) はそのまま維持し、 ハーネス層と並行して効かせる。
+
+### 6.9 サンプリング fallback を設定に外出しする 【決定 + 後続実装】
+
+**決定**: `consult=0.2` / `runAsAgent=0.2` / `runAsEvaluator=0.1` のハードコードを廃止し、 `config.secondLLM` 配下に明示する。
+
+設定スキーマ (`src/config/types.ts`) の追加:
+
+```ts
+export interface SecondLLMSamplingDefaults {
+  /** 単発相談時の温度 (consult)。 endpoint.temperature が未指定の場合の fallback */
+  consultTemperature?: number;     // default: 0.2
+  /** エージェント実行時の温度 (runAsAgent)。 同上 */
+  agentTemperature?: number;       // default: 0.2
+  /** Evaluator 実行時の温度 (runAsEvaluator)。 同上 */
+  evaluatorTemperature?: number;   // default: 0.1
+}
+
+export interface SecondLLMConfig {
+  enabled: boolean;
+  endpoint: SecondLLMEndpoint;
+  budget: BudgetConfig | null;
+  cost: CostConfig;
+  /** サンプリング fallback (用途別)。 endpoint.temperature が指定されていればそちら優先 */
+  samplingDefaults?: SecondLLMSamplingDefaults;
+}
+```
+
+優先順位:
+1. `endpoint.temperature` (個別 endpoint で明示された値、 `/second temperature` 経由で設定可)
+2. `secondLLM.samplingDefaults.{consultTemperature | agentTemperature | evaluatorTemperature}` (用途別 default)
+3. ハードコード fallback (`0.2` / `0.2` / `0.1` — 後方互換のため残す)
+
+`SecondLLMManager.resolveSampling(fallbackTemperature)` のシグネチャを `resolveSampling(mode: "consult" | "agent" | "evaluator")` に変更し、 内部で上記の優先順位を適用する。
+
+`top_p` / `top_k` / `repetition_penalty` も同様の優先順位で外出しする。
+
+新たな REPL コマンド (任意):
+- `/second sampling consult <値>` / `agent <値>` / `evaluator <値>` で `samplingDefaults` を直接設定可能に。 既存の `/second temperature` (= endpoint.temperature) との使い分けを `/help` に明記。
 
 ---
 
-## 7. まとめ — 「直す前に決めるべき問い」
+## 7. 設計の決定事項 — まとめ
 
-このドキュメントを足掛かりに、 修正方針を決める際の問いを整理する。
-
-### Q1. メインLLMとサブエージェントは「同じ立場」 を維持するか?
-- 維持するなら: SubAgent も `EXCLUDED_TOOLS` (second_llm_*, plan_mode 系) を持たせて Level 階層を再構築するべきではない
-- そうでないなら: §6.1 の通り EXCLUDED_TOOLS を強化する
-
-### Q2. v0.3.0 設計書をどうするか?
-- 「歴史的経緯」 として archive する: main_second_swap_design.md + harness-engineering 系を上位設計と位置付ける
-- 維持する: §1.2 (メイン=ローカル限定) と §1.3 (動作モード=consult/agent のみ) を更新
-
-### Q3. Evaluator はセカンドLLMの 1 用途? それとも独立した役者?
-- セカンドLLMの 1 用途: v030 §1.3, §4.1 を更新して `SecondLLMMode = "consult" | "agent" | "evaluator"` に
-- 独立した役者: `Evaluator` を「メイン/セカンドのどちらか / または別 endpoint」 を選べる構造に拡張
-
-### Q4. 「@second」 プレフィックスや `/second ask` を復活させるか?
-- 復活させる: v030 §7.3 を実装し、 ユーザー明示経路を提供
-- 取り消す: v030 §7.3 を削除 or 注記し、 description ベースのルーティング誘導に一本化
-
-### Q5. サブエージェントにもハーネス介入を入れるか?
-- 入れる: §6.8 の通り `HarnessState` を `SubAgent` に組み込み、 メインと一貫性を持たせる
-- 入れない: 「分身は短命なのでハーネスは不要」 と整理して文書化
+| ID | 決定内容 | 性質 |
+|----|----------|------|
+| D1 | `ancestorTypes` ベースの委任階層ガードを導入。 sub→second→sub と second→sub→second を構造的に拒否 | 後続実装 |
+| D2 | メインもセカンドもクラウドLLM可。 全クラウド構成を正規としてサポート | 後続文書更新 |
+| D3 | Evaluator はハーネス側の独立機構。 セカンドLLM 不在時はメインで 1 回呼び切りフォールバック (現状維持) | 文書整備 |
+| D4 | DelegationGuard 数値は実装値 (5/20/15) を正とし、 v030 設計書を揃える | 文書更新 |
+| D5 | `@second` プレフィックス / `/second ask` は **不採用**。 直接アクセスは `/swap` で代替 | 確定 |
+| D6 | `SubAgent` の Provider 任意性は将来拡張余地として残す | 現状維持 |
+| D7 | Evaluator 用に別 endpoint を持たせる構造は現状不要、 将来余地として記述 | 現状維持 |
+| D8 | `SubAgent` にもハーネス介入 (`HarnessState` + `enrichToolResult`) を入れる。 必須 | 後続実装 |
+| D9 | サンプリング fallback (温度等) を `config.secondLLM.samplingDefaults` に外出し | 後続実装 |
 
 ---
 
-## 8. 関連ファイル一覧 (現状把握用)
+## 8. 後続実装タスクリスト
+
+D1, D8, D9 は実装を伴う。 ファイル単位での予定:
+
+| # | ファイル | 主な変更 | 関連 D |
+|---|----------|---------|--------|
+| 1 | `src/agent/delegation-context.ts` (新規) | `AncestorTypes`, `ROOT_ANCESTORS`, `extendAncestors`, `excludedToolsFor` を実装 | D1 |
+| 2 | `src/tools/tool-executor.ts` | `ancestors: AncestorTypes` フィールドを追加。 task / second_llm_* に対する子コンテキスト生成時に伝播 | D1 |
+| 3 | `src/agent/agent-loop.ts` | ToolExecutor に `ROOT_ANCESTORS` を渡す | D1 |
+| 4 | `src/agent/sub-agent.ts` | `parentAncestors` 引数を受け取り、 `excludedToolsFor(parent ∪ {sub})` でフィルタリング。 `HarnessState + enrichToolResult` を導入 | D1, D8 |
+| 5 | `src/second-llm/second-llm-manager.ts` | `consult` / `runAsAgent` に `parentAncestors` 引数。 `EXCLUDED_TOOLS` 定数を `excludedToolsFor(parent ∪ {second})` 呼び出しに置換。 `resolveSampling(mode)` に変更 | D1, D9 |
+| 6 | `src/tools/definitions/task.ts` | `parentAncestors` を `subAgentManager.launchForeground/Background/Parallel` に伝播 | D1 |
+| 7 | `src/tools/definitions/second-llm.ts` | `parentAncestors` を `secondLLMManager.runAsAgent/consult` に伝播 | D1 |
+| 8 | `src/config/types.ts` | `SecondLLMSamplingDefaults` 型追加、 `SecondLLMConfig.samplingDefaults` フィールド追加 | D9 |
+| 9 | `src/cli/repl.ts` | `/second sampling consult/agent/evaluator <値>` コマンドを追加 (任意) | D9 |
+| 10 | `tests/agent/delegation-context.test.ts` (新規) | sub→second→sub と second→sub→second が拒否されることを確認 | D1 |
+| 11 | `tests/agent/sub-agent-harness.test.ts` (新規) | 壁ドンループが SubAgent でも検出されることを確認 | D8 |
+| 12 | `docs/v030_second_llm_design.md` | §1.2, §1.3, §2.3, §4.1, §4.2, §7.3 の更新 | D2, D3, D4, D5 |
+
+---
+
+## 9. 関連ファイル一覧 (現状把握用)
 
 | 役割 | ファイル |
 |------|----------|

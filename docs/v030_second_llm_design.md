@@ -1,8 +1,14 @@
 # v0.3.0 セカンドLLM機能 設計書
 
-> **ステータス**: 実装済み（2026-03-15）
+> **ステータス**: 実装済み（2026-03-15）/ **2026-04-30 改訂** (本ドキュメントは現状を反映するため後続改訂が入っている。 §更新履歴 参照)
 > **作成日**: 2026-03-15
 > **関連**: 外部仕様の概要は `external_design.md` §12 を参照
+>
+> **後続設計書 (本書よりも優先される最新方針)**:
+> - `docs/main-second-subagent-comparison.md` — メインLLM / セカンドLLM / サブエージェントの最新の関係整理と決定事項 (2026-04-30)
+> - `docs/main_second_swap_design.md` — main⇔second 入替機能 (型統一による主従の対称化、 2026-04-29)
+> - `docs/llm-profile-descriptions.md` — description によるルーティング誘導
+> - `docs/harness-engineering.md` / `harness-engineering-phase5.md` — Evaluator・ハーネス介入の導入
 >
 > **実装状況**:
 > - `src/providers/vertex-ai.ts` — Vertex AI プロバイダー ✅
@@ -11,6 +17,14 @@
 > - `src/tools/definitions/second-llm.ts` — `second_llm_consult` / `second_llm_agent` ツール ✅
 > - `src/cost/cost-calculator.ts`, `token-tracker.ts`, `budget-guard.ts` — コスト管理 ✅
 > - `src/index.ts` — `config.secondLLM.enabled` 時に条件付きで登録 ✅
+>
+> ## 更新履歴
+>
+> | 日付 | 変更点 | 関連 |
+> |------|--------|------|
+> | 2026-03-15 | 初版 | — |
+> | 2026-04-29 | `LLMEndpoint` と `SecondLLMEndpoint` の型統一、 `/swap` コマンド追加 | `main_second_swap_design.md` |
+> | 2026-04-30 | (1) §1.1 / §1.2 「メイン=ローカル限定」 を撤回。 全クラウド構成を正規サポート。 (2) §1.3 「動作モード」 に Evaluator (ハーネス起源) を追記。 (3) §2.3 階層型委任ルールを `ancestorTypes` ベースに再設計。 (4) §4.1 `SecondLLMMode` に `evaluator` を追加。 (5) §4.2 DelegationGuard 数値を実装値に揃える (3→5 / 50→20 / 30→15)。 (6) §7.3 `@second` プレフィックスと `/second ask` を不採用とし、 `/swap` で代替。 | `main-second-subagent-comparison.md` |
 
 ---
 
@@ -18,37 +32,63 @@
 
 ### 1.1 目的
 
-メインLLM（ローカルLLM）を補完する**セカンドLLM**として、クラウドLLM（Vertex AI / Azure AI）を利用可能にする。これにより、ローカルLLMでは困難な高度な推論や多言語処理を、ユーザーの明示的な指示に基づいてクラウドLLMに委任できる。
+> **2026-04-30 改訂**: 初版では「メイン (ローカルLLM) を補完するセカンドLLM (クラウドLLM)」 という構図だったが、 後続の `main_second_swap_design.md` で型を統一し、 メインもセカンドも **ローカル / クラウド の両方を選べる** 構造になった。 メインとセカンドの主従関係はユーザーが選ぶトレードオフであり、 構造上は対称。
+
+メインLLMとは別に **セカンドLLM** を併用可能にする。 メイン / セカンドそれぞれにローカルLLM (Ollama / LM Studio / llama.cpp / vLLM) または クラウドLLM (Vertex AI / Azure OpenAI / Azure AI Foundry) を任意に組み合わせられる。 アプリケーションを **両者ともクラウドで運用する構成も正規構成** として認める。
+
+これにより:
+- ローカルLLMでは困難な推論をクラウドLLMに委任する (= ローカル主、 クラウド従)
+- 軽量モデルでユーザー対話を回し、 重い判断のみを高品質モデルに翻訳する (= 軽量主、 重量従)
+- 全クラウド構成で異なる特性のクラウドモデル 2 つを使い分ける (例: メイン=Sonnet、 セカンド=Gemini Flash)
+
+など複数の使い方を試行錯誤できる。
 
 ### 1.2 基本方針
 
 | 項目 | 方針 |
 |---|---|
-| メインLLM | **ローカルLLMのみ**（Ollama / LM Studio / llama.cpp / vLLM）。変更なし |
-| セカンドLLM | **ローカルLLM または クラウドLLM**。**オプション機能** |
-| 起動条件 | セカンドLLM設定が有効 **かつ** ユーザーが明示的に利用を指示。クラウドLLMの場合は追加で予算の95%未満であることが必要 |
-| 動作モード | ① メインLLMへの相談 ② サブエージェントとしてタスク実行 |
-| ツールアクセス | メインエージェントと**同一のツール群**をすべて使用可能 |
-| コスト管理 | クラウドLLM: トークン使用量を記録し、目安金額を算出。予算上限で自動停止。ローカルLLM: 予算不要（参考コストのみ表示） |
+| メインLLM | **ローカル または クラウド** のいずれも指定可能 (`config.mainLLM`)。 `LLMEndpoint` 型 |
+| セカンドLLM | **ローカル または クラウド** のいずれも指定可能 (`config.secondLLM.endpoint`)。 `SecondLLMEndpoint = LLMEndpoint` (型統一) |
+| 入れ替え | `/swap` コマンドでメイン⇔セカンドを実行時に入れ替え可能 (`docs/main_second_swap_design.md` §2.3) |
+| 起動条件 | セカンドLLM設定が有効 **かつ** メインLLMの判断で `second_llm_*` ツールが呼ばれる。 クラウドLLMの場合は追加で予算の 95% 未満であることが必要 |
+| 動作モード | ① 単発相談 (consult) ② サブエージェントとしてタスク実行 (agent) ③ 成果物の独立レビュー (evaluator、 ハーネス起源 — §1.3 注記参照) |
+| ツールアクセス | 階層型委任ルールに従う (§2.3)。 同種再帰や、 孫世代での異種委任は構造的に拒否 |
+| コスト管理 | クラウドLLM: トークン使用量を記録し、 目安金額を算出。 予算上限で自動停止。 ローカルLLM: 予算不要（参考コストのみ表示） |
 
-### 1.3 対応プロバイダとモデル
+### 1.3 動作モードと対応プロバイダ
 
-#### ローカルLLM（メインLLMと同種、または別インスタンス）
+#### 動作モード (3 種)
+
+| モード | 用途 | ツール | DelegationGuard | 起動経路 |
+|--------|------|--------|------------------|----------|
+| **consult** | 単発相談 (壁打ち / 要約 / 別視点) | 使わない | 対象 | メインの判断で `second_llm_consult` 呼出 |
+| **agent** | タスクをセカンドLLMに委任 (ツール実行可) | 共有 ToolRegistry から `excludedToolsFor({second})` を除外 | 対象 | メインの判断で `second_llm_agent` 呼出 |
+| **evaluator** | 成果物の独立レビュー (ハーネス起源) | `file_read` / `grep` / `glob` のみ | **対象外** | 自動 (`AgentLoop` が `response_complete` 直前に起動) |
+
+> **注**: `evaluator` モードは v0.3.0 初版にはなかった、 後発のハーネス機構 (`docs/harness-engineering*.md`) で導入された用途。 セカンドLLM が利用できない場合は メインLLM で 1 回呼び切りのフォールバックが動く。 この性質上、 委任ガード (DelegationGuard) の対象外として扱う。
+
+#### 対応プロバイダ — メイン / セカンド共通
+
+> **2026-04-30 改訂**: メインLLMもクラウドを選択可能になったため、 「セカンド限定」 の表記を撤廃。
+
+##### ローカルLLM
 
 | プラットフォーム | 認証方式 | 備考 |
 |---|---|---|
-| **Ollama** | なし | メインLLMと異なるモデル/サーバーを指定可 |
+| **Ollama** | なし | 同サーバー上の別モデル / 別ホストいずれも可 |
 | **LM Studio** | なし | |
 | **llama.cpp** | なし | |
 | **vLLM** | なし | |
 
-#### クラウドLLM
+##### クラウドLLM
 
 | プラットフォーム | 利用可能モデル | 認証方式 |
 |---|---|---|
 | **Vertex AI** | Gemini (3 Pro, 3 Flash, 2.5系), Claude (Opus, Sonnet, Haiku) | Google Cloud サービスアカウント / ADC |
 | **Azure OpenAI** | GPT (5.x系, 4o系) | API Key / Azure AD |
 | **Azure AI Foundry** | Claude (Opus, Sonnet, Haiku) | API Key |
+
+> アプリ全体を **クラウドのみ** で運用する構成も正当な選択肢 (例: メイン = Sonnet 4.6 / セカンド = Gemini 3 Flash)。 ローカル GPU を持たない環境でも利用可能。
 
 ---
 
@@ -125,40 +165,74 @@ User → REPL → AgentLoop(Leader) → LocalLLM Provider (メインLLM)
                     └── TokenTracker → CostCalculator → usage log
 ```
 
-### 2.3 階層型委任ルールと安全制約（無限ループ防止の核心）
+### 2.3 階層型委任ルール (ancestorTypes ベース) と安全制約
 
-Agent Team では**厳格な階層構造**と**2つの安全制約**により再帰・ループを構造的に防止する。
+> **2026-04-30 改訂**: 初版は「Level 2 のメンバーは Level 2 以上のメンバーを起動できない (C1)」 という Level ベースの制約だったが、 メイン → サブエージェント → セカンドLLM という **異種を経由した 1 段の委任** を許容したいユースケースが出てきたため、 **`ancestorTypes` ベース** の判定に再設計した。 同種再帰 (sub→sub / second→second) と、 孫世代での異種委任 (sub→second→sub / second→sub→second) は引き続き構造的に拒否される。
+
+#### 許可される委任関係
 
 ```
-Level 0: ユーザー
-  └─ Level 1: チームリーダー (メインLLM AgentLoop)
-       ├─ Level 2a: 分身サブエージェント (SubAgent, メインLLM)
-       ├─ Level 2b: セカンドLLM consultor (相談, 1回応答)
-       └─ Level 2c: セカンドLLM agent (委任, ツール実行ループ)
+ユーザー
+  └─ メインLLM (AgentLoop)
+       ├─ サブエージェント (= メインの分身、 同 Provider/Model)
+       │    └─ セカンドLLM (consult / agent) ← 異種 1 段は OK
+       │         └─ ❌ サブエージェント (NG: 孫からの異種委任)
+       │         └─ ❌ セカンドLLM (NG: 同種再帰)
+       │    └─ ❌ サブエージェント (NG: 同種再帰)
+       │
+       └─ セカンドLLM (consult / agent)
+            └─ サブエージェント ← 異種 1 段は OK
+            │    └─ ❌ サブエージェント (NG: 同種再帰)
+            │    └─ ❌ セカンドLLM (NG: 孫からの異種委任)
+            └─ ❌ セカンドLLM (NG: 同種再帰)
 ```
+
+要約:
+- **メインから**: sub も second も呼べる
+- **メインの子 (sub または second) から**: 異種を 1 段だけ呼べる (sub → second または second → sub)
+- **孫 (祖先に sub と second の両方を持つもの) から**: いずれの委任系統も呼べない
+- **同種再帰** (sub → sub, second → second): 構造的に常に禁止
 
 #### 安全制約
 
 | 制約ID | 制約 | 実装方法 |
 |---|---|---|
-| **C1** | セカンドLLMは**サブエージェントを作成できない** | `EXCLUDED_TOOLS` に `task`, `task_output` を含め、機能自体を提供しない |
-| **C2** | セカンドLLMは**結果のみを返す**（質問を質問で返さない、依頼に対する結果を返すのみ） | システムプロンプトで強制 + `DelegationResult` に `type: "answer"` のみ許可 |
+| **C1 (改訂)** | 各エージェント実行コンテキストは祖先の系統 (`ancestorTypes: Set<"sub" \| "second">`) を保持し、 子エージェントは **祖先と同種の委任ツール** を呼び出せない | `excludedToolsFor(ancestors)` で ToolRegistry からツール定義そのものを除外 |
+| **C2** | セカンドLLMは結果のみを返す (質問を質問で返さない、 依頼に対する結果を返すのみ) | システムプロンプトで強制。 委任プロンプトに「不明点があれば最善の推測で答える」 を明記 |
+
+`ancestorTypes` の伝播ルール:
+
+| 親 → 子 の遷移 | 親 ancestors | 子 ancestors |
+|----------------|---------------|---------------|
+| メイン → sub (`task` 起動) | ∅ | {sub} |
+| メイン → second (`second_llm_*` 起動) | ∅ | {second} |
+| sub → second (sub の中で `second_llm_*` 起動) | {sub} | {sub, second} |
+| second → sub (second の中で `task` 起動) | {second} | {second, sub} |
+| 孫 → 何か | {sub, second} | (拒否、 そもそもツールが見えない) |
+
+`excludedToolsFor(ancestors)` の挙動:
+- `ancestors.has("sub")` → `task`, `task_output` を除外
+- `ancestors.has("second")` → `second_llm_consult`, `second_llm_agent` を除外
+- 共通: `enter_plan_mode`, `exit_plan_mode` は子コンテキストでは常に除外 (リーダー専権)
 
 > [!IMPORTANT]
-> C1 + C2 により、R1（無限ループ）とR2（再帰タスク起動）の重大リスクは**構造的にほぼ解消**される。`DelegationGuard` はメインLLMの品質ガードレールとして機能する。
+> ToolRegistry レベルでツール定義そのものが見えないため、 モデルがガードを破る試みは原理的に不可能。 これにより R1 (無限ループ) と R2 (再帰タスク起動) は構造的に解消される。
 
-#### ルール
-1. **Level 2 のメンバーは Level 2 以上のメンバーを起動できない**（C1）
-   - セカンドLLMは `second_llm_consult`, `second_llm_agent`, `task` ツールを使用不可
-   - 分身サブエージェントも現行通り `task` ツールを除外済み
-2. **セカンドLLMは結果のみを返す**（C2）
-   - メインLLMへの逆質問・逆委任は禁止
-   - 不明点がある場合は最善の推測で回答する
-3. **consult モードは1回のリクエスト-レスポンスで完結**（ツール不使用）
-4. **agent モードは `maxTurns` 制限付き**（デフォルト30回、設定可能）
-5. **DelegationGuard がセッション内の委任回数を追跡**（品質ガードレール）
-   - 連続的セカンドLLM呼び出しの上限: 3回/ターン
-   - セッション全体の呼び出し上限: 設定可能（デフォルト50回）
+#### その他のルール
+
+1. **consult モードは 1 回のリクエスト-レスポンスで完結** (ツール不使用)
+2. **agent モードは `MAX_ITERATIONS` 制限付き** (現行 15 回 / `src/second-llm/second-llm-manager.ts`)
+3. **DelegationGuard がセッション内の委任回数を追跡** (品質ガードレール、 §4.2)
+4. **evaluator モード (ハーネス起源) は DelegationGuard 対象外** で、 自動レビュー機構として独立に動く
+
+#### 実装上の参照ファイル (改訂版設計の落とし込み)
+
+| ファイル | 役割 |
+|----------|------|
+| `src/agent/delegation-context.ts` (新規予定) | `AncestorTypes`, `extendAncestors`, `excludedToolsFor` の型・ヘルパー |
+| `src/tools/tool-executor.ts` | `ancestors` フィールドを保持し、 task / second_llm_* のツール呼出時に子へ伝播 |
+| `src/agent/sub-agent.ts` | コンストラクタで `parentAncestors` を受け取り、 子の ToolRegistry をフィルタリング |
+| `src/second-llm/second-llm-manager.ts` | `consult` / `runAsAgent` で `parentAncestors` を受け取り、 ハードコード `EXCLUDED_TOOLS` を `excludedToolsFor` 呼び出しに置換 |
 
 ### 2.4 コンポーネント構成
 
@@ -252,6 +326,12 @@ export type CloudProviderType = "vertex-ai" | "azure-openai" | "azure-claude";
 // セカンドLLMはローカルまたはクラウドのいずれかを指定可能
 export type SecondLLMProviderType = ProviderType | CloudProviderType;
 
+// 2026-04-29 改訂 (main_second_swap_design.md §2.1):
+// SecondLLMEndpoint は LLMEndpoint の型エイリアスに統一された。
+// メイン側も SecondLLMProviderType と同等の Provider を選択可能。
+// 実装的には: export type SecondLLMEndpoint = LLMEndpoint;
+//
+// 以下は v0.3.0 初版の独立定義 (歴史的経緯)。 現在は LLMEndpoint と完全一致する。
 export interface SecondLLMEndpoint {
   providerType: SecondLLMProviderType;
   model: string;
@@ -264,6 +344,23 @@ export interface SecondLLMEndpoint {
   endpoint?: string;       // https://xxx.openai.azure.com/ 等
   apiKey?: string;
   deploymentName?: string;
+  // サンプリング (LLMEndpoint と共通)
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  repetition_penalty?: number;
+  // 特性説明 (llm-profile-descriptions.md)
+  description?: string;
+  // コンテキストウィンドウ (max_tokens 算出に利用)
+  contextWindow?: number;
+}
+
+// 2026-04-30 追加: サンプリング fallback の外出し
+// (main-second-subagent-comparison.md §6.9 の決定 D9)
+export interface SecondLLMSamplingDefaults {
+  consultTemperature?: number;     // default: 0.2
+  agentTemperature?: number;       // default: 0.2
+  evaluatorTemperature?: number;   // default: 0.1
 }
 
 export interface BudgetConfig {
@@ -281,6 +378,8 @@ export interface SecondLLMConfig {
   endpoint: SecondLLMEndpoint;
   budget: BudgetConfig | null;  // ローカルLLMの場合は null（予算不要）
   cost: CostConfig;
+  /** 2026-04-30 追加: 用途別サンプリング fallback (D9)。 endpoint.temperature が指定されていればそちら優先 */
+  samplingDefaults?: SecondLLMSamplingDefaults;
 }
 
 // Config に追加
@@ -385,7 +484,8 @@ export function isCloudProvider(type: SecondLLMProviderType): boolean {
 ```typescript
 // src/second-llm/second-llm-manager.ts
 
-export type SecondLLMMode = "consult" | "agent";
+// 2026-04-30 改訂: evaluator モードを追加 (ハーネス起源、 §1.3 注記参照)
+export type SecondLLMMode = "consult" | "agent" | "evaluator";
 
 export class SecondLLMManager {
   private provider: LLMProvider;
@@ -448,15 +548,15 @@ interface UsageSummary {
 
 ### 4.2 DelegationGuard — 品質ガードレール
 
-安全制約 C1（サブエージェント作成禁止）と C2（結果のみ返す）により、無限ループ・再帰のリスクは構造的に解消されている。`DelegationGuard` の主な役割は、メインLLMが**不必要に繰り返しセカンドLLMを呼び出すパターン**を検知・抑制する**品質ガードレール**である。
+> **2026-04-30 改訂**: §2.3 の C1 を `ancestorTypes` ベースに再設計したため「無限ループ・再帰のリスクは構造的に解消されている」 という性質は維持される。 `DelegationGuard` は引き続き「メインLLMが不必要に繰り返しセカンドLLMを呼び出すパターン」 を品質ガードレールとして検知する。 数値は Phase 5 のハーネス試行錯誤を経て実用最適点に調整された。
 
 ```typescript
 // src/second-llm/delegation-guard.ts
 
 interface DelegationLimits {
-  maxConsecutiveCalls: number;  // 連続呼び出し上限 (デフォルト: 3)
-  maxSessionCalls: number;     // セッション全体の上限 (デフォルト: 50)
-  maxAgentTurns: number;       // エージェントモードのツール実行ループ上限 (デフォルト: 30)
+  maxConsecutiveDelegations: number;  // 連続呼び出し上限 (実装値: 5)
+  maxTotalDelegations: number;        // セッション全体の上限 (実装値: 20)
+  // エージェントモードのツール実行ループ上限は SecondLLMManager 側で MAX_ITERATIONS = 15 として保持
 }
 
 type DelegationCheckResult =
@@ -904,19 +1004,16 @@ else → "ok"
 
 ### 7.3 ユーザーからのセカンドLLM呼び出し方法
 
-ユーザーが明示的にセカンドLLMを利用する方法は2つ：
+> **2026-04-30 改訂**: 経路 1 (`@second` プレフィックス) と経路 2 (`/second ask` コマンド) は **不採用** とした。 後発の `/swap` コマンド (`docs/main_second_swap_design.md`) でメイン⇔セカンドを実行時に入れ替えられるようになったため、 ユーザーが「セカンドに直接声がけする」 体験は swap で代替できる。
 
-1. **`@second` プレフィックス**: 入力の先頭に `@second` を付ける
-   ```
-   > @second この設計のレビューをお願いします
-   ```
+採用する経路 (1 つに集約):
 
-2. **`/second ask` コマンド**: コマンドとして直接相談
-   ```
-   > /second ask この関数のリファクタリング案を教えて
-   ```
+1. ~~**`@second` プレフィックス**~~ — 不採用 (`/swap` で代替)
+2. ~~**`/second ask` コマンド**~~ — 不採用 (`/swap` で代替)
+3. **メインLLMが判断**: メインLLMが description (= `/model description` / `/second description` で設定された特性説明) を見て、 `second_llm_consult` / `second_llm_agent` ツールを自発的に呼び出す。 これが通常運用。
+4. **明示的な切替** (新): ユーザーが一時的にセカンドを「メイン化」 して直接対話したいときは `/swap` で入れ替え、 用件後に再度 `/swap` で戻す。 熟練ユーザー向け。
 
-3. **メインLLMが判断**: メインLLMが `second_llm_consult` / `second_llm_agent` ツールを自発的に呼び出す（ユーザーがセカンドLLM利用を促した場合のみ）
+これにより、 ユーザーがメインLLMの判断を信頼してそのまま使うか、 swap で能動的に切り替えるかの 2 軸 (= 信頼ベース / 切替ベース) で運用できる。 「 `@second` で 1 メッセージだけセカンドに送る」 という中間粒度の体験は提供しない。
 
 ---
 
