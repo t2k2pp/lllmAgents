@@ -21,6 +21,7 @@ import {
   type SessionData,
 } from "./session-manager.js";
 import { PlanManager } from "./plan-mode.js";
+import { formatSelfCheck } from "./self-check-messages.js";
 import type { SamplingParams } from "../config/types.js";
 import * as logger from "../utils/logger.js";
 import { getOpsLogger } from "../utils/ops-logger.js";
@@ -52,23 +53,8 @@ function renderMarkdown(text: string): string {
 const MAX_TOOL_ITERATIONS = 50;
 const MAX_CONNECTION_RETRIES = 3;
 
-/**
- * 自己点検メッセージの整形。
- *
- * 「偽ユーザー発言」として詰めるのではなく、
- * `[自己点検 N/M]` マーカーで**ハーネス通知であることを明示**してLLMに自問自答を促す。
- * LLMは response_complete を呼ぶか、必要なツールを呼ぶかを選ぶ。
- */
-function formatSelfCheck(round: number, max: number, userIntent: string, concern: string): string {
-  const intent = userIntent.length > 200 ? userIntent.slice(0, 200) + "..." : userIntent;
-  return (
-    `[自己点検 ${round}/${max}] 今の応答を確認してください:\n` +
-    `  ・ユーザーの依頼「${intent}」に応えていますか？\n` +
-    `  ・${concern}\n` +
-    `  ・追加作業が不要なら response_complete ツールを呼んでください\n` +
-    `  ・作業が残っているなら該当ツールを呼んでください`
-  );
-}
+// formatSelfCheck は src/agent/self-check-messages.ts に移動 (ID-012: 2026-04-30 共通化)。
+// メインと SubAgent の両方が同じフォーマッタを使うため。
 
 /**
  * モデルのアーティファクト/ガベージ出力を検出する。
