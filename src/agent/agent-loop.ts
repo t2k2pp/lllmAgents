@@ -787,10 +787,14 @@ export class AgentLoop {
         selfCheckRounds++;
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ツール未呼び出し`));
         this.history.addAssistantMessage(textContent);
+        // 2026-05-01: C 案。 「promise テキストだけでは作業継続と認識しない」 を明示し、
+        // 短い「了解しました」「実装します」 等の応答で止まるループを抜けやすくする。
         this.history.addUserMessage(
           formatSelfCheck(
             selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
-            `テキスト応答のみでツール呼び出しがありません。依頼の遂行に必要なツール（file_write, bash, 等）を実行してください。`
+            `テキスト応答のみでツール呼出がありません。 ` +
+            `「了解しました」「実装します」 等の promise テキストだけではハーネスは作業継続と認識しません。 ` +
+            `依頼の遂行に必要なツール (file_write / file_edit / bash 等) を直接呼んで作業を進めてください。`
           )
         );
         continue;
