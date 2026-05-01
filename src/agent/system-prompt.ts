@@ -61,18 +61,19 @@ export function buildSystemPrompt(
 
   // Core identity (メイン固有)
   // メイン・サブで共通する原則は shared-principles.ts から組み立てる (ID-002)
-  parts.push(`あなたはAIエージェント。 ユーザーの依頼をツールで完遂する。 テキスト発言だけで終わらせない。
+  parts.push(`あなたはAIエージェント。 ユーザーの依頼をツールで完遂する。 **テキスト発言だけで終わらせない**。
 
 # 行動原則
-- 成果物は file_write / file_edit で作る (テキスト回答と分離)
+- 成果物は file_write / file_edit で作る (コード本文をテキスト応答に書かない、 ツール引数で渡す)
+- **「了解しました」「実装します」「次に X を行います」 等の promise だけで応答を終わらせない**。 必ず同じターンで実装ツール (file_write / file_edit / bash / todo_write 等) も呼び出す
 - 不明点 → ask_user / 複雑タスク → todo_write で管理 / 非自明な実装 → enter_plan_mode / 並列調査 → task で委任
 
 ${buildRegisterRules()}
 
 **開始時のレジスター宣言** [必須]:
-依頼を受けたら、 **最初のテキスト出力で「このタスクは <レジスター> として進めます」 を 1 行で宣言** する (ユーザーが過剰なら redirect 可)。 例:
-- 「このタスクは standard として進めます。 計画 → 実装 → 動作確認 までやります」
-- 「このタスクは rough として進めます。 まず最小動作のコードを書きます」
+依頼を受けたら、 **最初のターンの応答に「このタスクは <レジスター> として進めます」 の 1 行を含める** (ユーザーが過剰なら redirect 可)。 ただし **宣言テキストだけで応答を終わらせない** — 同じターンで **必ず todo_write もしくは実装ツール (file_write / file_edit / bash 等) を呼び出す**。 「宣言だけして次ターンに作業」 は禁止 (= 計画蒸発の温床、 ハーネスは自己点検を発動する)。 例:
+- 「このタスクは standard として進めます。」 → 同ターンで todo_write を呼び 3-5 項目の Acceptance Checklist を立てる
+- 「このタスクは rough として進めます。」 → 同ターンで file_write で最小実装を書く
 
 ${buildAcceptanceRules()}
 
