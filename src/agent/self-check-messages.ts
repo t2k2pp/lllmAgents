@@ -13,11 +13,46 @@
  */
 
 /**
+ * 「沈黙系依頼」 のパターン (= ユーザーが「応答を返すな / 返事不要 / 中間報告不要」 と
+ * 明示しているケース)。 こうした literal cue を [自己点検] や 空応答 nudge に逐語で
+ * echo すると、 model が「沈黙すべき」 と再解釈してツール呼出を止める現象を確認
+ * (2026-05-01: セッション mom9py3u-xidq で gpt-5.3-codex が turn 20-39 まで promise
+ * だけ返し続ける状態に陥った)。 この場合は intent を翻訳してから提示する。
+ */
+const SILENT_CONTINUATION_PATTERNS: ReadonlyArray<RegExp> = [
+  /応答を返さない/,
+  /応答(は|を)?(不要|要らない|いらない)/,
+  /返事(は|を)?(不要|要らない|いらない)/,
+  /返答(は|を)?(不要|要らない|いらない)/,
+  /中間報告.*(不要|要らない|いらない)/,
+  /進捗報告.*(不要|要らない|いらない)/,
+  /(?:^|[^一-龯])(黙って|だまって)/,
+  /喋らないで|しゃべらないで/,
+];
+
+/**
+ * ユーザー intent に「沈黙系依頼」 が含まれる場合、 ハーネスが内部で再提示する用に
+ * 翻訳する。 該当しなければ元の intent をそのまま返す。
+ *
+ * 「応答を返さないで」 → 「継続的にツールを呼び、 中間報告のテキストを返さずに作業を進めてほしい」
+ *
+ * これは [自己点検] / 空応答 nudge / SubAgent の自己点検 すべての経路で使う共通の
+ * 入力フィルタ。 元のユーザー文言は session 履歴に残っているため失われない。
+ */
+export function rephraseUserIntent(intent: string): string {
+  if (SILENT_CONTINUATION_PATTERNS.some((p) => p.test(intent))) {
+    return "継続的にツール (file_write / file_edit / bash 等) を呼び、 中間報告のテキストを返さずに完成まで作業を進めてほしい";
+  }
+  return intent;
+}
+
+/**
  * 自己点検メッセージを整形する。
  *
  * @param round 現在のラウンド (1-indexed)
  * @param max 最大ラウンド数 (上限到達でターン強制終了)
  * @param intent 起点となった依頼。 メインなら user message、 サブなら delegate prompt
+ *               (「応答を返さないで」 等の沈黙系依頼が含まれていれば内部で翻訳される)
  * @param concern 個別の懸念事項 (例: "応答が途中で切れています。 続きを出力してください。")
  * @param actionHint 取るべき次の行動の案内文 (省略時はメイン用 = response_complete 呼出を促す)
  */
@@ -28,7 +63,8 @@ export function formatSelfCheck(
   concern: string,
   actionHint?: string,
 ): string {
-  const truncated = intent.length > 200 ? intent.slice(0, 200) + "..." : intent;
+  const rephrased = rephraseUserIntent(intent);
+  const truncated = rephrased.length > 200 ? rephrased.slice(0, 200) + "..." : rephrased;
   const action =
     actionHint ??
     "追加作業が不要なら response_complete ツールを呼んでください\n" +

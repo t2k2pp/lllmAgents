@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import ora from "ora";
 import { HarnessState, enrichToolResult } from "./harness-intervention.js";
-import { formatSelfCheck } from "./self-check-messages.js";
+import { formatSelfCheck, rephraseUserIntent } from "./self-check-messages.js";
 import { globalTokenTracker } from "../cost/token-tracker.js";
 import { globalCostCalculator } from "../cost/cost-calculator.js";
 import { select } from "@inquirer/prompts";
@@ -852,14 +852,20 @@ export class AgentLoop {
             reason = "本文・思考ともに空";
           }
           console.log(chalk.yellow(`\n  空のレスポンス (${reason}) — 再試行します (${emptyResponseRetries}/${MAX_EMPTY_RETRIES})...`));
-          // 同じリクエストをそのまま再送しても同じ結果になるため、元の意図を含むナッジメッセージを追加する
-          const nudgeIntent = userMessageText.length > 200
-            ? userMessageText.slice(0, 200) + "..."
-            : userMessageText;
+          // 同じリクエストをそのまま再送しても同じ結果になるため、元の意図を含むナッジメッセージを追加する。
+          // 2026-05-01: 「promise だけ返す」 ループ対策として B 案を実装:
+          //   ・「応答を返さないで」 等の沈黙系依頼は rephraseUserIntent で翻訳して提示
+          //   ・「了解しました / 実装します 等の promise テキストだけでは作業継続と認識しない」 を明示
+          const rephrasedIntent = rephraseUserIntent(userMessageText);
+          const nudgeIntent = rephrasedIntent.length > 200
+            ? rephrasedIntent.slice(0, 200) + "..."
+            : rephrasedIntent;
           this.history.addAssistantMessage("（空のレスポンス）");
           this.history.addUserMessage(
-            `ユーザーの依頼: 「${nudgeIntent}」\n` +
-            "この依頼に対して応答してください。テキストで回答するか、必要ならツールを呼び出してください。"
+            `[ハーネス通知] 直前の応答が空またはテキストのみで、 ツール呼出がありませんでした。\n` +
+            `「了解しました」「実装します」「続きを行います」 等の promise テキストだけではハーネスは作業継続と認識しません。\n` +
+            `ユーザーの意図: ${nudgeIntent}\n` +
+            `次の手として、 todo の未完了項目があれば該当ツール (file_write / file_edit / bash 等) を直接呼んで作業を進めてください。 中間報告のテキストは不要です。`
           );
           continue;
         }
