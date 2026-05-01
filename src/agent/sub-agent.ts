@@ -29,47 +29,10 @@ interface SubAgentConfig {
   allowedTools?: string[];
 }
 
-// Hardcoded fallback configs for backward compatibility
-const FALLBACK_CONFIGS: Record<string, Omit<SubAgentConfig, "description">> = {
-  explore: {
-    type: "explore",
-    systemPrompt: `あなたはコードベース探索に特化したエージェントです。
-ファイル検索(glob)、コンテンツ検索(grep)、ファイル読み取り(file_read)のツールを使って
-コードベースを調査し、質問に答えてください。
-ファイルの編集や書き込みは行わないでください。
-調査結果を簡潔にまとめて報告してください。`,
-    maxTurns: 20,
-    allowedTools: ["file_read", "glob", "grep", "web_fetch", "web_search"],
-  },
-  plan: {
-    type: "plan",
-    systemPrompt: `あなたはソフトウェアアーキテクトエージェントです。
-タスクの実装戦略を設計してください。
-ファイル検索(glob)、コンテンツ検索(grep)、ファイル読み取り(file_read)のツールを使って
-コードベースを調査し、ステップバイステップの実装計画を作成してください。
-ファイルの編集や書き込みは行わないでください。
-計画は具体的なファイルパスと変更内容を含めてください。`,
-    maxTurns: 15,
-    allowedTools: ["file_read", "glob", "grep", "web_fetch", "web_search"],
-  },
-  "general-purpose": {
-    type: "general-purpose",
-    systemPrompt: `あなたは汎用サブエージェントです。
-指示されたタスクを自律的に実行してください。
-利用可能なすべてのツールを使ってタスクを完了してください。
-完了したら結果を簡潔に報告してください。`,
-    maxTurns: 30,
-  },
-  bash: {
-    type: "bash",
-    systemPrompt: `あなたはコマンド実行に特化したエージェントです。
-bashツールを使ってシェルコマンドを実行してください。
-git操作、ビルド、テスト実行などのターミナルタスクを処理します。
-結果を簡潔に報告してください。`,
-    maxTurns: 15,
-    allowedTools: ["bash", "file_read", "glob", "grep"],
-  },
-};
+// ID-014 (a) (2026-05-01): FALLBACK_CONFIGS は完全撤去。
+// 全エージェント定義は src/agents/builtin/*.md (5 ファイル: bash / code-reviewer /
+// explore / general-purpose / plan) を single source of truth とする。
+// 外部 .md が見つからないエージェント名は task ツール側でエラー扱い。
 
 // Shared loader instance (lazy-initialized)
 let sharedLoader: AgentDefinitionLoader | null = null;
@@ -106,8 +69,10 @@ function getLoader(): AgentDefinitionLoader {
 }
 
 /**
- * Resolve agent configuration by name.
- * Priority: external definition file > hardcoded fallback.
+ * Resolve agent configuration by name from external definition file (`src/agents/builtin/*.md`).
+ *
+ * ID-014 (a) (2026-05-01): ハードコード fallback は撤去。 外部 .md が見つからない場合は
+ * null を返し、 task ツール側で「不明な agent type」 エラーにする。
  */
 function resolveAgentConfig(type: SubAgentType): Omit<SubAgentConfig, "description"> | null {
   const loader = getLoader();
@@ -118,12 +83,10 @@ function resolveAgentConfig(type: SubAgentType): Omit<SubAgentConfig, "descripti
     return agentDefToConfig(externalDef);
   }
 
-  const fallback = FALLBACK_CONFIGS[type];
-  if (fallback) {
-    logger.debug(`Using fallback config for agent type '${type}'`);
-    return fallback;
-  }
-
+  logger.warn(
+    `Agent definition '${type}' not found in src/agents/builtin/. ` +
+      `Available: ${loader.listNames().join(", ")}`,
+  );
   return null;
 }
 

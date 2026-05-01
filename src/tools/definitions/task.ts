@@ -19,20 +19,29 @@ export const taskTool: ToolHandler = {
     type: "function",
     function: {
       name: "task",
-      description: `サブエージェントを起動して複雑なタスクを委任する。
-利用可能なタイプ:
-- explore: コードベース探索(読取専用ツールのみ)
-- plan: 実装計画の設計(読取専用ツールのみ)
-- general-purpose: 汎用タスク(全ツール利用可能)
-- bash: コマンド実行特化
-
-複数のサブエージェントを並列に起動可能。独立したタスクは並列実行で効率化する。`,
+      description:
+        "メインLLM (あなた自身) を別コンテキストで起動してサブタスクを委任する。\n" +
+        "[使うべき場面] (1) メインLLM の特性 (例: 大コンテキスト・特定の専門性) が活きるタスク。 " +
+        "(2) 探索系 (explore / plan agent type) で読取専用の調査をメインから分離。 " +
+        "(3) second_llm_agent と並列起動して総時間短縮 (parallelCapable=true 時)。\n" +
+        "[使うべきでない] (1) セカンドLLM の特性が活きるタスク → second_llm_agent を優先。 " +
+        "(2) 自分で 30 秒以内にできる軽作業 → インライン処理。 " +
+        "(3) 細切れの連続委任 → 修正をまとめて 1 回で渡す。\n" +
+        "[よくある誤用] (a) explore / plan agent に編集タスクを渡す → 読取専用なので失敗する。 " +
+        "(b) general-purpose に「ファイル一覧出して」 程度を委任 → glob で十分。 " +
+        "(c) bash agent に複雑な多段タスクを丸投げ → general-purpose を選ぶ。 " +
+        "(d) code-reviewer agent に新規コードを書かせる → コードレビュー専任。\n" +
+        "[利用可能タイプ] explore (コード調査・読取専用) / plan (実装計画・読取専用) / " +
+        "general-purpose (全ツール) / bash (コマンド実行特化) / code-reviewer (品質・セキュリティレビュー特化)。\n" +
+        "[second_llm_agent との使い分け] task = メインLLM (= あなた自身) / " +
+        "second_llm_agent = 別モデル。 モデル特性で選ぶ。\n" +
+        "[並列起動] 独立したタスクは複数同時起動で総時間短縮可能 (run_in_background + task_output)。",
       parameters: {
         type: "object",
         properties: {
           subagent_type: {
             type: "string",
-            enum: ["explore", "plan", "general-purpose", "bash"],
+            enum: ["explore", "plan", "general-purpose", "bash", "code-reviewer"],
             description: "サブエージェントのタイプ",
           },
           description: {

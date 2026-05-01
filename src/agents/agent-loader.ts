@@ -163,6 +163,18 @@ export class AgentDefinitionLoader {
   }
 
   /**
+   * Return the list of loaded agent names. Calls loadAll() if not already loaded.
+   * Used by sub-agent.ts:resolveAgentConfig() to surface available types when an
+   * unknown agent name is requested (ID-014 (a): 2026-05-01).
+   */
+  listNames(): string[] {
+    if (!this.loaded) {
+      this.loadAll();
+    }
+    return Array.from(this.definitions.keys());
+  }
+
+  /**
    * Return ordered search paths: builtin, user-global, project-local.
    */
   private getSearchPaths(): string[] {

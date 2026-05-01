@@ -24,29 +24,29 @@
 
 | 状態 | 件数 | ID |
 |------|------|-----|
-| ✅ 対応済み | 15 | ID-002, ID-003, ID-004, ID-005, ID-006, ID-007, ID-012, ID-013, ID-015, ID-016, ID-017, ID-018, ID-021, ID-027, (+ID-001 §2-4) |
+| ✅ 対応済み | 18 | ID-002〜007, ID-012〜018, ID-021, ID-024, ID-027, ID-014, ID-039 (+ID-001 §2-4) |
 | ✅ 一部対応済み | 2 | ID-001 (§2-4 実施 / §1 保留), ID-022 (§3 実施 / §1-2 残課題) |
 | ⏸️ 保留 (ユーザー判断) | 3 | ID-008, ID-009, ID-010 |
-| ⏳ 未対応 | 残 | ID-011, ID-014, ID-019, ID-020 (※定数化済み, signature 拡張は残る), ID-023〜026, ID-028〜045 |
+| ⏳ 未対応 | 残 | ID-011, ID-019, ID-020 (※定数化済み, signature 拡張は残る), ID-023, ID-025, ID-026, ID-028〜038, ID-040〜045 |
 
 > 「対応済み」 のうち ID-005 / 006 / 013 / 022 / 027 は ID-001 / ID-002 のリファクタの副次効果として達成された。 単独で意図的に修正したわけではないが、 結果として review の指摘事項が解消されている。
 
 ### 重大項目トップ3 (未対応):
-  1. **[ID-031]** 外部 agent 定義 4 ファイルが英語短文 + ハーネス原則ゼロで `buildSubAgentStrategyPrompt()` の哲学とほぼ完全に断絶
-  2. **[ID-014]** `sub-agent.ts` の FALLBACK_CONFIGS と外部 agent 定義が二重存在し fallback が常時生きている恐れ
-  3. **[ID-033]** excel/powerpoint スキルが Python テンプレート 200 行強を SKILL.md 本文に内包 (References パターン違反)
+  1. **[ID-031]** 外部 agent 定義 4 ファイルが英語短文 + ハーネス原則ゼロで `buildSubAgentStrategyPrompt()` の哲学とほぼ完全に断絶 (※ID-014 (a) で構造は外部 .md 統一済み、 内容刷新が残る)
+  2. **[ID-033]** excel/powerpoint スキルが Python テンプレート 200 行強を SKILL.md 本文に内包 (References パターン違反)
+  3. **[ID-034]** skill-creator が完全英語 + 当プロジェクトに存在しないスクリプト (init_skill.py / package_skill.py) への参照を含む
 
 ### 重大項目 (順位下、 未対応):
-  4. [ID-034] skill-creator が完全英語 + 当プロジェクトに存在しないスクリプト (init_skill.py / package_skill.py) への参照を含む
-  5. [ID-035] excel/powerpoint/add-repl-command/skill-creator が `tools:` フロントマターを持つ一方、 game-development/dev-workflow 等は持たない (一貫性欠落)
-  6. [ID-039] code-review / pr-review / code-reviewer (3 件) が同じ責務でばらばらに存在
-  7. [ID-042] excel/powerpoint の「絶対ルール」 がレジスター無視で常に production 相当 (rough 依頼でもテンプレ全載せ)
+  4. [ID-035] excel/powerpoint/add-repl-command/skill-creator が `tools:` フロントマターを持つ一方、 game-development/dev-workflow 等は持たない (一貫性欠落)
+  5. [ID-042] excel/powerpoint の「絶対ルール」 がレジスター無視で常に production 相当 (rough 依頼でもテンプレ全載せ)
 
 ### 対応済み (重大):
   - ✅ [ID-001] system-prompt の三層重複 → ID-001 §2-4 で大幅縮小 (227 行)
   - ✅ [ID-002] harness-intervention のセカンドLLM 用プロンプトが中核と内容重複 → shared-principles.ts に統合
   - ✅ [ID-003] system-prompt の dialogueLockUntil 動作仕様の漏出 → 削除 + agent-loop エラー文言充実
   - ✅ [ID-005] 委任 3 条件の 3 重化 → tool-guides.ts:delegation に集約 (1.5 重化)
+  - ✅ [ID-014] FALLBACK_CONFIGS 撤去 → 全 5 agent が src/agents/builtin/*.md の single source of truth に
+  - ✅ [ID-039] code-review / pr-review / code-reviewer の 3 重存在 → references/code-review-criteria.md に観点を集約
 
 ---
 
@@ -548,7 +548,16 @@
   ```
   - 削減目標: 11 行 → 3 行 (= description で語られない「履歴非共有」 のみ補足)
 
-### [ID-014] sub-agent.ts: FALLBACK_CONFIGS と外部 AgentDefinitionLoader の二重存在 (重大度: 重大)
+### [ID-014] sub-agent.ts: FALLBACK_CONFIGS と外部 AgentDefinitionLoader の二重存在 (重大度: 重大) — ✅ 対応済み (2026-05-01, 方針 (a))
+> **修正サマリ** (ユーザー判断: 方針 (a) 「外部 .md を正規」):
+> - 新規 `src/agents/builtin/bash.md` を作成 (今まで FALLBACK のみで生きていた `bash` agent type を外部定義に移行)
+> - `src/agent/sub-agent.ts` から `FALLBACK_CONFIGS` 定数 (約 40 行) を完全撤去
+> - `resolveAgentConfig()` を「外部 .md が見つからなければ null + warn ログ」 に変更。 task ツール側で `Unknown sub-agent type` エラーになる
+> - `src/agents/agent-loader.ts` に `listNames()` メソッドを追加 (warn ログで利用可能な agent 一覧を表示するため)
+> - 結果: 全 5 agent (`bash` / `code-reviewer` / `explore` / `general-purpose` / `plan`) が `src/agents/builtin/*.md` の single source of truth に。 撤去によりコード ~40 行削減
+> - 残課題: 外部 .md 4 ファイルがハーネス哲学と断絶している件は **ID-031** で別途対応 (本対応では既存スタイルを維持)。 `bash.md` のみ既存 4 ファイルと同じ英語短文で揃えている
+> - 全 266 tests pass、 型チェッククリーン
+- **箇所**: `src/agent/sub-agent.ts:25-64, 102-120`
 - **箇所**: `src/agent/sub-agent.ts:25-64, 102-120`
 - **テキスト断片**:
   ```typescript
@@ -897,7 +906,9 @@
       return `API Key が無効/期限切れ/権限不足。 ${REPL_CMD_SECOND_STATUS} で確認、 ${REPL_CMD_SECOND_SETUP_AZURE} で再設定。`;
     ```
 
-### [ID-024] tool: task.ts description が古い 3-5 行散文で SKILL 形式と非対称 (重大度: 中)
+### [ID-024] tool: task.ts description が古い 3-5 行散文で SKILL 形式と非対称 (重大度: 中) — ✅ 対応済み (2026-05-01)
+> **修正サマリ**: 提案通り `task.ts` の description を 4 要素テンプレ (`[使うべき場面]` / `[使うべきでない]` / `[よくある誤用]` / `[利用可能タイプ]` / `[second_llm_agent との使い分け]` / `[並列起動]`) に改稿。 second_llm_agent と非対称だった旧文体を解消し、 use case ごとの判断材料を充実させた。 enum に `code-reviewer` を追加 (ID-014 (a) で `src/agents/builtin/code-reviewer.md` が公式に利用可能になったため)。
+- **箇所**: `src/tools/definitions/task.ts:20-28`
 - **箇所**: `src/tools/definitions/task.ts:20-28`
 - **テキスト断片**:
   ```
@@ -1341,7 +1352,15 @@
   ```
   ```
 
-### [ID-039] code-review (スキル) / pr-review (スキル) / code-reviewer (外部 agent) の 3 ファイルが同責務でばらばら配置 (重大度: 重大)
+### [ID-039] code-review (スキル) / pr-review (スキル) / code-reviewer (外部 agent) の 3 ファイルが同責務でばらばら配置 (重大度: 重大) — ✅ 対応済み (2026-05-01, 方針 (a))
+> **修正サマリ** (ユーザー判断: 方針 (a) 「3 ファイルを残しつつ観点を共有 references に集約」):
+> - 新規 `src/skills/builtin/code-review/references/code-review-criteria.md` を作成。 重要度分類 (Critical / High / Medium / Low) と チェック観点 (正確性 / セキュリティ [OWASP Top 10] / パフォーマンス / 保守性 / テスト) と 出力形式 / 報告ルール を 1 箇所に集約
+> - **`code-review/SKILL.md`**: 観点列挙を削除し、 references 参照型に書き換え。 用途分担 (code-review / pr-review / code-reviewer agent) の使い分けも明記
+> - **`pr-review/SKILL.md`**: 観点列挙を削除し、 references 参照型に書き換え。 PR レビュー特有の観点 (変更スコープ整合性 / テスト追加 / 破壊的変更明記 / リファクタリング分離) のみを inline で残す
+> - **`code-reviewer.md` (外部 agent)**: 英語 → 日本語に統一 (ID-031 と同方向)。 観点列挙を削除し、 同 references を参照する形へ。 役割境界 (レビュー専任 / 編集禁止 / 修正案を必ず添える) を明記
+> - 結果: 「重要度分類」 と「観点」 が 3 箇所バラバラ → 1 箇所集約。 レビュー結果のフォーマットも統一
+> - 全 266 tests pass
+- **箇所**: `src/skills/builtin/code-review/SKILL.md` (31行) / `src/skills/builtin/pr-review/SKILL.md` (35行) / `src/agents/builtin/code-reviewer.md` (19行)
 - **箇所**: `src/skills/builtin/code-review/SKILL.md` (31行) / `src/skills/builtin/pr-review/SKILL.md` (35行) / `src/agents/builtin/code-reviewer.md` (19行)
 - **テキスト断片** (3 件すべて「コードレビューの観点」 を独自に列挙):
   ```
