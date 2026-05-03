@@ -638,8 +638,8 @@ export class REPL {
       case "/context": {
         const messages = this.agent.getHistory().getMessages();
         const tokens = estimateMessageTokens(messages);
-        const ctxWindow = this.config.mainLLM.contextWindow ?? 4096;
-        const pct = Math.round((tokens / ctxWindow) * 100);
+        const ctxWindow = this.agent.getContextWindow();
+        const pct = ctxWindow > 0 ? Math.round((tokens / ctxWindow) * 100) : 0;
         console.log(chalk.dim(`  Messages: ${messages.length}`));
         console.log(chalk.dim(`  Tokens: ~${tokens} / ${ctxWindow} (${pct}%)`));
         const bar = progressBar(pct);
@@ -2531,9 +2531,11 @@ export class REPL {
 
 function progressBar(pct: number): string {
   const width = 30;
-  const filled = Math.round((pct / 100) * width);
+  const clamped = Math.max(0, Math.min(100, pct));
+  const filled = Math.round((clamped / 100) * width);
   const empty = width - filled;
   const color =
     pct > 80 ? chalk.red : pct > 60 ? chalk.yellow : chalk.green;
-  return `[${color("█".repeat(filled))}${chalk.dim("░".repeat(empty))}] ${pct}%`;
+  const overflow = pct > 100 ? chalk.red(" ⚠ over") : "";
+  return `[${color("█".repeat(filled))}${chalk.dim("░".repeat(empty))}] ${pct}%${overflow}`;
 }
