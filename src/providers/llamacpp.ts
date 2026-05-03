@@ -1,6 +1,7 @@
 import type { ModelInfo, ModelDetail } from "../config/types.js";
 import { OpenAICompatProvider } from "./openai-compat.js";
 import { httpGet } from "../utils/http-client.js";
+import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "./utils/context-length.js";
 
 interface LlamaCppModel {
   id: string;
@@ -38,7 +39,7 @@ export class LlamaCppProvider extends OpenAICompatProvider {
         return res.data.data.map((m) => ({
           name: m.id,
           size: m.meta?.n_params ?? 0,
-          contextLength: m.meta?.n_ctx_train ?? 4096,
+          contextLength: m.meta?.n_ctx_train ?? (inferContextLength(m.id) || FALLBACK_CONTEXT_WINDOW),
           supportsVision: false,
           supportsFunctionCalling: true,
         }));
@@ -52,10 +53,14 @@ export class LlamaCppProvider extends OpenAICompatProvider {
   async getModelInfo(modelName: string): Promise<ModelDetail> {
     const models = await this.listModels();
     const found = models.find((m) => m.name === modelName);
+    const ctxFromList = found?.contextLength ?? 0;
+    const contextLength = ctxFromList > 0
+      ? ctxFromList
+      : (inferContextLength(modelName) || FALLBACK_CONTEXT_WINDOW);
     return {
       name: modelName,
       size: found?.size ?? 0,
-      contextLength: found?.contextLength ?? 4096,
+      contextLength,
       supportsVision: false,
       supportsFunctionCalling: true,
     };

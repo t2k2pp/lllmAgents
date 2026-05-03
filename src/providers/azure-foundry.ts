@@ -1,6 +1,7 @@
 import { OpenAICompatProvider } from "./openai-compat.js";
 import type { ChatParams, ChatWithToolsParams, ChatChunk } from "./base-provider.js";
 import type { ModelInfo } from "../config/types.js";
+import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "./utils/context-length.js";
 
 interface AzureFoundryConfig {
   /** ホスト部のみ (例: https://my-resource.services.ai.azure.com) または完全URL */
@@ -68,7 +69,7 @@ export class AzureFoundryProvider extends OpenAICompatProvider {
     return [{
       name: this.foundryConfig.model,
       size: 0,
-      contextLength: 4096,
+      contextLength: inferContextLength(this.foundryConfig.model) || FALLBACK_CONTEXT_WINDOW,
       supportsVision: false,
       supportsFunctionCalling: true,
     }];

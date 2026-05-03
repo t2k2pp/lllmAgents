@@ -47,6 +47,7 @@ import { SecondLLMManager } from "./second-llm/second-llm-manager.js";
 import { ChatLogger } from "./agent/chat-logger.js";
 import { createSessionId } from "./agent/llm-logger.js";
 import { initOpsLogger, getOpsLogger, parseOpsLogLevel } from "./utils/ops-logger.js";
+import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "./providers/utils/context-length.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -176,7 +177,7 @@ async function main(): Promise<void> {
   const hookManager = new HookManager();
   hookManager.loadHooks(process.cwd());
 
-  // Context window: 明示設定 > プロバイダ getModelInfo > モデル名ヒューリスティック > 4096
+  // Context window: 明示設定 > プロバイダ getModelInfo > モデル名ヒューリスティック > FALLBACK_CONTEXT_WINDOW
   let contextWindow = config.mainLLM.contextWindow ?? 0;
   let ctxSource = contextWindow > 0 ? "config" : "";
   if (!ctxSource) {
@@ -195,17 +196,16 @@ async function main(): Promise<void> {
     }
   }
   if (!ctxSource) {
-    // モデル名ヒューリスティック: 著名モデルの実コンテキスト長
-    const m = config.mainLLM.model.toLowerCase();
-    if (/claude.*opus|claude.*sonnet|claude.*haiku/.test(m)) contextWindow = 200_000;
-    else if (/gpt-?5|gpt-?4\.1|gpt-?4o|o[13]/.test(m)) contextWindow = 200_000;
-    else if (/gemini.*1\.5|gemini.*2/.test(m)) contextWindow = 1_000_000;
-    if (contextWindow > 0) ctxSource = "heuristic";
+    const inferred = inferContextLength(config.mainLLM.model);
+    if (inferred > 0) {
+      contextWindow = inferred;
+      ctxSource = "heuristic";
+    }
   }
   if (!ctxSource) {
-    contextWindow = 4096;
+    contextWindow = FALLBACK_CONTEXT_WINDOW;
     ctxSource = "fallback";
-    getOpsLogger().warn("config", "contextWindow fell back to 4096 — auto-compression may trigger early. Set mainLLM.contextWindow explicitly to override.", {
+    getOpsLogger().warn("config", `contextWindow fell back to ${FALLBACK_CONTEXT_WINDOW} — set mainLLM.contextWindow explicitly to override.`, {
       model: config.mainLLM.model,
       provider: config.mainLLM.providerType,
     });
