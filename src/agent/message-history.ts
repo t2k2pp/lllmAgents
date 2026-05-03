@@ -52,7 +52,27 @@ export class MessageHistory {
   replaceOlderMessages(summary: string, keepRecent: number): void {
     if (this.messages.length <= keepRecent) return;
 
-    const recent = this.messages.slice(-keepRecent);
+    // 境界が tool_call / tool_result のペアを分断すると、Azure (Responses API) や
+    // OpenAI 系で「対応する tool_call が見つからない」400 エラーになる。
+    // 境界を前方に移動してペアを recent 側にまとめて含める。
+    let boundary = this.messages.length - keepRecent;
+    while (boundary > 0) {
+      const cur = this.messages[boundary];
+      const prev = this.messages[boundary - 1];
+      const startsWithToolResult = cur?.role === "tool";
+      const prevHasToolCalls =
+        prev?.role === "assistant" &&
+        Array.isArray(prev.tool_calls) &&
+        prev.tool_calls.length > 0;
+      if (startsWithToolResult || prevHasToolCalls) {
+        boundary--;
+      } else {
+        break;
+      }
+    }
+    if (boundary <= 0) return; // 全保持に倒す
+
+    const recent = this.messages.slice(boundary);
     this.messages = [
       { role: "system", content: `[会話履歴の要約]\n${summary}` },
       ...recent,
