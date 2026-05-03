@@ -45,6 +45,8 @@ import { HookManager } from "./hooks/hook-manager.js";
 import { MCPManager } from "./mcp/mcp-manager.js";
 import { SecondLLMManager } from "./second-llm/second-llm-manager.js";
 import { ChatLogger } from "./agent/chat-logger.js";
+import { createSessionId } from "./agent/llm-logger.js";
+import { initOpsLogger, getOpsLogger, parseOpsLogLevel } from "./utils/ops-logger.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -275,6 +277,23 @@ async function main(): Promise<void> {
 
   const llmProfiles = buildLLMProfiles(config, hasSecondLLM);
 
+  // セッションID と運用ログを初期化 (セッションJSONL と運用ログでファイル名を揃える)
+  const sessionId = createSessionId();
+  const opsCfg = config.logging?.ops;
+  // 環境変数 LLM_LOG_LEVEL が設定されていれば config を上書き (CIや調査時の即時切替用)
+  const envLevel = process.env.LLM_LOG_LEVEL ? parseOpsLogLevel(process.env.LLM_LOG_LEVEL) : null;
+  initOpsLogger({
+    sessionId,
+    level: envLevel ?? opsCfg?.level ?? "info",
+    enabled: opsCfg?.enabled ?? true,
+    pathOverride: opsCfg?.path,
+  });
+  getOpsLogger().info("session", "session started", {
+    sessionId,
+    mainModel: config.mainLLM.model,
+    provider: config.mainLLM.providerType,
+  });
+
   const agent = new AgentLoop(
     provider,
     config.mainLLM.model,
@@ -285,7 +304,7 @@ async function main(): Promise<void> {
     hookManager,
     skillInfos,
     "main",
-    undefined,
+    sessionId,
     config.streamingDisplay ?? false,
     config.maxParallelTools ?? 3,
     hasSecondLLM,

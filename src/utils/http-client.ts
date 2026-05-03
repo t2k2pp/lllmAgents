@@ -1,4 +1,5 @@
 import { Agent } from "undici";
+import { getOpsLogger, maskHeaders } from "./ops-logger.js";
 
 export interface HttpResponse<T = unknown> {
   ok: boolean;
@@ -115,12 +116,21 @@ export async function httpPostStream(
   const controller = new AbortController();
   const connectTimer = setTimeout(() => controller.abort(), connectTimeoutMs);
 
+  const reqHeaders = {
+    "Content-Type": "application/json",
+    ...additionalHeaders,
+  };
+
+  // 運用ログ TRACE: 送信ワイヤ (機密ヘッダはマスク済み body はそのまま記録 — Anthropic等は user prompt平文のため取り扱い注意)
+  getOpsLogger().trace("http", "POST request", {
+    url,
+    headers: maskHeaders(reqHeaders),
+    body,
+  });
+
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...additionalHeaders,
-    },
+    headers: reqHeaders,
     body: JSON.stringify(body),
     signal: controller.signal,
     // @ts-expect-error -- Node.js undici dispatcher option（型定義にないがランタイムで有効）
@@ -131,9 +141,17 @@ export async function httpPostStream(
 
   if (!res.ok) {
     const text = await res.text();
+    // 運用ログ ERROR: HTTP 非200 を本文付きで記録 (4KBで切り詰め)
+    getOpsLogger().error("http", `HTTP ${res.status}`, {
+      url,
+      status: res.status,
+      statusText: res.statusText,
+      bodyExcerpt: text.length > 4096 ? text.slice(0, 4096) + "...(truncated)" : text,
+    });
     throw new Error(`HTTP ${res.status}: ${text}`);
   }
   if (!res.body) {
+    getOpsLogger().error("http", "No response body for streaming", { url, status: res.status });
     throw new Error("No response body for streaming");
   }
 
