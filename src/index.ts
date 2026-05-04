@@ -481,8 +481,8 @@ async function main(): Promise<void> {
     console.log(`  Restored: ${restoredStates.join(", ")}`);
   }
 
-  // Start REPL
-  const repl = new REPL(agent, config, skillRegistry, planManager, secondLLMManager);
+  // Start REPL (sharedPassphrase は /swap や /second setup 後の Provider 再生成で使い回す)
+  const repl = new REPL(agent, config, skillRegistry, planManager, secondLLMManager, sharedPassphrase);
   await repl.start();
 
   // Cleanup

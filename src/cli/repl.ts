@@ -60,6 +60,7 @@ export class REPL {
     private skillRegistry?: SkillRegistry,
     private planManager?: PlanManager,
     private secondLLMManager?: SecondLLMManager,
+    private passphrase?: string,
   ) {
     // スキル情報を取得してメニュープロバイダーに渡す
     const skillInfos = skillRegistry
@@ -221,15 +222,40 @@ export class REPL {
   }
 
   /**
+   * 暗号化済み apiKey の復号に必要な合言葉を確保する。
+   * 既存の this.passphrase で復号できれば再利用、できなければプロンプトで取得して保持する。
+   * 暗号化されていない apiKey の場合は何もしない。
+   * /swap や /second setup 後に Provider を再生成する際、起動時に取得した合言葉を使い回すための共通処理。
+   */
+  private async ensurePassphraseFor(
+    apiKey: string | undefined,
+    label: string,
+    providerType: string | undefined,
+  ): Promise<void> {
+    if (!apiKey || !CredentialVault.isEncrypted(apiKey)) return;
+    if (this.passphrase && CredentialVault.resolve(apiKey, this.passphrase)) return;
+    const secret = await password({
+      message: `${label} (${providerType ?? ""})の暗号化キーを復号するための合言葉:`,
+      mask: "*",
+    });
+    this.passphrase = secret;
+  }
+
+  /**
    * メインLLMの接続先 (providerType / baseUrl / model) 変更を実行時に反映する。
    * Configを保存後に呼ぶと、新しいProviderインスタンスを作成して AgentLoop と
    * SubAgentManager に注入し、システムプロンプトのプロファイル情報も更新する。
    * 接続テストを行い、失敗時は警告を出すが処理は続行する（ユーザーがリトライできる）。
    */
   private async applyMainLLMEndpoint(): Promise<void> {
+    await this.ensurePassphraseFor(
+      this.config.mainLLM.apiKey,
+      "メインLLM",
+      this.config.mainLLM.providerType,
+    );
     let newProvider;
     try {
-      newProvider = createProvider(this.config.mainLLM);
+      newProvider = createProvider(this.config.mainLLM, this.passphrase);
     } catch (e) {
       console.log(chalk.red(`  Provider生成に失敗しました: ${e instanceof Error ? e.message : String(e)}`));
       return;
@@ -464,7 +490,7 @@ export class REPL {
         await this.applyMainLLMEndpoint();
         console.log(chalk.green("  実行時に反映しました。"));
       } else {
-        this.applySecondLLMEndpoint();
+        await this.applySecondLLMEndpoint();
         const isAvail = this.secondLLMManager?.isAvailable() ?? false;
         if (isAvail) {
           console.log(chalk.green("  実行時に反映しました。"));
@@ -480,12 +506,17 @@ export class REPL {
    * セカンドLLMの接続先 (providerType / baseUrl / model / description) 変更を実行時に反映する。
    * SecondLLMManager を再初期化して新しいProviderを作成する。
    */
-  private applySecondLLMEndpoint(): void {
+  private async applySecondLLMEndpoint(): Promise<void> {
     if (!this.config.secondLLM || !this.secondLLMManager) {
       return;
     }
+    await this.ensurePassphraseFor(
+      this.config.secondLLM.endpoint?.apiKey,
+      "セカンドLLM",
+      this.config.secondLLM.endpoint?.providerType,
+    );
     try {
-      this.secondLLMManager.initialize(this.config.secondLLM);
+      this.secondLLMManager.initialize(this.config.secondLLM, this.passphrase);
     } catch (e) {
       console.log(chalk.red(`  セカンドLLM再初期化に失敗: ${e instanceof Error ? e.message : String(e)}`));
       console.log(chalk.dim(`  設定は保存済み。Cloud LLMで合言葉が必要な場合は再起動が必要です。`));
@@ -1208,7 +1239,7 @@ export class REPL {
                   if (chosen !== currentModel) {
                     this.config.secondLLM.endpoint.model = chosen;
                     saveConfig(this.config);
-                    this.applySecondLLMEndpoint();
+                    await this.applySecondLLMEndpoint();
                     console.log(chalk.dim(`  セカンドLLMモデル: ${chalk.yellow(currentModel)} → ${chalk.cyan(chosen)}`));
                   } else {
                     console.log(chalk.dim(`  モデルは変更されませんでした。`));
@@ -1225,7 +1256,7 @@ export class REPL {
             const oldModel = this.config.secondLLM.endpoint.model;
             this.config.secondLLM.endpoint.model = newModel;
             saveConfig(this.config);
-            this.applySecondLLMEndpoint();
+            await this.applySecondLLMEndpoint();
             console.log(chalk.dim(`  セカンドLLMモデル: ${chalk.yellow(oldModel)} → ${chalk.cyan(newModel)}`));
           }
         } else if (subCmd === "context") {
@@ -1244,7 +1275,7 @@ export class REPL {
             const oldLabel = old ? (old >= 1000 ? `${Math.round(old / 1000)}K` : `${old}`) : "(未設定)";
             this.config.secondLLM.endpoint.contextWindow = val;
             saveConfig(this.config);
-            this.applySecondLLMEndpoint();
+            await this.applySecondLLMEndpoint();
             const newLabel = val >= 1000 ? `${Math.round(val / 1000)}K` : `${val}`;
             console.log(chalk.dim(`  セカンドLLMコンテキスト長: ${chalk.yellow(oldLabel)} → ${chalk.cyan(newLabel)} トークン`));
           }
@@ -1258,7 +1289,7 @@ export class REPL {
             const oldUrl = this.config.secondLLM.endpoint.baseUrl ?? "(未設定)";
             this.config.secondLLM.endpoint.baseUrl = newUrl;
             saveConfig(this.config);
-            this.applySecondLLMEndpoint();
+            await this.applySecondLLMEndpoint();
             console.log(chalk.dim(`  URL: ${chalk.yellow(oldUrl)} → ${chalk.cyan(newUrl)}`));
             console.log(chalk.green(`  実行時に反映しました。`));
           } else {
@@ -1278,7 +1309,7 @@ export class REPL {
             const oldProvider = this.config.secondLLM.endpoint.providerType;
             this.config.secondLLM.endpoint.providerType = newProvider as SecondLLMProviderType;
             saveConfig(this.config);
-            this.applySecondLLMEndpoint();
+            await this.applySecondLLMEndpoint();
             console.log(chalk.dim(`  プロバイダー: ${chalk.yellow(oldProvider)} → ${chalk.cyan(newProvider)}`));
             const isCloud = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic"].includes(newProvider);
             if (isCloud) {
@@ -1355,7 +1386,7 @@ export class REPL {
             } else if (valArg === "auto" || valArg === "clear") {
               delete this.config.secondLLM.endpoint[paramKey];
               saveConfig(this.config);
-              this.applySecondLLMEndpoint();
+              await this.applySecondLLMEndpoint();
               console.log(chalk.yellow(`  セカンドLLM ${subCmd} を auto (内部既定) に戻しました`));
             } else {
               const num = r.integer ? parseInt(valArg, 10) : parseFloat(valArg);
@@ -1365,7 +1396,7 @@ export class REPL {
               } else {
                 this.config.secondLLM.endpoint[paramKey] = num;
                 saveConfig(this.config);
-                this.applySecondLLMEndpoint();
+                await this.applySecondLLMEndpoint();
                 console.log(chalk.green(`  セカンドLLM ${subCmd} を ${chalk.cyan(String(num))} に設定しました (次のLLM呼び出しから反映)`));
               }
             }
@@ -1446,7 +1477,7 @@ export class REPL {
 
         // 実行時反映: Provider再生成 / SecondLLMManager再初期化
         await this.applyMainLLMEndpoint();
-        this.applySecondLLMEndpoint();
+        await this.applySecondLLMEndpoint();
         const isAvail = this.secondLLMManager?.isAvailable() ?? false;
         if (!isAvail && this.config.secondLLM.enabled) {
           console.log(chalk.yellow("  ※ セカンドLLM の接続テストに失敗しています。/second status で確認してください。"));
