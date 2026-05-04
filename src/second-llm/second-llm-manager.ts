@@ -215,11 +215,12 @@ export class SecondLLMManager {
       log.nextTurn();
       log.logRequest(messages, this.endpoint.model);
 
+      // maxTokens は渡さない: agent-loop.ts と同じ理由 (contextWindow を max_tokens として渡すと
+      // サーバによって input + max_tokens > context で 400 を返す)。 provider 側既定値に委ねる。
       const stream = this.provider.chat({
         model: this.endpoint.model,
         messages,
         ...this.resolveSampling("consult"),
-        maxTokens: this.endpoint.contextWindow,
         stream: true
       });
 
@@ -290,7 +291,6 @@ export class SecondLLMManager {
           messages,
           tools: toolDefs,
           ...this.resolveSampling("agent"),
-          maxTokens: this.endpoint.contextWindow,
           stream: true
         });
 
@@ -423,7 +423,6 @@ export class SecondLLMManager {
           messages,
           tools: toolDefs,
           ...this.resolveSampling("evaluator"),
-          maxTokens: this.endpoint.contextWindow,
           stream: true,
         });
 

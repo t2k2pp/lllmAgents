@@ -292,19 +292,23 @@ export class AgentLoop {
             this.model,
             toolDefs.length > 0 ? toolDefs : undefined,
           );
+          // maxTokens は意図的に渡さない:
+          //   - openai-compat (Azure Foundry / vLLM 等): 省略すると「残りコンテキスト全部」がサーバ既定値となる。
+          //     contextWindow をそのまま渡すと、サーバによっては input + max_tokens > context で 400 を返す
+          //     (例: Kimi-K2 で 13991 input + 256000 max_tokens > 262144 → BadRequest)。
+          //   - azure-anthropic: max_tokens 必須だが provider 側に DEFAULT_MAX_TOKENS=64000 のフォールバックあり。
+          //   - azure-gpt (Responses API): max_output_tokens 省略時はサーバ既定 (= 残コンテキスト) が適用される。
           const gen = toolDefs.length > 0
             ? this.provider.chatWithTools({
               model: this.model,
               messages: this.history.getMessages(),
               tools: toolDefs,
-              maxTokens: this.contextWindow,
               stream: true,
               ...this.samplingParams,
             })
             : this.provider.chat({
               model: this.model,
               messages: this.history.getMessages(),
-              maxTokens: this.contextWindow,
               stream: true,
               ...this.samplingParams,
             });

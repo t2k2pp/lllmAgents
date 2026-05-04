@@ -140,10 +140,14 @@ export class OpenAICompatProvider implements LLMProvider {
     if (params.top_p !== undefined) body.top_p = params.top_p;
     if (params.top_k !== undefined) body.top_k = params.top_k;
     if (params.repetition_penalty !== undefined) body.repetition_penalty = params.repetition_penalty;
-    // max_tokens: 設定のcontextWindowから渡されたモデルのコンテキストサイズを使用する。
-    // サーバーは入力トークン+max_tokensがコンテキストを超えないよう自動調整するため、
-    // コンテキストサイズをそのまま渡しても問題ない。
-    // finish_reason="length" が返った場合はエージェント側で自動継続する。
+    // max_tokens は呼び出し側が明示指定したときだけ送信する。
+    //
+    // 重要: 「contextWindow をそのまま渡してサーバが自動調整する」 と思い込んではいけない。
+    // OpenAI 互換サーバの大半 (vLLM / Azure AI Foundry / llama.cpp 等) は max_tokens を
+    // **完了側専用枠** として扱い、 input + max_tokens > context_length で 400 を返す。
+    //   実例: Kimi-K2 (262144 ctx) で input=13991, max_tokens=256000 → 400 BadRequest
+    // 省略すればサーバ既定値 = 「残コンテキスト全部」 が使われるため、 上限まで出力させたい
+    // ケースこそ省略が正解。 finish_reason="length" が返った場合はエージェント側で自動継続する。
     if (params.maxTokens) {
       body.max_tokens = params.maxTokens;
     }
