@@ -35,6 +35,7 @@ import { AzureGPTProvider } from "../providers/azure-gpt.js";
 import { AzureOpenAIProvider } from "../providers/azure-openai.js";
 import { AzureClaudeProvider } from "../providers/azure-claude.js";
 import { saveConfig } from "../config/config-manager.js";
+import { runLocalLLMSetup, connectAndListModels } from "../config/setup-wizard.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
 import { secondLLMConsultTool, secondLLMAgentTool, setSecondLLMManager } from "../tools/definitions/second-llm.js";
@@ -548,6 +549,147 @@ export class REPL {
     this.agent.updateLLMProfiles(profiles, skillInfos, hasSecondLLM, !!this.config.obsidian?.vaultPath);
   }
 
+  // ─── /model host / /model port / /model setup (local) ────────────────────────
+
+  /** baseUrl から host / port を取り出す。 パース失敗時は両方 null */
+  private parseBaseUrl(baseUrl: string | undefined): { host: string | null; port: number | null; protocol: string } {
+    if (!baseUrl) return { host: null, port: null, protocol: "http:" };
+    try {
+      const u = new URL(baseUrl);
+      const port = u.port ? parseInt(u.port, 10) : null;
+      return { host: u.hostname, port: Number.isFinite(port) ? port : null, protocol: u.protocol };
+    } catch {
+      return { host: null, port: null, protocol: "http:" };
+    }
+  }
+
+  /**
+   * host/port 変更後に接続テスト + モデル一覧件数をプレビュー表示する。
+   * 「URL を入れたのに /model list で何も出ない」 という不信感を払拭する目的。
+   * 失敗しても設定は保持する (ユーザーがサーバー起動順を後回しにするケースに配慮)。
+   */
+  private async previewConnectionAfterEndpointChange(): Promise<void> {
+    const providerType = this.config.mainLLM.providerType;
+    if (providerType !== "ollama" && providerType !== "lmstudio" && providerType !== "llamacpp" && providerType !== "vllm") {
+      // クラウド系は host/port では設定しない
+      return;
+    }
+    const baseUrl = this.config.mainLLM.baseUrl;
+    if (!baseUrl) return;
+    try {
+      const models = await connectAndListModels(providerType as ProviderType, baseUrl);
+      if (models.length > 0) {
+        console.log(chalk.dim(`  ${models.length} 個のモデルが利用可能です。 /model list で選択できます。`));
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.log(chalk.yellow(`  ⚠ ${msg}`));
+      console.log(chalk.dim("  サーバー側のモデル起動状況を確認してください。 設定は保持しています。"));
+    }
+  }
+
+  private async handleModelHostCommand(arg: string): Promise<void> {
+    const cur = this.parseBaseUrl(this.config.mainLLM.baseUrl);
+    if (!arg) {
+      console.log(chalk.dim(`  現在のホスト: ${cur.host ?? "(未設定)"}`));
+      console.log(chalk.dim(`  現在のポート: ${cur.port ?? "(未設定)"}`));
+      console.log(chalk.dim(`  使い方: /model host <ホスト名またはIPアドレス>`));
+      console.log(chalk.dim(`  例: /model host 192.168.1.201`));
+      console.log(chalk.dim(`      /model host localhost`));
+      console.log(chalk.dim(`  ※ ポートは現状値を維持します。 ポートも変えるなら /model port、 全部やり直すなら /model setup`));
+      return;
+    }
+    // ホスト名らしさの簡易チェック (先頭がスキームっぽければ案内)
+    if (/^https?:\/\//i.test(arg)) {
+      console.log(chalk.yellow("  /model host にはスキーム (http://) を含めないでください。"));
+      console.log(chalk.dim("  例: /model host 192.168.1.201"));
+      return;
+    }
+    const port = cur.port ?? DEFAULT_PORTS[this.config.mainLLM.providerType as ProviderType] ?? 8080;
+    const newUrl = `http://${arg}:${port}`;
+    const oldUrl = this.config.mainLLM.baseUrl;
+    this.config.mainLLM.baseUrl = newUrl;
+    saveConfig(this.config);
+    console.log(chalk.dim(`  メインLLM URL: ${chalk.yellow(oldUrl ?? "(未設定)")} → ${chalk.cyan(newUrl)}`));
+    await this.applyMainLLMEndpoint();
+    await this.previewConnectionAfterEndpointChange();
+  }
+
+  private async handleModelPortCommand(arg: string): Promise<void> {
+    const cur = this.parseBaseUrl(this.config.mainLLM.baseUrl);
+    if (!arg) {
+      console.log(chalk.dim(`  現在のホスト: ${cur.host ?? "(未設定)"}`));
+      console.log(chalk.dim(`  現在のポート: ${cur.port ?? "(未設定)"}`));
+      console.log(chalk.dim(`  使い方: /model port <番号>`));
+      console.log(chalk.dim(`  例: /model port 8090`));
+      const port = DEFAULT_PORTS[this.config.mainLLM.providerType as ProviderType];
+      if (port) {
+        console.log(chalk.dim(`  ${this.config.mainLLM.providerType} のデフォルトポート: ${port}`));
+      }
+      return;
+    }
+    const portNum = parseInt(arg, 10);
+    if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
+      console.log(chalk.red(`  無効なポート番号: ${arg} (1〜65535 の整数)`));
+      return;
+    }
+    const host = cur.host ?? "localhost";
+    const newUrl = `http://${host}:${portNum}`;
+    const oldUrl = this.config.mainLLM.baseUrl;
+    this.config.mainLLM.baseUrl = newUrl;
+    saveConfig(this.config);
+    console.log(chalk.dim(`  メインLLM URL: ${chalk.yellow(oldUrl ?? "(未設定)")} → ${chalk.cyan(newUrl)}`));
+    await this.applyMainLLMEndpoint();
+    await this.previewConnectionAfterEndpointChange();
+  }
+
+  /**
+   * /model setup (引数なし or "local") — ローカル系LLMの対話ウィザード。
+   * npm run setup と同じプロンプト体系で provider/host/port/model/ctx/特性 を一括再設定する。
+   */
+  private async handleModelSetupLocal(): Promise<void> {
+    const cur = this.config.mainLLM;
+    const isCloud = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic"]
+      .includes(cur.providerType);
+    try {
+      const result = await runLocalLLMSetup({
+        headline: "メインLLM 再設定",
+        current: isCloud ? undefined : {
+          providerType: cur.providerType,
+          baseUrl: cur.baseUrl,
+          model: cur.model,
+          contextWindow: cur.contextWindow,
+          description: cur.description,
+        },
+      });
+      // ローカル系に切り替わるのでクラウド用フィールドはクリア
+      this.config.mainLLM = {
+        ...result.endpoint,
+        // 既存のサンプリングパラメータ等は保持
+        temperature: cur.temperature,
+        top_p: cur.top_p,
+        top_k: cur.top_k,
+        repetition_penalty: cur.repetition_penalty,
+      };
+      saveConfig(this.config);
+      console.log(chalk.green("\n  メインLLM設定を更新しました。"));
+      console.log(chalk.dim(`  Provider: ${this.config.mainLLM.providerType}`));
+      console.log(chalk.dim(`  URL:      ${this.config.mainLLM.baseUrl}`));
+      console.log(chalk.dim(`  Model:    ${this.config.mainLLM.model}`));
+      if (this.config.mainLLM.contextWindow) {
+        console.log(chalk.dim(`  Context:  ${this.config.mainLLM.contextWindow.toLocaleString()} tokens`));
+      }
+      await this.applyMainLLMEndpoint();
+    } catch (e) {
+      if (e instanceof Error && (e.message.includes("User force closed") || e.message.includes("force closed"))) {
+        console.log(chalk.yellow("\n  セットアップを中止しました。 設定は変更されていません。"));
+      } else {
+        console.log(chalk.red(`\n  セットアップに失敗しました: ${e instanceof Error ? e.message : String(e)}`));
+        console.log(chalk.dim("  設定は変更されていません。 サーバー側を確認してから再度 /model setup を実行してください。"));
+      }
+    }
+  }
+
   // ─── プロンプトプレフィックス ────────────────────────
 
   private getPromptPrefix(): string {
@@ -1008,12 +1150,18 @@ export class REPL {
               console.log(chalk.green(`  ${args[0]} を ${chalk.cyan(String(num))} に設定しました (次のLLM呼び出しから反映)`));
             }
           }
+        } else if (args[0] === "host" || args[0] === "ip") {
+          await this.handleModelHostCommand(args.slice(1).join(" ").trim());
+        } else if (args[0] === "port") {
+          await this.handleModelPortCommand(args.slice(1).join(" ").trim());
         } else if (args[0] === "url") {
+          // 非推奨: 表記揺れ解消のため /model host + /model port または /model setup を推奨
+          console.log(chalk.yellow("  /model url は非推奨です。"));
+          console.log(chalk.dim("  代わりに /model host <ホスト名/IP>、 /model port <番号>、"));
+          console.log(chalk.dim("  または /model setup (ウィザード) をご利用ください。"));
           const newUrl = args.slice(1).join(" ").trim();
           if (!newUrl) {
             console.log(chalk.dim(`  現在のURL: ${this.config.mainLLM.baseUrl}`));
-            console.log(chalk.dim(`  使い方: /model url <URL>`));
-            console.log(chalk.dim(`  例: /model url http://192.168.1.201:8000`));
           } else {
             const oldUrl = this.config.mainLLM.baseUrl;
             this.config.mainLLM.baseUrl = newUrl;
@@ -1060,20 +1208,16 @@ export class REPL {
               console.log(chalk.dim(`  URL: ${chalk.cyan(newUrl)}`));
             } else {
               const port = DEFAULT_PORTS[newProvider as ProviderType];
-              console.log(chalk.dim(`  URL: ${this.config.mainLLM.baseUrl ?? "(未設定)"} (必要なら /model url で更新。${newProvider}のデフォルトポートは ${port})`));
+              console.log(chalk.dim(`  URL: ${this.config.mainLLM.baseUrl ?? "(未設定)"} (必要なら /model host / /model port で更新。${newProvider}のデフォルトポートは ${port})`));
             }
             await this.applyMainLLMEndpoint();
             console.log(chalk.green(`  実行時に反映しました。`));
           }
         } else if (args[0] === "setup") {
           const targetProvider = args[1]?.trim();
-          if (!targetProvider) {
-            console.log(chalk.yellow("  使い方: /model setup <provider>"));
-            console.log(chalk.dim("  例: /model setup azure-foundry    (Kimi/Mistral等のAzure AI Foundry)"));
-            console.log(chalk.dim("       /model setup azure-anthropic (Azure Claude — Anthropic Messages API)"));
-            console.log(chalk.dim("       /model setup azure-openai    (Azure OpenAI — Chat Completions API)"));
-            console.log(chalk.dim("       /model setup azure-gpt       (Azure OpenAI — Responses API。 gpt-5/codex系)"));
-            console.log(chalk.dim("       /model setup azure-claude    (Azure Claude — OpenAI互換ルート)"));
+          if (!targetProvider || targetProvider === "local") {
+            // 引数なし or "local" → ローカル系ウィザード (npm run setup と同等の流れ)
+            await this.handleModelSetupLocal();
           } else if (
             targetProvider === "azure-openai" ||
             targetProvider === "azure-gpt" ||
@@ -1092,7 +1236,13 @@ export class REPL {
             }
           } else {
             console.log(chalk.red(`  対話セットアップ未対応のプロバイダー: ${targetProvider}`));
-            console.log(chalk.dim("  ローカル系 (ollama/lmstudio/llamacpp/vllm) は /model provider <タイプ> [<URL>] で設定できます。"));
+            console.log(chalk.dim("  使い方:"));
+            console.log(chalk.dim("    /model setup                  ローカル系LLM (ollama/lmstudio/llamacpp/vllm) ウィザード"));
+            console.log(chalk.dim("    /model setup azure-foundry    Azure AI Foundry (Kimi/Mistral等)"));
+            console.log(chalk.dim("    /model setup azure-anthropic  Azure Claude — Anthropic Messages API"));
+            console.log(chalk.dim("    /model setup azure-openai     Azure OpenAI — Chat Completions API"));
+            console.log(chalk.dim("    /model setup azure-gpt        Azure OpenAI — Responses API (gpt-5/codex系)"));
+            console.log(chalk.dim("    /model setup azure-claude     Azure Claude — OpenAI互換ルート"));
           }
         } else {
           const newModel = args[0];

@@ -50,7 +50,9 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/model")}          現在のモデル情報
     ${chalk.cyan("/model <name>")}   モデルを切り替え
     ${chalk.cyan("/model list")}     利用可能なモデル一覧
-    ${chalk.cyan("/model url")}      接続先URLを変更
+    ${chalk.cyan("/model setup")}    ローカル系LLMをウィザードで再設定 (npm run setup と同等)
+    ${chalk.cyan("/model host")}     接続先のホスト or IP を変更（ポートは保持）
+    ${chalk.cyan("/model port")}     接続先のポート番号を変更
     ${chalk.cyan("/model provider")} プロバイダー(ollama/vllm等)を変更
     ${chalk.cyan("/model description")} モデル特性説明
     ${chalk.cyan("/model temperature")} 温度設定 (top_p/top_k/rep_penaltyも同様、各コマンドで)
