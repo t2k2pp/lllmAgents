@@ -20,6 +20,7 @@ sandbox/screenshots/*
 # deploy/ はビルド成果物のみ ignore、配布用アセットは scripts/deploy-assets/ から組み立てる
 deploy/localllm.exe
 deploy/localllm
+deploy/localllm.cjs
 deploy/skills/
 deploy/.deploy-meta.json
 deploy/install.bat
@@ -39,3 +40,13 @@ __pycache__/
 # Temporary/test files
 src/Level.js
 src/test-Level.js
+
+# macOS metadata
+.DS_Store
+**/.DS_Store
+
+# ローカル動作ログ・キャッシュ (~/.localllm を除く repo 内 transcript 用)
+.localllm/transcripts/
+
+# proj/ 配下は個別リポジトリで管理 (別コミット運用)
+proj/
