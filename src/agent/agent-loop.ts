@@ -117,6 +117,15 @@ export class AgentLoop {
   private intentClassifier: IntentClassifier;
   /** 直前ターンのプロンプトトークン数（待機スピナーでの文脈サイズ表示用） */
   private lastPromptTokens = 0;
+  /**
+   * P0-A: 直近 FAILURE_WINDOW 反復内のツール失敗履歴。 同じ (signature, error) が
+   * 2 回以上出たら「同じ轍を踏んでいる」 と判定し self-check を注入する。
+   * 既存の MAX_REPEAT_TOOL=3 (連続検出) では grep/read を間に挟まれると無効化されるため、
+   * sliding window で「間に他ツールが挟まっても」 失敗の繰り返しを検出する補強。
+   */
+  private recentFailures: Array<{ iteration: number; signature: string; error: string }> = [];
+  /** 主ループの現在の iteration index (executeSingleTool/Parallel から参照するため共有) */
+  private currentIteration = 0;
   /** チャットログ（Obsidian Vault保存、null なら無効） */
   private chatLogger: ChatLogger | null = null;
   /** Evaluator（成果物の独立レビュー） */
@@ -205,6 +214,8 @@ export class AgentLoop {
     this.currentSource = options?.source ?? "cli";
     this.isProcessing = true;
     this._aborted = false;
+    // P0-A: ユーザー発話のたびに失敗履歴をリセット (前ターンの失敗を引き摺らない)
+    this.recentFailures = [];
     try {
     this.history.addUserMessage(userMessage);
     // チャットログ記録
@@ -247,6 +258,7 @@ export class AgentLoop {
     const MAX_REPEAT_TOOL = 3; // 同じツール呼び出しがN回連続で失敗したら中断
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+      this.currentIteration = iteration;
       // 中断チェック
       if (this._aborted) {
         console.log(chalk.yellow("\n  (処理を中断しました)"));
@@ -1024,6 +1036,61 @@ export class AgentLoop {
     };
   }
 
+  /**
+   * P0-A: ツール失敗を sliding window で追跡し、 同じ (signature, error) が
+   * 直近 FAILURE_WINDOW 反復内に再発したら self-check メッセージを history へ注入する。
+   *
+   * 既存の MAX_REPEAT_TOOL=3 (連続検出) は grep/read を間に挟まれると無効化されるため、
+   * これは「間に他ツールが挟まっても失敗の繰り返しを検出する」 補強。
+   * docs/agent-loop-efficiency-review.md §4.2 参照。
+   */
+  private static readonly FAILURE_WINDOW = 10;
+  private maybeDetectStuckLoop(toolCall: ToolCall, errorMsg: string): void {
+    const iteration = this.currentIteration;
+    const signature = `${toolCall.function.name}:${toolCall.function.arguments ?? ""}`;
+    // window 外の古いエントリを除去
+    this.recentFailures = this.recentFailures.filter(
+      (e) => iteration - e.iteration < AgentLoop.FAILURE_WINDOW,
+    );
+    const trimmedErr = (errorMsg ?? "").slice(0, 500);
+    const prior = this.recentFailures.filter(
+      (e) => e.signature === signature && e.error === trimmedErr,
+    );
+    this.recentFailures.push({ iteration, signature, error: trimmedErr });
+    if (prior.length === 0) return; // 初回失敗 → 通常通り
+
+    // 直近 window 内に同じ失敗が既にあった → 学習されていない兆候
+    const advice = this.buildStuckLoopAdvice(toolCall.function.name, trimmedErr);
+    const intervention =
+      `[ハーネス] 直近${AgentLoop.FAILURE_WINDOW}反復内に「${toolCall.function.name}」 を同じ引数で実行し、 同じエラーが ${prior.length + 1} 回出ています。\n` +
+      `  エラー: ${trimmedErr.slice(0, 200)}\n` +
+      `  ${advice}\n` +
+      `  同じ引数での再試行は禁止。 別の引数 / 別ツール / ask_user のいずれかに切り替えてください。`;
+    console.log(chalk.yellow(`\n  ⚠ stuck-loop 検出: ${toolCall.function.name} が直近${AgentLoop.FAILURE_WINDOW}反復で同一エラー再発`));
+    this.history.addUserMessage(intervention);
+    // 注入後は当該 signature の履歴をクリアして再注入を防ぐ
+    this.recentFailures = this.recentFailures.filter((e) => e.signature !== signature);
+  }
+
+  /** P0-A: 失敗ツールごとの具体的助言を返す。 ツール側エラー文の指示を増幅させる役割。 */
+  private buildStuckLoopAdvice(toolName: string, errorMsg: string): string {
+    if (toolName === "file_edit") {
+      if (errorMsg.includes("found") && errorMsg.includes("times")) {
+        return "対処: replace_all=true を指定するか、 old_string の前後を含めて一意化してください。";
+      }
+      if (errorMsg.includes("not found")) {
+        return "対処: file_read でファイル現状を確認 → 一意な部分文字列で再構築。 諦めて file_write も検討。";
+      }
+    }
+    if (toolName === "bash") {
+      return "対処: コマンドのエラー出力を読み、 引数や前提を変更してから再試行してください。 同じコマンドの単純再試行は無効。";
+    }
+    if (toolName === "file_read") {
+      return "対処: パスを再確認 (絶対パスか / 親ディレクトリは存在するか)。 同じパスの再試行は無効。";
+    }
+    return "対処: エラーメッセージの示す通りに引数を変えるか、 別ツールに切り替えてください。";
+  }
+
   /** Execute a single tool call, returning whether to abort the rest of the run loop */
   private async executeSingleTool(toolCall: ToolCall): Promise<boolean> {
     const summary = formatToolCall(toolCall);
@@ -1095,6 +1162,12 @@ export class AgentLoop {
     resultContent = enrichToolResult(toolCall, result.success, resultContent, this.harnessState);
 
     this.history.addToolResult(toolCall.id, resultContent);
+
+    // P0-A: 失敗時に sliding-window で「同じ轍」 を検出して self-check 注入
+    if (!result.success) {
+      const errMsg = (result.error ?? result.output ?? "").toString();
+      this.maybeDetectStuckLoop(toolCall, errMsg);
+    }
 
     return result.abortExecution === true;
   }
@@ -1185,6 +1258,12 @@ export class AgentLoop {
         resultContent = enrichToolResult(toolCall, result.success, resultContent, this.harnessState);
 
         this.history.addToolResult(toolCall.id, resultContent);
+
+        // P0-A: 並列ルートでも同じ sliding-window 失敗検出を適用
+        if (!result.success) {
+          const errMsg = (result.error ?? result.output ?? "").toString();
+          this.maybeDetectStuckLoop(toolCall, errMsg);
+        }
 
         if (result.abortExecution) {
           shouldAbort = true;

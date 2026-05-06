@@ -82,6 +82,8 @@ export function buildToolUsageRules(): string {
   // 契約) は別概念のため残す。
   return `# ツール使用の原則
 - 編集前に file_read で必ず読む。 古い情報での編集は失敗の主因
+- **file_edit / file_write 直後の file_read は禁止**。 file_edit のレスポンスには編集箇所 ±20 行が同梱されており、 file_write は今書いた内容そのもの。 別箇所を見たい時のみ file_read。
+- 同じツール × 同じ引数で失敗 → そのまま再試行は無効。 エラー文の指示通りに引数を変えるか、 別ツールに切り替える (例: file_edit で found N times → replace_all=true か一意化、 not found → file_write で全体書き直し)
 - 各ツールの description は「使うべき場面」「使うべきでない場面」「よくある誤用」 を含む。 迷ったら description を再読
 - 新規作成より既存編集を優先`;
 }
