@@ -78,6 +78,44 @@ interface BashToolHandler extends ToolHandler {
   killRunningProcess(): void;
 }
 
+/**
+ * P3-B: 破壊的なコマンドを検出して、 実行前に git status のスナップショットを
+ * 取得する。 docs/agent-loop-efficiency-review.md §4.7 参照。
+ *
+ * 対象パターン:
+ * - git checkout -- <path> / git checkout . (作業ツリー破棄)
+ * - git reset --hard
+ * - git clean -fd / -fdx (untracked 削除)
+ * - rm -rf / rm -fr
+ * - find ... -delete
+ *
+ * 観測ログ (株アプリ実装、 2026-05-06 セッション T86) で、 git checkout が失敗し
+ * 作業ツリーが意図せぬ状態で残り、 同じ編集を 6 回やり直す事象が発生した。
+ */
+const DESTRUCTIVE_PATTERNS: RegExp[] = [
+  /\bgit\s+checkout\s+(--\s|\.\s|\.$|--$)/,
+  /\bgit\s+reset\s+--hard\b/,
+  /\bgit\s+clean\s+-[a-z]*[df][a-z]*\b/,
+  /\brm\s+-[rR][fF]?\s|\brm\s+-[fF][rR]?\s/,
+  /\bfind\b[^|;&]*-delete\b/,
+];
+function isDestructiveCommand(command: string): boolean {
+  return DESTRUCTIVE_PATTERNS.some((re) => re.test(command));
+}
+function captureGitStatusSnapshot(): string {
+  try {
+    const out = execFileSync("git", ["status", "--short"], {
+      encoding: "utf-8",
+      timeout: 5000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.trim();
+  } catch {
+    // git リポジトリ外、 or git 未インストール → スナップショットなしで続行
+    return "";
+  }
+}
+
 /** 現在実行中の子プロセス（abort用） */
 import type { ChildProcess } from "node:child_process";
 let currentProcess: ChildProcess | null = null;
@@ -100,6 +138,9 @@ export const bashTool: BashToolHandler = {
         "[よくある誤用] (a) Windows で cmd 構文を期待 → git bash なので Unix 構文。 " +
         "(b) パイプの中で対話入力を要するコマンド → 使わない。 " +
         "(c) 長時間実行コマンド → timeout を増やすか run_in_background を検討。\n" +
+        "[破壊的コマンドの作法] git checkout -- / git reset --hard / git clean -fd / rm -rf / find -delete を実行する前に必ず " +
+        "git status --short で状態を確認し、 不要な作業を巻き込まないか検証してから打つこと。 ハーネスは破壊的コマンド検出時、 " +
+        "事前 git status を取得して結果先頭に添付する (= 巻き込み事故を可視化)。\n" +
         "[副次情報] 成功時に exitCode/durationMs/stdoutBytes を末尾に付与。",
       parameters: {
         type: "object",
@@ -129,6 +170,10 @@ export const bashTool: BashToolHandler = {
   async execute(params: Record<string, unknown>): Promise<ToolResult> {
     const command = params.command as string;
     const timeout = (params.timeout as number) ?? DEFAULT_TIMEOUT;
+
+    // P3-B: 破壊的コマンド検出 → 事前 git status スナップショットを保持
+    const destructive = isDestructiveCommand(command);
+    const preflightStatus = destructive ? captureGitStatusSnapshot() : "";
 
     // OS-level サンドボックスラップ
     let shell: string;
@@ -218,10 +263,20 @@ export const bashTool: BashToolHandler = {
         // Phase 5-C2: 副次情報の標準同梱 (exitCode/duration/bytes)
         const durationMs = Date.now() - startMs;
         const meta = `\n[bash] exitCode=${code ?? "?"} | duration=${durationMs}ms | stdout=${stdout.length}B | stderr=${stderr.length}B`;
-        if (code === 0) {
-          return { success: true, output: truncated + meta };
+        // P3-B: 破壊的コマンドの場合、 事前 git status を結果先頭に添付。
+        // これによりモデルは「どのファイルが破棄されたか」 を即座に把握でき、
+        // T86 (git checkout 失敗 → 同じ編集 6 回やり直し) のような事故が防げる。
+        let prefix = "";
+        if (destructive) {
+          prefix = preflightStatus
+            ? `[P3-B] 破壊的コマンド検出。 実行前の git status:\n${preflightStatus}\n[ハーネス] ` +
+              `この破壊操作で巻き込まれた可能性のあるファイルが上記です。 必要なら別途 stash で退避してから再実行を検討。\n---\n`
+            : `[P3-B] 破壊的コマンド検出 (git リポジトリ外、 または git 未インストール)。 ロールバック失敗時の復旧手段を確保していますか?\n---\n`;
         }
-        return { success: false, output: truncated + meta, error: `Exit code: ${code}` };
+        if (code === 0) {
+          return { success: true, output: prefix + truncated + meta };
+        }
+        return { success: false, output: prefix + truncated + meta, error: `Exit code: ${code}` };
       };
 
       // close と exit の両方を監視（Windowsでcloseが発火しないケース対策）

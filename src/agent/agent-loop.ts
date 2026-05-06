@@ -167,6 +167,14 @@ export class AgentLoop {
   private todoWriteCount = 0;
   /** P1-B: plan/todo の過多警告を既に注入したか (1 user span に 1 回だけ) */
   private planTodoWarned = false;
+  /**
+   * P3-A: 現在の対話レジスター。 system-prompt の規約により、 モデルがタスク開始時に
+   * 「このタスクは X として進めます」 と宣言する。 その宣言を読み取り、 反復上限を
+   * レジスター別に切り替える。 unknown のままなら従来通り MAX_TOOL_ITERATIONS=100。
+   */
+  private currentRegister: "explore" | "rough" | "standard" | "production" | "unknown" = "unknown";
+  /** P3-A: ソフトキャップ警告を既に注入したか (1 user span に 1 回だけ) */
+  private softCapWarned = false;
   /** チャットログ（Obsidian Vault保存、null なら無効） */
   private chatLogger: ChatLogger | null = null;
   /** Evaluator（成果物の独立レビュー） */
@@ -263,6 +271,9 @@ export class AgentLoop {
     this.planModeEntries = 0;
     this.todoWriteCount = 0;
     this.planTodoWarned = false;
+    // P3-A: レジスターは user 発話ごとに再判定 (前タスクのレジスターを引き継がない)
+    this.currentRegister = "unknown";
+    this.softCapWarned = false;
     try {
     this.history.addUserMessage(userMessage);
     // チャットログ記録
@@ -306,6 +317,24 @@ export class AgentLoop {
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       this.currentIteration = iteration;
+      // P3-A: レジスター別ソフトキャップ。 hard cap = MAX_TOOL_ITERATIONS=100 は維持しつつ、
+      // 軽量タスク (explore/rough) は早めに上限到達を促し、 standard はやや控えめ、
+      // production は hard cap まで使う。 docs/agent-loop-efficiency-review.md §4.1 参照。
+      const softCap = this.computeRegisterSoftCap();
+      if (iteration >= softCap && !this.softCapWarned) {
+        console.log(chalk.yellow(
+          `\n  レジスター "${this.currentRegister}" のソフト上限 (${softCap}) に到達しました。 ` +
+          `必要なら ask_user で続行可否を確認するか、 区切って報告してください。`,
+        ));
+        this.history.addUserMessage(
+          `[ハーネス] レジスター "${this.currentRegister}" のソフト上限 (${softCap} 反復) に到達しました。\n` +
+          `  進捗を簡潔にまとめ、 残作業を提示してから ask_user で続行 or 中断を確認してください。\n` +
+          `  「もう少しで終わる」 と判断するなら response_complete で完了報告を。 hard cap は ${MAX_TOOL_ITERATIONS} 反復です。`,
+        );
+        this.softCapWarned = true;
+        // ソフトキャップ到達後は hard cap までしか走らないようループ条件で自然終了させる
+        // (即座に return せず、 LLM の応答を 1 回受けてから安全に閉じる)
+      }
       // 中断チェック
       if (this._aborted) {
         console.log(chalk.yellow("\n  (処理を中断しました)"));
@@ -624,6 +653,9 @@ export class AgentLoop {
       }
 
       if (!success) return;
+
+      // P3-A: アシスタント応答テキストからレジスター宣言を検出 (1 user span に 1 度だけ反映)
+      this.detectRegisterFromText(textContent);
 
       // finish_reason="length": max_tokensに達して出力が途中で切れた場合、自動的に続きを生成する
       // 安全ネット: vLLMがfinish_reason="stop"を誤って返す場合に備え、
@@ -1136,6 +1168,45 @@ export class AgentLoop {
       return "対処: パスを再確認 (絶対パスか / 親ディレクトリは存在するか)。 同じパスの再試行は無効。";
     }
     return "対処: エラーメッセージの示す通りに引数を変えるか、 別ツールに切り替えてください。";
+  }
+
+  /**
+   * P3-A: レジスター別ソフトキャップ。 hard cap (MAX_TOOL_ITERATIONS=100) 内に収まる
+   * 範囲で、 軽量タスクは早めに警告。 docs/agent-loop-efficiency-review.md §4.1 参照。
+   */
+  private static readonly REGISTER_SOFT_CAP: Record<string, number> = {
+    explore: 20,
+    rough: 30,
+    standard: 70,
+    production: 100, // hard cap と同値
+    unknown: 100, // レジスター宣言なし → 従来動作と同じ
+  };
+  private computeRegisterSoftCap(): number {
+    return AgentLoop.REGISTER_SOFT_CAP[this.currentRegister] ?? MAX_TOOL_ITERATIONS;
+  }
+
+  /**
+   * P3-A: アシスタントの応答テキストから「このタスクは X として進めます」 系の
+   * 宣言を検出してレジスターを更新。 system-prompt 規約 (system-prompt.ts:73-) に対応。
+   * 一度設定したら user 発話で reset されるまで維持。
+   */
+  private detectRegisterFromText(text: string): void {
+    if (this.currentRegister !== "unknown") return; // 既に決まっていれば変えない
+    if (!text) return;
+    // 「このタスクは X として」 / 「register: X」 / 「X register」 / 英語表現も拾う
+    const patterns: Array<[RegExp, AgentLoop["currentRegister"]]> = [
+      [/(?:このタスクは|task is|register[:：])\s*(production|本番品質|本番)/i, "production"],
+      [/(?:このタスクは|task is|register[:：])\s*(standard|通常)/i, "standard"],
+      [/(?:このタスクは|task is|register[:：])\s*(rough|ラフ|MVP)/i, "rough"],
+      [/(?:このタスクは|task is|register[:：])\s*(explore|探索|短答)/i, "explore"],
+    ];
+    for (const [re, reg] of patterns) {
+      if (re.test(text)) {
+        this.currentRegister = reg;
+        console.log(chalk.dim(`  [register] "${reg}" に設定 (soft cap = ${this.computeRegisterSoftCap()})`));
+        return;
+      }
+    }
   }
 
   /**
