@@ -71,6 +71,34 @@ function isGarbageResponse(text: string): boolean {
   return false;
 }
 
+/**
+ * P2-B: 巨大 tool_result を頭尾要約に置換する。 履歴に積もるトークンが
+ * 平均 95K / 最大 172K に達していたため、 大きな出力 (>20KB) は中央を切る。
+ *
+ * - 閾値: 20KB 未満は無加工 (観測ログの p90 = 6KB なので 95% は影響を受けない)
+ * - 加工: 先頭 8KB + 末尾 4KB を残し、 中央を「...(N bytes truncated for history)」 に置換
+ * - 対象外: file_edit (P0-B で自前にスニペット同梱しており短い)、 file_write
+ *
+ * docs/agent-loop-efficiency-review.md §4.8 参照。
+ */
+const TOOL_RESULT_TRUNCATE_THRESHOLD = 20 * 1024;
+const TOOL_RESULT_HEAD_BYTES = 8 * 1024;
+const TOOL_RESULT_TAIL_BYTES = 4 * 1024;
+function truncateLargeToolResult(toolName: string, content: string): string {
+  if (!content) return content;
+  // file_edit は P0-B で自前にスニペット同梱しており、 既に短い
+  if (toolName === "file_edit" || toolName === "file_write") return content;
+  if (content.length <= TOOL_RESULT_TRUNCATE_THRESHOLD) return content;
+  const head = content.slice(0, TOOL_RESULT_HEAD_BYTES);
+  const tail = content.slice(-TOOL_RESULT_TAIL_BYTES);
+  const truncated = content.length - TOOL_RESULT_HEAD_BYTES - TOOL_RESULT_TAIL_BYTES;
+  return (
+    head +
+    `\n\n...(${truncated} bytes truncated for history; full output was ${content.length} bytes from "${toolName}")...\n\n` +
+    tail
+  );
+}
+
 
 export class AgentLoop {
   private history: MessageHistory;
@@ -1230,6 +1258,9 @@ export class AgentLoop {
     // を一括で適用。
     resultContent = enrichToolResult(toolCall, result.success, resultContent, this.harnessState);
 
+    // P2-B: 巨大 tool_result はコンテキスト膨張の主因。 履歴格納時に頭尾を残して中央を要約。
+    resultContent = truncateLargeToolResult(toolCall.function.name, resultContent);
+
     this.history.addToolResult(toolCall.id, resultContent);
 
     // P0-A: 失敗時に sliding-window で「同じ轍」 を検出して self-check 注入
@@ -1328,6 +1359,9 @@ export class AgentLoop {
 
         // Phase 5 第2ラウンド: ハーネス介入レイヤ (並列ルートでも適用)
         resultContent = enrichToolResult(toolCall, result.success, resultContent, this.harnessState);
+
+        // P2-B: 巨大 tool_result の頭尾要約 (並列ルートも同様に適用)
+        resultContent = truncateLargeToolResult(toolCall.function.name, resultContent);
 
         this.history.addToolResult(toolCall.id, resultContent);
 

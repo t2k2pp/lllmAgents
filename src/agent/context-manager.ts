@@ -14,7 +14,9 @@ export class ContextManager {
     provider: LLMProvider,
     model: string,
     contextWindow: number,
-    threshold = 0.8,
+    // P2-B: 旧 0.8 → 0.7 に前倒し。 80% 到達時の圧縮は対象が大きく遅延が嵩むため、
+    // 早めに小さく頻繁に圧縮する方が体感が良い。 docs/agent-loop-efficiency-review.md §4.8 参照。
+    threshold = 0.7,
     keepRecentMessages = 10,
   ) {
     this.contextWindow = contextWindow;

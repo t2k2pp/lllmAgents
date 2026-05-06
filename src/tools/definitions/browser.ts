@@ -1,9 +1,18 @@
+import * as crypto from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { PlaywrightManager } from "../../browser/playwright-manager.js";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
 
 export function createBrowserTools(manager: PlaywrightManager): ToolHandler[] {
+  /**
+   * P2-A: browser_snapshot 結果のキャッシュ。 同一 DOM のままキャプチャを連発する
+   * (引数 `{}` で 19 連発の事例あり) ことを抑止するため、 直前の snapshot のハッシュ
+   * と一致したら短い「変化なし」 レスポンスのみ返す。
+   * docs/agent-loop-efficiency-review.md §4.5 参照。
+   */
+  let lastSnapshotHash = "";
+  let lastSnapshotLen = 0;
   const browserNavigate: ToolHandler = {
     name: "browser_navigate",
     definition: {
@@ -24,6 +33,9 @@ export function createBrowserTools(manager: PlaywrightManager): ToolHandler[] {
       try {
         const url = params.url as string;
         const finalUrl = await manager.navigate(url);
+        // P2-A: ナビゲーション = DOM 全更新なので snapshot キャッシュを無効化
+        lastSnapshotHash = "";
+        lastSnapshotLen = 0;
         return { success: true, output: `Navigated to: ${finalUrl}` };
       } catch (e) {
         return { success: false, output: "", error: String(e) };
@@ -37,13 +49,28 @@ export function createBrowserTools(manager: PlaywrightManager): ToolHandler[] {
       type: "function",
       function: {
         name: "browser_snapshot",
-        description: "現在のページのアクセシビリティツリーを取得します。ページの構造と内容をテキストで確認できます。",
+        description:
+          "現在のページのアクセシビリティツリーを取得します。 ページの構造と内容をテキストで確認できます。\n" +
+          "[副次情報] 直前の snapshot から DOM が変化していなければ、 短縮レスポンスのみ返す (= 連発しても情報は増えない)。",
         parameters: { type: "object", properties: {} },
       },
     },
     async execute(): Promise<ToolResult> {
       try {
         const tree = await manager.snapshot();
+        // P2-A: 直前と同一なら短縮レスポンス。 click/navigate/type 系で DOM が
+        // 変わったら別ハンドラ側で lastSnapshotHash をクリアする。
+        const hash = crypto.createHash("sha1").update(tree).digest("hex");
+        if (hash === lastSnapshotHash) {
+          return {
+            success: true,
+            output:
+              `[browser_snapshot] no changes since previous snapshot (hash=${hash.slice(0, 8)}, ${lastSnapshotLen} chars). ` +
+              `前回と DOM が変わっていません。 別の操作 (click/type/navigate) を行ってから再取得するか、 別アプローチを検討してください。`,
+          };
+        }
+        lastSnapshotHash = hash;
+        lastSnapshotLen = tree.length;
         return { success: true, output: tree };
       } catch (e) {
         return { success: false, output: "", error: String(e) };
@@ -70,6 +97,9 @@ export function createBrowserTools(manager: PlaywrightManager): ToolHandler[] {
     async execute(params): Promise<ToolResult> {
       try {
         await manager.click(params.selector as string);
+        // P2-A: クリックは DOM 変更を起こす可能性 → snapshot キャッシュを無効化
+        lastSnapshotHash = "";
+        lastSnapshotLen = 0;
         return { success: true, output: `Clicked: ${params.selector}` };
       } catch (e) {
         return { success: false, output: "", error: String(e) };
@@ -97,6 +127,9 @@ export function createBrowserTools(manager: PlaywrightManager): ToolHandler[] {
     async execute(params): Promise<ToolResult> {
       try {
         await manager.type(params.selector as string, params.text as string);
+        // P2-A: 入力は DOM 変更を起こす → snapshot キャッシュを無効化
+        lastSnapshotHash = "";
+        lastSnapshotLen = 0;
         return { success: true, output: `Typed into: ${params.selector}` };
       } catch (e) {
         return { success: false, output: "", error: String(e) };
