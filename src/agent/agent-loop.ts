@@ -50,7 +50,7 @@ function renderMarkdown(text: string): string {
   }
 }
 
-const MAX_TOOL_ITERATIONS = 50;
+const MAX_TOOL_ITERATIONS = 100;
 const MAX_CONNECTION_RETRIES = 3;
 
 // formatSelfCheck は src/agent/self-check-messages.ts に移動 (ID-012: 2026-04-30 共通化)。

@@ -15,7 +15,7 @@
 ┌──────────────────▼─────────────────────────────┐
 │                AgentLoop                        │
 │  - ユーザーメッセージ → LLM → ツール → LLM...  │
-│  - MAX_TOOL_ITERATIONS = 50                     │
+│  - MAX_TOOL_ITERATIONS = 100                     │
 │  - リトライ (MAX_RETRIES = 2, exp backoff)      │
 │  - ストリーミング出力 (SSE → stdout)            │
 │  - プランモード (設計→承認→実行)                │
