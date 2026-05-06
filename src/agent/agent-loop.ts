@@ -126,6 +126,19 @@ export class AgentLoop {
   private recentFailures: Array<{ iteration: number; signature: string; error: string }> = [];
   /** 主ループの現在の iteration index (executeSingleTool/Parallel から参照するため共有) */
   private currentIteration = 0;
+  /**
+   * P1-A: bash 累積実行時間 (ms)。 重い build/run の連発を抑止するための観測値。
+   * 閾値超過で 1 度だけ警告を末尾に注入し、 ユーザー発話で reset。
+   */
+  private bashCumulativeMs = 0;
+  /** P1-A: bash 警告を既に注入したか (1 user span に 1 回だけ) */
+  private bashCumulativeWarned = false;
+  /** P1-B: 1 user span 内の enter_plan_mode 呼出回数 */
+  private planModeEntries = 0;
+  /** P1-B: 1 user span 内の todo_write 呼出回数 */
+  private todoWriteCount = 0;
+  /** P1-B: plan/todo の過多警告を既に注入したか (1 user span に 1 回だけ) */
+  private planTodoWarned = false;
   /** チャットログ（Obsidian Vault保存、null なら無効） */
   private chatLogger: ChatLogger | null = null;
   /** Evaluator（成果物の独立レビュー） */
@@ -216,6 +229,12 @@ export class AgentLoop {
     this._aborted = false;
     // P0-A: ユーザー発話のたびに失敗履歴をリセット (前ターンの失敗を引き摺らない)
     this.recentFailures = [];
+    // P1-A/B: bash累積時間 / plan/todo 呼出回数も user span 単位でリセット
+    this.bashCumulativeMs = 0;
+    this.bashCumulativeWarned = false;
+    this.planModeEntries = 0;
+    this.todoWriteCount = 0;
+    this.planTodoWarned = false;
     try {
     this.history.addUserMessage(userMessage);
     // チャットログ記録
@@ -1091,6 +1110,56 @@ export class AgentLoop {
     return "対処: エラーメッセージの示す通りに引数を変えるか、 別ツールに切り替えてください。";
   }
 
+  /**
+   * P1-A: bash 累積時間 / P1-B: plan/todo 呼出回数を観測し、 閾値超過で 1 度だけ
+   * self-check を注入する。 ツール完了直後に呼び出される。
+   * docs/agent-loop-efficiency-review.md §4.4 / §4.6 参照。
+   */
+  private static readonly BASH_CUMULATIVE_WARN_MS = 5 * 60 * 1000; // 5 分
+  private static readonly PLAN_MODE_LIMIT = 2;
+  private static readonly TODO_WRITE_LIMIT = 5;
+  private maybeWarnBashCumulative(toolCall: ToolCall, durationMs: number): void {
+    if (toolCall.function.name !== "bash") return;
+    this.bashCumulativeMs += durationMs;
+    if (this.bashCumulativeWarned) return;
+    if (this.bashCumulativeMs < AgentLoop.BASH_CUMULATIVE_WARN_MS) return;
+    const totalSec = Math.round(this.bashCumulativeMs / 1000);
+    console.log(chalk.yellow(`\n  ⚠ bash 累積実行時間が ${totalSec}s に達しました。 重い build/run の連発を見直してください`));
+    this.history.addUserMessage(
+      `[ハーネス] このユーザー発話以降、 bash の累積実行時間が ${totalSec}s を超えました。\n` +
+      `  重い検証 (build / 起動 / 全件再実行) を毎 edit ごとに走らせていませんか?\n` +
+      `  対策: (a) 複数 edit をまとめてから 1 回 build (b) syntax check (\`node --check\` / \`tsc --noEmit\` 等) で軽く確認 (c) ホットリロードを活用 (d) 同一コマンドの単純再実行は禁止。`,
+    );
+    this.bashCumulativeWarned = true;
+  }
+  private maybeWarnPlanTodoOveruse(toolCall: ToolCall): void {
+    const name = toolCall.function.name;
+    if (name === "enter_plan_mode") this.planModeEntries++;
+    if (name === "todo_write") this.todoWriteCount++;
+    if (this.planTodoWarned) return;
+    const planOver = this.planModeEntries > AgentLoop.PLAN_MODE_LIMIT;
+    const todoOver = this.todoWriteCount > AgentLoop.TODO_WRITE_LIMIT;
+    if (!planOver && !todoOver) return;
+    const reasons: string[] = [];
+    if (planOver) {
+      reasons.push(
+        `enter_plan_mode を ${this.planModeEntries} 回呼んでいます (上限 ${AgentLoop.PLAN_MODE_LIMIT})。 「計画蒸発」 (計画を立てて抜け、 また立てる) の兆候です。`,
+      );
+    }
+    if (todoOver) {
+      reasons.push(
+        `todo_write を ${this.todoWriteCount} 回呼んでいます (上限 ${AgentLoop.TODO_WRITE_LIMIT})。 細切れの todo 更新で反復が嵩みます。`,
+      );
+    }
+    console.log(chalk.yellow(`\n  ⚠ 計画/Todo 過多検知: ${reasons.join(" / ")}`));
+    this.history.addUserMessage(
+      `[ハーネス] このユーザー発話以降、 計画/Todo の更新が過多です:\n` +
+      reasons.map((r) => `  - ${r}`).join("\n") +
+      `\n  対策: 既存の todo を見直し、 必要なら 1 回だけ更新する。 計画モード再突入は禁止 — 既存計画を流用して実装を進めてください。`,
+    );
+    this.planTodoWarned = true;
+  }
+
   /** Execute a single tool call, returning whether to abort the rest of the run loop */
   private async executeSingleTool(toolCall: ToolCall): Promise<boolean> {
     const summary = formatToolCall(toolCall);
@@ -1168,6 +1237,9 @@ export class AgentLoop {
       const errMsg = (result.error ?? result.output ?? "").toString();
       this.maybeDetectStuckLoop(toolCall, errMsg);
     }
+    // P1-A/B: bash 累積時間と plan/todo 過多を観測
+    this.maybeWarnBashCumulative(toolCall, toolDurationMs);
+    this.maybeWarnPlanTodoOveruse(toolCall);
 
     return result.abortExecution === true;
   }
@@ -1264,6 +1336,9 @@ export class AgentLoop {
           const errMsg = (result.error ?? result.output ?? "").toString();
           this.maybeDetectStuckLoop(toolCall, errMsg);
         }
+        // P1-A/B: 並列ルートでも bash 累積時間 / plan/todo 過多を観測
+        this.maybeWarnBashCumulative(toolCall, durationMs);
+        this.maybeWarnPlanTodoOveruse(toolCall);
 
         if (result.abortExecution) {
           shouldAbort = true;

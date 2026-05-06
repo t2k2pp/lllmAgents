@@ -48,6 +48,12 @@ export function buildVerificationRules(): string {
 - 仕様ファイルがあれば、 仕様キーワードを成果物が含むか grep で確認
 - production レジスターでは可能なら browser_screenshot で実際の表示を確認
 
+# 検証粒度の最適化 [必須] — 細切れ build は反復浪費の主因
+- **複数の file_edit を行ってから 1 回 build** が原則。 1 edit ごとに \`npm run build && PORT=... node ...\` のような重い検証を回さない (観測ログで同一 build を 11 連発した事例あり)
+- 軽い syntax check (\`node --check\` / \`python -m py_compile\` / \`tsc --noEmit\` 等) で edit 中の暫定確認、 build/run はまとまった単位で
+- ホットリロード可能なサーバーは「再起動なし」 で確認できないか先に検討
+- 検証用プロセスを起動したら、 用が済んだら止める。 起動 → 確認 → kill のサイクルで PID を放置しない
+
 検証失敗 → 修正 → 再検証を通るまで繰り返す。 検証成功の事実を完了報告に含める。`;
 }
 
