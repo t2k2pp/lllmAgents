@@ -21,6 +21,11 @@ import {
   type CapabilityProfile,
 } from "./capability-tier.js";
 import { normalizeToolCalls } from "./tool-call-normalizer.js";
+import {
+  classifyTaskComplexity,
+  recommendTier,
+  explainRecommendation,
+} from "./task-complexity.js";
 import { buildSystemPrompt, type SkillInfo, type LLMProfiles } from "./system-prompt.js";
 import {
   createSession,
@@ -325,6 +330,19 @@ export class AgentLoop {
           .filter((p): p is { type: "text"; text: string } => p.type === "text")
           .map((p) => p.text)
           .join(" ");
+    // Phase E-3: タスク複雑度を分類して、 不一致なら model 推奨を 1 行ログ。
+    // 自動切替はしない (ユーザの明示操作 = /model を尊重)。
+    try {
+      const complexity = classifyTaskComplexity(userMessageText);
+      const recommended = recommendTier(complexity, this.capability.tier);
+      if (recommended) {
+        const reason = explainRecommendation(complexity, this.capability.tier, recommended);
+        console.log(chalk.dim(
+          `  [model 推奨] ${this.capability.tier} → ${recommended} (complexity=${complexity}). ${reason}`,
+        ));
+        console.log(chalk.dim(`  → 切替する場合: /model <name> または /second swap`));
+      }
+    } catch { /* 推奨は best-effort、 失敗しても続行 */ }
     // <think>タグフィルター（古いOllama向け、ストリーム跨ぎ対応）
     const filterThinkingTags = createThinkingFilter();
     let emptyResponseRetries = 0;
