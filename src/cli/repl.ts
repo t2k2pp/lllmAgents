@@ -39,6 +39,7 @@ import { runLocalLLMSetup, connectAndListModels } from "../config/setup-wizard.j
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
 import { secondLLMConsultTool, secondLLMAgentTool, setSecondLLMManager } from "../tools/definitions/second-llm.js";
+import { federatedDelegateTool, setFederatedSecondLLMManager } from "../tools/definitions/federated-delegate.js";
 import { buildLLMProfiles } from "../agent/llm-profiles.js";
 import { createProvider } from "../providers/provider-factory.js";
 import { getOpsLogger, setOpsLogLevel, parseOpsLogLevel } from "../utils/ops-logger.js";
@@ -528,9 +529,12 @@ export class REPL {
     // (ToolRegistry.register は Map.set ベースで冪等なので再呼び出しは無害)
     if (this.secondLLMManager.isAvailable()) {
       setSecondLLMManager(this.secondLLMManager);
+      setFederatedSecondLLMManager(this.secondLLMManager);
       const reg = this.agent.getToolRegistry();
       reg.register(secondLLMConsultTool);
       reg.register(secondLLMAgentTool);
+      // Phase E-2: federated_delegate (validation 付き委譲)
+      reg.register(federatedDelegateTool);
     }
     this.refreshLLMProfiles();
   }

@@ -30,6 +30,7 @@ import { taskTool, taskOutputTool, setSubAgentManager } from "./tools/definition
 import { enterPlanModeTool, exitPlanModeTool, setPlanManager } from "./tools/definitions/plan-mode.js";
 import { skillTool, setSkillRegistry, setSkillPermissionManager, setSkillSubAgentManager } from "./tools/definitions/skill.js";
 import { secondLLMConsultTool, secondLLMAgentTool, setSecondLLMManager } from "./tools/definitions/second-llm.js";
+import { federatedDelegateTool, setFederatedSecondLLMManager } from "./tools/definitions/federated-delegate.js";
 import { knowledgeSaveTool, setObsidianConfig } from "./tools/definitions/knowledge-save.js";
 import { knowledgeSearchTool } from "./tools/definitions/knowledge-search.js";
 import { responseCompleteTool } from "./tools/definitions/response-complete.js";
@@ -281,8 +282,11 @@ async function main(): Promise<void> {
     }
     if (secondLLMManager.isAvailable()) {
       setSecondLLMManager(secondLLMManager);
+      setFederatedSecondLLMManager(secondLLMManager);
       toolRegistry.register(secondLLMConsultTool);
       toolRegistry.register(secondLLMAgentTool);
+      // Phase E-2: federated_delegate (期待出力の自動 validation 付き委譲)
+      toolRegistry.register(federatedDelegateTool);
     }
   }
   const hasSecondLLM = secondLLMManager.isAvailable();
