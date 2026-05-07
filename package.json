@@ -17,7 +17,8 @@
     "dev": "tsx watch src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "analyze:loop": "node scripts/analyze-loop.mjs"
   },
   "dependencies": {
     "@anthropic-ai/tokenizer": "^0.0.4",
