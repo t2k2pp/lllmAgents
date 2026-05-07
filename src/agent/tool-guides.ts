@@ -7,7 +7,12 @@
  * 連結して返す。
  *
  * 関連: `docs/prompt-tech-debt-review.md` ID-001 の §2 と §4 (2026-04-30 実施)
+ *
+ * Phase B-3 (2026-05-07): tier 引数を追加。 T3 (7B local) では主要ツールの
+ * few-shot 例を初回使用時に追加注入する。 docs/multi-tier-harness-roadmap.md §4 D-3 参照。
  */
+
+import type { Tier } from "./capability-tier.js";
 
 /** ガイドキー → ガイドテキスト本体 */
 const GUIDE_TEXTS: Record<string, string> = {
@@ -78,6 +83,95 @@ delegate メッセージには次の 4 点を必ず含める:
 };
 
 /**
+ * Phase B-3: T3 (7B local) 向けの few-shot 例。 ツール初回利用時に description の
+ * 補足として注入される。 T1/T2 では注入されない (= 賢い LLM の足枷にならない)。
+ *
+ * 設計指針:
+ * - 良い例 1 つ + 悪い例の落とし穴 2-3 件
+ * - JSON 形式で書く (T3 は JSON-mode が多い)
+ * - 引数の必須/任意を明示
+ */
+const T3_FEW_SHOTS: Record<string, string> = {
+  file_edit: `[T3向け 例: file_edit]
+良い例:
+  file_edit({"file_path": "/abs/path/to/main.py", "old_string": "def foo():\\n    pass", "new_string": "def foo():\\n    return 42"})
+悪い例 / よくある失敗:
+- 相対パス ("./main.py") → 絶対パス ("/abs/...") を使う
+- old_string が空白/改行/インデントを 1 文字でも違える → エラーになる。 file_read 結果からそのままコピー
+- 同じ old_string が 2 箇所以上マッチ → エラー。 replace_all=true を追加するか前後を含めて一意化
+- 直前に file_read していない → 必ず先に読む`,
+
+  file_write: `[T3向け 例: file_write]
+良い例:
+  file_write({"file_path": "/abs/path/to/output.py", "content": "<file 全文>"})
+悪い例:
+- content に差分だけ渡す → 全文を渡す (file_write は完全上書き)
+- 相対パス → 絶対パスのみ
+- 既存ファイルを上書きしたいだけなら file_edit を優先`,
+
+  file_read: `[T3向け 例: file_read]
+良い例:
+  file_read({"file_path": "/abs/path/to/file.py"})
+  file_read({"file_path": "/abs/main.py", "offset": 100, "limit": 50})  // 100行目から50行
+悪い例:
+- file_edit / file_write の直後に同じファイルを読む → 不要 (レスポンスに該当箇所が入っている)
+- 大きいファイル (>1000行) を offset/limit なしで読む → コンテキスト浪費`,
+
+  bash: `[T3向け 例: bash]
+良い例:
+  bash({"command": "node --check /abs/path/file.js"})
+  bash({"command": "cd /abs/proj && python -m pytest test_main.py", "timeout": 60000})
+悪い例:
+- ファイル中身を見るために cat/head/tail を使う → file_read を使う
+- ファイル一覧に ls -la を使う → glob を使う
+- 同じコマンドを 2 回失敗で 3 回目を試す → 引数を変える
+- pytest や npm run build を 1 edit ごとに走らせる → まとめて 1 回`,
+
+  grep: `[T3向け 例: grep]
+良い例:
+  grep({"pattern": "function foo", "path": "/abs/path/src"})
+  grep({"pattern": "TODO", "path": "/abs/proj", "include": "*.py"})
+悪い例:
+- 正規表現の特殊文字 ($, ^, [, ], (, )) を escape し忘れる
+- ヒット 0 で同じ pattern を再試行 → pattern を緩める or path を広げる`,
+
+  glob: `[T3向け 例: glob]
+良い例:
+  glob({"pattern": "**/*.py", "path": "/abs/proj"})
+  glob({"pattern": "src/**/test_*.py"})
+悪い例:
+- ヒット 0 で同じ pattern を再試行 → pattern を緩める ("*" → "**/*"、 拡張子を変える)
+- 全ディレクトリを再帰検索 (\`ls -R\` 相当) は使わない (スコープ違反)`,
+
+  todo_write: `[T3向け 例: todo_write]
+良い例:
+  todo_write({"todos": [
+    {"content": "main.py を file_write で作成", "status": "in_progress"},
+    {"content": "node --check で構文確認", "status": "pending"},
+    {"content": "python main.py で動作確認", "status": "pending"}
+  ]})
+原則:
+- 3 項目で十分。 細かく分けすぎない
+- "in_progress" は同時に 1 つだけ
+- 全部 "completed" になったら response_complete を呼ぶ`,
+
+  ask_user: `[T3向け 例: ask_user]
+良い例:
+  ask_user({"question": "ファイル名を教えてください。 main.py か app.py か。"})
+原則:
+- 推測で進めるより聞く方が良い
+- 質問は 1 つだけ短く
+- 同じツールが 2 回失敗した時 / ユーザー指示が曖昧な時に使う`,
+
+  response_complete: `[T3向け 例: response_complete]
+良い例:
+  response_complete({"summary": "main.py を作成、 node --check 通過、 動作確認済み。"})
+原則:
+- 作業が全部終わったら必ず呼ぶ
+- summary は 1-2 文で簡潔に「何を作ったか / どう確認したか」`,
+};
+
+/**
  * ツール名 → 該当するガイドキー配列。
  * 1 つのツールに対して複数のガイドが該当しうる (例: bash は verification + scopeStrict)。
  */
@@ -93,25 +187,40 @@ const TOOL_TO_GUIDES: Record<string, readonly string[]> = {
 
 /** 既に注入済みのガイドキーを追跡する Set */
 const usedGuides = new Set<string>();
+/** Phase B-3: 既に注入済みの T3 few-shot キー (= ツール名) */
+const usedFewShots = new Set<string>();
 
 /**
  * ツール初回使用時のガイドテキストを取得する。
  *
  * - ツールに紐づくガイドキー (TOOL_TO_GUIDES) のうち、 まだ使われていないものだけを連結して返す
+ * - Phase B-3: tier === "T3" で、 そのツールに T3 few-shot 例があれば追加で注入
  * - 1 つでも未使用ガイドがあれば文字列を返し、 全て使用済みなら null を返す
  * - 取得した時点で「使用済み」 とマークするため、 同じガイドが二度注入されることはない
  */
-export function getFirstUseGuide(toolName: string): string | null {
-  const keys = TOOL_TO_GUIDES[toolName];
-  if (!keys || keys.length === 0) return null;
+export function getFirstUseGuide(toolName: string, tier?: Tier): string | null {
+  const keys = TOOL_TO_GUIDES[toolName] ?? [];
+  const unusedKeys = keys.filter((k) => !usedGuides.has(k));
 
-  const unused = keys.filter((k) => !usedGuides.has(k));
-  if (unused.length === 0) return null;
+  // Phase B-3: T3 では few-shot を 1 度だけ注入
+  let t3Example: string | null = null;
+  if (tier === "T3" && T3_FEW_SHOTS[toolName] && !usedFewShots.has(toolName)) {
+    t3Example = T3_FEW_SHOTS[toolName];
+    usedFewShots.add(toolName);
+  }
 
-  for (const k of unused) {
+  if (unusedKeys.length === 0 && !t3Example) return null;
+
+  for (const k of unusedKeys) {
     usedGuides.add(k);
   }
-  return unused.map((k) => GUIDE_TEXTS[k]).filter(Boolean).join("\n\n");
+
+  const parts: string[] = [];
+  for (const k of unusedKeys) {
+    if (GUIDE_TEXTS[k]) parts.push(GUIDE_TEXTS[k]);
+  }
+  if (t3Example) parts.push(t3Example);
+  return parts.length > 0 ? parts.join("\n\n") : null;
 }
 
 /**
@@ -119,4 +228,5 @@ export function getFirstUseGuide(toolName: string): string | null {
  */
 export function resetToolGuides(): void {
   usedGuides.clear();
+  usedFewShots.clear();
 }

@@ -3,6 +3,7 @@ import { loadMemory } from "./memory.js";
 import { loadProjectInstructions, getGitInfo } from "./project-context.js";
 import { isWindows } from "../utils/platform.js";
 import { RuleLoader } from "../rules/rule-loader.js";
+import type { Tier } from "./capability-tier.js";
 import {
   buildRegisterRules,
   buildAcceptanceRules,
@@ -52,6 +53,7 @@ export function buildSystemPrompt(
   hasSecondLLM?: boolean,
   hasObsidian?: boolean,
   llmProfiles?: LLMProfiles,
+  tier?: Tier,
 ): string {
   const memory = loadMemory();
   const projectInstructions = loadProjectInstructions();
@@ -59,25 +61,90 @@ export function buildSystemPrompt(
 
   const parts: string[] = [];
 
-  // Core identity (メイン固有)
-  // メイン・サブで共通する原則は shared-principles.ts から組み立てる (ID-002)
-  parts.push(`あなたはAIエージェント。 ユーザーの依頼をツールで完遂する。 **テキスト発言だけで終わらせない**。
+  // Phase B-2: tier 別の core identity 出し分け
+  // - T1 (Claude/GPT-5): 簡潔。 規約だけ伝え、 暗黙の判断は信頼
+  // - T2 (default): 現行版 (中庸)
+  // - T3 (7B local): 簡素テンプレート + 明示的指示
+  // 共通する shared-principles 部分は各 builder に tier を渡す。
+  if (tier === "T1") {
+    parts.push(`あなたは AI エージェント。 ユーザーの依頼をツールで完遂する。 テキストだけで終わらせない。
+
+# 行動原則
+- 成果物は file_write / file_edit で作る (本文をテキスト応答に書かない、 ツール引数で渡す)
+- promise だけで応答を終わらせない (同ターンで実装ツールも呼ぶ)
+- 不明点 → ask_user / 複雑タスク → todo_write / 並列調査 → task で委任
+
+${buildRegisterRules(tier)}
+
+開始時、 通常のタスクなら 1 行で進め方を述べてからツールを呼ぶ。 既存のハーネスから自己点検が来た場合のみ反応する。
+
+${buildAcceptanceRules(tier)}
+
+${buildVerificationRules(tier)}
+
+# 応答完了 — 作業終了時に response_complete を呼ぶ。
+
+${buildToolUsageRules(tier)}
+
+${buildSpecFileRules(tier)}
+
+${buildEscalationRules(tier)}
+
+${buildUnexpectedSignalRules(tier)}
+
+# 委任 — task / second_llm_consult / second_llm_agent。 詳細は各ツール description。
+# セキュリティ — サンドボックス外禁止、 rm -rf 等危険コマンド遮断、 認証情報ハードコード禁止。
+# 出力 — 日本語入力には日本語。 プロフェッショナルかつ簡潔。 ファイル操作報告はパスと概要のみ。`);
+  } else if (tier === "T3") {
+    // T3: 簡素テンプレート + 「タスクをこの 3 行で書け」 形式
+    parts.push(`あなたは AI エージェント。 ユーザーの依頼に対し、 必ず ツール を呼んで成果物を作る。 テキストだけで応答を終わらせてはいけない。
+
+# 必ず守る 5 つのルール
+1. ファイルを作るときは file_write、 修正は file_edit (テキストにコードを書かない)
+2. 編集前に file_read でファイル現状を読む。 編集後は同じファイルを read しない (レスポンスに該当箇所が含まれる)
+3. 同じ tool を同じ引数で 2 回失敗したら、 引数を変える。 同じものを試し直さない
+4. 作業が完了したら response_complete を呼ぶ
+5. 不明な点があれば ask_user で人間に聞く。 推測で進めない
+
+${buildRegisterRules(tier)}
+
+# タスク開始時、 必ずこの 3 行で答えてから実装する:
+(1) 何を作るか: <ファイル名と種類>
+(2) どこに書くか: <絶対パス>
+(3) 検証方法: <bash で叩くコマンド>
+
+${buildAcceptanceRules(tier)}
+
+${buildVerificationRules(tier)}
+
+${buildToolUsageRules(tier)}
+
+${buildSpecFileRules(tier)}
+
+${buildEscalationRules(tier)}
+
+${buildUnexpectedSignalRules(tier)}
+
+# 出力 — 日本語入力には日本語で答える。 ファイル操作の報告は「<path> に <概要> を書いた」 のように 1 行で。`);
+  } else {
+    // T2 / undefined (current)
+    parts.push(`あなたはAIエージェント。 ユーザーの依頼をツールで完遂する。 **テキスト発言だけで終わらせない**。
 
 # 行動原則
 - 成果物は file_write / file_edit で作る (コード本文をテキスト応答に書かない、 ツール引数で渡す)
 - **「了解しました」「実装します」「次に X を行います」 等の promise だけで応答を終わらせない**。 必ず同じターンで実装ツール (file_write / file_edit / bash / todo_write 等) も呼び出す
 - 不明点 → ask_user / 複雑タスク → todo_write で管理 / 非自明な実装 → enter_plan_mode / 並列調査 → task で委任
 
-${buildRegisterRules()}
+${buildRegisterRules(tier)}
 
 **開始時のレジスター宣言** [必須]:
 依頼を受けたら、 **最初のターンの応答に「このタスクは <レジスター> として進めます」 の 1 行を含める** (ユーザーが過剰なら redirect 可)。 ただし **宣言テキストだけで応答を終わらせない** — 同じターンで **必ず todo_write もしくは実装ツール (file_write / file_edit / bash 等) を呼び出す**。 「宣言だけして次ターンに作業」 は禁止 (= 計画蒸発の温床、 ハーネスは自己点検を発動する)。 例:
 - 「このタスクは standard として進めます。」 → 同ターンで todo_write を呼び 3-5 項目の Acceptance Checklist を立てる
 - 「このタスクは rough として進めます。」 → 同ターンで file_write で最小実装を書く
 
-${buildAcceptanceRules()}
+${buildAcceptanceRules(tier)}
 
-${buildVerificationRules()}
+${buildVerificationRules(tier)}
 
 # 応答完了の宣言 [必須]
 作業が終わったら **必ず response_complete ツールを呼ぶ**。 summary にユーザー向け要約を入れる。
@@ -86,13 +153,13 @@ ${buildVerificationRules()}
 - 単純な挨拶や短い質問への応答でも、 会話が完結したら response_complete を呼んでよい
 - standard / production レジスターで Acceptance Checklist の未消化項目があるなら response_complete は呼ばない (まだ完了ではない)
 
-${buildToolUsageRules()}
+${buildToolUsageRules(tier)}
 
-${buildSpecFileRules()}
+${buildSpecFileRules(tier)}
 
-${buildEscalationRules()}
+${buildEscalationRules(tier)}
 
-${buildUnexpectedSignalRules()}
+${buildUnexpectedSignalRules(tier)}
 
 # 委任の概要 [必須]
 3 条件 (コンテキスト保護 / 並列性 / 専門性) のいずれかでなければインライン処理。 task / second_llm_consult / second_llm_agent の使い分けと委任時の必須 4 点 (レジスター / Acceptance Criteria / 仕様ファイルパス / 保存先パス) は、 これらツールの初回呼出時にガイドが注入される (段階的開示)。 計画モード (enter_plan_mode) の発動条件はそのツール description を参照。
@@ -103,6 +170,7 @@ ${buildUnexpectedSignalRules()}
 # 出力スタイル
 - 日本語の入力には日本語で返答。 プロフェッショナルな口調
 - ファイル操作報告はパスと変更概要のみ。 挨拶・質問には直接返答 (ツール不要)`);
+  }
 
   // Environment info
   const now = new Date();
@@ -121,18 +189,21 @@ ${buildUnexpectedSignalRules()}
 - 現在日時: ${localDatetime}`);
 
   // Project instructions (truncate at line boundary to avoid broken context)
+  // Phase B-2: T3 は短 ctx なので積極的に切る
+  const projInstrLimit = tier === "T3" ? 1500 : tier === "T1" ? 4000 : 3000;
+  const memoryLimit = tier === "T3" ? 1000 : tier === "T1" ? 3000 : 2000;
   if (projectInstructions) {
     parts.push(`
 # プロジェクト指示（参考情報）
 以下は現在の作業ディレクトリのリポジトリ固有の開発ルールです。ユーザーから別の指示がある場合はユーザーの指示を優先すること。
-${truncateAtLine(projectInstructions, 3000)}`);
+${truncateAtLine(projectInstructions, projInstrLimit)}`);
   }
 
   // Auto-memory (truncate at line boundary)
   if (memory) {
     parts.push(`
 # メモ
-${truncateAtLine(memory, 2000)}`);
+${truncateAtLine(memory, memoryLimit)}`);
   }
 
   // Skills (dynamic list)

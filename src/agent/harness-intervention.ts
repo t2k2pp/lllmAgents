@@ -23,6 +23,7 @@
  */
 
 import type { ToolCall } from "../providers/base-provider.js";
+import type { Tier } from "./capability-tier.js";
 import {
   buildRegisterRules,
   buildAcceptanceRules,
@@ -65,24 +66,24 @@ export function enrichToolResult(
  * `shared-principles.ts` から組み立て、 サブ固有 (立場 / 成果物保存責任 / 完結) のみ
  * ここで追加する。 「メイン・サブで乖離したいポイントはない」 というユーザー判断による。
  */
-export function buildSubAgentStrategyPrompt(): string {
+export function buildSubAgentStrategyPrompt(tier?: Tier): string {
   return `# あなたの立場
 メインLLMから委任されたサブエージェント。 タスクの完成までを **この 1 回の委任で完結** させる。
 細切れに別の委任に分けず、 必要な作業はこのセッション内でやり切る。 委任メッセージにはレジスター・ Acceptance Criteria・ 仕様ファイルパス・ 保存先パスが含まれているはず。
 
-${buildRegisterRules()}
+${buildRegisterRules(tier)}
 
-${buildAcceptanceRules()}
+${buildAcceptanceRules(tier)}
 
-${buildSpecFileRules()}
+${buildSpecFileRules(tier)}
 
-${buildToolUsageRules()}
+${buildToolUsageRules(tier)}
 
-${buildVerificationRules()}
+${buildVerificationRules(tier)}
 
-${buildEscalationRules()}
+${buildEscalationRules(tier)}
 
-${buildUnexpectedSignalRules()}
+${buildUnexpectedSignalRules(tier)}
 
 # 成果物の保存責任 [必須] — テキスト返却は未完了
 コード・ HTML・ JSON などの "成果物" は、 必ず file_write / file_edit で実ファイルに保存してから return する。 テキストのコードブロック (\`\`\`html ... \`\`\` 等) を返すだけでは未完了:

@@ -5,6 +5,7 @@ import { globalCostCalculator } from "../cost/cost-calculator.js";
 import { DelegationGuard } from "./delegation-guard.js";
 import { createSecondLLMProvider } from "../providers/provider-factory.js";
 import { LLMLogger } from "../agent/llm-logger.js";
+import { resolveCapability } from "../agent/capability-tier.js";
 import { getOpsLogger } from "../utils/ops-logger.js";
 import {
   HarnessState,
@@ -267,7 +268,13 @@ export class SecondLLMManager {
     try {
       // Phase 5 第2ラウンド: メインLLMの system-prompt から戦略原則を継承する。
       // メインとセカンドで「同じ原則を共有する」 ことが目的 (非対称性の解消)。
-      const systemPrompt = buildSubAgentStrategyPrompt();
+      // Phase B-4: セカンドLLM 自身の能力ティアを解決して shared-principles に渡す。
+      // セカンド側で T3 なら few-shot 風に短文化、 T1 なら concise が反映される。
+      const secondTier = resolveCapability(
+        this.endpoint.model,
+        this.endpoint.contextWindow ?? undefined,
+      ).tier;
+      const systemPrompt = buildSubAgentStrategyPrompt(secondTier);
       const messages: Message[] = [
         { role: "system", content: systemPrompt },
         { role: "user", content: prompt }

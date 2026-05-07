@@ -222,7 +222,8 @@ export class AgentLoop {
     // Phase A-3 + A-5: 能力ティア解決 (model + ctx 窓 + config の override)
     this.capability = resolveCapability(model, contextWindow, this.getCapabilityOverride(model));
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, model)} (${this.capability.reason})`);
-    const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian, llmProfiles);
+    // Phase B-2: 能力ティアを system prompt に渡して、 T1=concise / T2=current / T3=verbose+examples を出し分ける
+    const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian, llmProfiles, this.capability.tier);
     this.history = new MessageHistory(systemPrompt);
     this.contextManager = new ContextManager(provider, model, contextWindow, compressionThreshold);
     this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager);
@@ -1335,7 +1336,8 @@ export class AgentLoop {
 
     // ID-001 §2 + §4 (2026-04-30): 段階的開示。 ツール初回使用時にガイドを末尾へ付加。
     // verification / scopeStrict / delegation / secondLLM / obsidian の 5 種が tool-guides.ts に定義されている。
-    const guide = getFirstUseGuide(toolCall.function.name);
+    // Phase B-3: 能力ティアを渡して、 T3 では few-shot 例も追加注入する。
+    const guide = getFirstUseGuide(toolCall.function.name, this.capability.tier);
     if (guide) {
       resultContent += "\n\n" + guide;
     }
@@ -1439,7 +1441,8 @@ export class AgentLoop {
           : `Error: ${result.error}\n${result.output}`;
 
         // ID-001 §2 + §4 (2026-04-30): 段階的開示。 並列ルートでも同様にガイドを注入。
-        const guide = getFirstUseGuide(toolCall.function.name);
+        // Phase B-3: 並列ルートでも能力ティアを渡す
+        const guide = getFirstUseGuide(toolCall.function.name, this.capability.tier);
         if (guide) {
           resultContent += "\n\n" + guide;
         }
@@ -1513,13 +1516,15 @@ export class AgentLoop {
    */
   updateLLMProfiles(profiles: LLMProfiles, skills?: SkillInfo[], hasSecondLLM?: boolean, hasObsidian?: boolean): void {
     this.llmProfiles = profiles;
-    const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian, profiles);
+    // Phase B-2: tier 反映
+    const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian, profiles, this.capability.tier);
     this.history.updateSystemPrompt(systemPrompt);
   }
 
   restoreSession(sessionData: SessionData): void {
     this.session = sessionData;
-    const systemPrompt = buildSystemPrompt(undefined, undefined, undefined, this.llmProfiles);
+    // Phase B-2: tier 反映
+    const systemPrompt = buildSystemPrompt(undefined, undefined, undefined, this.llmProfiles, this.capability.tier);
     this.history = new MessageHistory(systemPrompt);
     for (const msg of sessionData.messages) {
       if (msg.role === "user") {
