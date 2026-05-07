@@ -827,11 +827,12 @@ export class REPL {
         break;
 
       case "/capability": {
-        // Phase A-4: 現在の LLM 能力ティアと profile を表示
+        // Phase A-4 + C-1: 現在の LLM 能力ティア / profile / tunables を表示
         const cap = this.agent.getCapability();
         const ctxK = cap.contextWindow >= 1000
           ? `${Math.round(cap.contextWindow / 1000)}K`
           : `${cap.contextWindow}`;
+        const truncKB = Math.round(cap.toolResultTruncateBytes / 1024);
         console.log(chalk.dim("  Capability profile:"));
         console.log(chalk.dim(`    model         : ${this.agent.getModel()}`));
         console.log(chalk.dim(`    tier          : ${cap.tier}`));
@@ -840,8 +841,15 @@ export class REPL {
         console.log(chalk.dim(`    toolCalling   : ${cap.supportsToolCalling}`));
         console.log(chalk.dim(`    parallelTools : ${cap.supportsParallelTools}`));
         console.log(chalk.dim(`    instrFollow   : ${cap.reliableInstructionFollowing}`));
+        console.log(chalk.dim("  Loop tunables (Phase C):"));
+        console.log(chalk.dim(`    maxIterations : ${cap.maxIterations}`));
+        console.log(chalk.dim(`    selfCheck max : ${cap.maxSelfCheckRounds}`));
+        console.log(chalk.dim(`    compress @    : ${Math.round(cap.compressionThreshold * 100)}% of ctxWindow`));
+        console.log(chalk.dim(`    truncate >    : ${truncKB}KB`));
+        console.log(chalk.dim(`    bash warn     : ${cap.bashCumulativeWarnEnabled ? "ON" : "OFF"}`));
+        console.log(chalk.dim(`    plan/todo警告 : ${cap.planTodoOveruseEnabled ? "ON" : "OFF"}`));
         console.log(chalk.dim(`    判定根拠       : ${cap.reason}`));
-        console.log(chalk.dim("  詳細: docs/multi-tier-harness-roadmap.md §3"));
+        console.log(chalk.dim("  詳細: docs/multi-tier-harness-roadmap.md §3-4"));
         break;
       }
 

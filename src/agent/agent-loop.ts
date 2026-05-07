@@ -56,6 +56,11 @@ function renderMarkdown(text: string): string {
   }
 }
 
+/**
+ * 反復上限の絶対 hard cap。 Phase C 以降は capability.maxIterations が
+ * 主要な制御点となり、 この定数は実際には使われない (一律 100 に統一)。
+ * 残してあるのは過去ドキュメントとの整合性 (DESIGN.md / docs/internal_design.md)。
+ */
 const MAX_TOOL_ITERATIONS = 100;
 const MAX_CONNECTION_RETRIES = 3;
 
@@ -78,26 +83,25 @@ function isGarbageResponse(text: string): boolean {
 }
 
 /**
- * P2-B: 巨大 tool_result を頭尾要約に置換する。 履歴に積もるトークンが
- * 平均 95K / 最大 172K に達していたため、 大きな出力 (>20KB) は中央を切る。
+ * P2-B + Phase C-3: 巨大 tool_result を頭尾要約に置換する。
  *
- * - 閾値: 20KB 未満は無加工 (観測ログの p90 = 6KB なので 95% は影響を受けない)
- * - 加工: 先頭 8KB + 末尾 4KB を残し、 中央を「...(N bytes truncated for history)」 に置換
+ * - 閾値: tier 別 (T1=20KB / T2=12KB / T3=6KB)。 短 ctx の T3 はノイズ感受性高。
+ * - 加工: 先頭 60% + 末尾 30% を残し、 中央を「...(N bytes truncated for history)」 に置換
  * - 対象外: file_edit (P0-B で自前にスニペット同梱しており短い)、 file_write
  *
- * docs/agent-loop-efficiency-review.md §4.8 参照。
+ * docs/agent-loop-efficiency-review.md §4.8 / docs/multi-tier-harness-roadmap.md §4 Phase C 参照。
  */
-const TOOL_RESULT_TRUNCATE_THRESHOLD = 20 * 1024;
-const TOOL_RESULT_HEAD_BYTES = 8 * 1024;
-const TOOL_RESULT_TAIL_BYTES = 4 * 1024;
-function truncateLargeToolResult(toolName: string, content: string): string {
+function truncateLargeToolResult(toolName: string, content: string, threshold: number): string {
   if (!content) return content;
   // file_edit は P0-B で自前にスニペット同梱しており、 既に短い
   if (toolName === "file_edit" || toolName === "file_write") return content;
-  if (content.length <= TOOL_RESULT_TRUNCATE_THRESHOLD) return content;
-  const head = content.slice(0, TOOL_RESULT_HEAD_BYTES);
-  const tail = content.slice(-TOOL_RESULT_TAIL_BYTES);
-  const truncated = content.length - TOOL_RESULT_HEAD_BYTES - TOOL_RESULT_TAIL_BYTES;
+  if (content.length <= threshold) return content;
+  // 閾値の 60%/30% で頭尾、 残り 10% は truncate メッセージ
+  const headBytes = Math.floor(threshold * 0.6);
+  const tailBytes = Math.floor(threshold * 0.3);
+  const head = content.slice(0, headBytes);
+  const tail = content.slice(-tailBytes);
+  const truncated = content.length - headBytes - tailBytes;
   return (
     head +
     `\n\n...(${truncated} bytes truncated for history; full output was ${content.length} bytes from "${toolName}")...\n\n` +
@@ -225,7 +229,11 @@ export class AgentLoop {
     // Phase B-2: 能力ティアを system prompt に渡して、 T1=concise / T2=current / T3=verbose+examples を出し分ける
     const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian, llmProfiles, this.capability.tier);
     this.history = new MessageHistory(systemPrompt);
-    this.contextManager = new ContextManager(provider, model, contextWindow, compressionThreshold);
+    // Phase C-2: 圧縮閾値は tier 由来 (T1=0.7 / T2=0.6 / T3=0.5) を使う。
+    // 引数の compressionThreshold は無視され、 capability の値が常に勝つ。
+    // (ユーザが明示的に変えたい場合は config.json modelCapabilities.<modelId>.compressionThreshold で override 可能)
+    void compressionThreshold; // 後方互換: 引数は受け付けるが capability 由来を使う
+    this.contextManager = new ContextManager(provider, model, contextWindow, this.capability.compressionThreshold);
     this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager);
     this.session = createSession(model);
     this.llmLogger = new LLMLogger(agentId, sessionId);
@@ -329,15 +337,20 @@ export class AgentLoop {
      * 上限到達で追加の自己点検注入は停止しターン終了。
      */
     let selfCheckRounds = 0;
-    const MAX_SELF_CHECK_ROUNDS = 3;
+    // Phase C-2: tier 別に自己点検回数を変える。 T1=3 / T2=2 / T3=1。
+    // T3 は scaffolding を増やしても改善しないため早めにユーザに戻す。
+    const MAX_SELF_CHECK_ROUNDS = this.capability.maxSelfCheckRounds;
     const MAX_REPEAT_TOOL = 3; // 同じツール呼び出しがN回連続で失敗したら中断
 
-    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+    // Phase C-2: hard cap を tier 別に。 T1=100, T2=80, T3=50。
+    // ユーザー override (config.json modelCapabilities) で上書きも可能。
+    const hardCap = this.capability.maxIterations;
+    for (let iteration = 0; iteration < hardCap; iteration++) {
       this.currentIteration = iteration;
-      // P3-A: レジスター別ソフトキャップ。 hard cap = MAX_TOOL_ITERATIONS=100 は維持しつつ、
-      // 軽量タスク (explore/rough) は早めに上限到達を促し、 standard はやや控えめ、
-      // production は hard cap まで使う。 docs/agent-loop-efficiency-review.md §4.1 参照。
-      const softCap = this.computeRegisterSoftCap();
+      // P3-A: レジスター別ソフトキャップ。 hard cap (= capability.maxIterations) 内で、
+      // 軽量タスク (explore/rough) は早めに上限到達を促し、 standard はやや控えめ。
+      // Phase C-4: production が hard cap (T3=50) を超えないよう min を取る。
+      const softCap = Math.min(this.computeRegisterSoftCap(), hardCap);
       if (iteration >= softCap && !this.softCapWarned) {
         console.log(chalk.yellow(
           `\n  レジスター "${this.currentRegister}" のソフト上限 (${softCap}) に到達しました。 ` +
@@ -346,7 +359,7 @@ export class AgentLoop {
         this.history.addUserMessage(
           `[ハーネス] レジスター "${this.currentRegister}" のソフト上限 (${softCap} 反復) に到達しました。\n` +
           `  進捗を簡潔にまとめ、 残作業を提示してから ask_user で続行 or 中断を確認してください。\n` +
-          `  「もう少しで終わる」 と判断するなら response_complete で完了報告を。 hard cap は ${MAX_TOOL_ITERATIONS} 反復です。`,
+          `  「もう少しで終わる」 と判断するなら response_complete で完了報告を。 hard cap は ${hardCap} 反復です (tier=${this.capability.tier})。`,
         );
         this.softCapWarned = true;
         // ソフトキャップ到達後は hard cap までしか走らないようループ条件で自然終了させる
@@ -1236,6 +1249,8 @@ export class AgentLoop {
   private static readonly TODO_WRITE_LIMIT = 5;
   private maybeWarnBashCumulative(toolCall: ToolCall, durationMs: number): void {
     if (toolCall.function.name !== "bash") return;
+    // Phase C-3: tier で feature gating。 T3 では判断負荷増になるため抑制。
+    if (!this.capability.bashCumulativeWarnEnabled) return;
     this.bashCumulativeMs += durationMs;
     if (this.bashCumulativeWarned) return;
     if (this.bashCumulativeMs < AgentLoop.BASH_CUMULATIVE_WARN_MS) return;
@@ -1249,6 +1264,9 @@ export class AgentLoop {
     this.bashCumulativeWarned = true;
   }
   private maybeWarnPlanTodoOveruse(toolCall: ToolCall): void {
+    // Phase C-3: tier で feature gating。 T1/T3 では plan/todo 過多検知を抑制。
+    // T1: 賢いLLMは自然に最小限で運用 / T3: scaffolding 増加が判断負荷を上げる
+    if (!this.capability.planTodoOveruseEnabled) return;
     const name = toolCall.function.name;
     if (name === "enter_plan_mode") this.planModeEntries++;
     if (name === "todo_write") this.todoWriteCount++;
@@ -1347,8 +1365,13 @@ export class AgentLoop {
     // を一括で適用。
     resultContent = enrichToolResult(toolCall, result.success, resultContent, this.harnessState);
 
-    // P2-B: 巨大 tool_result はコンテキスト膨張の主因。 履歴格納時に頭尾を残して中央を要約。
-    resultContent = truncateLargeToolResult(toolCall.function.name, resultContent);
+    // P2-B + Phase C-3: 巨大 tool_result はコンテキスト膨張の主因。 履歴格納時に頭尾を残して
+    // 中央を要約。 閾値は tier 別 (T1=20KB / T2=12KB / T3=6KB)。
+    resultContent = truncateLargeToolResult(
+      toolCall.function.name,
+      resultContent,
+      this.capability.toolResultTruncateBytes,
+    );
 
     this.history.addToolResult(toolCall.id, resultContent);
 
@@ -1450,8 +1473,12 @@ export class AgentLoop {
         // Phase 5 第2ラウンド: ハーネス介入レイヤ (並列ルートでも適用)
         resultContent = enrichToolResult(toolCall, result.success, resultContent, this.harnessState);
 
-        // P2-B: 巨大 tool_result の頭尾要約 (並列ルートも同様に適用)
-        resultContent = truncateLargeToolResult(toolCall.function.name, resultContent);
+        // P2-B + Phase C-3: 巨大 tool_result の頭尾要約 (並列ルートも同様に適用)
+        resultContent = truncateLargeToolResult(
+          toolCall.function.name,
+          resultContent,
+          this.capability.toolResultTruncateBytes,
+        );
 
         this.history.addToolResult(toolCall.id, resultContent);
 
@@ -1561,6 +1588,8 @@ export class AgentLoop {
     this.contextManager.setContextWindow(value);
     // Phase A-3: ctx 窓変更でヒューリスティック判定の結果が変わり得るので再解決 (override 反映)
     this.capability = resolveCapability(this.model, value, this.getCapabilityOverride(this.model));
+    // Phase C-2: 圧縮閾値も追従
+    this.contextManager.setThreshold(this.capability.compressionThreshold);
   }
 
   setModel(model: string): void {
@@ -1571,6 +1600,8 @@ export class AgentLoop {
     this.evaluator.setMainProvider(this.provider, model);
     // Phase A-3: model 切替で能力ティアを再解決 (override 反映)
     this.capability = resolveCapability(model, this.contextWindow, this.getCapabilityOverride(model));
+    // Phase C-2: 圧縮閾値も tier 切替に追従
+    this.contextManager.setThreshold(this.capability.compressionThreshold);
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, model)} (${this.capability.reason})`);
   }
 
@@ -1586,6 +1617,8 @@ export class AgentLoop {
     this.evaluator.setMainProvider(provider, this.model);
     // Phase A-3: provider 切替でも (model が変わる可能性あるため) capability を再解決 (override 反映)
     this.capability = resolveCapability(this.model, this.contextWindow, this.getCapabilityOverride(this.model));
+    // Phase C-2: 圧縮閾値も追従
+    this.contextManager.setThreshold(this.capability.compressionThreshold);
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, this.model)} (${this.capability.reason})`);
   }
 

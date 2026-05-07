@@ -31,6 +31,20 @@ export interface CapabilityProfile {
   promptStyle: "concise" | "standard" | "verbose+examples";
   /** 判定の根拠 (ログ/UI 表示用) */
   reason: string;
+
+  // === Phase C: ループ制御チューナブル (docs/multi-tier-harness-roadmap.md §4 Phase C) ===
+  /** ツール呼び出しの hard cap (絶対上限) */
+  maxIterations: number;
+  /** 自己点検の最大連続発動回数 (text-only / verification / evaluator 共通) */
+  maxSelfCheckRounds: number;
+  /** ContextManager の圧縮発火閾値 (0..1, 例: 0.7 = 70% で圧縮) */
+  compressionThreshold: number;
+  /** 履歴格納時に tool_result を truncate する閾値 (バイト数) */
+  toolResultTruncateBytes: number;
+  /** P1-A bash 累積警告を有効化するか (T3 では抑制) */
+  bashCumulativeWarnEnabled: boolean;
+  /** P1-B plan/todo 過多検知を有効化するか (T1/T3 では抑制) */
+  planTodoOveruseEnabled: boolean;
 }
 
 /**
@@ -44,6 +58,13 @@ export interface CapabilityOverride {
   supportsParallelTools?: boolean;
   reliableInstructionFollowing?: boolean;
   promptStyle?: CapabilityProfile["promptStyle"];
+  // Phase C tunables も override 可能
+  maxIterations?: number;
+  maxSelfCheckRounds?: number;
+  compressionThreshold?: number;
+  toolResultTruncateBytes?: number;
+  bashCumulativeWarnEnabled?: boolean;
+  planTodoOveruseEnabled?: boolean;
 }
 
 /** 各ティアのデフォルトプロファイル (override 適用前のベース) */
@@ -53,18 +74,42 @@ const TIER_DEFAULTS: Record<Tier, Omit<CapabilityProfile, "tier" | "contextWindo
     supportsParallelTools: true,
     reliableInstructionFollowing: true,
     promptStyle: "concise",
+    // Phase C: T1 は 100 反復まで深掘り、 自己点検 3 回まで、 圧縮閾値 0.7、 truncate 20KB
+    maxIterations: 100,
+    maxSelfCheckRounds: 3,
+    compressionThreshold: 0.7,
+    toolResultTruncateBytes: 20 * 1024,
+    // T1 は判断負荷が低いので bash 累積警告は ON で問題ない (5min を超えれば警告)
+    bashCumulativeWarnEnabled: true,
+    // T1 は plan/todo を自然に最小限で運用するため過多検知は OFF (= 賢い LLM の足枷にしない)
+    planTodoOveruseEnabled: false,
   },
   T2: {
     supportsToolCalling: "native",
     supportsParallelTools: true,
     reliableInstructionFollowing: true,
     promptStyle: "standard",
+    // Phase C: T2 は 80 反復、 自己点検 2 回、 圧縮 0.6、 truncate 12KB
+    maxIterations: 80,
+    maxSelfCheckRounds: 2,
+    compressionThreshold: 0.6,
+    toolResultTruncateBytes: 12 * 1024,
+    bashCumulativeWarnEnabled: true,
+    planTodoOveruseEnabled: true,
   },
   T3: {
     supportsToolCalling: "json-mode",
     supportsParallelTools: false,
     reliableInstructionFollowing: false,
     promptStyle: "verbose+examples",
+    // Phase C: T3 は 50 反復で打ち切り、 自己点検 1 回、 圧縮 0.5、 truncate 6KB
+    maxIterations: 50,
+    maxSelfCheckRounds: 1,
+    compressionThreshold: 0.5,
+    toolResultTruncateBytes: 6 * 1024,
+    // T3 は scaffolding 自体が判断負荷を上げるため P1-A/B は両方 OFF
+    bashCumulativeWarnEnabled: false,
+    planTodoOveruseEnabled: false,
   },
 };
 

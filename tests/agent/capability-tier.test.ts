@@ -189,3 +189,56 @@ describe("CapabilityProfile — フィールド整合性", () => {
     expect(profile.supportsToolCalling).toBe("regex-fallback");
   });
 });
+
+describe("Phase C tunables — ループ制御チューナブル", () => {
+  it("T1 のループ制御値: 100 反復 / self-check 3 / 0.7 / 20KB", () => {
+    const p = resolveCapability("claude-opus-4-7");
+    expect(p.maxIterations).toBe(100);
+    expect(p.maxSelfCheckRounds).toBe(3);
+    expect(p.compressionThreshold).toBe(0.7);
+    expect(p.toolResultTruncateBytes).toBe(20 * 1024);
+  });
+
+  it("T2 のループ制御値: 80 反復 / self-check 2 / 0.6 / 12KB", () => {
+    const p = resolveCapability("kimi-k2.6");
+    expect(p.maxIterations).toBe(80);
+    expect(p.maxSelfCheckRounds).toBe(2);
+    expect(p.compressionThreshold).toBe(0.6);
+    expect(p.toolResultTruncateBytes).toBe(12 * 1024);
+  });
+
+  it("T3 のループ制御値: 50 反復 / self-check 1 / 0.5 / 6KB", () => {
+    const p = resolveCapability("phi-4");
+    expect(p.maxIterations).toBe(50);
+    expect(p.maxSelfCheckRounds).toBe(1);
+    expect(p.compressionThreshold).toBe(0.5);
+    expect(p.toolResultTruncateBytes).toBe(6 * 1024);
+  });
+
+  it("P1-A/B のティア別 ON/OFF: T1=bashOnly, T2=both, T3=neither", () => {
+    expect(resolveCapability("claude-opus-4-7").bashCumulativeWarnEnabled).toBe(true);
+    expect(resolveCapability("claude-opus-4-7").planTodoOveruseEnabled).toBe(false);
+    expect(resolveCapability("kimi-k2.6").bashCumulativeWarnEnabled).toBe(true);
+    expect(resolveCapability("kimi-k2.6").planTodoOveruseEnabled).toBe(true);
+    expect(resolveCapability("phi-4").bashCumulativeWarnEnabled).toBe(false);
+    expect(resolveCapability("phi-4").planTodoOveruseEnabled).toBe(false);
+  });
+
+  it("ユーザ override で tunables を個別に変更可能", () => {
+    const p = resolveCapability("claude-opus-4-7", undefined, {
+      maxIterations: 200,
+      compressionThreshold: 0.85,
+    });
+    expect(p.tier).toBe("T1"); // tier は維持
+    expect(p.maxIterations).toBe(200); // override 反映
+    expect(p.compressionThreshold).toBe(0.85);
+    expect(p.maxSelfCheckRounds).toBe(3); // 他のフィールドは T1 default
+  });
+
+  it("tier override で tunables も対応する tier の値に切替", () => {
+    const p = resolveCapability("claude-opus-4-7", undefined, { tier: "T3" });
+    expect(p.tier).toBe("T3");
+    expect(p.maxIterations).toBe(50); // T3 の default
+    expect(p.compressionThreshold).toBe(0.5);
+  });
+});

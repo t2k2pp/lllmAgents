@@ -29,6 +29,14 @@ export class ContextManager {
     this.contextWindow = value;
   }
 
+  /**
+   * Phase C-5: 圧縮閾値を変更する。 model 切替で能力ティアが変わったとき、
+   * AgentLoop から capability.compressionThreshold を流し込む用途。
+   */
+  setThreshold(value: number): void {
+    this.threshold = value;
+  }
+
   setProvider(provider: LLMProvider, model: string): void {
     this.compressor.setProvider(provider, model);
   }
