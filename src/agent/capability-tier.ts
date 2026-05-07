@@ -45,6 +45,11 @@ export interface CapabilityProfile {
   bashCumulativeWarnEnabled: boolean;
   /** P1-B plan/todo 過多検知を有効化するか (T1/T3 では抑制) */
   planTodoOveruseEnabled: boolean;
+  /**
+   * Phase D-4: 圧縮時に手元に残す直近メッセージ数。 短 ctx の T3 ほど少なく。
+   * docs/multi-tier-harness-roadmap.md §4 Phase D-4 参照。
+   */
+  keepRecentMessages: number;
 }
 
 /**
@@ -65,6 +70,8 @@ export interface CapabilityOverride {
   toolResultTruncateBytes?: number;
   bashCumulativeWarnEnabled?: boolean;
   planTodoOveruseEnabled?: boolean;
+  // Phase D-4
+  keepRecentMessages?: number;
 }
 
 /** 各ティアのデフォルトプロファイル (override 適用前のベース) */
@@ -83,6 +90,8 @@ const TIER_DEFAULTS: Record<Tier, Omit<CapabilityProfile, "tier" | "contextWindo
     bashCumulativeWarnEnabled: true,
     // T1 は plan/todo を自然に最小限で運用するため過多検知は OFF (= 賢い LLM の足枷にしない)
     planTodoOveruseEnabled: false,
+    // Phase D-4: 圧縮時に残す直近メッセージ数 (T1 は ctx 広いので余裕あり)
+    keepRecentMessages: 10,
   },
   T2: {
     supportsToolCalling: "native",
@@ -96,6 +105,7 @@ const TIER_DEFAULTS: Record<Tier, Omit<CapabilityProfile, "tier" | "contextWindo
     toolResultTruncateBytes: 12 * 1024,
     bashCumulativeWarnEnabled: true,
     planTodoOveruseEnabled: true,
+    keepRecentMessages: 8,
   },
   T3: {
     supportsToolCalling: "json-mode",
@@ -110,6 +120,8 @@ const TIER_DEFAULTS: Record<Tier, Omit<CapabilityProfile, "tier" | "contextWindo
     // T3 は scaffolding 自体が判断負荷を上げるため P1-A/B は両方 OFF
     bashCumulativeWarnEnabled: false,
     planTodoOveruseEnabled: false,
+    // Phase D-4: T3 は短 ctx (8K-32K) なので直近 5 件だけ残して積極的に圧縮
+    keepRecentMessages: 5,
   },
 };
 

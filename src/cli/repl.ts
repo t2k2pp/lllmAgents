@@ -846,6 +846,7 @@ export class REPL {
         console.log(chalk.dim(`    selfCheck max : ${cap.maxSelfCheckRounds}`));
         console.log(chalk.dim(`    compress @    : ${Math.round(cap.compressionThreshold * 100)}% of ctxWindow`));
         console.log(chalk.dim(`    truncate >    : ${truncKB}KB`));
+        console.log(chalk.dim(`    keepRecent    : ${cap.keepRecentMessages} msgs`));
         console.log(chalk.dim(`    bash warn     : ${cap.bashCumulativeWarnEnabled ? "ON" : "OFF"}`));
         console.log(chalk.dim(`    plan/todo警告 : ${cap.planTodoOveruseEnabled ? "ON" : "OFF"}`));
         console.log(chalk.dim(`    判定根拠       : ${cap.reason}`));

@@ -37,6 +37,13 @@ export class ContextManager {
     this.threshold = value;
   }
 
+  /**
+   * Phase D-4: 圧縮時に残す直近メッセージ数を変更。 短 ctx の T3 では 5 まで切り詰める。
+   */
+  setKeepRecentMessages(value: number): void {
+    if (value > 0) this.keepRecentMessages = value;
+  }
+
   setProvider(provider: LLMProvider, model: string): void {
     this.compressor.setProvider(provider, model);
   }

@@ -230,11 +230,17 @@ export class AgentLoop {
     // Phase B-2: 能力ティアを system prompt に渡して、 T1=concise / T2=current / T3=verbose+examples を出し分ける
     const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian, llmProfiles, this.capability.tier);
     this.history = new MessageHistory(systemPrompt);
-    // Phase C-2: 圧縮閾値は tier 由来 (T1=0.7 / T2=0.6 / T3=0.5) を使う。
+    // Phase C-2 + D-4: 圧縮閾値と keepRecentMessages を tier 由来で設定。
     // 引数の compressionThreshold は無視され、 capability の値が常に勝つ。
-    // (ユーザが明示的に変えたい場合は config.json modelCapabilities.<modelId>.compressionThreshold で override 可能)
+    // (ユーザが明示的に変えたい場合は config.json modelCapabilities.<modelId>.* で override 可能)
     void compressionThreshold; // 後方互換: 引数は受け付けるが capability 由来を使う
-    this.contextManager = new ContextManager(provider, model, contextWindow, this.capability.compressionThreshold);
+    this.contextManager = new ContextManager(
+      provider,
+      model,
+      contextWindow,
+      this.capability.compressionThreshold,
+      this.capability.keepRecentMessages,
+    );
     this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager);
     this.session = createSession(model);
     this.llmLogger = new LLMLogger(agentId, sessionId);
@@ -1710,8 +1716,9 @@ export class AgentLoop {
     this.contextManager.setContextWindow(value);
     // Phase A-3: ctx 窓変更でヒューリスティック判定の結果が変わり得るので再解決 (override 反映)
     this.capability = resolveCapability(this.model, value, this.getCapabilityOverride(this.model));
-    // Phase C-2: 圧縮閾値も追従
+    // Phase C-2 + D-4: 圧縮閾値・keepRecentMessages も追従
     this.contextManager.setThreshold(this.capability.compressionThreshold);
+    this.contextManager.setKeepRecentMessages(this.capability.keepRecentMessages);
   }
 
   setModel(model: string): void {
@@ -1722,8 +1729,9 @@ export class AgentLoop {
     this.evaluator.setMainProvider(this.provider, model);
     // Phase A-3: model 切替で能力ティアを再解決 (override 反映)
     this.capability = resolveCapability(model, this.contextWindow, this.getCapabilityOverride(model));
-    // Phase C-2: 圧縮閾値も tier 切替に追従
+    // Phase C-2 + D-4: 圧縮閾値・keepRecentMessages も tier 切替に追従
     this.contextManager.setThreshold(this.capability.compressionThreshold);
+    this.contextManager.setKeepRecentMessages(this.capability.keepRecentMessages);
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, model)} (${this.capability.reason})`);
   }
 
@@ -1739,8 +1747,9 @@ export class AgentLoop {
     this.evaluator.setMainProvider(provider, this.model);
     // Phase A-3: provider 切替でも (model が変わる可能性あるため) capability を再解決 (override 反映)
     this.capability = resolveCapability(this.model, this.contextWindow, this.getCapabilityOverride(this.model));
-    // Phase C-2: 圧縮閾値も追従
+    // Phase C-2 + D-4: 圧縮閾値・keepRecentMessages も追従
     this.contextManager.setThreshold(this.capability.compressionThreshold);
+    this.contextManager.setKeepRecentMessages(this.capability.keepRecentMessages);
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, this.model)} (${this.capability.reason})`);
   }
 
