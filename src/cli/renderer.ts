@@ -49,6 +49,7 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/compact")}        コンテキストを手動圧縮
     ${chalk.cyan("/capability")}     現在のLLM能力ティア (T1/T2/T3) と profile を表示
     ${chalk.cyan("/metrics")}        現セッションのテレメトリ (反復・bash累積・stuck-loop・トークン)
+    ${chalk.cyan("/mcp")}            MCP サーバ管理 (status/on/off/reload/toggle <name>)
     ${chalk.cyan("/model")}          現在のモデル情報
     ${chalk.cyan("/model <name>")}   モデルを切り替え
     ${chalk.cyan("/model list")}     利用可能なモデル一覧

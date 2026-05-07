@@ -232,6 +232,13 @@ export interface Config {
    * 詳細: docs/multi-tier-harness-roadmap.md §3.3
    */
   modelCapabilities?: Record<string, ModelCapabilityOverride>;
+  /**
+   * Phase F-1b: MCP サーバー全体の ON/OFF。
+   * - 未指定 (undefined) または true → mcp-servers.json を読んで接続 (既存挙動)
+   * - false → 設定があっても接続スキップ (= 一時的に MCP を切りたいとき)
+   * 起動時の --no-mcp フラグでも同等。 REPL /mcp on /off で動的切替可能。
+   */
+  mcpEnabled?: boolean;
 }
 
 // ヘルパー: セカンドLLMがクラウドかローカルかを判定

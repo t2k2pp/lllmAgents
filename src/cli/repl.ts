@@ -63,6 +63,8 @@ export class REPL {
     private planManager?: PlanManager,
     private secondLLMManager?: SecondLLMManager,
     private passphrase?: string,
+    /** Phase F-1: /mcp slash command で参照するため optional 引数として受ける */
+    private mcpManager?: import("../mcp/mcp-manager.js").MCPManager,
   ) {
     // スキル情報を取得してメニュープロバイダーに渡す
     const skillInfos = skillRegistry
@@ -858,6 +860,90 @@ export class REPL {
         console.log(chalk.dim(`    tokens in/out     : ${tok.totalInputTokens.toLocaleString()} / ${tok.totalOutputTokens.toLocaleString()}`));
         console.log(chalk.dim(`    estimated cost    : $${tok.totalCostUsd.toFixed(4)} USD`));
         console.log(chalk.dim(`  詳細レポート: npm run analyze:loop`));
+        break;
+      }
+
+      case "/mcp": {
+        // Phase F-1: MCP server 状態管理 (status / reload / on / off / toggle)
+        if (!this.mcpManager) {
+          console.log(chalk.yellow("  MCP マネージャ未初期化です。"));
+          break;
+        }
+        const sub = args[0]?.trim() ?? "status";
+        const target = args[1]?.trim();
+        switch (sub) {
+          case "status": {
+            const enabled = this.mcpManager.isGlobalEnabled();
+            const servers = this.mcpManager.getServerStatus();
+            console.log(chalk.dim(`  MCP global: ${enabled ? chalk.green("ON") : chalk.yellow("OFF")}`));
+            if (servers.length === 0) {
+              console.log(chalk.dim("  (mcp-servers.json に登録なし)"));
+            } else {
+              console.log(chalk.dim(`  Servers (${servers.length}):`));
+              for (const s of servers) {
+                const stateMark = s.connected
+                  ? chalk.green("● connected")
+                  : (s.configDisabled || s.runtimeDisabled)
+                    ? chalk.yellow("○ skipped")
+                    : chalk.red("✗ not connected");
+                const reason = s.configDisabled
+                  ? " (config.disabled)"
+                  : s.runtimeDisabled
+                    ? " (runtime skip)"
+                    : "";
+                console.log(chalk.dim(`    ${stateMark} ${s.name}${reason}: ${s.toolCount} tools`));
+              }
+            }
+            console.log(chalk.dim("  使用例: /mcp on | /mcp off | /mcp reload | /mcp toggle <server> | /mcp status"));
+            break;
+          }
+          case "on": {
+            this.mcpManager.setGlobalEnabled(true);
+            console.log(chalk.dim("  MCP enabled. /mcp reload で再接続してください。"));
+            break;
+          }
+          case "off": {
+            this.mcpManager.setGlobalEnabled(false);
+            await this.mcpManager.disconnectAll();
+            console.log(chalk.dim("  MCP disabled. 接続中のサーバを切断しました。 (設定ファイルは変更していません)"));
+            break;
+          }
+          case "reload": {
+            console.log(chalk.dim("  MCP: 再接続中..."));
+            try {
+              const total = await this.mcpManager.reload(this.agent.getToolRegistry());
+              console.log(chalk.dim(`  MCP: 再接続完了 (${total} tools)`));
+            } catch (e) {
+              console.log(chalk.yellow(`  MCP reload 失敗: ${e}`));
+            }
+            break;
+          }
+          case "toggle": {
+            if (!target) {
+              console.log(chalk.yellow("  使用方法: /mcp toggle <server-name>"));
+              break;
+            }
+            const servers = this.mcpManager.getServerStatus();
+            const found = servers.find((s) => s.name === target);
+            if (!found) {
+              console.log(chalk.yellow(`  サーバ "${target}" が見つかりません。 /mcp status で確認。`));
+              break;
+            }
+            const wasDisabled = found.runtimeDisabled || found.configDisabled;
+            if (wasDisabled) {
+              this.mcpManager.enableServer(target);
+              console.log(chalk.dim(`  ${target}: runtime skip 解除 (/mcp reload で接続)`));
+            } else {
+              this.mcpManager.disableServer(target);
+              console.log(chalk.dim(`  ${target}: runtime skip on (/mcp reload で反映)`));
+            }
+            break;
+          }
+          default: {
+            console.log(chalk.yellow(`  未知のサブコマンド: ${sub}`));
+            console.log(chalk.dim("  使用方法: /mcp [status|on|off|reload|toggle <server>]"));
+          }
+        }
         break;
       }
 

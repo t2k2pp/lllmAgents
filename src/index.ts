@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import chalk from "chalk";
 import { configExists, loadConfig, saveConfig } from "./config/config-manager.js";
 import { runSetupWizard } from "./config/setup-wizard.js";
 import { createProvider } from "./providers/provider-factory.js";
@@ -162,7 +163,16 @@ async function main(): Promise<void> {
   toolRegistry.register(createVisionTool(visionService));
 
   // MCP servers
+  // Phase F-1b: 起動時 --no-mcp フラグ / config.mcpEnabled で全体 ON/OFF を制御。
+  // 設定ファイル (mcp-servers.json) は残したまま、 接続だけスキップできる。
   const mcpManager = new MCPManager(process.cwd());
+  const mcpDisabledByCli = args.includes("--no-mcp");
+  // unknown プロパティを安全に拾う (Config 型に mcpEnabled を将来追加するまでの暫定)
+  const mcpDisabledByCfg = (config as unknown as { mcpEnabled?: boolean }).mcpEnabled === false;
+  if (mcpDisabledByCli || mcpDisabledByCfg) {
+    mcpManager.setGlobalEnabled(false);
+    console.log(chalk.dim(`  MCP: disabled by ${mcpDisabledByCli ? "--no-mcp" : "config"}`));
+  }
   await mcpManager.connectAll(toolRegistry);
 
   // Permissions
@@ -486,7 +496,7 @@ async function main(): Promise<void> {
   }
 
   // Start REPL (sharedPassphrase は /swap や /second setup 後の Provider 再生成で使い回す)
-  const repl = new REPL(agent, config, skillRegistry, planManager, secondLLMManager, sharedPassphrase);
+  const repl = new REPL(agent, config, skillRegistry, planManager, secondLLMManager, sharedPassphrase, mcpManager);
   await repl.start();
 
   // Cleanup

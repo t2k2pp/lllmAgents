@@ -46,6 +46,12 @@ export interface MCPServerConfig {
   url?: string;
   /** サーバーが提供するツールに対するパーミッション ("auto" | "ask") */
   permissionLevel?: "auto" | "ask";
+  /**
+   * Phase F-1b: このサーバーを **設定ファイルに残したまま** 接続スキップする。
+   * デフォルト false (= 接続する)。 true なら mcp-servers.json から削除せず一時無効化できる。
+   * REPL の /mcp toggle <server> で動的に切替可能。
+   */
+  disabled?: boolean;
 }
 
 export interface MCPServersConfig {
