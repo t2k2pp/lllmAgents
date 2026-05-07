@@ -185,10 +185,82 @@ const TOOL_TO_GUIDES: Record<string, readonly string[]> = {
   knowledge_search: ["obsidian"],
 };
 
+/**
+ * Phase D-3: T3 向けの失敗時 few-shot ガイド。 (toolName, errorPattern) のペアごとに
+ * 1 度だけ注入される。 D-2 の decision-tree (stuck-loop = 2 回目の失敗) より早く、
+ * **1 回目の失敗時** に具体的な「次にすべき tool 呼び出し例」 を提示する。
+ *
+ * ペアキー = `<toolName>:<errorPattern>` (errorPattern は固定の識別子)
+ * 値 = 注入される文字列
+ */
+const T3_FAILURE_GUIDES: Record<string, string> = {
+  "file_edit:found-multiple": `[T3向け 失敗時例: file_edit "found N times"]
+このエラーは old_string が複数箇所にマッチした場合に出ます。 次の例を真似てください:
+  file_edit({"file_path": "/abs/path", "old_string": "<同じ>", "new_string": "<新>", "replace_all": true})
+全部置換したくない場合は old_string の前後を含めて一意化してください。`,
+
+  "file_edit:not-found": `[T3向け 失敗時例: file_edit "not found in file"]
+このエラーは old_string がファイルにマッチしなかった場合に出ます。 次のいずれかを試してください:
+  1. file_read でファイル現状を確認 (空白・改行が違う可能性)
+  2. file_write でファイル全体を書き直す:
+       file_write({"file_path": "/abs/path", "content": "<全文>"})`,
+
+  "file_read:not-found": `[T3向け 失敗時例: file_read "File not found"]
+パスが間違っているか、 ファイル自体が無い可能性。 次の例を真似てください:
+  1. glob でファイル名検索: glob({"pattern": "**/<filename>"})
+  2. 見つからなければ ask_user で正しいパスを確認`,
+
+  "bash:exit-1": `[T3向け 失敗時例: bash "Exit code: 1"]
+コマンド失敗時の対処:
+  1. エラー出力 (STDERR) を読み、 引数を 1 つ変える
+  2. 同じコマンドを再実行しない (= 同じ結果になるだけ)
+  3. 何度も失敗するなら ask_user で人間に確認`,
+
+  "grep:no-match": `[T3向け 失敗時例: grep "No matches found"]
+pattern が厳しすぎる可能性。 次の例:
+  1. pattern を短く: "function foo" → "foo"
+  2. path を広げる: 親ディレクトリを指定
+  3. 大文字小文字: 別の case を試す`,
+
+  "glob:no-match": `[T3向け 失敗時例: glob "0 files"]
+pattern にマッチするファイルが無い。 次の例:
+  1. pattern を緩める: "*.py" → "**/*.py"
+  2. 拡張子を変える: ".py" → ".pyc" や ".pyi" など
+  3. 親 path を指定する`,
+};
+
+/**
+ * Phase D-3: ツール失敗時、 (toolName, error 本文) から該当する failure guide キーを
+ * 推定する。 既知パターンに該当しなければ null。
+ */
+function inferFailureGuideKey(toolName: string, errorMsg: string): string | null {
+  if (!errorMsg) return null;
+  const err = errorMsg.toLowerCase();
+  if (toolName === "file_edit") {
+    if (err.includes("found") && err.includes("times")) return "file_edit:found-multiple";
+    if (err.includes("not found")) return "file_edit:not-found";
+  }
+  if (toolName === "file_read") {
+    if (err.includes("not found")) return "file_read:not-found";
+  }
+  if (toolName === "bash") {
+    if (err.includes("exit code: 1") || err.includes("exit code: 127")) return "bash:exit-1";
+  }
+  if (toolName === "grep") {
+    if (err.includes("no matches") || err.includes("0 match")) return "grep:no-match";
+  }
+  if (toolName === "glob") {
+    if (err.includes("no match") || err.includes("0 file")) return "glob:no-match";
+  }
+  return null;
+}
+
 /** 既に注入済みのガイドキーを追跡する Set */
 const usedGuides = new Set<string>();
 /** Phase B-3: 既に注入済みの T3 few-shot キー (= ツール名) */
 const usedFewShots = new Set<string>();
+/** Phase D-3: 既に注入済みの T3 failure guide キー (= toolName:pattern) */
+const usedFailureGuides = new Set<string>();
 
 /**
  * ツール初回使用時のガイドテキストを取得する。
@@ -224,9 +296,28 @@ export function getFirstUseGuide(toolName: string, tier?: Tier): string | null {
 }
 
 /**
+ * Phase D-3: ツール失敗時 (T3 のみ) に該当する failure guide を 1 度だけ取得する。
+ * 同じ (toolName, errorPattern) では 2 回目以降は null を返し、 D-2 の decision-tree が
+ * 拾う構造になっている。
+ *
+ * @returns 注入する文字列。 該当パターン無し or 既に注入済 or T3 以外なら null。
+ */
+export function getFailureGuide(toolName: string, errorMsg: string, tier?: Tier): string | null {
+  if (tier !== "T3") return null;
+  const key = inferFailureGuideKey(toolName, errorMsg);
+  if (!key) return null;
+  if (usedFailureGuides.has(key)) return null;
+  const guide = T3_FAILURE_GUIDES[key];
+  if (!guide) return null;
+  usedFailureGuides.add(key);
+  return guide;
+}
+
+/**
  * ガイド追跡状態をリセットする (セッション復元時等)。
  */
 export function resetToolGuides(): void {
   usedGuides.clear();
   usedFewShots.clear();
+  usedFailureGuides.clear();
 }

@@ -35,7 +35,7 @@ import { getOpsLogger } from "../utils/ops-logger.js";
 import { LLMLogger } from "./llm-logger.js";
 import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
-import { getFirstUseGuide } from "./tool-guides.js";
+import { getFirstUseGuide, getFailureGuide } from "./tool-guides.js";
 import { IntentClassifier } from "./intent-classifier.js";
 import { Evaluator } from "./evaluator.js";
 import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";
@@ -1466,6 +1466,17 @@ export class AgentLoop {
     // を一括で適用。
     resultContent = enrichToolResult(toolCall, result.success, resultContent, this.harnessState);
 
+    // Phase D-3: T3 でツール失敗時、 該当エラーパターン用の failure few-shot を 1 度だけ末尾に注入。
+    // (toolName, errorPattern) ごとに 1 度のみ → 重複 spam 抑制。 D-2 (stuck-loop) より早く発動する。
+    if (!result.success) {
+      const failGuide = getFailureGuide(
+        toolCall.function.name,
+        (result.error ?? result.output ?? "").toString(),
+        this.capability.tier,
+      );
+      if (failGuide) resultContent += "\n\n" + failGuide;
+    }
+
     // P2-B + Phase C-3: 巨大 tool_result はコンテキスト膨張の主因。 履歴格納時に頭尾を残して
     // 中央を要約。 閾値は tier 別 (T1=20KB / T2=12KB / T3=6KB)。
     resultContent = truncateLargeToolResult(
@@ -1573,6 +1584,16 @@ export class AgentLoop {
 
         // Phase 5 第2ラウンド: ハーネス介入レイヤ (並列ルートでも適用)
         resultContent = enrichToolResult(toolCall, result.success, resultContent, this.harnessState);
+
+        // Phase D-3: 並列ルートでも T3 失敗時の failure few-shot を注入
+        if (!result.success) {
+          const failGuide = getFailureGuide(
+            toolCall.function.name,
+            (result.error ?? result.output ?? "").toString(),
+            this.capability.tier,
+          );
+          if (failGuide) resultContent += "\n\n" + failGuide;
+        }
 
         // P2-B + Phase C-3: 巨大 tool_result の頭尾要約 (並列ルートも同様に適用)
         resultContent = truncateLargeToolResult(
