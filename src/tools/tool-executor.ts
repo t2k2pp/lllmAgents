@@ -4,6 +4,7 @@ import type { ToolRegistry, ToolResult } from "./tool-registry.js";
 import type { PermissionManager, RequestSource } from "../security/permission-manager.js";
 import type { HookManager } from "../hooks/hook-manager.js";
 import { ROOT_ANCESTORS, type AncestorTypes } from "../agent/delegation-context.js";
+import { validateAgainstSchema, formatValidationError } from "./schema-validator.js";
 import * as logger from "../utils/logger.js";
 
 export class ToolExecutor {
@@ -45,6 +46,23 @@ export class ToolExecutor {
         output: "",
         error: `Invalid tool arguments: ${toolCall.function.arguments}`,
       };
+    }
+
+    // Phase E-4: Schema-strict validation — required / type / enum を実行前にチェック
+    // 違反時は具体的な error を返してモデルに学習させる (T3 で特に効果大)
+    try {
+      const parameters = handler.definition.function.parameters;
+      const validation = validateAgainstSchema(parameters, params);
+      if (!validation.valid) {
+        return {
+          success: false,
+          output: "",
+          error: formatValidationError(toolName, validation.errors),
+        };
+      }
+    } catch (e) {
+      // schema 自体が壊れているケース → tool 開発時のバグなので debug ログだけ残して通過
+      logger.debug(`Schema validation skipped for ${toolName} due to: ${e}`);
     }
 
     // Permission check
