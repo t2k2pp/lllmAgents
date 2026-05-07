@@ -28,6 +28,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/context", description: "コンテキスト使用状況" },
   { command: "/compact", description: "コンテキスト圧縮" },
   { command: "/capability", description: "LLM能力ティア (T1/T2/T3) と profile を表示" },
+  { command: "/metrics", description: "現セッションのテレメトリ (反復・bash累積・stuck-loop・トークン)" },
   { command: "/try", description: "試行錯誤モード: 自動的に評価・改善を繰り返す", needsArg: true },
   { command: "/try 3", description: "最大3回試行（デフォルト）", needsArg: true },
   { command: "/stream", description: "ストリーミング表示モードの確認/切り替え" },

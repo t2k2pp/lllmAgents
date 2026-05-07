@@ -830,6 +830,37 @@ export class REPL {
         console.log(chalk.dim("  完了。"));
         break;
 
+      case "/metrics": {
+        // Phase F-4: 現セッションのテレメトリ可視化
+        const m = this.agent.getMetrics();
+        const tok = globalTokenTracker.getSessionTotal();
+        const cap = this.agent.getCapability();
+        const ctxKb = Math.round(cap.contextWindow / 1000);
+        const lastTokIn = (this.agent as unknown as { lastPromptTokens: number }).lastPromptTokens ?? 0;
+        const lastPct = cap.contextWindow > 0 ? Math.round(lastTokIn / cap.contextWindow * 100) : 0;
+        const bashSec = Math.round(m.bashCumulativeMs / 1000);
+        // 警告フラグ整形
+        const flag = (b: boolean): string => b ? chalk.yellow("● fired") : chalk.dim("○ ok");
+        console.log(chalk.bold("\n  Session metrics (Phase F-4)"));
+        console.log(chalk.dim(`  ── 進行状況 ────────────────────────────`));
+        console.log(chalk.dim(`    iteration         : ${m.iteration} / softCap=${m.softCap} / hardCap=${m.hardCap}`));
+        console.log(chalk.dim(`    register          : ${m.register} (tier=${cap.tier})`));
+        console.log(chalk.dim(`    last prompt size  : ~${lastTokIn} / ${ctxKb}K (${lastPct}%)`));
+        console.log(chalk.dim(`  ── ハーネス警告状態 ─────────────────────`));
+        console.log(chalk.dim(`    softCap warned    : ${flag(m.softCapWarned)}`));
+        console.log(chalk.dim(`    bash cumulative   : ${bashSec}s ${flag(m.bashWarned)}${cap.bashCumulativeWarnEnabled ? "" : chalk.dim(" (disabled in tier)")}`));
+        console.log(chalk.dim(`    plan-mode entries : ${m.planModeEntries}${cap.planTodoOveruseEnabled ? "" : chalk.dim(" (warn disabled in tier)")}`));
+        console.log(chalk.dim(`    todo_write count  : ${m.todoWriteCount}${cap.planTodoOveruseEnabled ? "" : chalk.dim(" (warn disabled in tier)")}`));
+        console.log(chalk.dim(`    plan/todo warned  : ${flag(m.planTodoWarned)}`));
+        console.log(chalk.dim(`    stuck-loop window : ${m.recentFailures} 件 (直近 10 反復)`));
+        console.log(chalk.dim(`  ── 累計トークン・コスト ─────────────────`));
+        console.log(chalk.dim(`    LLM calls         : ${tok.recordCount}`));
+        console.log(chalk.dim(`    tokens in/out     : ${tok.totalInputTokens.toLocaleString()} / ${tok.totalOutputTokens.toLocaleString()}`));
+        console.log(chalk.dim(`    estimated cost    : $${tok.totalCostUsd.toFixed(4)} USD`));
+        console.log(chalk.dim(`  詳細レポート: npm run analyze:loop`));
+        break;
+      }
+
       case "/capability": {
         // Phase A-4 + C-1: 現在の LLM 能力ティア / profile / tunables を表示
         const cap = this.agent.getCapability();

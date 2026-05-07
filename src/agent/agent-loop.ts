@@ -1729,6 +1729,39 @@ export class AgentLoop {
     return this.contextWindow;
   }
 
+  /**
+   * Phase F-4: 現セッションのテレメトリスナップショット。
+   * REPL の /metrics コマンドで現在進行中の状態を可視化するために使う。
+   * docs/multi-tier-harness-roadmap.md §4 Phase F-4 参照。
+   */
+  getMetrics(): {
+    iteration: number;
+    bashCumulativeMs: number;
+    bashWarned: boolean;
+    planModeEntries: number;
+    todoWriteCount: number;
+    planTodoWarned: boolean;
+    softCapWarned: boolean;
+    recentFailures: number;
+    register: string;
+    softCap: number;
+    hardCap: number;
+  } {
+    return {
+      iteration: this.currentIteration,
+      bashCumulativeMs: this.bashCumulativeMs,
+      bashWarned: this.bashCumulativeWarned,
+      planModeEntries: this.planModeEntries,
+      todoWriteCount: this.todoWriteCount,
+      planTodoWarned: this.planTodoWarned,
+      softCapWarned: this.softCapWarned,
+      recentFailures: this.recentFailures.length,
+      register: this.currentRegister,
+      softCap: this.computeRegisterSoftCap(),
+      hardCap: this.capability.maxIterations,
+    };
+  }
+
   setContextWindow(value: number): void {
     this.contextWindow = value;
     this.contextManager.setContextWindow(value);
