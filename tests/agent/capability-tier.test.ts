@@ -1,0 +1,191 @@
+import { describe, it, expect } from "vitest";
+import {
+  resolveCapability,
+  formatCapabilityLabel,
+  type Tier,
+} from "../../src/agent/capability-tier.js";
+
+describe("resolveCapability — 完全一致テーブル", () => {
+  const cases: Array<[string, Tier, string]> = [
+    // T1
+    ["claude-opus-4-7", "T1", "Claude Opus 4.7"],
+    ["claude-opus-4-7[1m]", "T1", "Claude Opus 4.7 1M ctx variant"],
+    ["claude-sonnet-4-6", "T1", "Claude Sonnet 4.6"],
+    ["gpt-5", "T1", "GPT-5 base"],
+    ["gpt-5.4", "T1", "GPT-5.4"],
+    ["gpt-5.3-codex", "T1", "GPT-5.3 Codex"],
+    ["gemini-2.5-pro", "T1", "Gemini 2.5 Pro"],
+    // T2
+    ["claude-haiku-4-5", "T2", "Claude Haiku 4.5"],
+    ["gpt-4o", "T2", "GPT-4o"],
+    ["kimi-k2", "T2", "Kimi K2"],
+    ["kimi-k2.6", "T2", "Kimi K2.6"],
+    ["qwen3.6-35b-a3b", "T2", "Qwen3.6 35B A3B"],
+    ["llama-3.3-70b", "T2", "Llama 3.3 70B"],
+    ["mistral-large", "T2", "Mistral Large"],
+    ["deepseek-v3", "T2", "DeepSeek V3"],
+    // T3
+    ["llama-3.2-7b", "T3", "Llama 3.2 7B"],
+    ["mistral-7b", "T3", "Mistral 7B"],
+    ["qwen-7b", "T3", "Qwen 7B"],
+    ["phi-4", "T3", "Phi-4"],
+    ["phi-4-mini", "T3", "Phi-4 mini"],
+    ["gemma-2-9b", "T3", "Gemma 2 9B"],
+    ["codellama-7b", "T3", "Code Llama 7B"],
+  ];
+
+  for (const [modelId, expectedTier, description] of cases) {
+    it(`${modelId} → ${expectedTier} (${description})`, () => {
+      const profile = resolveCapability(modelId);
+      expect(profile.tier).toBe(expectedTier);
+      expect(profile.contextWindow).toBeGreaterThan(0);
+    });
+  }
+
+  it("大文字混在でも一致する (lowercase 比較)", () => {
+    expect(resolveCapability("Claude-Opus-4-7").tier).toBe("T1");
+    expect(resolveCapability("GPT-5.4").tier).toBe("T1");
+    expect(resolveCapability("LLAMA-3.2-7B").tier).toBe("T3");
+  });
+
+  it("Qwen3.6-35B-A3B-BF16.gguf (実セッションで観測した名前) → T2", () => {
+    const profile = resolveCapability("Qwen3.6-35B-A3B-BF16.gguf");
+    expect(profile.tier).toBe("T2");
+  });
+});
+
+describe("resolveCapability — パターン一致 (PATTERN_RULES)", () => {
+  it("未知の Claude 4.X variant → T1", () => {
+    const profile = resolveCapability("claude-opus-4-99-experimental");
+    expect(profile.tier).toBe("T1");
+    expect(profile.reason).toContain("pattern match");
+  });
+
+  it("未知の GPT-5 variant → T1", () => {
+    const profile = resolveCapability("gpt-5.7-preview");
+    expect(profile.tier).toBe("T1");
+  });
+
+  it("Kimi-K2 系 (バリアント) → T2", () => {
+    const profile = resolveCapability("kimi-k2-instruct");
+    expect(profile.tier).toBe("T2");
+  });
+
+  it("Llama 70B+ 全般 → T2", () => {
+    expect(resolveCapability("llama-3.1-70b-instruct").tier).toBe("T2");
+    expect(resolveCapability("llama-3.3-405b").tier).toBe("T2");
+  });
+
+  it("Llama 7B/8B → T3", () => {
+    expect(resolveCapability("llama-3.2-7b-instruct").tier).toBe("T3");
+    expect(resolveCapability("llama-3.1-8b").tier).toBe("T3");
+  });
+
+  it("Phi-3.5 / Phi-4 系 → T3", () => {
+    expect(resolveCapability("phi-3.5-mini").tier).toBe("T3");
+    expect(resolveCapability("phi-4-medium").tier).toBe("T3");
+  });
+});
+
+describe("resolveCapability — ヒューリスティック (パターン外)", () => {
+  it("ctxWindow 提供あり: 大きい ctx は T2 寄り", () => {
+    const profile = resolveCapability("totally-unknown-model", 128_000);
+    expect(profile.tier).toBe("T2");
+    expect(profile.reason).toContain("heuristic");
+  });
+
+  it("ctxWindow 提供あり: 小さい ctx は T3 寄り", () => {
+    const profile = resolveCapability("totally-unknown-model", 8_192);
+    expect(profile.tier).toBe("T3");
+  });
+
+  it("model 名に 70b 表記があれば T2", () => {
+    const profile = resolveCapability("custom-model-70b-merged", 32_000);
+    expect(profile.tier).toBe("T2");
+  });
+
+  it("model 名に 7b 表記があれば T3", () => {
+    const profile = resolveCapability("custom-fine-tune-7b-v2", 32_000);
+    expect(profile.tier).toBe("T3");
+  });
+
+  it("情報無しのフォールバックは T2 (中庸)", () => {
+    const profile = resolveCapability("opaque-private-model");
+    expect(profile.tier).toBe("T2");
+    expect(profile.reason).toContain("fallback");
+  });
+});
+
+describe("resolveCapability — ユーザ override", () => {
+  it("tier の override が反映される (= デフォルトも切替)", () => {
+    const profile = resolveCapability("claude-opus-4-7", undefined, { tier: "T3" });
+    expect(profile.tier).toBe("T3");
+    // T3 のデフォルトに合わせて promptStyle も切替わる
+    expect(profile.promptStyle).toBe("verbose+examples");
+    expect(profile.reason).toContain("user override");
+  });
+
+  it("contextWindow のみ override しても tier は維持", () => {
+    const profile = resolveCapability("gpt-5.4", undefined, { contextWindow: 50_000 });
+    expect(profile.tier).toBe("T1");
+    expect(profile.contextWindow).toBe(50_000);
+  });
+
+  it("promptStyle のみ override (実験用)", () => {
+    const profile = resolveCapability("llama-3.2-7b", undefined, { promptStyle: "concise" });
+    expect(profile.tier).toBe("T3"); // tier は維持
+    expect(profile.promptStyle).toBe("concise"); // override 反映
+  });
+
+  it("provider 報告の ctxWindow が override より優先される (= 引数の ctxWindow)", () => {
+    const profile = resolveCapability("claude-opus-4-7", 80_000);
+    expect(profile.contextWindow).toBe(80_000);
+  });
+});
+
+describe("formatCapabilityLabel", () => {
+  it("ティア / モデル / ctx / promptStyle が含まれる", () => {
+    const profile = resolveCapability("claude-opus-4-7");
+    const label = formatCapabilityLabel(profile, "claude-opus-4-7");
+    expect(label).toContain("T1");
+    expect(label).toContain("claude-opus-4-7");
+    expect(label).toContain("200K");
+    expect(label).toContain("concise");
+  });
+
+  it("8K 以下の ctx は K 表記にせず数値で出す", () => {
+    const profile = resolveCapability("phi-4");
+    const label = formatCapabilityLabel(profile, "phi-4");
+    expect(label).toMatch(/16K|16384/); // 16384 を 16K で出してもよい
+  });
+});
+
+describe("CapabilityProfile — フィールド整合性", () => {
+  it("T1 はデフォルトで native tool calling + 並列対応", () => {
+    const profile = resolveCapability("claude-opus-4-7");
+    expect(profile.supportsToolCalling).toBe("native");
+    expect(profile.supportsParallelTools).toBe(true);
+    expect(profile.reliableInstructionFollowing).toBe(true);
+  });
+
+  it("T3 はデフォルトで json-mode + 並列なし + verbose+examples", () => {
+    const profile = resolveCapability("phi-4");
+    expect(profile.supportsToolCalling).toBe("json-mode");
+    expect(profile.supportsParallelTools).toBe(false);
+    expect(profile.reliableInstructionFollowing).toBe(false);
+    expect(profile.promptStyle).toBe("verbose+examples");
+  });
+
+  it("T2 はバランス型", () => {
+    const profile = resolveCapability("kimi-k2.6");
+    expect(profile.tier).toBe("T2");
+    expect(profile.supportsToolCalling).toBe("native");
+    expect(profile.supportsParallelTools).toBe(true);
+    expect(profile.promptStyle).toBe("standard");
+  });
+
+  it("regex-fallback ツール呼出のモデルは正しく識別される", () => {
+    const profile = resolveCapability("mistral-7b");
+    expect(profile.supportsToolCalling).toBe("regex-fallback");
+  });
+});

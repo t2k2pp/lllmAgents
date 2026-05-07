@@ -185,6 +185,25 @@ export interface LoggingConfig {
   ops?: OpsLogConfig;
 }
 
+/**
+ * 能力ティアのユーザ override (Phase A-5)。 capability-tier.ts の
+ * CapabilityOverride と同形だが、 config.json から読むので JSON-friendly な型のみ。
+ *
+ * 使い方 (config.json):
+ *   "modelCapabilities": {
+ *     "my-custom-llama-fine-tune": { "tier": "T3", "contextWindow": 8192 },
+ *     "qwen3.6-35b-a3b-special": { "tier": "T1", "promptStyle": "concise" }
+ *   }
+ */
+export interface ModelCapabilityOverride {
+  tier?: "T1" | "T2" | "T3";
+  contextWindow?: number;
+  promptStyle?: "concise" | "standard" | "verbose+examples";
+  supportsToolCalling?: "native" | "json-mode" | "regex-fallback";
+  supportsParallelTools?: boolean;
+  reliableInstructionFollowing?: boolean;
+}
+
 export interface Config {
   mainLLM: LLMEndpoint;
   visionLLM: LLMEndpoint | null;
@@ -207,6 +226,12 @@ export interface Config {
   chatLog?: ChatLogConfig;
   /** ログ設定 (運用ログ等)。詳細: docs/llm-logging.md */
   logging?: LoggingConfig;
+  /**
+   * モデル別の能力ティア override (Phase A-5)。
+   * fine-tune 等で自動判定が誤る場合に modelId をキーに上書きできる。
+   * 詳細: docs/multi-tier-harness-roadmap.md §3.3
+   */
+  modelCapabilities?: Record<string, ModelCapabilityOverride>;
 }
 
 // ヘルパー: セカンドLLMがクラウドかローカルかを判定

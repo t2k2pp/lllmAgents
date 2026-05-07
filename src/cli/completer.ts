@@ -27,6 +27,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/clear", description: "会話履歴クリア" },
   { command: "/context", description: "コンテキスト使用状況" },
   { command: "/compact", description: "コンテキスト圧縮" },
+  { command: "/capability", description: "LLM能力ティア (T1/T2/T3) と profile を表示" },
   { command: "/try", description: "試行錯誤モード: 自動的に評価・改善を繰り返す", needsArg: true },
   { command: "/try 3", description: "最大3回試行（デフォルト）", needsArg: true },
   { command: "/stream", description: "ストリーミング表示モードの確認/切り替え" },

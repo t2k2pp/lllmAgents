@@ -15,6 +15,11 @@ import type { PermissionManager, RequestSource } from "../security/permission-ma
 import type { HookManager } from "../hooks/hook-manager.js";
 import { MessageHistory } from "./message-history.js";
 import { ContextManager } from "./context-manager.js";
+import {
+  resolveCapability,
+  formatCapabilityLabel,
+  type CapabilityProfile,
+} from "./capability-tier.js";
 import { buildSystemPrompt, type SkillInfo, type LLMProfiles } from "./system-prompt.js";
 import {
   createSession,
@@ -23,6 +28,7 @@ import {
 } from "./session-manager.js";
 import { PlanManager } from "./plan-mode.js";
 import type { SamplingParams } from "../config/types.js";
+import { loadConfig } from "../config/config-manager.js";
 import * as logger from "../utils/logger.js";
 import { getOpsLogger } from "../utils/ops-logger.js";
 import { LLMLogger } from "./llm-logger.js";
@@ -175,6 +181,13 @@ export class AgentLoop {
   private currentRegister: "explore" | "rough" | "standard" | "production" | "unknown" = "unknown";
   /** P3-A: ソフトキャップ警告を既に注入したか (1 user span に 1 回だけ) */
   private softCapWarned = false;
+  /**
+   * Phase A: 能力ティアプロファイル。 ハーネス各機能はこれを参照して挙動を切替える。
+   * docs/multi-tier-harness-roadmap.md §3 参照。
+   * 主流路 (P0-P3) との統合は Phase A-7 (後続コミット) で実施予定。
+   * 現時点では起動ログと /capability コマンドへの可視化のみ。
+   */
+  private capability: CapabilityProfile;
   /** チャットログ（Obsidian Vault保存、null なら無効） */
   private chatLogger: ChatLogger | null = null;
   /** Evaluator（成果物の独立レビュー） */
@@ -206,6 +219,9 @@ export class AgentLoop {
     this.contextWindow = contextWindow;
     this.samplingParams = samplingParams;
     this.llmProfiles = llmProfiles;
+    // Phase A-3 + A-5: 能力ティア解決 (model + ctx 窓 + config の override)
+    this.capability = resolveCapability(model, contextWindow, this.getCapabilityOverride(model));
+    logger.info(`[capability] ${formatCapabilityLabel(this.capability, model)} (${this.capability.reason})`);
     const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian, llmProfiles);
     this.history = new MessageHistory(systemPrompt);
     this.contextManager = new ContextManager(provider, model, contextWindow, compressionThreshold);
@@ -1538,6 +1554,8 @@ export class AgentLoop {
   setContextWindow(value: number): void {
     this.contextWindow = value;
     this.contextManager.setContextWindow(value);
+    // Phase A-3: ctx 窓変更でヒューリスティック判定の結果が変わり得るので再解決 (override 反映)
+    this.capability = resolveCapability(this.model, value, this.getCapabilityOverride(this.model));
   }
 
   setModel(model: string): void {
@@ -1546,6 +1564,9 @@ export class AgentLoop {
     this.contextManager.setProvider(this.provider, model);
     this.intentClassifier.setProvider(this.provider, model);
     this.evaluator.setMainProvider(this.provider, model);
+    // Phase A-3: model 切替で能力ティアを再解決 (override 反映)
+    this.capability = resolveCapability(model, this.contextWindow, this.getCapabilityOverride(model));
+    logger.info(`[capability] ${formatCapabilityLabel(this.capability, model)} (${this.capability.reason})`);
   }
 
   /**
@@ -1558,6 +1579,36 @@ export class AgentLoop {
     this.contextManager.setProvider(provider, this.model);
     this.intentClassifier.setProvider(provider, this.model);
     this.evaluator.setMainProvider(provider, this.model);
+    // Phase A-3: provider 切替でも (model が変わる可能性あるため) capability を再解決 (override 反映)
+    this.capability = resolveCapability(this.model, this.contextWindow, this.getCapabilityOverride(this.model));
+    logger.info(`[capability] ${formatCapabilityLabel(this.capability, this.model)} (${this.capability.reason})`);
+  }
+
+  /** Phase A: 現在の能力プロファイルを取得 (REPL の /capability コマンド用) */
+  getCapability(): CapabilityProfile {
+    return { ...this.capability };
+  }
+
+  /**
+   * Phase A-5: config.json の modelCapabilities から override を取得。
+   * fine-tune モデル等で自動判定が誤る場合のユーザ調整手段。
+   * 設定不在時は undefined を返す (= 自動判定のみ)。
+   */
+  private getCapabilityOverride(modelId: string): import("./capability-tier.js").CapabilityOverride | undefined {
+    try {
+      const cfg = loadConfig();
+      const overrides = cfg.modelCapabilities;
+      if (!overrides) return undefined;
+      // 完全一致のみ (lowercase 比較で柔軟に)
+      const id = modelId.toLowerCase().trim();
+      for (const key of Object.keys(overrides)) {
+        if (key.toLowerCase().trim() === id) return overrides[key];
+      }
+      return undefined;
+    } catch {
+      // config 読込失敗時は override なしで自動判定
+      return undefined;
+    }
   }
 
   getSamplingParams(): SamplingParams {

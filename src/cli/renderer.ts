@@ -47,6 +47,7 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/clear")}          会話履歴をクリア
     ${chalk.cyan("/context")}        コンテキスト使用状況
     ${chalk.cyan("/compact")}        コンテキストを手動圧縮
+    ${chalk.cyan("/capability")}     現在のLLM能力ティア (T1/T2/T3) と profile を表示
     ${chalk.cyan("/model")}          現在のモデル情報
     ${chalk.cyan("/model <name>")}   モデルを切り替え
     ${chalk.cyan("/model list")}     利用可能なモデル一覧

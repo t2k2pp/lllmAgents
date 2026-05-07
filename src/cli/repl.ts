@@ -826,6 +826,25 @@ export class REPL {
         console.log(chalk.dim("  完了。"));
         break;
 
+      case "/capability": {
+        // Phase A-4: 現在の LLM 能力ティアと profile を表示
+        const cap = this.agent.getCapability();
+        const ctxK = cap.contextWindow >= 1000
+          ? `${Math.round(cap.contextWindow / 1000)}K`
+          : `${cap.contextWindow}`;
+        console.log(chalk.dim("  Capability profile:"));
+        console.log(chalk.dim(`    model         : ${this.agent.getModel()}`));
+        console.log(chalk.dim(`    tier          : ${cap.tier}`));
+        console.log(chalk.dim(`    ctxWindow     : ${ctxK} (${cap.contextWindow} tokens)`));
+        console.log(chalk.dim(`    promptStyle   : ${cap.promptStyle}`));
+        console.log(chalk.dim(`    toolCalling   : ${cap.supportsToolCalling}`));
+        console.log(chalk.dim(`    parallelTools : ${cap.supportsParallelTools}`));
+        console.log(chalk.dim(`    instrFollow   : ${cap.reliableInstructionFollowing}`));
+        console.log(chalk.dim(`    判定根拠       : ${cap.reason}`));
+        console.log(chalk.dim("  詳細: docs/multi-tier-harness-roadmap.md §3"));
+        break;
+      }
+
       case "/try": {
         const tryArgsStr = args.join(" ").trim();
         if (!tryArgsStr) {
