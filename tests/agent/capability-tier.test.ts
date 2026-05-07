@@ -88,25 +88,38 @@ describe("resolveCapability — パターン一致 (PATTERN_RULES)", () => {
 });
 
 describe("resolveCapability — ヒューリスティック (パターン外)", () => {
-  it("ctxWindow 提供あり: 大きい ctx は T2 寄り", () => {
-    const profile = resolveCapability("totally-unknown-model", 128_000);
-    expect(profile.tier).toBe("T2");
-    expect(profile.reason).toContain("heuristic");
-  });
+  // tier 判定はモデル名のサイズ表記のみ使う (ctxWindow とは独立)。
+  // ctxWindow の解決は providers/utils/context-length.ts (inferContextLength) に一元化済。
 
-  it("ctxWindow 提供あり: 小さい ctx は T3 寄り", () => {
-    const profile = resolveCapability("totally-unknown-model", 8_192);
-    expect(profile.tier).toBe("T3");
-  });
-
-  it("model 名に 70b 表記があれば T2", () => {
-    const profile = resolveCapability("custom-model-70b-merged", 32_000);
+  it("model 名に 70b 表記があれば T2 (ctx は inferContextLength 任せ)", () => {
+    const profile = resolveCapability("custom-model-70b-merged");
     expect(profile.tier).toBe("T2");
+    expect(profile.contextWindow).toBeGreaterThan(0); // 値の出所は問わない
   });
 
   it("model 名に 7b 表記があれば T3", () => {
-    const profile = resolveCapability("custom-fine-tune-7b-v2", 32_000);
+    const profile = resolveCapability("custom-fine-tune-7b-v2");
     expect(profile.tier).toBe("T3");
+  });
+
+  it("引数 ctxWindow が指定されればそれが contextWindow に反映される (= 真値は外部由来)", () => {
+    const profile = resolveCapability("custom-model-70b", 100_000);
+    expect(profile.tier).toBe("T2");
+    expect(profile.contextWindow).toBe(100_000);
+    expect(profile.reason).toContain("ctx=arg");
+  });
+
+  it("ctxWindow 未指定で既知パターンに合えば inferContextLength が使われる", () => {
+    // "llama" は inferContextLength で 128K (3.x default) になる
+    const profile = resolveCapability("llama-3.2-something", undefined);
+    expect(profile.contextWindow).toBe(128_000);
+    expect(profile.reason).toContain("ctx=infer");
+  });
+
+  it("ctxWindow 未指定で完全未知なら FALLBACK_CONTEXT_WINDOW (32K)", () => {
+    const profile = resolveCapability("opaque-private-model");
+    expect(profile.contextWindow).toBe(32_768);
+    expect(profile.reason).toContain("ctx=fallback");
   });
 
   it("情報無しのフォールバックは T2 (中庸)", () => {
@@ -153,10 +166,11 @@ describe("formatCapabilityLabel", () => {
     expect(label).toContain("concise");
   });
 
-  it("8K 以下の ctx は K 表記にせず数値で出す", () => {
+  it("ctx が K 表記 (>=1000) なら K 単位で出力", () => {
+    // phi-4 は inferContextLength で 128K になる (= /phi-?4/ がマッチ)
     const profile = resolveCapability("phi-4");
     const label = formatCapabilityLabel(profile, "phi-4");
-    expect(label).toMatch(/16K|16384/); // 16384 を 16K で出してもよい
+    expect(label).toMatch(/\dK ctx/); // 128K でも 200K でも何 K でも OK
   });
 });
 

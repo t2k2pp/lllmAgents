@@ -1,6 +1,6 @@
 # lllmAgents 100 点超えロードマップ — マルチティア・ハーネス戦略
 
-> **目的**: ローカル LLM を含むマルチプロバイダ AI エージェントとして、 Claude Code を 100 点としたとき同等以上 (目標 112 点) を目指す改善設計。
+> **目的**: ローカル LLM を含むマルチプロバイダ AI エージェントとして、 Claude Code を 100 点としたとき同等以上 (目標 107 点 ※ F-1 訂正反映) を目指す改善設計。
 >
 > **核心原則**: ハーネス工学は LLM の能力ティアに適応する。 賢い LLM (Claude/GPT-5) のための工夫が、 弱い LLM (7B ローカル) の足枷になってはいけない。 逆に弱い LLM 向けの scaffolding が、 賢い LLM を萎縮させてもいけない。
 >
@@ -20,8 +20,8 @@
 | **C** | ティア別ループ制御 (反復上限・自己点検深度・検証粒度) | +6 |
 | **D** | ローカル LLM 特有の工夫 (tool format 正規化, decision-tree, few-shot, ctx 最適化) | +18 |
 | **E** | 100 点超え機能 (自己改善ハーネス, federated reasoning, auto model selection, schema-strict I/O) | +22 |
-| **F** | エコシステム拡張 (MCP, streaming UX, テストランナ, テレメトリ) | +18 |
-| **合計** | | **35 → 112** |
+| **F** | エコシステム拡張 (MCP 周辺強化, streaming UX, テストランナ, テレメトリ) | +13 |
+| **合計** | | **35 → 107** (※ F-1 訂正で -5) |
 
 主張は次の 1 行に集約される:
 
@@ -93,44 +93,60 @@
 | **T2** | Kimi-K2, Qwen3 32B+, Llama 3.3 70B, GPT-4o | tool-use OK、 中程度のドリフト、 32K-128K ctx | 標準介入、 ガードレール |
 | **T3** | Llama 7-13B, Mistral 7B, Qwen 7-14B, Phi-4 | tool-use 不安定、 短文応答が多い、 4K-32K ctx、 即ドリフト | 厚いスキャフォールド、 hard gate 中心 |
 
-### 3.2 自動判定ロジック (`src/agent/capability-tier.ts` 新設)
+### 3.2 自動判定ロジック (`src/agent/capability-tier.ts`)
+
+> **訂正 (2026-05-07)**: 当初設計では `CapabilityProfile.contextWindow` を tier 表で
+> 持つことを提案したが、 これは既存システム (`src/index.ts` の 4 段 chain と
+> `providers/utils/context-length.ts:inferContextLength`) と重複する余計な層だった。
+> tier 判定と contextWindow の真値解決は直交させ、 tier テーブルは contextWindow を
+> 持たない設計に修正済 (`KNOWN_MODELS.contextWindow` を全削除、 `inferContextLength` に統一)。
+> 下記コードは修正後の正しい姿:
 
 ```ts
 export type Tier = "T1" | "T2" | "T3";
 
 interface CapabilityProfile {
   tier: Tier;
-  contextWindow: number;
-  supportsToolCalling: "native" | "json-mode" | "regex";
+  contextWindow: number; // フィールドは保持 (consumers が読む)、 値の出所は外部
+  supportsToolCalling: "native" | "json-mode" | "regex-fallback";
   supportsParallelTools: boolean;
-  reliableInstructionFollowing: boolean; // system-prompt の規約を守れるか
+  reliableInstructionFollowing: boolean;
   promptStyle: "concise" | "standard" | "verbose+examples";
+  // ループ制御チューナブル (Phase C で追加)
+  maxIterations: number;
+  maxSelfCheckRounds: number;
+  compressionThreshold: number;
+  toolResultTruncateBytes: number;
+  bashCumulativeWarnEnabled: boolean;
+  planTodoOveruseEnabled: boolean;
+  keepRecentMessages: number;
 }
 
-const KNOWN_MODELS: Record<string, Partial<CapabilityProfile>> = {
-  // T1
-  "claude-opus-4-7": { tier: "T1", contextWindow: 200_000, supportsToolCalling: "native", reliableInstructionFollowing: true },
-  "claude-sonnet-4-6": { tier: "T1", contextWindow: 200_000, ... },
-  "gpt-5.4": { tier: "T1", contextWindow: 200_000, ... },
-  // T2
-  "kimi-k2.6": { tier: "T2", contextWindow: 256_000, supportsToolCalling: "native" },
-  "qwen3.6-35b-a3b": { tier: "T2", contextWindow: 32_768, supportsToolCalling: "json-mode" },
-  // T3
-  "llama-3.2-7b": { tier: "T3", contextWindow: 8_192, supportsToolCalling: "regex" },
-  "phi-4-mini": { tier: "T3", contextWindow: 16_384, supportsToolCalling: "json-mode" },
+// tier 判定のみ。 contextWindow は持たない
+const KNOWN_MODELS: Record<string, Partial<CapabilityProfile> & { tier: Tier }> = {
+  "claude-opus-4-7": { tier: "T1" },
+  "kimi-k2.6": { tier: "T2" },
+  "llama-3.2-7b": { tier: "T3", supportsToolCalling: "regex-fallback" },
+  // ...
 };
 
-export function resolveCapability(modelId: string, ctxWindow?: number): CapabilityProfile {
-  // 1. モデル名完全一致
-  if (KNOWN_MODELS[modelId]) return fillDefaults(KNOWN_MODELS[modelId]);
-  // 2. プレフィックス一致 (claude-* / gpt-* / kimi-* / qwen-* / llama-* / mistral-* / phi-*)
-  for (const [prefix, profile] of Object.entries(KNOWN_PREFIXES)) {
-    if (modelId.startsWith(prefix)) return inferFromPrefix(modelId, profile, ctxWindow);
-  }
-  // 3. ヒューリスティック: ctx window と model ID 数値からパラメータサイズを推定
-  return inferFromHeuristics(modelId, ctxWindow);
+export function resolveCapability(
+  modelId: string,
+  ctxWindow?: number, // src/index.ts の 4 段 chain で解決された値が来る
+  override?: CapabilityOverride,
+): CapabilityProfile {
+  // contextWindow は別経路で 1 回だけ解決:
+  //   引数 ctxWindow → inferContextLength(modelId) → FALLBACK_CONTEXT_WINDOW
+  const resolvedCtx = resolveContextWindow(modelId, ctxWindow);
+  // tier 判定: KNOWN_MODELS → PATTERN_RULES → 名前ヒューリスティック → T2 fallback
+  // (tier 判定は contextWindow とは独立)
+  ...
 }
 ```
+
+**設計原則**: 同じ情報の出所は 1 つに統一する。 `contextWindow` の真値は provider
+が知っており、 知らなければヒューリスティック (`inferContextLength`) → fallback の順。
+tier テーブルが独自の数値を持つと矛盾と保守負担を生む。
 
 ### 3.3 ユーザによる手動 override
 
@@ -368,15 +384,23 @@ export function resolveCapability(modelId: string, ctxWindow?: number): Capabili
 
 これらは Claude Code の現在価値の主な部分でもある。 lllmAgents が同等になるための機能群。
 
-#### F-1: MCP (Model Context Protocol) 統合 (+7)
+#### F-1: MCP (Model Context Protocol) 周辺強化 (+2)
 
-MCP サーバ (Anthropic 規格) を読み込めるようにする。 既存の Slack / GitHub / Linear / Postgres 等の MCP サーバ資産が即利用可能になる。
+> **訂正 (2026-05-07)**: 当初「MCP 統合を新設 +7 点」 と書いたが、 実装確認を怠った
+> 認識誤り。 MCP は既に実装済 (`src/mcp/{mcp-manager,mcp-client,types}.ts` + `tests/mcp/`)、
+> stdio + SSE 両対応、 `~/.localllm/mcp-servers.json` 設定、 ToolRegistry 自動登録、
+> `mcp__<server>__<tool>` プレフィックス命名まで揃っている。 寄与点数も大幅下方修正。
 
-実装:
-- `src/mcp/client.ts` 新設 (Anthropic SDK の MCP クライアント仕様準拠)
-- `~/.localllm/mcp-servers.json` で server 一覧管理
-- 起動時に MCP の tool 一覧を `ToolRegistry` に流し込み
-- 権限 UI に「MCP server X からの tool: 許可しますか?」 を統合
+実装済 (確認):
+- `src/mcp/mcp-client.ts` (381 行) — JSON-RPC 2.0 over stdio + SSE
+- `src/mcp/mcp-manager.ts` (189 行) — ライフサイクル管理 + ToolRegistry 統合
+- 設定パス: `~/.localllm/mcp-servers.json` / `.localllm/mcp-servers.json` / `.claude/mcp-servers.json`
+
+残せる差分 (= 周辺強化):
+- 接続失敗時のリトライ UX 改善 (現状: warning 1 行で諦め)
+- `/mcp status` / `/mcp reload` slash command
+- セッション分析レポート (E-1) で MCP ツール由来の失敗を分離して可視化
+- (将来) 公開 MCP server カタログから 1 コマンドで追加
 
 #### F-2: Streaming UX / IDE 統合 (+5)
 
@@ -407,13 +431,13 @@ VSCode 拡張機能 / Cursor 統合 / Web UI のいずれかを実装。 最低�
 | Phase E-2: federated reasoning | +4 | +4 | +8 (新しい価値領域) |
 | Phase E-3: auto model selection | +3 | +2 | +5 |
 | Phase E-4: schema-strict I/O | +0 | +3 | +3 |
-| Phase F-1: MCP | +5 | +3 | +7 |
+| Phase F-1: MCP 周辺強化 (既存実装の確認後、 寄与下方修正) | +1 | +1 | +2 |
 | Phase F-2: IDE 統合 | +3 | +3 | +5 |
 | Phase F-3: テストランナ + 安全 destructive | +1 | +1 | +3 |
 | Phase F-4: テレメトリ可視化 | +1 | +2 | +3 |
-| **合計** | | | **+77 → 35 + 77 = 112** |
+| **合計** | | | **+72 → 35 + 72 = 107** (※ F-1 訂正で当初予測 -5) |
 
-100 点超え (112) の根拠:
+100 点超え (107) の根拠:
 - Claude Code が前提とする「ユーザは Claude を使う」 を超えて、 「ユーザは適材適所のモデル群を使う」 という新しい設計領域を切り拓く (E-2, E-3)
 - ローカル LLM の実用化 (Phase D 群) は Claude Code に存在しない価値領域
 - 賢い LLM の足枷にならない原則 (Phase B-C) で、 同時に T1 ユーザの体験も Claude Code と同等以上に磨ける
@@ -518,7 +542,7 @@ P0-P3 は正しい方向への第一歩だったが、 **すべて T1/T2 を暗�
 - MCP, IDE, テストランナ、 テレメトリ
 - 100 点超えを安定化
 
-合計 5 ヶ月の追加開発で 35 → 112 点の見込み。
+合計 5 ヶ月の追加開発で 35 → 107 点の見込み (F-1 訂正で当初 112 点予測から下方)。
 
 ---
 
