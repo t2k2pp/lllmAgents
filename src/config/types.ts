@@ -239,6 +239,19 @@ export interface Config {
    * 起動時の --no-mcp フラグでも同等。 REPL /mcp on /off で動的切替可能。
    */
   mcpEnabled?: boolean;
+  /**
+   * Phase F (Skills ON/OFF): スキル機能全体の ON/OFF。
+   * - 未指定 (undefined) または true → ~/.localllm/skills/ から全部ロード (既存挙動)
+   * - false → ロードはするが registry 層で無効化 (= 中級者が一時 OFF)
+   * 起動時 --no-skills フラグや REPL /skills on /off で切替。
+   */
+  skillsEnabled?: boolean;
+  /**
+   * Phase F (Skills ON/OFF): 永続的にスキップするスキル名のリスト (= ファイル削除なし)。
+   * 各 skill の `name` フィールドで指定。 REPL /skills toggle <name> で動的に追加削除可能。
+   * 将来的にグループ単位の指定も検討 (例: { groups: ["dev"], skills: ["foo"] })。
+   */
+  disabledSkills?: string[];
 }
 
 // ヘルパー: セカンドLLMがクラウドかローカルかを判定

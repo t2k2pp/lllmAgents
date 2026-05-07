@@ -947,6 +947,92 @@ export class REPL {
         break;
       }
 
+      case "/skills": {
+        // Phase F (Skills ON/OFF): 全/個別 skill の状態管理 (status/on/off/reload/toggle)
+        if (!this.skillRegistry) {
+          console.log(chalk.yellow("  SkillRegistry 未初期化です。"));
+          break;
+        }
+        const sub = args[0]?.trim() ?? "status";
+        const target = args[1]?.trim();
+        switch (sub) {
+          case "status": {
+            const enabled = this.skillRegistry.isGlobalEnabled();
+            const all = this.skillRegistry.listAllWithStatus();
+            console.log(chalk.dim(`  Skills global: ${enabled ? chalk.green("ON") : chalk.yellow("OFF")}`));
+            if (all.length === 0) {
+              console.log(chalk.dim("  (~/.localllm/skills/ 等にスキルがロードされていません)"));
+            } else {
+              const builtinCount = all.filter((s) => s.builtIn).length;
+              const userCount = all.length - builtinCount;
+              const enabledCount = all.filter((s) => s.enabled).length;
+              console.log(chalk.dim(`  Loaded: ${all.length} (builtin=${builtinCount}, user=${userCount}) / Enabled: ${enabledCount}`));
+              for (const s of all) {
+                const stateMark = s.enabled
+                  ? chalk.green("●")
+                  : chalk.yellow("○");
+                const reason = !enabled
+                  ? " (global OFF)"
+                  : s.runtimeDisabled
+                    ? " (skip)"
+                    : "";
+                const tag = s.builtIn ? chalk.dim("[builtin]") : chalk.dim("[user]");
+                console.log(chalk.dim(`    ${stateMark} ${s.name.padEnd(24)} ${tag}${reason}`));
+              }
+            }
+            console.log(chalk.dim("  使用例: /skills on | /skills off | /skills toggle <name> | /skills reload"));
+            console.log(chalk.dim("  永続的に外す: ~/.localllm/config.json の disabledSkills に name を追加"));
+            break;
+          }
+          case "on": {
+            this.skillRegistry.setGlobalEnabled(true);
+            this.refreshLLMProfiles();
+            console.log(chalk.dim("  Skills enabled (system prompt 反映済)"));
+            break;
+          }
+          case "off": {
+            this.skillRegistry.setGlobalEnabled(false);
+            this.refreshLLMProfiles();
+            console.log(chalk.dim("  Skills disabled (system prompt から外しました)"));
+            break;
+          }
+          case "reload": {
+            // 完全な再読込は loadAllSkills を呼ぶ必要があるが、 registry に
+            // 注入し直すと既存の disable 状態を保持できないため、 ここでは「次回起動時」 を案内。
+            console.log(chalk.dim("  Skills reload は次回起動時に行われます (~/.localllm/skills/ の差分を見たい場合)"));
+            console.log(chalk.dim("  個別 toggle なら /skills toggle <name> で即時反映"));
+            break;
+          }
+          case "toggle": {
+            if (!target) {
+              console.log(chalk.yellow("  使用方法: /skills toggle <skill-name>"));
+              break;
+            }
+            const all = this.skillRegistry.listAllWithStatus();
+            const found = all.find((s) => s.name === target);
+            if (!found) {
+              console.log(chalk.yellow(`  スキル "${target}" が見つかりません。 /skills status で確認。`));
+              break;
+            }
+            if (found.runtimeDisabled) {
+              this.skillRegistry.enableSkill(target);
+              console.log(chalk.dim(`  ${target}: 有効化しました`));
+            } else {
+              this.skillRegistry.disableSkill(target);
+              console.log(chalk.dim(`  ${target}: 無効化しました (永続化は config.disabledSkills へ)`));
+            }
+            this.refreshLLMProfiles();
+            console.log(chalk.dim("  system prompt 反映済"));
+            break;
+          }
+          default: {
+            console.log(chalk.yellow(`  未知のサブコマンド: ${sub}`));
+            console.log(chalk.dim("  使用方法: /skills [status|on|off|reload|toggle <name>]"));
+          }
+        }
+        break;
+      }
+
       case "/capability": {
         // Phase A-4 + C-1: 現在の LLM 能力ティア / profile / tunables を表示
         const cap = this.agent.getCapability();

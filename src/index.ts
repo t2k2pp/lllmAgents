@@ -247,6 +247,22 @@ async function main(): Promise<void> {
   for (const skill of skills) {
     skillRegistry.register(skill);
   }
+  // Phase F (Skills ON/OFF): 起動時の --no-skills フラグ / config.skillsEnabled / config.disabledSkills を反映
+  const skillsDisabledByCli = args.includes("--no-skills");
+  const skillsCfgFlag = (config as unknown as { skillsEnabled?: boolean }).skillsEnabled;
+  if (skillsDisabledByCli || skillsCfgFlag === false) {
+    skillRegistry.setGlobalEnabled(false);
+    console.log(chalk.dim(`  Skills: disabled by ${skillsDisabledByCli ? "--no-skills" : "config"}`));
+  }
+  const disabledSkills = (config as unknown as { disabledSkills?: string[] }).disabledSkills;
+  if (Array.isArray(disabledSkills)) {
+    for (const name of disabledSkills) {
+      skillRegistry.disableSkill(name);
+    }
+    if (disabledSkills.length > 0) {
+      console.log(chalk.dim(`  Skills: ${disabledSkills.length} skill(s) skipped by config.disabledSkills`));
+    }
+  }
   setSkillRegistry(skillRegistry);
   setSkillPermissionManager(permissions);
 
