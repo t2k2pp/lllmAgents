@@ -20,6 +20,7 @@ import {
   formatCapabilityLabel,
   type CapabilityProfile,
 } from "./capability-tier.js";
+import { normalizeToolCalls } from "./tool-call-normalizer.js";
 import { buildSystemPrompt, type SkillInfo, type LLMProfiles } from "./system-prompt.js";
 import {
   createSession,
@@ -819,7 +820,27 @@ export class AgentLoop {
         continue;
       }
 
+      // Phase D-1: T2/T3 では非標準形式 (Mistral [TOOL_CALLS] / ChatML <tool_call> /
+      // ReAct Action: / Plain JSON) の tool 呼び出しを fallback として正規化を試みる。
+      // OpenAI 互換 function calling が確実な T1 ではスキップ (誤検知を避ける)。
+      if (
+        toolCalls.length === 0 &&
+        textContent.trim().length > 0 &&
+        (this.capability.tier === "T2" || this.capability.tier === "T3")
+      ) {
+        const normalized = normalizeToolCalls(textContent);
+        if (normalized.toolCalls.length > 0) {
+          console.log(chalk.dim(
+            `  [tool-format] ${normalized.format} 形式から ${normalized.toolCalls.length} 件の tool 呼び出しを抽出 (tier=${this.capability.tier})`,
+          ));
+          // 既存の textContent / toolCalls を上書きして tool 実行ルートへ流す
+          textContent = normalized.cleanedText;
+          toolCalls.push(...normalized.toolCalls);
+        }
+      }
+
       // ガベージ応答（トークンアーティファクト等）を検出: リプロンプトしても改善しないため中断
+      // 注: 上の正規化で tool calls を抽出できた場合はここに来ない (toolCalls.length > 0)
       if (toolCalls.length === 0 && textContent.trim().length > 0 && isGarbageResponse(textContent)) {
         console.log(chalk.yellow("\n  モデルの応答が解析できない形式です。プロンプトを変えて再度お試しください。"));
         this.history.addAssistantMessage(textContent);
