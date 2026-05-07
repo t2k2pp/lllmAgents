@@ -1190,16 +1190,96 @@ export class AgentLoop {
     if (prior.length === 0) return; // 初回失敗 → 通常通り
 
     // 直近 window 内に同じ失敗が既にあった → 学習されていない兆候
-    const advice = this.buildStuckLoopAdvice(toolCall.function.name, trimmedErr);
-    const intervention =
-      `[ハーネス] 直近${AgentLoop.FAILURE_WINDOW}反復内に「${toolCall.function.name}」 を同じ引数で実行し、 同じエラーが ${prior.length + 1} 回出ています。\n` +
-      `  エラー: ${trimmedErr.slice(0, 200)}\n` +
-      `  ${advice}\n` +
-      `  同じ引数での再試行は禁止。 別の引数 / 別ツール / ask_user のいずれかに切り替えてください。`;
-    console.log(chalk.yellow(`\n  ⚠ stuck-loop 検出: ${toolCall.function.name} が直近${AgentLoop.FAILURE_WINDOW}反復で同一エラー再発`));
+    // Phase D-2: T3 では decision-tree mode で binary 二択を提示する。
+    // 自由形式の助言は T3 にとって判断負荷が高く、 さらに迷走する原因になるため。
+    const intervention = this.capability.tier === "T3"
+      ? this.buildT3DecisionTreeIntervention(toolCall, trimmedErr, prior.length + 1)
+      : this.buildStandardStuckLoopIntervention(toolCall, trimmedErr, prior.length + 1);
+    console.log(chalk.yellow(`\n  ⚠ stuck-loop 検出: ${toolCall.function.name} が直近${AgentLoop.FAILURE_WINDOW}反復で同一エラー再発 (tier=${this.capability.tier})`));
     this.history.addUserMessage(intervention);
     // 注入後は当該 signature の履歴をクリアして再注入を防ぐ
     this.recentFailures = this.recentFailures.filter((e) => e.signature !== signature);
+  }
+
+  /** Phase D-2: T1/T2 向け標準介入 (自由形式の advice) */
+  private buildStandardStuckLoopIntervention(toolCall: ToolCall, errorMsg: string, occurrences: number): string {
+    const advice = this.buildStuckLoopAdvice(toolCall.function.name, errorMsg);
+    return (
+      `[ハーネス] 直近${AgentLoop.FAILURE_WINDOW}反復内に「${toolCall.function.name}」 を同じ引数で実行し、 同じエラーが ${occurrences} 回出ています。\n` +
+      `  エラー: ${errorMsg.slice(0, 200)}\n` +
+      `  ${advice}\n` +
+      `  同じ引数での再試行は禁止。 別の引数 / 別ツール / ask_user のいずれかに切り替えてください。`
+    );
+  }
+
+  /**
+   * Phase D-2: T3 向け decision-tree 介入。
+   *
+   * 自由形式で「別アプローチを取れ」 と言っても T3 は判断できないことが多い。
+   * 代わりに binary 二択を提示し、 「どちらかを 1 行で答えてから tool 実行」 と強制する。
+   * docs/multi-tier-harness-roadmap.md §4 D-2 参照。
+   */
+  private buildT3DecisionTreeIntervention(toolCall: ToolCall, errorMsg: string, occurrences: number): string {
+    const name = toolCall.function.name;
+    const [optionA, optionB] = this.buildBinaryDecisionOptions(name, errorMsg, toolCall.function.arguments ?? "");
+    return (
+      `[ハーネス] 「${name}」 を同じ引数で ${occurrences} 回失敗。 同じエラー: ${errorMsg.slice(0, 150)}\n` +
+      `\n` +
+      `次にどちらかを実行してください (両方やらない):\n` +
+      `  A) ${optionA}\n` +
+      `  B) ${optionB}\n` +
+      `\n` +
+      `1 行目に "A" か "B" を書いて、 同じターンで対応する tool 呼び出しをしてください。 これ以外の選択は禁止です。`
+    );
+  }
+
+  /**
+   * Phase D-2: ツール × エラー種別ごとの binary 選択肢を返す。
+   * A は「具体的な引数変更」、 B は基本「ask_user で人間に確認」 で固定。
+   * 二択の単純化が T3 の迷走を防ぐ。
+   */
+  private buildBinaryDecisionOptions(
+    toolName: string,
+    errorMsg: string,
+    _argumentsJson: string,
+  ): [string, string] {
+    if (toolName === "file_edit") {
+      if (errorMsg.includes("found") && errorMsg.includes("times")) {
+        return [
+          "同じ file_edit に replace_all=true を追加して再実行",
+          "ask_user で「どの箇所を編集するか」 を確認",
+        ];
+      }
+      if (errorMsg.includes("not found")) {
+        return [
+          "file_write でファイル全体を書き直す",
+          "ask_user で「ファイルパスが正しいか」 を確認",
+        ];
+      }
+    }
+    if (toolName === "file_read" && errorMsg.includes("not found")) {
+      return [
+        "glob でファイル名を検索 (例: glob({\"pattern\":\"**/<name>\"}))",
+        "ask_user で「正しいファイルパス」 を確認",
+      ];
+    }
+    if (toolName === "bash") {
+      return [
+        "コマンドの引数を変えて再実行 (例: 別コマンドや別 path)",
+        "ask_user で「期待する動作」 を確認",
+      ];
+    }
+    if (toolName === "grep" || toolName === "glob") {
+      return [
+        "pattern を緩める (例: より一般的な単語、 拡張子なし)",
+        "ask_user で「探したい内容」 を確認",
+      ];
+    }
+    // 汎用 fallback
+    return [
+      "ツールの引数を 1 つ変更して再実行 (エラー文の指示に従う)",
+      "ask_user で「どう進めるか」 を確認",
+    ];
   }
 
   /** P0-A: 失敗ツールごとの具体的助言を返す。 ツール側エラー文の指示を増幅させる役割。 */
