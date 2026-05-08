@@ -62,6 +62,10 @@ export class MCPManager {
   enableServer(name: string): void {
     this.runtimeDisabledServers.delete(name);
   }
+  /** runtime 個別 disable 中のサーバ name 一覧 (config 永続化用) */
+  getRuntimeDisabledNames(): string[] {
+    return [...this.runtimeDisabledServers];
+  }
 
   /**
    * 個別サーバを **即時** 切断 + tools を ToolRegistry から削除する。

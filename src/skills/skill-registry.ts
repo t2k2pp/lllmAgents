@@ -56,6 +56,11 @@ export class SkillRegistry {
     return this.globalEnabled && !this.disabledSkillNames.has(name);
   }
 
+  /** runtime 個別 disable 中のスキル name 一覧 (config 永続化用) */
+  getRuntimeDisabledNames(): string[] {
+    return [...this.disabledSkillNames];
+  }
+
   /**
    * disabled も含めた全スキル一覧 (status 表示用)。
    * list() は有効分のみだが、 こちらは UI で「無効化中: X」 を出すため。

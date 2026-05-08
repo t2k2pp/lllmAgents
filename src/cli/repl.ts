@@ -555,6 +555,30 @@ export class REPL {
     this.agent.updateLLMProfiles(profiles, skillInfos, hasSecondLLM, !!this.config.obsidian?.vaultPath);
   }
 
+  /**
+   * Phase F: MCP の現在状態 (global ON/OFF + 個別 runtime disabled) を config.json へ
+   * 永続化。 toggle / on / off の直後に呼ぶと再起動後も同じ状態が復元される。
+   */
+  private persistMcpState(): void {
+    if (!this.mcpManager) return;
+    this.config.mcpEnabled = this.mcpManager.isGlobalEnabled();
+    const disabled = this.mcpManager.getRuntimeDisabledNames();
+    this.config.disabledMcpServers = disabled.length > 0 ? disabled : undefined;
+    saveConfig(this.config);
+  }
+
+  /**
+   * Phase F: Skills の現在状態 (global ON/OFF + 個別 runtime disabled) を config.json へ
+   * 永続化。 toggle / on / off の直後に呼ぶと再起動後も同じ状態が復元される。
+   */
+  private persistSkillsState(): void {
+    if (!this.skillRegistry) return;
+    this.config.skillsEnabled = this.skillRegistry.isGlobalEnabled();
+    const disabled = this.skillRegistry.getRuntimeDisabledNames();
+    this.config.disabledSkills = disabled.length > 0 ? disabled : undefined;
+    saveConfig(this.config);
+  }
+
   // ─── /model host / /model port / /model setup (local) ────────────────────────
 
   /** baseUrl から host / port を取り出す。 パース失敗時は両方 null */
@@ -901,13 +925,15 @@ export class REPL {
           }
           case "on": {
             this.mcpManager.setGlobalEnabled(true);
-            console.log(chalk.dim("  MCP enabled. /mcp reload で再接続してください。"));
+            this.persistMcpState();
+            console.log(chalk.dim("  MCP enabled (config に保存)。 /mcp reload で再接続してください。"));
             break;
           }
           case "off": {
             this.mcpManager.setGlobalEnabled(false);
             await this.mcpManager.disconnectAll();
-            console.log(chalk.dim("  MCP disabled. 接続中のサーバを切断しました。 (設定ファイルは変更していません)"));
+            this.persistMcpState();
+            console.log(chalk.dim("  MCP disabled (config に保存)。 接続中のサーバを切断しました。"));
             break;
           }
           case "reload": {
@@ -944,6 +970,7 @@ export class REPL {
                   const r = await this.mcpManager.enableServerImmediate(target, registry);
                   console.log(chalk.dim(`  ${target}: 接続・ツール ${r.added} 件登録`));
                 }
+                this.persistMcpState();
               } catch (e) {
                 console.log(chalk.yellow(`  ${target}: ${e}`));
               }
@@ -995,6 +1022,8 @@ export class REPL {
                 console.log(chalk.yellow(`  ! ${n}: ${e}`));
               }
             }
+            this.persistMcpState();
+            console.log(chalk.dim("  config に保存済 (再起動後も維持)"));
             break;
           }
           default: {
@@ -1038,20 +1067,22 @@ export class REPL {
                 console.log(chalk.dim(`    ${stateMark} ${s.name.padEnd(24)} ${tag}${reason}`));
               }
             }
-            console.log(chalk.dim("  使用例: /skills on | /skills off | /skills toggle <name> | /skills reload"));
-            console.log(chalk.dim("  永続的に外す: ~/.localllm/config.json の disabledSkills に name を追加"));
+            console.log(chalk.dim("  使用例: /skills on | /skills off | /skills toggle [name] | /skills reload"));
+            console.log(chalk.dim("  ON/OFF と toggle 結果は config.json に自動保存 (再起動後も維持)"));
             break;
           }
           case "on": {
             this.skillRegistry.setGlobalEnabled(true);
             this.refreshLLMProfiles();
-            console.log(chalk.dim("  Skills enabled (system prompt 反映済)"));
+            this.persistSkillsState();
+            console.log(chalk.dim("  Skills enabled (system prompt 反映済 / config に保存)"));
             break;
           }
           case "off": {
             this.skillRegistry.setGlobalEnabled(false);
             this.refreshLLMProfiles();
-            console.log(chalk.dim("  Skills disabled (system prompt から外しました)"));
+            this.persistSkillsState();
+            console.log(chalk.dim("  Skills disabled (system prompt から外しました / config に保存)"));
             break;
           }
           case "reload": {
@@ -1080,9 +1111,10 @@ export class REPL {
                 console.log(chalk.dim(`  ${target}: 有効化`));
               } else {
                 this.skillRegistry.disableSkill(target);
-                console.log(chalk.dim(`  ${target}: 無効化 (永続化は config.disabledSkills へ)`));
+                console.log(chalk.dim(`  ${target}: 無効化`));
               }
               this.refreshLLMProfiles();
+              this.persistSkillsState();
               break;
             }
 
@@ -1113,9 +1145,10 @@ export class REPL {
             for (const n of turnOff) this.skillRegistry.disableSkill(n);
             for (const n of turnOn) this.skillRegistry.enableSkill(n);
             this.refreshLLMProfiles();
+            this.persistSkillsState();
             for (const n of turnOff) console.log(chalk.dim(`  ${chalk.yellow("− OFF")} ${n}`));
             for (const n of turnOn) console.log(chalk.dim(`  ${chalk.green("+ ON ")} ${n}`));
-            console.log(chalk.dim("  system prompt 反映済"));
+            console.log(chalk.dim("  system prompt 反映済 / config に保存 (再起動後も維持)"));
             break;
           }
           default: {

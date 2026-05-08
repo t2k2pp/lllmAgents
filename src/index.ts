@@ -167,11 +167,19 @@ async function main(): Promise<void> {
   // 設定ファイル (mcp-servers.json) は残したまま、 接続だけスキップできる。
   const mcpManager = new MCPManager(process.cwd());
   const mcpDisabledByCli = args.includes("--no-mcp");
-  // unknown プロパティを安全に拾う (Config 型に mcpEnabled を将来追加するまでの暫定)
-  const mcpDisabledByCfg = (config as unknown as { mcpEnabled?: boolean }).mcpEnabled === false;
+  const mcpDisabledByCfg = config.mcpEnabled === false;
   if (mcpDisabledByCli || mcpDisabledByCfg) {
     mcpManager.setGlobalEnabled(false);
     console.log(chalk.dim(`  MCP: disabled by ${mcpDisabledByCli ? "--no-mcp" : "config"}`));
+  }
+  // Phase F: REPL から個別 disable した server を再起動後も維持
+  if (Array.isArray(config.disabledMcpServers)) {
+    for (const name of config.disabledMcpServers) {
+      mcpManager.disableServer(name);
+    }
+    if (config.disabledMcpServers.length > 0) {
+      console.log(chalk.dim(`  MCP: ${config.disabledMcpServers.length} server(s) skipped by config.disabledMcpServers`));
+    }
   }
   await mcpManager.connectAll(toolRegistry);
 
@@ -249,18 +257,16 @@ async function main(): Promise<void> {
   }
   // Phase F (Skills ON/OFF): 起動時の --no-skills フラグ / config.skillsEnabled / config.disabledSkills を反映
   const skillsDisabledByCli = args.includes("--no-skills");
-  const skillsCfgFlag = (config as unknown as { skillsEnabled?: boolean }).skillsEnabled;
-  if (skillsDisabledByCli || skillsCfgFlag === false) {
+  if (skillsDisabledByCli || config.skillsEnabled === false) {
     skillRegistry.setGlobalEnabled(false);
     console.log(chalk.dim(`  Skills: disabled by ${skillsDisabledByCli ? "--no-skills" : "config"}`));
   }
-  const disabledSkills = (config as unknown as { disabledSkills?: string[] }).disabledSkills;
-  if (Array.isArray(disabledSkills)) {
-    for (const name of disabledSkills) {
+  if (Array.isArray(config.disabledSkills)) {
+    for (const name of config.disabledSkills) {
       skillRegistry.disableSkill(name);
     }
-    if (disabledSkills.length > 0) {
-      console.log(chalk.dim(`  Skills: ${disabledSkills.length} skill(s) skipped by config.disabledSkills`));
+    if (config.disabledSkills.length > 0) {
+      console.log(chalk.dim(`  Skills: ${config.disabledSkills.length} skill(s) skipped by config.disabledSkills`));
     }
   }
   setSkillRegistry(skillRegistry);

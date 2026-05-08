@@ -237,8 +237,16 @@ export interface Config {
    * - 未指定 (undefined) または true → mcp-servers.json を読んで接続 (既存挙動)
    * - false → 設定があっても接続スキップ (= 一時的に MCP を切りたいとき)
    * 起動時の --no-mcp フラグでも同等。 REPL /mcp on /off で動的切替可能。
+   * REPL で切替した結果はここに保存され、 再起動後も維持される。
    */
   mcpEnabled?: boolean;
+  /**
+   * Phase F (MCP per-server persistent skip): REPL /mcp toggle で外したサーバの永続リスト。
+   * mcp-servers.json の `disabled: true` とは独立 (= mcp-servers.json は user/admin 編集、
+   * こちらは REPL からの動的操作の永続化先)。 起動時に読み出して mcpManager.disableServer
+   * へ流し込む。 サーバ name (mcp-servers.json の name フィールド) で識別。
+   */
+  disabledMcpServers?: string[];
   /**
    * Phase F (Skills ON/OFF): スキル機能全体の ON/OFF。
    * - 未指定 (undefined) または true → ~/.localllm/skills/ から全部ロード (既存挙動)
