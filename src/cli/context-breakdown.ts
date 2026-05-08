@@ -341,10 +341,17 @@ export function formatContextBreakdown(b: ContextBreakdown, cwd: string = proces
   out.push("");
   out.push(chalk.dim("    Estimated usage by category"));
 
-  // System prompt
-  out.push(categoryLine("⛁", chalk.gray, "System prompt", b.systemPrompt.total, win));
-  if (b.systemPrompt.core > 0) {
-    out.push(subLine("Core (rules / env / profiles)", `~${formatTokens(b.systemPrompt.core)} tokens`));
+  // System prompt (= core 部分のみ。 memory / skills セクションは別カテゴリで分離して表示するため
+  // ここで full total を出すと重複カウントに見える)
+  out.push(categoryLine("⛁", chalk.gray, "System prompt", b.systemPrompt.core, win));
+  out.push(subLine("Rules / env / profiles", `~${formatTokens(b.systemPrompt.core)} tokens`));
+  if (b.systemPrompt.total !== b.systemPrompt.core) {
+    out.push(
+      subLine(
+        "(full system msg incl. memory+skills)",
+        `~${formatTokens(b.systemPrompt.total)} tokens`,
+      ),
+    );
   }
 
   // Memory files
