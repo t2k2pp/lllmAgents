@@ -7,6 +7,7 @@ import { bashTool } from "../tools/definitions/bash.js";
 import { globalTokenTracker } from "../cost/token-tracker.js";
 import { displayHelp, type SkillSummary } from "./renderer.js";
 import { estimateMessageTokens } from "../agent/token-counter.js";
+import { buildContextBreakdown, formatContextBreakdown } from "./context-breakdown.js";
 import { formatTodos } from "../tools/definitions/todo-write.js";
 import { listSessions, loadSession, getLatestSession } from "../agent/session-manager.js";
 import { loadMemory, saveMemory } from "../agent/memory.js";
@@ -839,14 +840,9 @@ export class REPL {
         break;
 
       case "/context": {
-        const messages = this.agent.getHistory().getMessages();
-        const tokens = estimateMessageTokens(messages);
-        const ctxWindow = this.agent.getContextWindow();
-        const pct = ctxWindow > 0 ? Math.round((tokens / ctxWindow) * 100) : 0;
-        console.log(chalk.dim(`  Messages: ${messages.length}`));
-        console.log(chalk.dim(`  Tokens: ~${tokens} / ${ctxWindow} (${pct}%)`));
-        const bar = progressBar(pct);
-        console.log(chalk.dim(`  ${bar}`));
+        // Claude Code 互換のカテゴリ別内訳: System prompt / Memory files / Skills / System tools / Messages / Free space
+        const breakdown = buildContextBreakdown(this.agent, this.skillRegistry, this.mcpManager);
+        process.stdout.write(formatContextBreakdown(breakdown));
         break;
       }
 

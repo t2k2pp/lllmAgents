@@ -1,0 +1,189 @@
+import { describe, it, expect } from "vitest";
+import type { AgentLoop } from "../../src/agent/agent-loop.js";
+import type { SkillRegistry } from "../../src/skills/skill-registry.js";
+import { buildContextBreakdown, formatContextBreakdown } from "../../src/cli/context-breakdown.js";
+import { MessageHistory } from "../../src/agent/message-history.js";
+import { ToolRegistry } from "../../src/tools/tool-registry.js";
+
+function makeAgent(opts: {
+  systemPrompt: string;
+  contextWindow?: number;
+  model?: string;
+  toolDefs?: Array<{ name: string }>;
+  userMessages?: Array<{ role: "user" | "assistant"; content: string }>;
+}): AgentLoop {
+  const history = new MessageHistory(opts.systemPrompt);
+  for (const m of opts.userMessages ?? []) {
+    if (m.role === "user") history.addUserMessage(m.content);
+    else history.addAssistantMessage(m.content);
+  }
+
+  const toolRegistry = new ToolRegistry();
+  for (const t of opts.toolDefs ?? []) {
+    toolRegistry.register({
+      name: t.name,
+      definition: {
+        type: "function",
+        function: {
+          name: t.name,
+          description: `${t.name} description for testing context breakdown`,
+          parameters: { type: "object", properties: { x: { type: "string" } } },
+        },
+      },
+      // execute is unused by buildContextBreakdown
+      execute: async () => ({ success: true, output: "" }),
+    });
+  }
+
+  return {
+    getHistory: () => history,
+    getContextWindow: () => opts.contextWindow ?? 100_000,
+    getModel: () => opts.model ?? "test-model",
+    getToolRegistry: () => toolRegistry,
+  } as unknown as AgentLoop;
+}
+
+describe("buildContextBreakdown", () => {
+  it("基本構造: System / Tools / Messages / Free space を分解する", () => {
+    const sys = `あなたは AI エージェント。 簡単な行動原則のみ。
+
+# 環境
+- platform: test
+- branch: main`;
+    const agent = makeAgent({
+      systemPrompt: sys,
+      contextWindow: 50_000,
+      toolDefs: [{ name: "bash" }, { name: "file_read" }],
+      userMessages: [
+        { role: "user", content: "hello world" },
+        { role: "assistant", content: "Hi there" },
+      ],
+    });
+
+    const b = buildContextBreakdown(agent, undefined, undefined);
+    expect(b.contextWindow).toBe(50_000);
+    expect(b.systemPrompt.total).toBeGreaterThan(0);
+    expect(b.tools.builtIn.count).toBe(2);
+    expect(b.tools.builtIn.tokens).toBeGreaterThan(0);
+    expect(b.tools.mcp.count).toBe(0);
+    expect(b.messages.count).toBe(2);
+    expect(b.messages.total).toBeGreaterThan(0);
+
+    // total = system + tools + messages, and free + total = ctxWindow
+    expect(b.totalUsed).toBe(b.systemPrompt.total + b.tools.total + b.messages.total);
+    expect(b.totalUsed + b.freeSpace).toBe(b.contextWindow);
+  });
+
+  it("system prompt に メモ / プロジェクト指示 / スキル一覧 セクションがあれば内訳を分離する", () => {
+    const sys = `本体ルール部分。
+たくさんの行動原則。
+
+# 環境
+- platform: test
+
+# プロジェクト指示（参考情報）
+プロジェクト指示はそこそこ長いのでトークンを消費する。
+これは2行目。
+
+# メモ
+- メモ1
+- メモ2
+
+# 利用可能なスキル一覧（参照用）
+ユーザーが明示的にスキルを呼び出した場合に使用する:
+
+- /commit: コミットメッセージ生成
+- /review: PR レビュー`;
+    const agent = makeAgent({ systemPrompt: sys, contextWindow: 100_000 });
+    const b = buildContextBreakdown(agent, undefined, undefined);
+
+    expect(b.memory.projectInstructions).toBeGreaterThan(0);
+    expect(b.memory.autoMemory).toBeGreaterThan(0);
+    expect(b.memory.total).toBe(b.memory.projectInstructions + b.memory.autoMemory);
+    expect(b.skills.total).toBeGreaterThan(0);
+
+    // core = system total - (memory + skills sections)
+    const sumOfParts = b.systemPrompt.core + b.memory.total + b.skills.total;
+    expect(sumOfParts).toBe(b.systemPrompt.total);
+  });
+
+  it("MCP ツールはサーバ別に内訳化される", () => {
+    const agent = makeAgent({
+      systemPrompt: "core",
+      toolDefs: [
+        { name: "bash" },
+        { name: "mcp__GoogleDrive__list" },
+        { name: "mcp__GoogleDrive__read" },
+        { name: "mcp__Gmail__send" },
+      ],
+    });
+    const b = buildContextBreakdown(agent, undefined, undefined);
+    expect(b.tools.builtIn.count).toBe(1);
+    expect(b.tools.mcp.count).toBe(3);
+    const serverNames = b.tools.mcp.servers.map((s) => s.name).sort();
+    expect(serverNames).toEqual(["Gmail", "GoogleDrive"]);
+    const drive = b.tools.mcp.servers.find((s) => s.name === "GoogleDrive");
+    expect(drive?.tools).toBe(2);
+  });
+
+  it("skill registry を渡すとロード/有効件数を集計する", () => {
+    // 軽量に SkillRegistry をスタブ
+    const skillRegistry = {
+      listAllWithStatus: () => [
+        {
+          name: "commit",
+          trigger: "/commit",
+          description: "Generate commit messages",
+          content: "",
+          filePath: "",
+          builtIn: true,
+          enabled: true,
+          runtimeDisabled: false,
+        },
+        {
+          name: "review",
+          trigger: "/review",
+          description: "Review pull requests",
+          content: "",
+          filePath: "",
+          builtIn: false,
+          enabled: false,
+          runtimeDisabled: true,
+        },
+      ],
+    } as unknown as SkillRegistry;
+
+    const agent = makeAgent({ systemPrompt: "core" });
+    const b = buildContextBreakdown(agent, skillRegistry, undefined);
+    expect(b.skills.loadedCount).toBe(2);
+    expect(b.skills.enabledCount).toBe(1);
+    expect(b.skills.items.find((s) => s.name === "commit")?.enabled).toBe(true);
+    expect(b.skills.items.find((s) => s.name === "review")?.enabled).toBe(false);
+  });
+
+  it("freeSpace は contextWindow を超えても 0 でクランプ", () => {
+    // 強引に小さい ctxWindow にして使用量を超過させる
+    const longSys = "x".repeat(200_000);
+    const agent = makeAgent({ systemPrompt: longSys, contextWindow: 1000 });
+    const b = buildContextBreakdown(agent, undefined, undefined);
+    expect(b.freeSpace).toBe(0);
+  });
+});
+
+describe("formatContextBreakdown", () => {
+  it("出力に主要カテゴリのラベルが含まれる", () => {
+    const agent = makeAgent({
+      systemPrompt: "test",
+      toolDefs: [{ name: "bash" }],
+      userMessages: [{ role: "user", content: "hi" }],
+    });
+    const b = buildContextBreakdown(agent, undefined, undefined);
+    const out = formatContextBreakdown(b);
+    expect(out).toContain("System prompt");
+    expect(out).toContain("Memory files");
+    expect(out).toContain("Skills");
+    expect(out).toContain("System tools");
+    expect(out).toContain("Messages");
+    expect(out).toContain("Free space");
+  });
+});

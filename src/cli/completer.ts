@@ -25,7 +25,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/quit", description: "終了" },
   { command: "/exit", description: "終了" },
   { command: "/clear", description: "会話履歴クリア" },
-  { command: "/context", description: "コンテキスト使用状況" },
+  { command: "/context", description: "コンテキスト使用状況 (System prompt / Memory / Skills / Tools / Messages 内訳)" },
   { command: "/compact", description: "コンテキスト圧縮" },
   { command: "/capability", description: "LLM能力ティア (T1/T2/T3) と profile を表示" },
   { command: "/metrics", description: "現セッションのテレメトリ (反復・bash累積・stuck-loop・トークン)" },
