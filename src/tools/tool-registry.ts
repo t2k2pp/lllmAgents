@@ -41,6 +41,14 @@ export class ToolRegistry {
     this.tools.set(handler.name, handler);
   }
 
+  /**
+   * 登録済みツールを名前で削除する。 MCP server の即時 disable などに使う。
+   * 削除できれば true、 そもそも未登録なら false。
+   */
+  unregister(name: string): boolean {
+    return this.tools.delete(name);
+  }
+
   get(name: string): ToolHandler | undefined {
     return this.tools.get(name);
   }

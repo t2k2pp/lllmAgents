@@ -27,7 +27,7 @@ import { sendDiscordNotification, isValidDiscordWebhookUrl } from "../utils/disc
 import { sendSlackNotification, isValidSlackWebhookUrl } from "../utils/slack.js";
 import { DiscordInteractionServer } from "../discord/interaction-server.js";
 import { registerAskCommand } from "../discord/slash-commands.js";
-import { select, input, password, confirm } from "@inquirer/prompts";
+import { select, input, password, confirm, checkbox } from "@inquirer/prompts";
 import { CredentialVault } from "../security/credential-vault.js";
 import { AzureFoundryProvider } from "../providers/azure-foundry.js";
 import { AzureAnthropicProvider } from "../providers/azure-anthropic.js";
@@ -881,11 +881,13 @@ export class REPL {
             } else {
               console.log(chalk.dim(`  Servers (${servers.length}):`));
               for (const s of servers) {
-                const stateMark = s.connected
-                  ? chalk.green("● connected")
-                  : (s.configDisabled || s.runtimeDisabled)
-                    ? chalk.yellow("○ skipped")
-                    : chalk.red("✗ not connected");
+                // active = connected かつ disabled でない、 skipped = いずれかの disabled、 failed = それ以外
+                const isSkipped = s.configDisabled || s.runtimeDisabled;
+                const stateMark = isSkipped
+                  ? chalk.yellow("○ skipped")
+                  : s.connected
+                    ? chalk.green("● active")
+                    : chalk.red("✗ failed");
                 const reason = s.configDisabled
                   ? " (config.disabled)"
                   : s.runtimeDisabled
@@ -894,7 +896,7 @@ export class REPL {
                 console.log(chalk.dim(`    ${stateMark} ${s.name}${reason}: ${s.toolCount} tools`));
               }
             }
-            console.log(chalk.dim("  使用例: /mcp on | /mcp off | /mcp reload | /mcp toggle <server> | /mcp status"));
+            console.log(chalk.dim("  使用例: /mcp on | /mcp off | /mcp reload | /mcp toggle [server] | /mcp status"));
             break;
           }
           case "on": {
@@ -919,23 +921,79 @@ export class REPL {
             break;
           }
           case "toggle": {
-            if (!target) {
-              console.log(chalk.yellow("  使用方法: /mcp toggle <server-name>"));
-              break;
-            }
             const servers = this.mcpManager.getServerStatus();
-            const found = servers.find((s) => s.name === target);
-            if (!found) {
-              console.log(chalk.yellow(`  サーバ "${target}" が見つかりません。 /mcp status で確認。`));
+            if (servers.length === 0) {
+              console.log(chalk.yellow("  mcp-servers.json に登録なし"));
               break;
             }
-            const wasDisabled = found.runtimeDisabled || found.configDisabled;
-            if (wasDisabled) {
-              this.mcpManager.enableServer(target);
-              console.log(chalk.dim(`  ${target}: runtime skip 解除 (/mcp reload で接続)`));
-            } else {
-              this.mcpManager.disableServer(target);
-              console.log(chalk.dim(`  ${target}: runtime skip on (/mcp reload で反映)`));
+            const registry = this.agent.getToolRegistry();
+
+            // 引数指定 = 直接トグル (スクリプト用)
+            if (target) {
+              const found = servers.find((s) => s.name === target);
+              if (!found) {
+                console.log(chalk.yellow(`  サーバ "${target}" が見つかりません。 /mcp status で確認。`));
+                break;
+              }
+              const isCurrentlyOn = !found.configDisabled && !found.runtimeDisabled && found.connected;
+              try {
+                if (isCurrentlyOn) {
+                  const r = await this.mcpManager.disableServerImmediate(target, registry);
+                  console.log(chalk.dim(`  ${target}: 切断・ツール ${r.removed} 件解除`));
+                } else {
+                  const r = await this.mcpManager.enableServerImmediate(target, registry);
+                  console.log(chalk.dim(`  ${target}: 接続・ツール ${r.added} 件登録`));
+                }
+              } catch (e) {
+                console.log(chalk.yellow(`  ${target}: ${e}`));
+              }
+              break;
+            }
+
+            // 引数なし = checkbox UI (↑↓ 選択、 space トグル、 enter 確定)
+            const initiallyOn = new Set(
+              servers
+                .filter((s) => !s.configDisabled && !s.runtimeDisabled && s.connected)
+                .map((s) => s.name),
+            );
+            let selected: string[];
+            try {
+              selected = await checkbox<string>({
+                message: "MCP サーバを選択 (↑↓ 選択 / space トグル / enter 確定 / Esc キャンセル)",
+                choices: servers.map((s) => ({
+                  name: `${s.name}${s.configDisabled ? " (config.disabled)" : ""} — ${s.toolCount} tools`,
+                  value: s.name,
+                  checked: initiallyOn.has(s.name),
+                  disabled: s.configDisabled ? "永続無効化中 (mcp-servers.json で disabled: true)" : false,
+                })),
+                pageSize: 15,
+              });
+            } catch {
+              console.log(chalk.dim("  キャンセルしました"));
+              break;
+            }
+            const newOn = new Set(selected);
+            const turnOff = [...initiallyOn].filter((n) => !newOn.has(n));
+            const turnOn = [...newOn].filter((n) => !initiallyOn.has(n));
+            if (turnOff.length === 0 && turnOn.length === 0) {
+              console.log(chalk.dim("  変更なし"));
+              break;
+            }
+            for (const n of turnOff) {
+              try {
+                const r = await this.mcpManager.disableServerImmediate(n, registry);
+                console.log(chalk.dim(`  ${chalk.yellow("− OFF")} ${n} (ツール ${r.removed} 件解除)`));
+              } catch (e) {
+                console.log(chalk.yellow(`  ! ${n}: ${e}`));
+              }
+            }
+            for (const n of turnOn) {
+              try {
+                const r = await this.mcpManager.enableServerImmediate(n, registry);
+                console.log(chalk.dim(`  ${chalk.green("+ ON ")} ${n} (ツール ${r.added} 件登録)`));
+              } catch (e) {
+                console.log(chalk.yellow(`  ! ${n}: ${e}`));
+              }
             }
             break;
           }
@@ -1004,24 +1062,59 @@ export class REPL {
             break;
           }
           case "toggle": {
-            if (!target) {
-              console.log(chalk.yellow("  使用方法: /skills toggle <skill-name>"));
-              break;
-            }
             const all = this.skillRegistry.listAllWithStatus();
-            const found = all.find((s) => s.name === target);
-            if (!found) {
-              console.log(chalk.yellow(`  スキル "${target}" が見つかりません。 /skills status で確認。`));
+            if (all.length === 0) {
+              console.log(chalk.yellow("  スキルがロードされていません"));
               break;
             }
-            if (found.runtimeDisabled) {
-              this.skillRegistry.enableSkill(target);
-              console.log(chalk.dim(`  ${target}: 有効化しました`));
-            } else {
-              this.skillRegistry.disableSkill(target);
-              console.log(chalk.dim(`  ${target}: 無効化しました (永続化は config.disabledSkills へ)`));
+
+            // 引数指定 = 直接トグル (スクリプト用)
+            if (target) {
+              const found = all.find((s) => s.name === target);
+              if (!found) {
+                console.log(chalk.yellow(`  スキル "${target}" が見つかりません。 /skills status で確認。`));
+                break;
+              }
+              if (found.runtimeDisabled) {
+                this.skillRegistry.enableSkill(target);
+                console.log(chalk.dim(`  ${target}: 有効化`));
+              } else {
+                this.skillRegistry.disableSkill(target);
+                console.log(chalk.dim(`  ${target}: 無効化 (永続化は config.disabledSkills へ)`));
+              }
+              this.refreshLLMProfiles();
+              break;
             }
+
+            // 引数なし = checkbox UI
+            const initiallyOn = new Set(all.filter((s) => s.enabled).map((s) => s.name));
+            let selected: string[];
+            try {
+              selected = await checkbox<string>({
+                message: "スキルを選択 (↑↓ 選択 / space トグル / enter 確定 / Esc キャンセル)",
+                choices: all.map((s) => ({
+                  name: `${s.name.padEnd(24)} ${s.builtIn ? "[builtin]" : "[user]"} — ${s.description.slice(0, 48)}`,
+                  value: s.name,
+                  checked: s.enabled,
+                })),
+                pageSize: 15,
+              });
+            } catch {
+              console.log(chalk.dim("  キャンセルしました"));
+              break;
+            }
+            const newOn = new Set(selected);
+            const turnOff = [...initiallyOn].filter((n) => !newOn.has(n));
+            const turnOn = [...newOn].filter((n) => !initiallyOn.has(n));
+            if (turnOff.length === 0 && turnOn.length === 0) {
+              console.log(chalk.dim("  変更なし"));
+              break;
+            }
+            for (const n of turnOff) this.skillRegistry.disableSkill(n);
+            for (const n of turnOn) this.skillRegistry.enableSkill(n);
             this.refreshLLMProfiles();
+            for (const n of turnOff) console.log(chalk.dim(`  ${chalk.yellow("− OFF")} ${n}`));
+            for (const n of turnOn) console.log(chalk.dim(`  ${chalk.green("+ ON ")} ${n}`));
             console.log(chalk.dim("  system prompt 反映済"));
             break;
           }

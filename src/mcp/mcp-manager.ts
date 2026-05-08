@@ -55,12 +55,67 @@ export class MCPManager {
   isGlobalEnabled(): boolean {
     return this.globalEnabled;
   }
-  /** 個別サーバを runtime skip (設定はそのまま残す) */
+  /** 個別サーバを runtime skip フラグだけ立てる (再接続時に反映、 既存接続は切らない) */
   disableServer(name: string): void {
     this.runtimeDisabledServers.add(name);
   }
   enableServer(name: string): void {
     this.runtimeDisabledServers.delete(name);
+  }
+
+  /**
+   * 個別サーバを **即時** 切断 + tools を ToolRegistry から削除する。
+   * UX 上、 toggle した瞬間に「もう使われない」 状態にするための API。
+   * docs/multi-tier-harness-roadmap.md §F-1 の「matrix UI」 対応で追加。
+   */
+  async disableServerImmediate(name: string, registry: ToolRegistry): Promise<{ removed: number }> {
+    this.runtimeDisabledServers.add(name);
+    let removed = 0;
+    for (const [key, client] of this.clients) {
+      if (client.name !== name) continue;
+      const prefix = `mcp__${client.name}__`;
+      for (const t of registry.getToolNames()) {
+        if (t.startsWith(prefix)) {
+          if (registry.unregister(t)) removed++;
+        }
+      }
+      await client.disconnect().catch(() => {});
+      this.clients.delete(key);
+      break;
+    }
+    return { removed };
+  }
+
+  /**
+   * 個別サーバを **即時** 再接続 + tools を ToolRegistry に登録する。
+   * 既に接続済の場合は何もしない (idempotent)。
+   */
+  async enableServerImmediate(name: string, registry: ToolRegistry): Promise<{ added: number }> {
+    this.runtimeDisabledServers.delete(name);
+    // 既に connected ならスキップ
+    for (const client of this.clients.values()) {
+      if (client.name === name && client.connected) {
+        return { added: 0 };
+      }
+    }
+    const configs = this.loadConfig();
+    for (const [key, c] of Object.entries(configs)) {
+      const sn = c.name ?? key;
+      if (sn !== name) continue;
+      try {
+        const client = new MCPClient(c);
+        await client.connect();
+        this.clients.set(key, client);
+        const handlers = this.createToolHandlers(client);
+        for (const h of handlers) {
+          registry.register(h);
+        }
+        return { added: handlers.length };
+      } catch (e) {
+        throw new Error(`MCP "${name}" 再接続失敗: ${e}`);
+      }
+    }
+    throw new Error(`MCP server "${name}" は設定ファイルに存在しません`);
   }
   /** runtime + 設定ファイル の combined 状態を返す */
   getServerStatus(): Array<{ name: string; configured: boolean; configDisabled: boolean; runtimeDisabled: boolean; connected: boolean; toolCount: number }> {
