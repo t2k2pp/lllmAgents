@@ -232,12 +232,14 @@ describe("Phase C tunables — ループ制御チューナブル", () => {
     expect(p.keepRecentMessages).toBe(5);
   });
 
-  it("P1-A/B のティア別 ON/OFF: T1=bashOnly, T2=both, T3=neither", () => {
-    expect(resolveCapability("claude-opus-4-7").bashCumulativeWarnEnabled).toBe(true);
-    expect(resolveCapability("claude-opus-4-7").planTodoOveruseEnabled).toBe(false);
-    expect(resolveCapability("kimi-k2.6").bashCumulativeWarnEnabled).toBe(true);
-    expect(resolveCapability("kimi-k2.6").planTodoOveruseEnabled).toBe(true);
+  it("P1-A/B のティア別 ON/OFF: P1-A は全 tier OFF (2026-05-09)、 P1-B は T2 のみ ON", () => {
+    // P1-A bash 累積警告: 全 tier 既定 OFF (誤発火 + 作業中断副作用のため)
+    expect(resolveCapability("claude-opus-4-7").bashCumulativeWarnEnabled).toBe(false);
+    expect(resolveCapability("kimi-k2.6").bashCumulativeWarnEnabled).toBe(false);
     expect(resolveCapability("phi-4").bashCumulativeWarnEnabled).toBe(false);
+    // P1-B plan/todo 過多検知: T1=OFF (賢いLLMの足枷回避) / T2=ON / T3=OFF (scaffolding抑制)
+    expect(resolveCapability("claude-opus-4-7").planTodoOveruseEnabled).toBe(false);
+    expect(resolveCapability("kimi-k2.6").planTodoOveruseEnabled).toBe(true);
     expect(resolveCapability("phi-4").planTodoOveruseEnabled).toBe(false);
   });
 

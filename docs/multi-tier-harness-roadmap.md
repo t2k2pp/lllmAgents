@@ -188,7 +188,7 @@ tier テーブルが独自の数値を持つと矛盾と保守負担を生む。
 | sliding-window 失敗検知 (P0-A) | ✅ | ✅ | ✅+簡素な助言 | 助言文を短く |
 | file_edit ±20 行スニペット (P0-B) | ✅ | ✅ | ✅ | Tier 関係なく有用 |
 | edit 直後 file_read 禁止ルール | 🟡prompt 1 行 | ✅prompt 明示 | ❌ハード拒否 | tool 側で reject |
-| bash 累積警告 (P1-A) | 🟡 | ✅ | ❌ | T3 は判断負荷増になるため抑制 |
+| bash 累積警告 (P1-A) | ❌ | ❌ | ❌ | 2026-05-09 全 tier OFF (誤発火 + T1 で作業中断副作用を観測) |
 | plan/todo 過多検知 (P1-B) | 🟡 | ✅ | ❌ | T3 は plan-mode 自体を抑制 |
 | browser_snapshot キャッシュ (P2-A) | ✅ | ✅ | ✅ | Tier 非依存 |
 | 圧縮閾値 0.7 (P2-B) | 0.7 | 0.6 | 0.5 | T3 は ctx 狭いため早めに |
@@ -479,7 +479,7 @@ P0-P3 は本ロードマップに統合される。 各機能の Phase 配属:
 | sliding-window 失敗検知 (P0-A) | Phase A 後の tier-aware 化 | T3 は助言文を短縮 |
 | file_edit ±20 行スニペット (P0-B) | tier 非依存 | 改修不要 |
 | edit 直後 file_read 禁止ルール (P0-B) | Phase B (T3 では tool 側 hard reject) | T3 で tool 側拒否を実装 |
-| bash 累積警告 (P1-A) | Phase A の後、 T3 では抑制 | tier 分岐追加 |
+| bash 累積警告 (P1-A) | **2026-05-09 全 tier OFF に降格** | 全 tier `bashCumulativeWarnEnabled=false`。 単発長 bash で誤発火し T1 が response_complete を即時呼ぶ副作用を観測。 必要なら user override で個別 ON |
 | plan/todo 過多検知 (P1-B) | T3 は plan-mode 自体を制限 | tier 分岐 + tool 側 reject |
 | browser_snapshot キャッシュ (P2-A) | tier 非依存 | 改修不要 |
 | 圧縮閾値 0.7 (P2-B) | Phase C で tier 別 | capability 参照 |

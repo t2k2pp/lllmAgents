@@ -54,7 +54,14 @@ export interface CapabilityProfile {
   compressionThreshold: number;
   /** 履歴格納時に tool_result を truncate する閾値 (バイト数) */
   toolResultTruncateBytes: number;
-  /** P1-A bash 累積警告を有効化するか (T3 では抑制) */
+  /**
+   * P1-A bash 累積警告を有効化するか。
+   * 2026-05-09: 全 tier で OFF に変更。 単発で長い bash (pygame の lingering 等で
+   * harness 計測 durationMs が膨らむ) で誤発火し、 警告文「重い build/run の連発」 と
+   * 実態が乖離。 T1 (gpt-5.4) では警告直後に response_complete を呼んで作業を畳む
+   * 副作用も観測 (jsonl 2026-05-08T15-36-24 turn28→29)。 default false を維持し、
+   * 必要なユーザーが override で個別 ON にできる形に降格。
+   */
   bashCumulativeWarnEnabled: boolean;
   /** P1-B plan/todo 過多検知を有効化するか (T1/T3 では抑制) */
   planTodoOveruseEnabled: boolean;
@@ -99,8 +106,8 @@ const TIER_DEFAULTS: Record<Tier, Omit<CapabilityProfile, "tier" | "contextWindo
     maxSelfCheckRounds: 3,
     compressionThreshold: 0.7,
     toolResultTruncateBytes: 20 * 1024,
-    // T1 は判断負荷が低いので bash 累積警告は ON で問題ない (5min を超えれば警告)
-    bashCumulativeWarnEnabled: true,
+    // 2026-05-09: 誤発火 + T1 が response_complete を呼んで作業を畳む副作用を観測したため OFF
+    bashCumulativeWarnEnabled: false,
     // T1 は plan/todo を自然に最小限で運用するため過多検知は OFF (= 賢い LLM の足枷にしない)
     planTodoOveruseEnabled: false,
     // Phase D-4: 圧縮時に残す直近メッセージ数 (T1 は ctx 広いので余裕あり)
@@ -116,7 +123,8 @@ const TIER_DEFAULTS: Record<Tier, Omit<CapabilityProfile, "tier" | "contextWindo
     maxSelfCheckRounds: 2,
     compressionThreshold: 0.6,
     toolResultTruncateBytes: 12 * 1024,
-    bashCumulativeWarnEnabled: true,
+    // 2026-05-09: T1 で観測した誤発火と作業中断の副作用は T2 でもリスクが高いため OFF
+    bashCumulativeWarnEnabled: false,
     planTodoOveruseEnabled: true,
     keepRecentMessages: 8,
   },
