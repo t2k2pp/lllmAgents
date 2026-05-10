@@ -243,7 +243,11 @@ ${skillLines}`);
       sections.push(`- task ツール → メインLLM (あなた自身) を別コンテキストで起動。メイン特性に合うタスクに使う`);
       sections.push(`- second_llm_agent ツール → セカンドLLMをツール付きエージェントとして起動。セカンド特性に合うタスクに使う`);
       sections.push(`- second_llm_consult ツール → セカンドLLMに単発質問 (ツールなし)。コードレビュー・壁打ち・要約でコンテキスト節約したいとき`);
-      sections.push(`両モデルの特性を見て、タスクの性質に合う方を選ぶこと。どちらでも良い場合はコンテキスト節約のため second_llm_* を優先。`);
+      sections.push(`両モデルの特性を見て、タスクの性質に合う方を選ぶこと。`);
+      // ※ 旧 prompt にあった「どちらでも良い場合は ctx 節約のためセカンド優先」 は削除 (2026-05-11)。
+      // ctx 節約はサブエージェント化 (task / second_llm_agent のいずれか) 全般の効果であり、
+      // main vs second の選択軸とは別。 タイブレーカーをセカンドに振る合理性がない。
+      // description 未設定時の自動補完は意図的に行わない (誤誘導リスク回避、 未入力は自己責任)。
       if (llmProfiles.parallelCapable) {
         sections.push(`独立した複数タスクがあるときは task と second_llm_agent を並列起動することで総所要時間を短縮できる。`);
       }
