@@ -1085,22 +1085,19 @@ export class AgentLoop {
           const nudgeIntent = rephrasedIntent.length > 200
             ? rephrasedIntent.slice(0, 200) + "..."
             : rephrasedIntent;
-          // Phase 2: 思考保全 — thinking が出ていた場合は要約を placeholder として残す。
+          // Phase 2: 思考保全 — thinking が出ていた場合は完全保全して placeholder にする。
           // モデルは次イテレーションで自分の前思考を読めるので、 同じ digestion を再生成
           // する無駄を避けられる。 ephemeral なので応答完了時に purge され次 span に漏れない。
+          //
+          // 機械的な文字カット (slice) は中途半端な切り取りで意味を壊しノイズになるため避ける。
+          // ctx 圧迫の懸念は以下で十分に抑えられている:
+          //   - MAX_EMPTY_RETRIES=3 で span 内の積み増し回数が上限固定
+          //   - ContextManager (capability.compressionThreshold) が閾値到達で要約圧縮
+          //   - 応答完了時の purgeEphemeral で span 境界を越えて残らない
           // docs/ephemeral-context-design.md §7.1 参照。
-          const THINKING_PRESERVE_LIMIT = 2000; // ctx 圧迫を抑える上限。 span 内のみなのでこの程度で十分
-          let placeholder: string;
-          if (thinkingContent.trim().length > 0) {
-            const truncated = thinkingContent.length > THINKING_PRESERVE_LIMIT
-              ? thinkingContent.slice(0, THINKING_PRESERVE_LIMIT) + "...[省略]"
-              : thinkingContent;
-            placeholder =
-              `[前回の思考 ${thinkingContent.length}字 — 形式不一致で吐き出せず、 ハーネスが保全]\n` +
-              truncated;
-          } else {
-            placeholder = "（空のレスポンス）";
-          }
+          const placeholder = thinkingContent.trim().length > 0
+            ? `[前回の思考 ${thinkingContent.length}字 — 形式不一致で吐き出せず、 ハーネスが保全]\n${thinkingContent}`
+            : "（空のレスポンス）";
           // empty-response placeholder と nudge は in-turn 専用 (応答完了時に purge)。
           // ユーザーへの最終応答が出れば、 これらの中間ノイズは過去 span から除去される。
           this.history.addAssistantMessage(placeholder, undefined, { ephemeral: true });

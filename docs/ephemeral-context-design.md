@@ -210,22 +210,27 @@ Phase 1 (本 commit) でインフラを入れたので、 Phase 2 で:
 `agent-loop.ts` の empty-response retry 箇所を以下に変更:
 
 ```ts
-const THINKING_PRESERVE_LIMIT = 2000; // ctx 圧迫を抑える上限
-let placeholder: string;
-if (thinkingContent.trim().length > 0) {
-  const truncated = thinkingContent.length > THINKING_PRESERVE_LIMIT
-    ? thinkingContent.slice(0, THINKING_PRESERVE_LIMIT) + "...[省略]"
-    : thinkingContent;
-  placeholder =
-    `[前回の思考 ${thinkingContent.length}字 — 形式不一致で吐き出せず、 ハーネスが保全]\n` +
-    truncated;
-} else {
-  placeholder = "（空のレスポンス）";
-}
+const placeholder = thinkingContent.trim().length > 0
+  ? `[前回の思考 ${thinkingContent.length}字 — 形式不一致で吐き出せず、 ハーネスが保全]\n${thinkingContent}`
+  : "（空のレスポンス）";
 this.history.addAssistantMessage(placeholder, undefined, { ephemeral: true });
 ```
 
 → 同 span 内で次の生成時にモデルが自分の前思考を読める。 完了後は ephemeral として破棄され、 次 span に漏れない。 nudge 文も「あなたの前回の思考は保全しました。 続きをそのまま実行に移してください」 と切り替え、 再思考の無駄を抑制。
+
+**重要な設計判断 — 機械的な文字数カットはしない (2026-05-10 修正)**:
+
+初版では `slice(0, 2000)` で先頭 2000 字に切り詰めていたが、 中途半端な切り取りは意味を壊しノイズになる。 「思考を無駄にしない」 という設計哲学とも矛盾する。 完全保全に倒す。
+
+ctx 圧迫の懸念は以下の三層で抑えられているため、 文字数キャップは不要:
+
+| 安全網 | 効果 |
+|---|---|
+| `MAX_EMPTY_RETRIES = 3` | span 内で thinking placeholder が積み増される回数を上限固定 (高々 3 件) |
+| `ContextManager` の閾値圧縮 | `capability.compressionThreshold` (T1=0.7 / T2=0.6 / T3=0.5) を超えたら自動で要約に置換。 文字数カットと違い意味を保つ要約 |
+| `purgeEphemeral` at span end | 応答完了時に必ず破棄。 span 境界を越えて持ち越されない |
+
+異常系 (思考 50K 字超など) でも要約圧縮が意味を保ったまま縮める。 機械的なカットより常に上位互換。
 
 ### 7.2 thinking 内 tool_call 抽出 (Phase D-1 拡張) ✅
 
