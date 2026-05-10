@@ -196,38 +196,66 @@ Phase 1 (本 commit) でインフラを入れたので、 Phase 2 で:
 
 ### 6.2 既知の限界
 
-- thinking content そのものは現状捨てられたまま (= Phase 2 で対応)
+- ~~thinking content そのものは現状捨てられたまま~~ (Phase 2 で対応済 §7.1)
 - 既存 P0-A の stuck-loop 介入を ephemeral 化したが、 真に学習させたい場合は span を跨ぎたいケースもある (要観察)
 - empty-response retry の placeholder が ephemeral になったため、 上限到達後の中断時にも purge される。 ただし最終的な「思考のみで終了」 のヒントはコンソール表示で残る
+- 思考保全は empty-response 経路のみ (textContent / toolCalls がある正常応答の thinking は変わらず捨てる)。 これは妥当: 正常応答が出ているなら model 自身がツールコール / テキストとして必要事項を吐き出せたので、 thinking は scratch として役目を果たした
 
 ---
 
-## 7. 将来拡張 (Phase 2)
+## 7. Phase 2 — 思考保全 (実装済 2026-05-10)
 
-### 7.1 思考保全 (empty-response 救済)
+### 7.1 思考保全 (empty-response 救済) ✅
 
-`agent-loop.ts:1062` 付近の `addAssistantMessage("（空のレスポンス）", ..., { ephemeral: true })` を:
+`agent-loop.ts` の empty-response retry 箇所を以下に変更:
 
 ```ts
-const placeholder = thinkingContent.length > 0
-  ? `[前回の思考 ${thinkingContent.length}字, 形式不一致で吐き出せず]\n${thinkingContent.slice(0, 2000)}`
-  : "（空のレスポンス）";
+const THINKING_PRESERVE_LIMIT = 2000; // ctx 圧迫を抑える上限
+let placeholder: string;
+if (thinkingContent.trim().length > 0) {
+  const truncated = thinkingContent.length > THINKING_PRESERVE_LIMIT
+    ? thinkingContent.slice(0, THINKING_PRESERVE_LIMIT) + "...[省略]"
+    : thinkingContent;
+  placeholder =
+    `[前回の思考 ${thinkingContent.length}字 — 形式不一致で吐き出せず、 ハーネスが保全]\n` +
+    truncated;
+} else {
+  placeholder = "（空のレスポンス）";
+}
 this.history.addAssistantMessage(placeholder, undefined, { ephemeral: true });
 ```
 
-→ 同 span 内で次の生成時にモデルが自分の前思考を読める。 完了後は ephemeral として破棄され、 次 span に漏れない。
+→ 同 span 内で次の生成時にモデルが自分の前思考を読める。 完了後は ephemeral として破棄され、 次 span に漏れない。 nudge 文も「あなたの前回の思考は保全しました。 続きをそのまま実行に移してください」 と切り替え、 再思考の無駄を抑制。
 
-### 7.2 thinking 内 tool_call 抽出 (Phase D-1 拡張)
+### 7.2 thinking 内 tool_call 抽出 (Phase D-1 拡張) ✅
 
 `normalizeToolCalls()` を `thinkingContent` にも適用 (T2/T3 限定):
-- Qwen3.6 が思考内に書いた `<tool_call>` を抽出して実行ルートへ
-- 抽出された tool_call は **永続** (実行結果と pair が必要)、 抽出失敗した残骸は ephemeral
 
-### 7.3 telemetry
+```ts
+if (
+  toolCalls.length === 0 &&
+  thinkingContent.trim().length > 0 &&
+  (this.capability.tier === "T2" || this.capability.tier === "T3")
+) {
+  const normalized = normalizeToolCalls(thinkingContent);
+  if (normalized.toolCalls.length > 0) {
+    console.log(chalk.dim(`  [tool-format] thinking 内 ${normalized.format} 形式から ${normalized.toolCalls.length} 件の tool 呼び出しを抽出`));
+    toolCalls.push(...normalized.toolCalls);
+  }
+}
+```
+
+これで観測された Qwen3 turn 3 のケース (思考内に `<tool_call><function=todo_write>...` が完成形で存在) が自動回収される。 抽出された tool_call は real tool execution に流れ、 結果と一緒に**永続**化される (tool ペア保護)。
+
+T1 (Claude/GPT-5) は OpenAI 互換 function calling が確実なのでスキップ (誤検知回避)。 既存の textContent 向け normalizer と同じ tier ガード。
+
+### 7.3 telemetry (将来)
 
 `purgeEphemeralAtSpanEnd` の呼び出し時に件数と reason を収集:
 - 「self-check が頻繁に発動するモデル」 を特定
 - Phase E-1 (自己改善ハーネス) の入力データになる
+
+これは Phase E-1 と一緒に実装する。
 
 ---
 

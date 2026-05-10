@@ -882,6 +882,25 @@ export class AgentLoop {
         }
       }
 
+      // Phase 2: 思考保全 — text/toolCalls がともに空でも thinking 内に <tool_call> 等が
+      // 埋まっているケース (例: Qwen3 が reasoning_content に ChatML 形式を吐く) を救う。
+      // 思考は SoWhat/WhySo の核なので、 そこに完成形のツールコールがあるなら捨てずに実行する。
+      // docs/ephemeral-context-design.md §7.2 参照。
+      if (
+        toolCalls.length === 0 &&
+        thinkingContent.trim().length > 0 &&
+        (this.capability.tier === "T2" || this.capability.tier === "T3")
+      ) {
+        const normalized = normalizeToolCalls(thinkingContent);
+        if (normalized.toolCalls.length > 0) {
+          console.log(chalk.dim(
+            `  [tool-format] thinking 内 ${normalized.format} 形式から ${normalized.toolCalls.length} 件の tool 呼び出しを抽出 (tier=${this.capability.tier})`,
+          ));
+          // textContent は元から空 (このブロックの前提)。 toolCalls だけ追加して実行ルートへ。
+          toolCalls.push(...normalized.toolCalls);
+        }
+      }
+
       // ガベージ応答（トークンアーティファクト等）を検出: リプロンプトしても改善しないため中断
       // 注: 上の正規化で tool calls を抽出できた場合はここに来ない (toolCalls.length > 0)
       if (toolCalls.length === 0 && textContent.trim().length > 0 && isGarbageResponse(textContent)) {
@@ -1066,11 +1085,30 @@ export class AgentLoop {
           const nudgeIntent = rephrasedIntent.length > 200
             ? rephrasedIntent.slice(0, 200) + "..."
             : rephrasedIntent;
+          // Phase 2: 思考保全 — thinking が出ていた場合は要約を placeholder として残す。
+          // モデルは次イテレーションで自分の前思考を読めるので、 同じ digestion を再生成
+          // する無駄を避けられる。 ephemeral なので応答完了時に purge され次 span に漏れない。
+          // docs/ephemeral-context-design.md §7.1 参照。
+          const THINKING_PRESERVE_LIMIT = 2000; // ctx 圧迫を抑える上限。 span 内のみなのでこの程度で十分
+          let placeholder: string;
+          if (thinkingContent.trim().length > 0) {
+            const truncated = thinkingContent.length > THINKING_PRESERVE_LIMIT
+              ? thinkingContent.slice(0, THINKING_PRESERVE_LIMIT) + "...[省略]"
+              : thinkingContent;
+            placeholder =
+              `[前回の思考 ${thinkingContent.length}字 — 形式不一致で吐き出せず、 ハーネスが保全]\n` +
+              truncated;
+          } else {
+            placeholder = "（空のレスポンス）";
+          }
           // empty-response placeholder と nudge は in-turn 専用 (応答完了時に purge)。
           // ユーザーへの最終応答が出れば、 これらの中間ノイズは過去 span から除去される。
-          this.history.addAssistantMessage("（空のレスポンス）", undefined, { ephemeral: true });
+          this.history.addAssistantMessage(placeholder, undefined, { ephemeral: true });
           this.history.addUserMessage(
             `[ハーネス通知] 直前の応答が空またはテキストのみで、 ツール呼出がありませんでした。\n` +
+            (thinkingContent.length > 0
+              ? `あなたの前回の思考は上の assistant メッセージに保全しました。 続きをそのまま実行に移してください (再思考は不要)。\n`
+              : "") +
             `「了解しました」「実装します」「続きを行います」 等の promise テキストだけではハーネスは作業継続と認識しません。\n` +
             `ユーザーの意図: ${nudgeIntent}\n` +
             `次の手として、 todo の未完了項目があれば該当ツール (file_write / file_edit / bash 等) を直接呼んで作業を進めてください。 中間報告のテキストは不要です。`,
