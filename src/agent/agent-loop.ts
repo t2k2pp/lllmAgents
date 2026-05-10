@@ -504,6 +504,7 @@ export class AgentLoop {
               if (thinkingSpinner) { thinkingSpinner.stop(); thinkingSpinner = null; }
               if (this.streamingDisplay && hasStartedOutput) process.stdout.write("\n");
               console.log(chalk.yellow("\n  (処理を中断しました)"));
+              this.purgeEphemeralAtSpanEnd("user_abort");
               return;
             }
             switch (chunk.type) {
@@ -702,12 +703,16 @@ export class AgentLoop {
             // "abort" → この発話を中止してREPLに戻る（プロセスは終了しない）
             // _aborted を立てることで /try などの呼び出し元もループを抜けられる
             this._aborted = true;
+            this.purgeEphemeralAtSpanEnd("llm_error_abort");
             return;
           }
         }
       }
 
-      if (!success) return;
+      if (!success) {
+        this.purgeEphemeralAtSpanEnd("llm_call_unsuccessful");
+        return;
+      }
 
       // P3-A: アシスタント応答テキストからレジスター宣言を検出 (1 user span に 1 度だけ反映)
       this.detectRegisterFromText(textContent);
@@ -723,8 +728,17 @@ export class AgentLoop {
         const structReason = "reason" in structural ? structural.reason : undefined;
         const reason = isTruncatedByLength ? "max_tokens到達" : `構造的不完全: ${structReason}`;
         console.log(chalk.dim(`\n  (${reason}のため、続きを生成します...)`));
-        this.history.addAssistantMessage(textContent, toolCalls.length > 0 ? toolCalls : undefined);
-        this.history.addUserMessage("続きを出力してください。途中から再開してください。");
+        // 部分応答を一旦履歴に積んで「続き」 を促すが、 これは in-turn の継続合図なので
+        // ユーザー応答完了時に purge して context を綺麗にする (tool_calls がある場合は永続化)。
+        this.history.addAssistantMessage(
+          textContent,
+          toolCalls.length > 0 ? toolCalls : undefined,
+          { ephemeral: toolCalls.length === 0 },
+        );
+        this.history.addUserMessage(
+          "続きを出力してください。途中から再開してください。",
+          { ephemeral: true },
+        );
         continue;
       }
 
@@ -777,6 +791,7 @@ export class AgentLoop {
         }
 
         if (shouldAbort) {
+          this.purgeEphemeralAtSpanEnd("tool_abort");
           return;
         }
 
@@ -792,7 +807,8 @@ export class AgentLoop {
                   this.history.addUserMessage(
                     "[ハーネス] プランモード中にコードファイルへの書き込みが検出されました。" +
                     "実装を開始する前に、exit_plan_mode で計画をユーザーに提示して承認を得てください。" +
-                    "設計書（.md等）の作成はプランモード中でも問題ありません。"
+                    "設計書（.md等）の作成はプランモード中でも問題ありません。",
+                    { ephemeral: true },
                   );
                   break;
                 }
@@ -838,6 +854,9 @@ export class AgentLoop {
           if (summary.length > 0) {
             console.log("\n" + chalk.dim(`  [response_complete] ${summary}`));
           }
+          // span 境界: in-turn の harness 注入 (self-check / nudge / 空応答 placeholder 等) を破棄。
+          // 過去 span のノイズを次 span に持ち込まない。 docs/ephemeral-context-design.md 参照。
+          this.purgeEphemeralAtSpanEnd("response_complete");
           return;
         }
 
@@ -868,6 +887,7 @@ export class AgentLoop {
       if (toolCalls.length === 0 && textContent.trim().length > 0 && isGarbageResponse(textContent)) {
         console.log(chalk.yellow("\n  モデルの応答が解析できない形式です。プロンプトを変えて再度お試しください。"));
         this.history.addAssistantMessage(textContent);
+        this.purgeEphemeralAtSpanEnd("garbage_response");
         return;
       }
 
@@ -878,14 +898,16 @@ export class AgentLoop {
         selfCheckRounds++;
         const fileList = pendingVerification.map(f => `    - ${f}`).join("\n");
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] 検証未実施`));
-        this.history.addAssistantMessage(textContent);
+        // 中間 promise テキストと self-check nudge は in-turn 専用 (応答完了時に purge)
+        this.history.addAssistantMessage(textContent, undefined, { ephemeral: true });
         this.history.addUserMessage(
           formatSelfCheck(
             selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
             `以下のファイルの動作確認が未完了です:\n${fileList}\n` +
             `    bash で検証コマンドを実行してください（.ts/.js: node --check, .py: python -m py_compile, プロジェクト全体: build/test/lint）。\n` +
             `    注意: GUIアプリ(pygame等)は構文チェックのみ。直接起動するとタイムアウト。`
-          )
+          ),
+          { ephemeral: true },
         );
         continue;
       }
@@ -910,12 +932,14 @@ export class AgentLoop {
           selfCheckRounds++;
           const feedback = Evaluator.formatForInjection(result);
           console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`));
-          this.history.addAssistantMessage(textContent);
+          // Evaluator 指摘と中間応答は in-turn 専用
+          this.history.addAssistantMessage(textContent, undefined, { ephemeral: true });
           this.history.addUserMessage(
             formatSelfCheck(
               selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
               `Evaluatorから以下の指摘があります:\n${feedback}`
-            )
+            ),
+            { ephemeral: true },
           );
           continue;
         }
@@ -951,12 +975,14 @@ export class AgentLoop {
           // 上限到達: ユーザーに報告して中断
           console.log(chalk.yellow(`\n  自己点検を${MAX_SELF_CHECK_ROUNDS}回実施しましたが response_complete が呼ばれませんでした。`));
           this.history.addAssistantMessage(textContent);
+          this.purgeEphemeralAtSpanEnd("self_check_limit");
           return;
         }
 
         selfCheckRounds++;
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ツール未呼び出し`));
-        this.history.addAssistantMessage(textContent);
+        // promise テキストと nudge は in-turn 専用 (応答完了時に purge)
+        this.history.addAssistantMessage(textContent, undefined, { ephemeral: true });
         // 2026-05-01: C 案。 「promise テキストだけでは作業継続と認識しない」 を明示し、
         // 短い「了解しました」「実装します」 等の応答で止まるループを抜けやすくする。
         this.history.addUserMessage(
@@ -965,7 +991,8 @@ export class AgentLoop {
             `テキスト応答のみでツール呼出がありません。 ` +
             `「了解しました」「実装します」 等の promise テキストだけではハーネスは作業継続と認識しません。 ` +
             `依頼の遂行に必要なツール (file_write / file_edit / bash 等) を直接呼んで作業を進めてください。`
-          )
+          ),
+          { ephemeral: true },
         );
         continue;
       }
@@ -976,13 +1003,15 @@ export class AgentLoop {
         codeBlockRetried = true;
         selfCheckRounds++;
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] コードがテキスト応答に含まれています`));
-        this.history.addAssistantMessage(textContent);
+        // コードを含む中間応答と nudge は in-turn 専用 (応答完了時に purge)
+        this.history.addAssistantMessage(textContent, undefined, { ephemeral: true });
         this.history.addUserMessage(
           formatSelfCheck(
             selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
             `コードをテキストで返しましたが、実際のファイル作成には file_write ツールが必要です。` +
             `意図したパスにファイルを保存する場合は file_write を呼んでください。`
-          )
+          ),
+          { ephemeral: true },
         );
         continue;
       }
@@ -1002,10 +1031,13 @@ export class AgentLoop {
               function: { name: "file_write", arguments: JSON.stringify(fw) },
             };
             shouldAbort = await this.executeSingleTool(syntheticCall);
-            if (shouldAbort) return;
+            if (shouldAbort) {
+              this.purgeEphemeralAtSpanEnd("synthetic_write_abort");
+              return;
+            }
           }
-          // 書き込み完了後、モデルに続きを促す
-          this.history.addUserMessage("ファイルの作成が完了しました。");
+          // 書き込み完了後、モデルに続きを促す (in-turn の合図)
+          this.history.addUserMessage("ファイルの作成が完了しました。", { ephemeral: true });
           continue;
         }
       }
@@ -1034,12 +1066,15 @@ export class AgentLoop {
           const nudgeIntent = rephrasedIntent.length > 200
             ? rephrasedIntent.slice(0, 200) + "..."
             : rephrasedIntent;
-          this.history.addAssistantMessage("（空のレスポンス）");
+          // empty-response placeholder と nudge は in-turn 専用 (応答完了時に purge)。
+          // ユーザーへの最終応答が出れば、 これらの中間ノイズは過去 span から除去される。
+          this.history.addAssistantMessage("（空のレスポンス）", undefined, { ephemeral: true });
           this.history.addUserMessage(
             `[ハーネス通知] 直前の応答が空またはテキストのみで、 ツール呼出がありませんでした。\n` +
             `「了解しました」「実装します」「続きを行います」 等の promise テキストだけではハーネスは作業継続と認識しません。\n` +
             `ユーザーの意図: ${nudgeIntent}\n` +
-            `次の手として、 todo の未完了項目があれば該当ツール (file_write / file_edit / bash 等) を直接呼んで作業を進めてください。 中間報告のテキストは不要です。`
+            `次の手として、 todo の未完了項目があれば該当ツール (file_write / file_edit / bash 等) を直接呼んで作業を進めてください。 中間報告のテキストは不要です。`,
+            { ephemeral: true },
           );
           continue;
         }
@@ -1050,13 +1085,16 @@ export class AgentLoop {
           : "（モデルから空のレスポンスが返されました。再度お試しください）";
         console.log(chalk.yellow(`\n  ${hint}`));
         // 空メッセージは履歴に入れない
+        this.purgeEphemeralAtSpanEnd("empty_response_giveup");
         return;
       }
       this.history.addAssistantMessage(textContent);
+      this.purgeEphemeralAtSpanEnd("final_text_response");
       return;
     }
 
     console.log(chalk.yellow("\n  Maximum tool iterations reached."));
+    this.purgeEphemeralAtSpanEnd("max_iterations");
     } finally {
       this.isProcessing = false;
     }
@@ -1191,6 +1229,23 @@ export class AgentLoop {
   }
 
   /**
+   * span 境界 (= ユーザー応答完了 / abort / 上限到達) で in-turn 専用のメッセージを破棄する。
+   * 詳細は docs/ephemeral-context-design.md を参照。
+   *
+   * 思想: ハーネスの自己点検・nudge・空応答 placeholder・stuck-loop 介入は span 内では
+   * モデルに必要だが、 ユーザー応答が出た後は「消費し終えた scratch space」 として捨てる。
+   * これにより過去 span の harness ノイズが次 span の判断を引きずらない。
+   *
+   * @param reason ログ用の理由タグ (response_complete / user_abort / etc.)
+   */
+  private purgeEphemeralAtSpanEnd(reason: string): void {
+    const purged = this.history.purgeEphemeral();
+    if (purged > 0) {
+      console.log(chalk.dim(`  [ephemeral-purge] ${purged} 件の in-turn 補助メッセージを破棄 (${reason})`));
+    }
+  }
+
+  /**
    * P0-A: ツール失敗を sliding window で追跡し、 同じ (signature, error) が
    * 直近 FAILURE_WINDOW 反復内に再発したら self-check メッセージを history へ注入する。
    *
@@ -1220,7 +1275,8 @@ export class AgentLoop {
       ? this.buildT3DecisionTreeIntervention(toolCall, trimmedErr, prior.length + 1)
       : this.buildStandardStuckLoopIntervention(toolCall, trimmedErr, prior.length + 1);
     console.log(chalk.yellow(`\n  ⚠ stuck-loop 検出: ${toolCall.function.name} が直近${AgentLoop.FAILURE_WINDOW}反復で同一エラー再発 (tier=${this.capability.tier})`));
-    this.history.addUserMessage(intervention);
+    // stuck-loop 介入は in-turn の方向修正なので応答完了時に purge
+    this.history.addUserMessage(intervention, { ephemeral: true });
     // 注入後は当該 signature の履歴をクリアして再注入を防ぐ
     this.recentFailures = this.recentFailures.filter((e) => e.signature !== signature);
   }
@@ -1385,6 +1441,7 @@ export class AgentLoop {
       `[ハーネス] このユーザー発話以降、 bash の累積実行時間が ${totalSec}s を超えました。\n` +
       `  重い検証 (build / 起動 / 全件再実行) を毎 edit ごとに走らせていませんか?\n` +
       `  対策: (a) 複数 edit をまとめてから 1 回 build (b) syntax check (\`node --check\` / \`tsc --noEmit\` 等) で軽く確認 (c) ホットリロードを活用 (d) 同一コマンドの単純再実行は禁止。`,
+      { ephemeral: true },
     );
     this.bashCumulativeWarned = true;
   }
@@ -1415,6 +1472,7 @@ export class AgentLoop {
       `[ハーネス] このユーザー発話以降、 計画/Todo の更新が過多です:\n` +
       reasons.map((r) => `  - ${r}`).join("\n") +
       `\n  対策: 既存の todo を見直し、 必要なら 1 回だけ更新する。 計画モード再突入は禁止 — 既存計画を流用して実装を進めてください。`,
+      { ephemeral: true },
     );
     this.planTodoWarned = true;
   }
