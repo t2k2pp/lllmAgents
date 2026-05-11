@@ -65,6 +65,8 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/slack")}          Slack設定 (status/url/test/bot-token/app-token)
     ${chalk.cyan("/search")}         Web検索プロバイダー設定 (SearXNG/DuckDuckGo)
     ${chalk.cyan("/todo")}           タスクリスト表示
+    ${chalk.cyan("/goal-seek <goal>")} Goal Seek mode 開始 — acceptance criteria を立て合格まで自律実行
+    ${chalk.cyan("/exit-goal-seek")}  Goal Seek mode を抜ける (acceptance 未達成でも user 明示で中断)
     ${chalk.cyan("/sessions [N]")}   保存済みセッション一覧 (デフォルト 20 件)
     ${chalk.cyan("/resume [id]")}    セッション復元 (引数なしで対話的選択)
     ${chalk.cyan("/continue")}       最新セッションを復元

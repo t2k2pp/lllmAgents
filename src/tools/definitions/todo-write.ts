@@ -12,6 +12,18 @@ export function getTodos(): TodoItem[] {
   return [...todos];
 }
 
+/**
+ * Goal Seek mode 入口など、 外部から todo を seed する用途。
+ * tool 経由 (LLM 駆動) と並列に使えるが、 上書きする点に注意。
+ */
+export function setTodos(newTodos: TodoItem[]): void {
+  todos = [...newTodos];
+}
+
+export function clearTodos(): void {
+  todos = [];
+}
+
 export function formatTodos(): string {
   if (todos.length === 0) return "No tasks.";
   return todos

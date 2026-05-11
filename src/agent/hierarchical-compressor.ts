@@ -51,6 +51,7 @@ const LAYER1_PROMPT = `以下の会話ブロックを要約してください。
 3. **未解決事項**: まだ完了していないタスク、保留中の判断は詳細に残す
 4. **解決済み事項**: 結論のみ1行で（過程は不要）
 5. **ユーザー発言は厚めに、AI応答は結論のみ**
+6. **Goal Seek mode の goal/acceptance_criteria は別途保持されているため要約に含めなくてよい** (docs/goal-seek-mode-design.md §3.10)
 
 ## 出力形式
 以下のJSON形式のみ返してください。他のテキストは不要です:
@@ -71,6 +72,7 @@ const LAYER2_PROMPT = `以下は過去の会話要約ブロック群です。こ
 - 解決済みの議論の詳細
 - AIの思考過程や説明
 - 試行錯誤の経緯（最終結果のみ残す）
+- Goal Seek mode の goal/acceptance_criteria (別保持されているため重複、 docs/goal-seek-mode-design.md §3.10)
 
 ## 出力形式
 以下のJSON形式のみ返してください。他のテキストは不要です:

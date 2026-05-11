@@ -46,6 +46,21 @@ import { Evaluator } from "./evaluator.js";
 import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";
 import type { ChatLogger } from "./chat-logger.js";
 import { renderEditDiff, renderWriteDiff } from "../cli/diff-display.js";
+import {
+  type GoalDefinition,
+  setGoal as setGoalSlot,
+  getGoal as getGoalSlot,
+  clearGoal as clearGoalSlot,
+  hasGoal as hasGoalSlot,
+  buildGoalSlotSection,
+} from "./goal-slot.js";
+import { setTodos as setTodosFromGoal, getTodos as getTodosCurrent } from "../tools/definitions/todo-write.js";
+
+/**
+ * AgentMode — paradigm 軸の切替。 register (style 軸) と直交。
+ * docs/goal-seek-mode-design.md §2.1 参照。
+ */
+export type AgentMode = "forward" | "goal-seek";
 
 // marked-terminal でMarkdownをターミナル向けにレンダリング
 marked.use(markedTerminal() as Parameters<typeof marked.use>[0]);
@@ -192,6 +207,17 @@ export class AgentLoop {
   /** P3-A: ソフトキャップ警告を既に注入したか (1 user span に 1 回だけ) */
   private softCapWarned = false;
   /**
+   * Goal Seek mode: paradigm 軸。 register (style 軸) と直交した別軸。
+   * 切替は user 明示のみ (enterGoalSeek / exitGoalSeek)。 AI 自動判定は不可。
+   * docs/goal-seek-mode-design.md §2.2 参照。
+   */
+  private currentMode: AgentMode = "forward";
+  /**
+   * system prompt の base 部分 (goal section を除く)。 mode 切替時に goal section を
+   * 着脱する用途で保持。 updateLLMProfiles / restoreSession でも更新される。
+   */
+  private basePrompt: string = "";
+  /**
    * Phase A: 能力ティアプロファイル。 ハーネス各機能はこれを参照して挙動を切替える。
    * docs/multi-tier-harness-roadmap.md §3 参照。
    * 主流路 (P0-P3) との統合は Phase A-7 (後続コミット) で実施予定。
@@ -234,7 +260,13 @@ export class AgentLoop {
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, model)} (${this.capability.reason})`);
     // Phase B-2: 能力ティアを system prompt に渡して、 T1=concise / T2=current / T3=verbose+examples を出し分ける
     const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian, llmProfiles, this.capability.tier);
-    this.history = new MessageHistory(systemPrompt);
+    this.basePrompt = systemPrompt;
+    // 既存 goal-slot 状態を反映 (process 内で /goal-seek 実行後の AgentLoop 再生成時に継承)。
+    // composePromptWithGoalSlot は currentMode を見るので、 先に mode を決める。
+    if (hasGoalSlot()) {
+      this.currentMode = "goal-seek";
+    }
+    this.history = new MessageHistory(this.composePromptWithGoalSlot(systemPrompt));
     // Phase C-2 + D-4: 圧縮閾値と keepRecentMessages を tier 由来で設定。
     // 引数の compressionThreshold は無視され、 capability の値が常に勝つ。
     // (ユーザが明示的に変えたい場合は config.json modelCapabilities.<modelId>.* で override 可能)
@@ -847,12 +879,29 @@ export class AgentLoop {
         const rcCall = toolCalls.find(tc => tc.function.name === "response_complete");
         if (rcCall) {
           let summary = "";
+          let forceFlag = false;
           try {
             const args = JSON.parse(rcCall.function.arguments ?? "{}");
             summary = (args.summary as string) ?? "";
+            forceFlag = (args.force as boolean) ?? false;
           } catch { /* ignore */ }
           if (summary.length > 0) {
             console.log("\n" + chalk.dim(`  [response_complete] ${summary}`));
+          }
+          // Goal Seek mode: acceptance 充足で span 終了したら自動的に mode を抜ける。
+          // (todo gate は response-complete.ts で実施済み。 ここに来た = ゲート通過 = 全 criteria 完了 or force)
+          // 設計書 §3.6 — 完了経路 (1) all criteria met → exit
+          if (this.currentMode === "goal-seek") {
+            const todos = getTodosCurrent();
+            const allDone = todos.length > 0 && todos.every((t) => t.status === "completed");
+            if (allDone) {
+              console.log(chalk.green(`  ✓ Goal Seek: acceptance 全項目達成 — mode 終了`));
+              this.exitGoalSeek("completed");
+            } else if (forceFlag) {
+              console.log(chalk.yellow(`  ⚠ Goal Seek: force=true で強制完了 — mode 終了 (acceptance 未充足)`));
+              this.exitGoalSeek("abort");
+            }
+            // それ以外 (todos 0 件 等) は mode を抜けず保持。 次の span でも goal を継続。
           }
           // span 境界: in-turn の harness 注入 (self-check / nudge / 空応答 placeholder 等) を破棄。
           // 過去 span のノイズを次 span に持ち込まない。 docs/ephemeral-context-design.md 参照。
@@ -1784,14 +1833,16 @@ export class AgentLoop {
     this.llmProfiles = profiles;
     // Phase B-2: tier 反映
     const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian, profiles, this.capability.tier);
-    this.history.updateSystemPrompt(systemPrompt);
+    this.basePrompt = systemPrompt;
+    this.history.updateSystemPrompt(this.composePromptWithGoalSlot(systemPrompt));
   }
 
   restoreSession(sessionData: SessionData): void {
     this.session = sessionData;
     // Phase B-2: tier 反映
     const systemPrompt = buildSystemPrompt(undefined, undefined, undefined, this.llmProfiles, this.capability.tier);
-    this.history = new MessageHistory(systemPrompt);
+    this.basePrompt = systemPrompt;
+    this.history = new MessageHistory(this.composePromptWithGoalSlot(systemPrompt));
     for (const msg of sessionData.messages) {
       if (msg.role === "user") {
         this.history.addUserMessage(typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content));
@@ -1839,7 +1890,11 @@ export class AgentLoop {
     register: string;
     softCap: number;
     hardCap: number;
+    mode: AgentMode;
+    goalStatement: string | null;
+    acceptanceCriteriaCount: number;
   } {
+    const goal = getGoalSlot();
     return {
       iteration: this.currentIteration,
       bashCumulativeMs: this.bashCumulativeMs,
@@ -1852,7 +1907,59 @@ export class AgentLoop {
       register: this.currentRegister,
       softCap: this.computeRegisterSoftCap(),
       hardCap: this.capability.maxIterations,
+      mode: this.currentMode,
+      goalStatement: goal?.statement ?? null,
+      acceptanceCriteriaCount: goal?.acceptance_criteria.length ?? 0,
     };
+  }
+
+  // ─── Goal Seek mode (docs/goal-seek-mode-design.md) ───
+
+  getMode(): AgentMode {
+    return this.currentMode;
+  }
+
+  /**
+   * Goal Seek mode へ入る。 user 明示経由のみ呼ばれる (slash command `/goal-seek`)。
+   * AI 側から呼ぶ経路を作らない (= 自動判定禁止、 設計書 §2.2)。
+   *
+   * @param goal user 入力をベースに AI が要約し user 承認した GoalDefinition
+   * @param seedTodos true なら acceptance_criteria を todo に同期 (default true)。
+   *                  todo gate (response-complete.ts) で acceptance 充足を強制するため。
+   */
+  enterGoalSeek(goal: GoalDefinition, seedTodos: boolean = true): void {
+    setGoalSlot(goal);
+    this.currentMode = "goal-seek";
+    if (seedTodos) {
+      setTodosFromGoal(
+        goal.acceptance_criteria.map((c) => ({ content: c, status: "pending" as const })),
+      );
+    }
+    this.history.updateSystemPrompt(this.composePromptWithGoalSlot(this.basePrompt));
+    logger.info(`[goal-seek] mode entered, ${goal.acceptance_criteria.length} criteria`);
+  }
+
+  /**
+   * Goal Seek mode を抜ける。 user 明示 (/exit-goal-seek) または acceptance 全合格 +
+   * response_complete でも自動的に呼ばれる。
+   */
+  exitGoalSeek(reason: "user" | "completed" | "abort" = "user"): void {
+    if (this.currentMode === "forward") return;
+    clearGoalSlot();
+    this.currentMode = "forward";
+    this.history.updateSystemPrompt(this.composePromptWithGoalSlot(this.basePrompt));
+    logger.info(`[goal-seek] mode exited (${reason})`);
+  }
+
+  /**
+   * basePrompt に Goal Slot section を結合する。 goal-seek mode かつ goal が存在する場合のみ
+   * section を末尾に追加。 forward mode では basePrompt そのままを返す。
+   */
+  private composePromptWithGoalSlot(base: string): string {
+    if (this.currentMode !== "goal-seek") return base;
+    const section = buildGoalSlotSection();
+    if (!section) return base;
+    return `${base}\n\n${section}`;
   }
 
   setContextWindow(value: number): void {

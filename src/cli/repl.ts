@@ -9,6 +9,9 @@ import { displayHelp, type SkillSummary } from "./renderer.js";
 import { estimateMessageTokens } from "../agent/token-counter.js";
 import { buildContextBreakdown, formatContextBreakdown } from "./context-breakdown.js";
 import { formatTodos } from "../tools/definitions/todo-write.js";
+import { collectResponse } from "../providers/base-provider.js";
+import type { GoalDefinition } from "../agent/goal-slot.js";
+import { getGoal as getGoalSlot } from "../agent/goal-slot.js";
 import { listSessions, loadSession, getLatestSession } from "../agent/session-manager.js";
 import { loadMemory, saveMemory } from "../agent/memory.js";
 import { resolveAtMentions, printMentionFeedback } from "./input-resolver.js";
@@ -867,6 +870,7 @@ export class REPL {
         console.log(chalk.dim(`  ── 進行状況 ────────────────────────────`));
         console.log(chalk.dim(`    iteration         : ${m.iteration} / softCap=${m.softCap} / hardCap=${m.hardCap}`));
         console.log(chalk.dim(`    register          : ${m.register} (tier=${cap.tier})`));
+        console.log(chalk.dim(`    mode              : ${m.mode === "goal-seek" ? chalk.cyan(m.mode) : m.mode}${m.goalStatement ? ` — ${m.goalStatement.slice(0, 60)}${m.goalStatement.length > 60 ? "..." : ""} (criteria ${m.acceptanceCriteriaCount})` : ""}`));
         console.log(chalk.dim(`    last prompt size  : ~${lastTokIn} / ${ctxKb}K (${lastPct}%)`));
         console.log(chalk.dim(`  ── ハーネス警告状態 ─────────────────────`));
         console.log(chalk.dim(`    softCap warned    : ${flag(m.softCapWarned)}`));
@@ -1626,6 +1630,118 @@ export class REPL {
       case "/todo":
         console.log(chalk.dim(formatTodos()));
         break;
+
+      case "/goal-seek": {
+        // Goal Seek mode 開始。 設計: docs/goal-seek-mode-design.md §3.3
+        const goalText = args.join(" ").trim();
+        if (!goalText) {
+          console.log(chalk.dim("  使用方法: /goal-seek <達成したい goal の自然言語>"));
+          console.log(chalk.dim("  例: /goal-seek llama.cpp の --parallel 設定を自動で最適化する機能を追加する"));
+          console.log(chalk.dim(""));
+          console.log(chalk.dim("  挙動: AI が acceptance criteria を抽出 → user 承認 → mode 開始"));
+          console.log(chalk.dim("  終了: 全 criteria 充足で response_complete 自動許可 / 手動は /exit-goal-seek"));
+          break;
+        }
+        if (this.agent.getMode() === "goal-seek") {
+          const existing = getGoalSlot();
+          console.log(chalk.yellow(`  既に Goal Seek mode 中です (goal: ${existing?.statement.slice(0, 60) ?? "?"}...)`));
+          console.log(chalk.dim(`  別の goal に切り替えるには先に /exit-goal-seek を実行してください。`));
+          break;
+        }
+
+        this.agentBusy = true;
+        try {
+          // Step 1: LLM に acceptance criteria を抽出させる
+          console.log(chalk.cyan("\n  ── /goal-seek: acceptance criteria を抽出中 ──"));
+          const provider = this.agent.getProvider();
+          const model = this.agent.getModel();
+          const extractPrompt =
+            `ユーザーから以下の goal が提供されました:\n\n` +
+            `${goalText}\n\n` +
+            `この goal を達成するための **検証可能な acceptance criteria** を 3-5 個、 JSON 配列形式で抽出してください。\n` +
+            `criteria は「動作する」「ファイルが存在する」「テストがパスする」 等、 客観的に判定可能な観点で記述すること。\n` +
+            `各 criterion は 1 文 (50 文字程度) で簡潔に。\n\n` +
+            `出力形式 (JSON のみ、 他のテキストは不要):\n` +
+            `{"criteria": ["criterion 1", "criterion 2", "criterion 3"]}`;
+
+          let criteria: string[] = [];
+          try {
+            const gen = provider.chat({
+              model,
+              messages: [{ role: "user", content: extractPrompt }],
+              temperature: 0.1,
+              maxTokens: 800,
+              stream: true,
+            });
+            const response = await collectResponse(gen);
+            const raw = response.content;
+            const jsonMatch = raw.match(/\{[\s\S]*?"criteria"[\s\S]*?\]\s*\}/);
+            if (jsonMatch) {
+              const parsed = JSON.parse(jsonMatch[0]);
+              if (Array.isArray(parsed.criteria)) {
+                criteria = parsed.criteria.filter((c: unknown): c is string => typeof c === "string");
+              }
+            }
+          } catch (e) {
+            console.log(chalk.yellow(`  ⚠ criteria 抽出に失敗しました: ${String(e).slice(0, 100)}`));
+          }
+
+          if (criteria.length === 0) {
+            console.log(chalk.yellow(`  criteria が抽出できませんでした。 goal 文を再確認するか、 LLM 設定を確認してください。`));
+            break;
+          }
+
+          // Step 2: user に提示して承認を取る
+          console.log(chalk.bold("\n  抽出された acceptance criteria:"));
+          criteria.forEach((c, i) => {
+            console.log(chalk.dim(`    ${i + 1}. ${c}`));
+          });
+          console.log();
+
+          let proceed = false;
+          try {
+            proceed = await confirm({
+              message: "  この内容で Goal Seek mode を開始しますか?",
+              default: true,
+            });
+          } catch {
+            proceed = false;
+          }
+
+          if (!proceed) {
+            console.log(chalk.yellow("  キャンセルしました。 criteria を修正したい場合は /goal-seek を再実行してください。\n"));
+            break;
+          }
+
+          // Step 3: mode 開始 + 最初の run
+          const goal: GoalDefinition = {
+            statement: goalText,
+            acceptance_criteria: criteria,
+            created_at: Date.now(),
+            register_at_creation: this.agent.getMetrics().register,
+          };
+          this.agent.enterGoalSeek(goal);
+          console.log(chalk.green(`\n  ✓ Goal Seek mode 開始 (criteria ${criteria.length} 項目)`));
+          console.log(chalk.dim(`  acceptance 充足まで response_complete はゲートされます。 中断: /exit-goal-seek\n`));
+
+          // 最初の run を起動 (goal 文をそのまま user message として agent.run へ渡す)
+          await this.agent.run(goalText);
+        } finally {
+          this.agentBusy = false;
+        }
+        break;
+      }
+
+      case "/exit-goal-seek": {
+        if (this.agent.getMode() !== "goal-seek") {
+          console.log(chalk.dim("  Goal Seek mode ではありません。"));
+          break;
+        }
+        const cur = getGoalSlot();
+        this.agent.exitGoalSeek("user");
+        console.log(chalk.yellow(`  Goal Seek mode を終了しました (中断: ${cur?.statement.slice(0, 60) ?? "?"}...)`));
+        break;
+      }
 
       case "/cost": {
         const stats = globalTokenTracker.getSessionTotal();
