@@ -68,6 +68,63 @@ describe("normalizeToolCalls — ChatML 形式", () => {
   });
 });
 
+describe("normalizeToolCalls — Anthropic XML 形式", () => {
+  it("単一 tool_call + 単一 parameter (JSON value)", () => {
+    const text = `<tool_call><function=refine_with_feedback><parameter=analysis>{"done":false,"summary":"ok"}</parameter></function></tool_call>`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).toBe("anthropic-xml");
+    expect(r.toolCalls).toHaveLength(1);
+    expect(r.toolCalls[0].function.name).toBe("refine_with_feedback");
+    const args = JSON.parse(r.toolCalls[0].function.arguments);
+    expect(args.analysis).toEqual({ done: false, summary: "ok" });
+  });
+
+  it("複数行 + 複数 parameter (混在型)", () => {
+    const text = `<tool_call>
+<function=create_canvas>
+<parameter=canvasPath>/abs/path.json</parameter>
+<parameter=size>32</parameter>
+<parameter=background>transparent</parameter>
+</function>
+</tool_call>`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).toBe("anthropic-xml");
+    const args = JSON.parse(r.toolCalls[0].function.arguments);
+    expect(args.canvasPath).toBe("/abs/path.json");
+    expect(args.size).toBe(32);
+    expect(args.background).toBe("transparent");
+  });
+
+  it("実観測ケース (gpt-5.4 reasoning が thinking に書いた形式)", () => {
+    // 2026-05-12T14-29-47 session T34 thinking から再構成
+    const text = `反復改善ループを続行します。
+
+<tool_call>
+<function=mcp__drawdot__refine_with_feedback>
+<parameter=analysis>
+{
+  "done": false,
+  "suggestedEdits": [
+    {"op": "rect.fill", "x": 4, "y": 3, "w": 8, "h": 1, "color": "#7A5A3A"}
+  ]
+}
+</parameter>
+</function>
+</tool_call>`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).toBe("anthropic-xml");
+    expect(r.toolCalls[0].function.name).toBe("mcp__drawdot__refine_with_feedback");
+    const args = JSON.parse(r.toolCalls[0].function.arguments);
+    expect(args.analysis.suggestedEdits).toHaveLength(1);
+  });
+
+  it("clean text にはツール部分が含まれない", () => {
+    const text = `説明テキスト<tool_call><function=foo><parameter=k>v</parameter></function></tool_call>後の説明`;
+    const r = normalizeToolCalls(text);
+    expect(r.cleanedText).toBe("説明テキスト後の説明");
+  });
+});
+
 describe("normalizeToolCalls — ReAct 形式", () => {
   it("Action + Action Input (JSON)", () => {
     const text = `Thought: I need to read the file.\nAction: file_read\nAction Input: {"file_path": "/abs/main.py"}`;

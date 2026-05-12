@@ -34,7 +34,26 @@ export class MessageHistory {
   }
 
   getMessages(): Message[] {
-    return [{ role: "system", content: this.systemPrompt }, ...this.messages];
+    return [
+      { role: "system", content: this.systemPrompt },
+      // 思考保全: assistant.thinking がある場合は content の先頭に inline 化して送信。
+      // provider に未対応フィールドを渡さないために thinking フィールド自体は除外。
+      ...this.messages.map((m) => {
+        if (m.role === "assistant" && m.thinking) {
+          const baseContent = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+          const inlined =
+            `[内部思考 — 同一 span 内の前ターンで自分が考えたこと]\n` +
+            `${m.thinking}\n` +
+            `[/内部思考]\n\n` +
+            `${baseContent}`;
+          const out: Message = { role: m.role, content: inlined };
+          if (m.tool_calls) out.tool_calls = m.tool_calls;
+          if (m.tool_call_id) out.tool_call_id = m.tool_call_id;
+          return out;
+        }
+        return m;
+      }),
+    ];
   }
 
   getRawMessages(): Message[] {
@@ -56,11 +75,16 @@ export class MessageHistory {
   addAssistantMessage(
     content: string,
     toolCalls?: ToolCall[],
-    opts?: { ephemeral?: boolean },
+    opts?: { ephemeral?: boolean; thinking?: string },
   ): void {
     const msg: Message = { role: "assistant", content };
     if (toolCalls && toolCalls.length > 0) {
       msg.tool_calls = toolCalls;
+    }
+    // 思考保全 (Phase 2 本実装): thinking がある場合は Message に保存。
+    // span 境界で clearAllThinking() で削除される。
+    if (opts?.thinking && opts.thinking.trim().length > 0) {
+      msg.thinking = opts.thinking;
     }
     this.messages.push(msg);
     if (opts?.ephemeral) {
@@ -95,6 +119,23 @@ export class MessageHistory {
     const before = this.messages.length;
     this.messages = this.messages.filter((m) => !this.ephemeralMessages.has(m));
     return before - this.messages.length;
+  }
+
+  /**
+   * 思考保全 (Phase 2 本実装) — span 境界で残存する thinking を削除する。
+   * tool_call assistant メッセージは永続化されるが、 thinking はユーザー応答時点で
+   * 「消費し終えた scratch」 として落とす (commit c5147fd の意図に整合)。
+   * @returns 削除した thinking 数
+   */
+  clearAllThinking(): number {
+    let cleared = 0;
+    for (const m of this.messages) {
+      if (m.role === "assistant" && m.thinking) {
+        delete m.thinking;
+        cleared++;
+      }
+    }
+    return cleared;
   }
 
   /** デバッグ・テスト用: 指定メッセージが揮発マークされているか確認 */

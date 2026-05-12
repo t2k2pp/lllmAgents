@@ -5,6 +5,14 @@ export interface Message {
   content: string | ContentPart[];
   tool_call_id?: string;
   tool_calls?: ToolCall[];
+  /**
+   * 思考保全 (Phase 2 本実装): モデルが reasoning/thinking で返した内部思考。
+   * 内部ストレージ専用フィールドで、 provider への送信時は MessageHistory.getMessages() が
+   * content に inline 化して送る (provider に未対応フィールドを渡さないため)。
+   * span 境界で破棄される (purgeEphemeralAtSpanEnd → clearAllThinking)。
+   * docs/ephemeral-context-design.md §7 参照。
+   */
+  thinking?: string;
 }
 
 export interface ContentPart {

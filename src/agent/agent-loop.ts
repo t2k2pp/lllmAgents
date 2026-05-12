@@ -765,7 +765,7 @@ export class AgentLoop {
         this.history.addAssistantMessage(
           textContent,
           toolCalls.length > 0 ? toolCalls : undefined,
-          { ephemeral: toolCalls.length === 0 },
+          { ephemeral: toolCalls.length === 0, thinking: thinkingContent },
         );
         this.history.addUserMessage(
           "続きを出力してください。途中から再開してください。",
@@ -796,7 +796,7 @@ export class AgentLoop {
           repeatToolCount++;
           if (repeatToolCount >= MAX_REPEAT_TOOL) {
             console.log(chalk.yellow(`\n  同じツール呼び出しが${MAX_REPEAT_TOOL}回連続しています。別のアプローチを試みます...`));
-            this.history.addAssistantMessage(textContent, toolCalls);
+            this.history.addAssistantMessage(textContent, toolCalls, { thinking: thinkingContent });
             // 直前のツール結果を偽造せずに、問題を指摘するメッセージを追加
             for (const tc of toolCalls) {
               this.history.addToolResult(tc.id,
@@ -813,7 +813,7 @@ export class AgentLoop {
           lastToolSignature = currentSignature;
         }
 
-        this.history.addAssistantMessage(textContent, toolCalls);
+        this.history.addAssistantMessage(textContent, toolCalls, { thinking: thinkingContent });
 
         let shouldAbort = false;
         if (toolCalls.length === 1) {
@@ -912,13 +912,14 @@ export class AgentLoop {
         continue;
       }
 
-      // Phase D-1: T2/T3 では非標準形式 (Mistral [TOOL_CALLS] / ChatML <tool_call> /
+      // Phase D-1: 非標準形式 (Mistral [TOOL_CALLS] / ChatML <tool_call> / Anthropic XML /
       // ReAct Action: / Plain JSON) の tool 呼び出しを fallback として正規化を試みる。
-      // OpenAI 互換 function calling が確実な T1 ではスキップ (誤検知を避ける)。
+      // 2026-05-13: 当初は T2/T3 限定だったが、 gpt-5.x reasoning モードが thinking/text に
+      // <tool_call><function=...><parameter=...> を書き出す事例 (2026-05-12 観測) があるため
+      // T1 でも有効化。 toolCalls.length === 0 のときのみ動くので native function calling と競合しない。
       if (
         toolCalls.length === 0 &&
-        textContent.trim().length > 0 &&
-        (this.capability.tier === "T2" || this.capability.tier === "T3")
+        textContent.trim().length > 0
       ) {
         const normalized = normalizeToolCalls(textContent);
         if (normalized.toolCalls.length > 0) {
@@ -932,13 +933,13 @@ export class AgentLoop {
       }
 
       // Phase 2: 思考保全 — text/toolCalls がともに空でも thinking 内に <tool_call> 等が
-      // 埋まっているケース (例: Qwen3 が reasoning_content に ChatML 形式を吐く) を救う。
+      // 埋まっているケース (例: Qwen3 が reasoning_content に ChatML 形式、
+      // gpt-5.x reasoning が Anthropic XML 形式を吐く) を救う。
       // 思考は SoWhat/WhySo の核なので、 そこに完成形のツールコールがあるなら捨てずに実行する。
       // docs/ephemeral-context-design.md §7.2 参照。
       if (
         toolCalls.length === 0 &&
-        thinkingContent.trim().length > 0 &&
-        (this.capability.tier === "T2" || this.capability.tier === "T3")
+        thinkingContent.trim().length > 0
       ) {
         const normalized = normalizeToolCalls(thinkingContent);
         if (normalized.toolCalls.length > 0) {
@@ -954,7 +955,7 @@ export class AgentLoop {
       // 注: 上の正規化で tool calls を抽出できた場合はここに来ない (toolCalls.length > 0)
       if (toolCalls.length === 0 && textContent.trim().length > 0 && isGarbageResponse(textContent)) {
         console.log(chalk.yellow("\n  モデルの応答が解析できない形式です。プロンプトを変えて再度お試しください。"));
-        this.history.addAssistantMessage(textContent);
+        this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
         this.purgeEphemeralAtSpanEnd("garbage_response");
         return;
       }
@@ -967,7 +968,8 @@ export class AgentLoop {
         const fileList = pendingVerification.map(f => `    - ${f}`).join("\n");
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] 検証未実施`));
         // 中間 promise テキストと self-check nudge は in-turn 専用 (応答完了時に purge)
-        this.history.addAssistantMessage(textContent, undefined, { ephemeral: true });
+        // thinking も保全 (span 内で活用、 span 終了時に破棄)
+        this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
         this.history.addUserMessage(
           formatSelfCheck(
             selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
@@ -1000,8 +1002,8 @@ export class AgentLoop {
           selfCheckRounds++;
           const feedback = Evaluator.formatForInjection(result);
           console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`));
-          // Evaluator 指摘と中間応答は in-turn 専用
-          this.history.addAssistantMessage(textContent, undefined, { ephemeral: true });
+          // Evaluator 指摘と中間応答は in-turn 専用、 thinking も保全
+          this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
           this.history.addUserMessage(
             formatSelfCheck(
               selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
@@ -1042,15 +1044,15 @@ export class AgentLoop {
         if (selfCheckRounds >= MAX_SELF_CHECK_ROUNDS) {
           // 上限到達: ユーザーに報告して中断
           console.log(chalk.yellow(`\n  自己点検を${MAX_SELF_CHECK_ROUNDS}回実施しましたが response_complete が呼ばれませんでした。`));
-          this.history.addAssistantMessage(textContent);
+          this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
           this.purgeEphemeralAtSpanEnd("self_check_limit");
           return;
         }
 
         selfCheckRounds++;
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ツール未呼び出し`));
-        // promise テキストと nudge は in-turn 専用 (応答完了時に purge)
-        this.history.addAssistantMessage(textContent, undefined, { ephemeral: true });
+        // promise テキストと nudge は in-turn 専用、 thinking も保全
+        this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
         // 2026-05-01: C 案。 「promise テキストだけでは作業継続と認識しない」 を明示し、
         // 短い「了解しました」「実装します」 等の応答で止まるループを抜けやすくする。
         this.history.addUserMessage(
@@ -1071,8 +1073,8 @@ export class AgentLoop {
         codeBlockRetried = true;
         selfCheckRounds++;
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] コードがテキスト応答に含まれています`));
-        // コードを含む中間応答と nudge は in-turn 専用 (応答完了時に purge)
-        this.history.addAssistantMessage(textContent, undefined, { ephemeral: true });
+        // コードを含む中間応答と nudge は in-turn 専用、 thinking も保全
+        this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
         this.history.addUserMessage(
           formatSelfCheck(
             selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
@@ -1090,7 +1092,7 @@ export class AgentLoop {
         const fakeWrites = extractFakeFileWriteCalls(textContent);
         if (fakeWrites.length > 0) {
           console.log(chalk.yellow(`\n  ツール呼び出しの代わりにJSONが返されました。${fakeWrites.length}件のfile_writeを直接実行します...`));
-          this.history.addAssistantMessage(textContent);
+          this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
           let shouldAbort = false;
           for (const fw of fakeWrites) {
             const syntheticCall: ToolCall = {
@@ -1172,7 +1174,7 @@ export class AgentLoop {
         this.purgeEphemeralAtSpanEnd("empty_response_giveup");
         return;
       }
-      this.history.addAssistantMessage(textContent);
+      this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
       this.purgeEphemeralAtSpanEnd("final_text_response");
       return;
     }
@@ -1326,6 +1328,12 @@ export class AgentLoop {
     const purged = this.history.purgeEphemeral();
     if (purged > 0) {
       console.log(chalk.dim(`  [ephemeral-purge] ${purged} 件の in-turn 補助メッセージを破棄 (${reason})`));
+    }
+    // 思考保全 (Phase 2 本実装): span 境界で残存する thinking も削除する。
+    // 「span 内では活用、 ユーザー応答後に破棄」 の原則を実装に反映 (commit c5147fd の意図)。
+    const clearedThinking = this.history.clearAllThinking();
+    if (clearedThinking > 0) {
+      console.log(chalk.dim(`  [thinking-purge] ${clearedThinking} 件の thinking を破棄 (${reason})`));
     }
   }
 

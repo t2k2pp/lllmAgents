@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node scripts/on-stop.js"
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/on-stop.js\""
           }
         ]
       }

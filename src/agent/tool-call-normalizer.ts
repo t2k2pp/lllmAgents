@@ -8,6 +8,8 @@
  *   - ChatML 形式: <tool_call>{"name": ..., "arguments": ...}</tool_call>
  *   - ReAct 形式: Action: foo\nAction Input: {"key": "value"}
  *   - Plain JSON: {"name": "foo", "arguments": {...}} ... (テキスト中に裸で)
+ *   - Anthropic XML 形式: <tool_call><function=name><parameter=key>value</parameter>...</function></tool_call>
+ *     (gpt-5.x reasoning モードが thinking/text に混ぜて出すパターン。 2026-05-12 観測)
  *
  * 既存の isGarbageResponse() はこれらを「ガベージ」 として捨ててしまっていた。
  * 本モジュールは fallback として上記形式を OpenAI 互換 ToolCall[] に変換する。
@@ -23,7 +25,7 @@ export interface NormalizationResult {
   /** ツール呼び出し部分を取り除いたテキスト (アシスタントの "考え" 等が残る場合) */
   cleanedText: string;
   /** どの形式で抽出したか (デバッグ・ログ用) */
-  format: "mistral" | "chatml" | "react" | "plain-json" | "none";
+  format: "mistral" | "chatml" | "react" | "plain-json" | "anthropic-xml" | "none";
 }
 
 /**
@@ -39,8 +41,10 @@ export function normalizeToolCalls(text: string): NormalizationResult {
   }
 
   // 順序重要: より特異性の高いマーカーから試す
+  // Anthropic XML は <tool_call><function=...> の入れ子なので ChatML より特異 → 先に試す
   const tries: Array<(t: string) => NormalizationResult | null> = [
     extractMistralToolCalls,
+    extractAnthropicXmlToolCalls,
     extractChatMLToolCalls,
     extractReActAction,
     extractPlainJSONToolCall,
@@ -114,6 +118,56 @@ function extractChatMLToolCalls(text: string): NormalizationResult | null {
   if (toolCalls.length === 0) return null;
   const cleanedText = text.replace(re, "").trim();
   return { toolCalls, cleanedText, format: "chatml" };
+}
+
+/**
+ * Anthropic XML 形式:
+ *   <tool_call>
+ *     <function=NAME>
+ *       <parameter=KEY>VALUE</parameter>
+ *       <parameter=KEY2>VALUE2</parameter>
+ *     </function>
+ *   </tool_call>
+ *
+ * 2026-05-12 観測: Azure GPT-5.x reasoning が thinking または text にこの形式を
+ * 出す事例 (= Anthropic Claude のツール呼び出し記法に引きずられている)。 native
+ * function calling は別途出る場合もあるが、 出ないケースで thinking 内に残るのを救う。
+ *
+ * VALUE は JSON or プレーンテキスト。 JSON parse できれば object、 できなければ string。
+ */
+function extractAnthropicXmlToolCalls(text: string): NormalizationResult | null {
+  const callRe = /<tool_call>\s*<function=([^>\s]+)>([\s\S]*?)<\/function>\s*<\/tool_call>/g;
+  const matches = [...text.matchAll(callRe)];
+  if (matches.length === 0) return null;
+
+  const toolCalls: ToolCall[] = [];
+  for (const m of matches) {
+    const name = m[1].trim();
+    if (!name) continue;
+    const body = m[2];
+    const args: Record<string, unknown> = {};
+    const paramRe = /<parameter=([^>\s]+)>([\s\S]*?)<\/parameter>/g;
+    for (const pm of body.matchAll(paramRe)) {
+      const key = pm[1].trim();
+      const rawValue = pm[2].trim();
+      try {
+        // JSON parse 成功なら object/array/number/etc. としてセット
+        args[key] = JSON.parse(rawValue);
+      } catch {
+        // 失敗時はそのまま文字列
+        args[key] = rawValue;
+      }
+    }
+    toolCalls.push({
+      id: generateCallId(),
+      type: "function",
+      function: { name, arguments: JSON.stringify(args) },
+    });
+  }
+
+  if (toolCalls.length === 0) return null;
+  const cleanedText = text.replace(callRe, "").trim();
+  return { toolCalls, cleanedText, format: "anthropic-xml" };
 }
 
 /**
