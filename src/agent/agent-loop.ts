@@ -530,10 +530,40 @@ export class AgentLoop {
             }
           };
 
+          // 「考え中…」 スピナーに経過時間を表示するためのヘルパー。
+          // thinking フェーズが長引いても進捗が見える (2026-05-14 修正)。
+          let thinkingStartTime = 0;
+          let thinkingTimer: ReturnType<typeof setInterval> | null = null;
+          const startThinkingSpinner = (): void => {
+            if (thinkingSpinner) return;
+            thinkingStartTime = Date.now();
+            thinkingSpinner = ora(chalk.dim("  考え中...")).start();
+            thinkingTimer = setInterval(() => {
+              if (thinkingSpinner) {
+                const elapsed = Math.floor((Date.now() - thinkingStartTime) / 1000);
+                thinkingSpinner.text = chalk.dim(`  考え中... (${formatElapsed(elapsed)})`);
+              }
+            }, 1000);
+          };
+          const stopThinkingSpinner = (failMessage?: string): void => {
+            if (thinkingTimer) {
+              clearInterval(thinkingTimer);
+              thinkingTimer = null;
+            }
+            if (thinkingSpinner) {
+              if (failMessage !== undefined) {
+                thinkingSpinner.fail(failMessage);
+              } else {
+                thinkingSpinner.stop();
+              }
+              thinkingSpinner = null;
+            }
+          };
+
           for await (const chunk of abortableIterator(gen, () => this._aborted)) {
             if (this._aborted) {
               stopWaitingSpinner();
-              if (thinkingSpinner) { thinkingSpinner.stop(); thinkingSpinner = null; }
+              stopThinkingSpinner();
               if (this.streamingDisplay && hasStartedOutput) process.stdout.write("\n");
               console.log(chalk.yellow("\n  (処理を中断しました)"));
               this.purgeEphemeralAtSpanEnd("user_abort");
@@ -552,10 +582,8 @@ export class AgentLoop {
                     }
                     process.stdout.write(chalk.gray(chunk.text));
                   } else {
-                    // スピナーモード: "考え中..." スピナー
-                    if (!thinkingSpinner) {
-                      thinkingSpinner = ora(chalk.dim("  考え中...")).start();
-                    }
+                    // スピナーモード: "考え中... (Xs)" スピナー (経過時間付き)
+                    startThinkingSpinner();
                   }
                   thinkingContent += chunk.text;
                 }
@@ -565,10 +593,7 @@ export class AgentLoop {
                   stopWaitingSpinner();
                   if (this.streamingDisplay) {
                     // ストリーミングモード: リアルタイム表示
-                    if (thinkingSpinner) {
-                      thinkingSpinner.stop();
-                      thinkingSpinner = null;
-                    }
+                    stopThinkingSpinner();
                     const displayText = filterThinkingTags(chunk.text);
                     if (displayText) {
                       if (!hasStartedOutput) {
@@ -584,10 +609,8 @@ export class AgentLoop {
                     }
                   } else {
                     // スピナーモード: バッファリング + "受信中..." スピナー
-                    if (thinkingSpinner) {
-                      thinkingSpinner.stop();
-                      thinkingSpinner = null;
-                    }
+                    // 「考え中…」 から「受信中…」 への切替なので thinkingTimer も止める
+                    stopThinkingSpinner();
                     // <think>...</think> タグをフィルタリング（古いOllamaの場合contentに含まれる）
                     const displayText = filterThinkingTags(chunk.text);
                     if (displayText) {
@@ -609,23 +632,16 @@ export class AgentLoop {
                 }
                 break;
               case "tool_call":
-                // 待機スピナーが動いていたら停止
+                // 待機スピナー + thinking スピナーを停止
                 stopWaitingSpinner();
-                // thinkingスピナーが動いていたら停止
-                if (thinkingSpinner) {
-                  thinkingSpinner.stop();
-                  thinkingSpinner = null;
-                }
+                stopThinkingSpinner();
                 if (chunk.toolCall) {
                   toolCalls.push(chunk.toolCall);
                 }
                 break;
               case "error":
                 stopWaitingSpinner();
-                if (thinkingSpinner) {
-                  thinkingSpinner.fail("エラー");
-                  thinkingSpinner = null;
-                }
+                stopThinkingSpinner("エラー");
                 throw new Error(chunk.error ?? "LLM error");
               case "done":
                 finishReason = chunk.finishReason ?? "stop";
@@ -655,20 +671,14 @@ export class AgentLoop {
                   });
                 }
                 stopWaitingSpinner();
-                if (thinkingSpinner) {
-                  thinkingSpinner.stop();
-                  thinkingSpinner = null;
-                }
+                stopThinkingSpinner();
                 break;
             }
           }
 
           // ストリーム完了後もスピナーが残っていたらクリーンアップ
           stopWaitingSpinner();
-          if (thinkingSpinner) {
-            thinkingSpinner.stop();
-            thinkingSpinner = null;
-          }
+          stopThinkingSpinner();
 
           // LLM I/O ログ: レスポンス記録（thinking含む）
           this.llmLogger.logResponse({
@@ -2237,10 +2247,27 @@ function isConnectionError(err: Error): boolean {
 }
 
 /** 経過秒数を "0:05" や "1:23" 形式にフォーマットする */
+/**
+ * 経過秒数を曖昧でない日本語表記で返す。
+ *   < 1 分     → "2秒"
+ *   < 1 時間   → "1分30秒"
+ *   ≥ 1 時間   → "1時間05分"
+ *
+ * 2026-05-14: 以前は "0:02" 形式だったが、 "0 分 02 秒" か "0 時 02 分" か曖昧で
+ * ユーザーが「2 分経過したのに 0:02?」 と誤読する事例があったため改修。
+ */
 function formatElapsed(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
+  if (seconds < 60) {
+    return `${seconds}秒`;
+  }
+  if (seconds < 3600) {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}分${s.toString().padStart(2, "0")}秒`;
+  }
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}時間${m.toString().padStart(2, "0")}分`;
 }
 
 /**
