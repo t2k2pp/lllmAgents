@@ -54,7 +54,11 @@ import {
   hasGoal as hasGoalSlot,
   buildGoalSlotSection,
 } from "./goal-slot.js";
-import { setTodos as setTodosFromGoal, getTodos as getTodosCurrent } from "../tools/definitions/todo-write.js";
+import {
+  setTodos as setTodosFromGoal,
+  getTodos as getTodosCurrent,
+  buildTodoSection,
+} from "../tools/definitions/todo-write.js";
 
 /**
  * AgentMode — paradigm 軸の切替。 register (style 軸) と直交。
@@ -212,11 +216,9 @@ export class AgentLoop {
    * docs/goal-seek-mode-design.md §2.2 参照。
    */
   private currentMode: AgentMode = "forward";
-  /**
-   * system prompt の base 部分 (goal section を除く)。 mode 切替時に goal section を
-   * 着脱する用途で保持。 updateLLMProfiles / restoreSession でも更新される。
-   */
-  private basePrompt: string = "";
+  // 注: 旧 basePrompt フィールドは戦略 ToDo Phase 1 で撤去。
+  // 準システムプロンプト合成は composer 経由で行い、 base は MessageHistory が保持する this.systemPrompt
+  // が単一の真実源 (composer の base 引数で渡される)。
   /**
    * Phase A: 能力ティアプロファイル。 ハーネス各機能はこれを参照して挙動を切替える。
    * docs/multi-tier-harness-roadmap.md §3 参照。
@@ -260,13 +262,15 @@ export class AgentLoop {
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, model)} (${this.capability.reason})`);
     // Phase B-2: 能力ティアを system prompt に渡して、 T1=concise / T2=current / T3=verbose+examples を出し分ける
     const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian, llmProfiles, this.capability.tier);
-    this.basePrompt = systemPrompt;
     // 既存 goal-slot 状態を反映 (process 内で /goal-seek 実行後の AgentLoop 再生成時に継承)。
-    // composePromptWithGoalSlot は currentMode を見るので、 先に mode を決める。
     if (hasGoalSlot()) {
       this.currentMode = "goal-seek";
     }
-    this.history = new MessageHistory(this.composePromptWithGoalSlot(systemPrompt));
+    // 戦略 ToDo Phase 1 (docs/strategic-todo-design.md §2.2 / §3.1):
+    // 準システムプロンプト動的合成。 base + goal section + todo section を毎呼出で fresh に作る。
+    // composer は MessageHistory.getMessages() が呼ぶたびに最新の goal-slot / todos を読んで合成。
+    this.history = new MessageHistory(systemPrompt);
+    this.history.setSystemPromptComposer((base) => this.composeQuasiSystemPrompt(base));
     // Phase C-2 + D-4: 圧縮閾値と keepRecentMessages を tier 由来で設定。
     // 引数の compressionThreshold は無視され、 capability の値が常に勝つ。
     // (ユーザが明示的に変えたい場合は config.json modelCapabilities.<modelId>.* で override 可能)
@@ -1849,18 +1853,18 @@ export class AgentLoop {
    */
   updateLLMProfiles(profiles: LLMProfiles, skills?: SkillInfo[], hasSecondLLM?: boolean, hasObsidian?: boolean): void {
     this.llmProfiles = profiles;
-    // Phase B-2: tier 反映
+    // Phase B-2: tier 反映。 base のみ更新、 動的部分は composer が次回 getMessages() で合成
     const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian, profiles, this.capability.tier);
-    this.basePrompt = systemPrompt;
-    this.history.updateSystemPrompt(this.composePromptWithGoalSlot(systemPrompt));
+    this.history.updateSystemPrompt(systemPrompt);
   }
 
   restoreSession(sessionData: SessionData): void {
     this.session = sessionData;
     // Phase B-2: tier 反映
     const systemPrompt = buildSystemPrompt(undefined, undefined, undefined, this.llmProfiles, this.capability.tier);
-    this.basePrompt = systemPrompt;
-    this.history = new MessageHistory(this.composePromptWithGoalSlot(systemPrompt));
+    this.history = new MessageHistory(systemPrompt);
+    // 戦略 ToDo Phase 1: 新しい MessageHistory にも composer を注入
+    this.history.setSystemPromptComposer((base) => this.composeQuasiSystemPrompt(base));
     for (const msg of sessionData.messages) {
       if (msg.role === "user") {
         this.history.addUserMessage(typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content));
@@ -1953,7 +1957,8 @@ export class AgentLoop {
         goal.acceptance_criteria.map((c) => ({ content: c, status: "pending" as const })),
       );
     }
-    this.history.updateSystemPrompt(this.composePromptWithGoalSlot(this.basePrompt));
+    // 準システムプロンプト composer (構築時に注入済) が次回 getMessages() で goal section を含めて再合成する。
+    // ここで明示的な updateSystemPrompt は不要。
     logger.info(`[goal-seek] mode entered, ${goal.acceptance_criteria.length} criteria`);
   }
 
@@ -1965,19 +1970,30 @@ export class AgentLoop {
     if (this.currentMode === "forward") return;
     clearGoalSlot();
     this.currentMode = "forward";
-    this.history.updateSystemPrompt(this.composePromptWithGoalSlot(this.basePrompt));
+    // composer が次回 getMessages() で goal section を含めない形で再合成する。
     logger.info(`[goal-seek] mode exited (${reason})`);
   }
 
   /**
-   * basePrompt に Goal Slot section を結合する。 goal-seek mode かつ goal が存在する場合のみ
-   * section を末尾に追加。 forward mode では basePrompt そのままを返す。
+   * 準システムプロンプトを毎呼出で fresh に合成する composer。
+   * MessageHistory.getMessages() から呼ばれる (動的合成、 docs/strategic-todo-design.md §3.1)。
+   *
+   * 構成:
+   *   1. base: 静的 system prompt (agent identity / tool guides 等)
+   *   2. Goal section: goal-seek mode かつ Goal Slot がある時のみ
+   *   3. ToDo section: todos が立っている時のみ (mode を問わず常時表示 = 戦略の可視化)
+   *
+   * 注: register / mode 表示 は今後追加候補 (Phase 1 試験的)。 現状は省略。
    */
-  private composePromptWithGoalSlot(base: string): string {
-    if (this.currentMode !== "goal-seek") return base;
-    const section = buildGoalSlotSection();
-    if (!section) return base;
-    return `${base}\n\n${section}`;
+  private composeQuasiSystemPrompt(base: string): string {
+    const parts: string[] = [base];
+    if (this.currentMode === "goal-seek") {
+      const goalSection = buildGoalSlotSection();
+      if (goalSection) parts.push(goalSection);
+    }
+    const todoSection = buildTodoSection();
+    if (todoSection) parts.push(todoSection);
+    return parts.join("\n\n");
   }
 
   setContextWindow(value: number): void {

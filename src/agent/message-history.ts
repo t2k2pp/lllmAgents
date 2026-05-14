@@ -19,11 +19,25 @@ export type AssistantMessageCallback = (content: string, toolCalls?: ToolCall[])
  *   - 揮発対象は「assistant の純テキスト (tool_calls なし)」 と「user 役の harness 注入」 のみ。
  *   - フラグは Message オブジェクトには載せない (provider にリークしないよう WeakSet で外置き)。
  */
+/**
+ * 準システムプロンプト composer の signature。
+ * AgentLoop が basePrompt + Goal section + ToDo section + mode info 等を結合する関数を渡す。
+ * 毎 getMessages() 呼出で呼ばれて fresh な system prompt を作る (動的合成)。
+ *
+ * docs/strategic-todo-design.md §2.2 / §3.1 参照。
+ */
+export type SystemPromptComposer = (basePrompt: string) => string;
+
 export class MessageHistory {
   private messages: Message[] = [];
   private systemPrompt: string;
   private onAssistantMessage: AssistantMessageCallback | null = null;
   private ephemeralMessages = new WeakSet<Message>();
+  /**
+   * 動的合成 composer。 注入されていれば getMessages() で毎回呼ばれて準システムプロンプトを作る。
+   * 未注入なら従来通り this.systemPrompt をそのまま返す (後方互換)。
+   */
+  private composer: SystemPromptComposer | null = null;
 
   constructor(systemPrompt: string) {
     this.systemPrompt = systemPrompt;
@@ -33,9 +47,19 @@ export class MessageHistory {
     this.onAssistantMessage = cb;
   }
 
+  /**
+   * 準システムプロンプト合成関数を注入する。 AgentLoop が constructor で呼ぶ。
+   * これ以降 getMessages() は毎回 composer(this.systemPrompt) を呼んで動的に system prompt を作る。
+   */
+  setSystemPromptComposer(composer: SystemPromptComposer | null): void {
+    this.composer = composer;
+  }
+
   getMessages(): Message[] {
+    // 準システムプロンプト: composer があれば毎回再合成、 無ければ既存挙動 (base のみ)
+    const finalSystemContent = this.composer ? this.composer(this.systemPrompt) : this.systemPrompt;
     return [
-      { role: "system", content: this.systemPrompt },
+      { role: "system", content: finalSystemContent },
       // 思考保全: assistant.thinking がある場合は content の先頭に inline 化して送信。
       // provider に未対応フィールドを渡さないために thinking フィールド自体は除外。
       ...this.messages.map((m) => {

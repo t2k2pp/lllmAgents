@@ -24,7 +24,7 @@ import { bashTool } from "./tools/definitions/bash.js";
 import { webFetchTool } from "./tools/definitions/web-fetch.js";
 import { createWebSearchTool } from "./tools/definitions/web-search.js";
 import { sandboxInfoTool } from "./tools/definitions/sandbox-info.js";
-import { todoWriteTool } from "./tools/definitions/todo-write.js";
+import { todoWriteTool, todoAppendTool, todoMarkTool, todoDeleteTool } from "./tools/definitions/todo-write.js";
 import { askUserTool } from "./tools/definitions/ask-user.js";
 import { createBrowserTools } from "./tools/definitions/browser.js";
 import { taskTool, taskOutputTool, setSubAgentManager } from "./tools/definitions/task.js";
@@ -133,6 +133,10 @@ async function main(): Promise<void> {
 
   // Interactive tools
   toolRegistry.register(todoWriteTool);
+  // 戦略 ToDo Phase 1 (docs/strategic-todo-design.md §3.2): 分離 tool 群
+  toolRegistry.register(todoAppendTool);
+  toolRegistry.register(todoMarkTool);
+  toolRegistry.register(todoDeleteTool);
   toolRegistry.register(askUserTool);
   toolRegistry.register(responseCompleteTool);
 
