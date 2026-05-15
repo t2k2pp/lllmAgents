@@ -15,7 +15,13 @@ export type RequestSource = "cli" | "discord" | "slack";
 // configに関わらず常にauto-approve
 const INHERENTLY_SAFE_TOOLS = new Set([
   "ask_user",
+  // ToDo 操作系 (戦略 ToDo Phase 1 — docs/strategic-todo-design.md §3.2):
+  // タスク管理は本質的に副作用なし (in-memory state 操作のみ) なので Claude Code の
+  // TaskCreate/TaskUpdate と同じく確認不要。 旧 todo_write は compat shim。
   "todo_write",
+  "todo_append",
+  "todo_mark",
+  "todo_delete",
   "enter_plan_mode",
   "exit_plan_mode",
   "task_output",
