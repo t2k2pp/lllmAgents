@@ -12,6 +12,7 @@ import {
   buildUnexpectedSignalRules,
   buildToolUsageRules,
   buildSpecFileRules,
+  buildCreativeRhythmRules,
 } from "./shared-principles.js";
 
 /**
@@ -80,6 +81,8 @@ ${buildRegisterRules(tier)}
 
 ${buildAcceptanceRules(tier)}
 
+${buildCreativeRhythmRules(tier)}
+
 ${buildVerificationRules(tier)}
 
 # 応答完了 — 作業終了時に response_complete を呼ぶ。
@@ -115,6 +118,8 @@ ${buildRegisterRules(tier)}
 
 ${buildAcceptanceRules(tier)}
 
+${buildCreativeRhythmRules(tier)}
+
 ${buildVerificationRules(tier)}
 
 ${buildToolUsageRules(tier)}
@@ -143,6 +148,8 @@ ${buildRegisterRules(tier)}
 - 「このタスクは rough として進めます。」 → 同ターンで file_write で最小実装を書く
 
 ${buildAcceptanceRules(tier)}
+
+${buildCreativeRhythmRules(tier)}
 
 ${buildVerificationRules(tier)}
 

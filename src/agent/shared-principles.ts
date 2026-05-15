@@ -99,6 +99,32 @@ export function buildAcceptanceRules(tier?: Tier): string {
 - 完了報告には「何が満たされたか / 満たせなかった項目とその理由」 を含める`;
 }
 
+/**
+ * 創造的反復のリズム (docs/strategic-todo-design.md 周辺で議論された原則)。
+ *
+ * 「完璧な計画を head で完成させてから一気に実装」 を抑止し、
+ * 「まず手を動かす → 結果を見る → 次を決める」 の短い feedback loop に誘導する。
+ *
+ * 絵を描く / コードを書く / 文書を作る、 すべてに共通する rhythm。
+ * 弱モデルが head で全てを構築しようとして発散する anti-pattern の予防。
+ */
+export function buildCreativeRhythmRules(tier?: Tier): string {
+  if (tier === "T1") {
+    return `# 創造的反復のリズム — まず大ざっぱに手を動かす → 結果を確認 → 次の手を決める。 head の中で完成形を構築しようとしない。 大ざっぱな全体 → 細部、 の順で交互に進める。`;
+  }
+  if (tier === "T3") {
+    return `# 創造的反復 [必須]
+- まず大ざっぱに何か出力する (完璧でなくていい)
+- 出力したものを確認する (file_read / inspect_canvas / bash 等)
+- 確認結果を基に次の手を決める
+- 「全部考えてから書く」 は禁止。 「書きながら考える」`;
+  }
+  return `# 創造的反復のリズム [必須]
+- まず大ざっぱに手を動かす → 結果を確認 → 次の手を決める
+- head の中で完成形を構築しようとしない
+- 大ざっぱな全体 → 細部、 の順で交互に進める`;
+}
+
 /** 検証 (詳細は tool-guides で遅延注入) */
 export function buildVerificationRules(tier?: Tier): string {
   if (tier === "T1") {
