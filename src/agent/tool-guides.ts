@@ -143,9 +143,9 @@ const T3_FEW_SHOTS: Record<string, string> = {
 - ヒット 0 で同じ pattern を再試行 → pattern を緩める ("*" → "**/*"、 拡張子を変える)
 - 全ディレクトリを再帰検索 (\`ls -R\` 相当) は使わない (スコープ違反)`,
 
-  todo_write: `[T3向け 例: todo_write]
-良い例:
-  todo_write({"todos": [
+  todo_write: `[T3向け — todo_write は deprecated。 todo_append を使う]
+良い例 (新規):
+  todo_append({"items": [
     {"content": "main.py を file_write で作成", "status": "in_progress"},
     {"content": "node --check で構文確認", "status": "pending"},
     {"content": "python main.py で動作確認", "status": "pending"}
@@ -153,7 +153,40 @@ const T3_FEW_SHOTS: Record<string, string> = {
 原則:
 - 3 項目で十分。 細かく分けすぎない
 - "in_progress" は同時に 1 つだけ
-- 全部 "completed" になったら response_complete を呼ぶ`,
+- 状態変更は todo_mark(id, status)。 全部 completed で response_complete
+- 行き詰まったら todo_mark(id, "blocked") で自己宣言`,
+
+  todo_append: `[T3向け 例: todo_append]
+複数の作業ステップを ToDo に commit する。 思考 → 戦略 → 実行 のリズムで使う。
+良い例:
+  todo_append({"items": [
+    {"content": "32x32 描画順を決める (遠 → 近)", "status": "in_progress"},
+    {"content": "シルエットを rect.fill で配置", "status": "pending"},
+    {"content": "顔のパーツを dot で詰める", "status": "pending"},
+    {"content": "Vision で評価", "status": "pending"}
+  ]})
+原則:
+- 思考だけで進めない。 戦略を todo に書き出してから実行に移る
+- 1 ターン内に commit + 最初の Action を両方やる (= 計画蒸発を防ぐ)`,
+
+  todo_mark: `[T3向け 例: todo_mark]
+既存 todo の状態を変更する。 内容は変えない。
+良い例:
+  todo_mark({"id": "t_xxx", "status": "in_progress"})
+  todo_mark({"id": "t_yyy", "status": "completed"})
+  todo_mark({"id": "t_zzz", "status": "blocked"})  ← 行き詰まりの自己宣言
+原則:
+- 着手時に "in_progress"、 完了時に "completed"
+- 詰まったら "blocked" で表明 → ハーネスや user が状況を把握できる
+- ループしないように 1 つずつ進める`,
+
+  todo_delete: `[T3向け 例: todo_delete]
+不要な todo を明示的に削除する。 戦略破棄したい時は delete + append の 2 段。
+良い例:
+  todo_delete({"ids": ["t_xxx", "t_yyy"]})
+原則:
+- 暗黙削除 (= 書き忘れ) は避ける、 必ず明示的に delete を呼ぶ
+- 戦略を作り直す時は: 古い todo を全 delete → 新 todo を append`,
 
   ask_user: `[T3向け 例: ask_user]
 良い例:

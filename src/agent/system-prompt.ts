@@ -72,7 +72,7 @@ export function buildSystemPrompt(
 # 行動原則
 - 成果物は file_write / file_edit で作る (本文をテキスト応答に書かない、 ツール引数で渡す)
 - promise だけで応答を終わらせない (同ターンで実装ツールも呼ぶ)
-- 不明点 → ask_user / 複雑タスク → todo_write / 並列調査 → task で委任
+- 不明点 → ask_user / 複雑タスク → **todo_append で戦略 commit してから実行** / 並列調査 → task で委任
 
 ${buildRegisterRules(tier)}
 
@@ -132,14 +132,14 @@ ${buildUnexpectedSignalRules(tier)}
 
 # 行動原則
 - 成果物は file_write / file_edit で作る (コード本文をテキスト応答に書かない、 ツール引数で渡す)
-- **「了解しました」「実装します」「次に X を行います」 等の promise だけで応答を終わらせない**。 必ず同じターンで実装ツール (file_write / file_edit / bash / todo_write 等) も呼び出す
-- 不明点 → ask_user / 複雑タスク → todo_write で管理 / 非自明な実装 → enter_plan_mode / 並列調査 → task で委任
+- **「了解しました」「実装します」「次に X を行います」 等の promise だけで応答を終わらせない**。 必ず同じターンで実装ツール (file_write / file_edit / bash / **todo_append** 等) も呼び出す
+- 不明点 → ask_user / 複雑タスク → **todo_append で戦略 commit してから実行** (思考だけで進めず ToDo 化する) / 非自明な実装 → enter_plan_mode / 並列調査 → task で委任
 
 ${buildRegisterRules(tier)}
 
 **開始時のレジスター宣言** [必須]:
-依頼を受けたら、 **最初のターンの応答に「このタスクは <レジスター> として進めます」 の 1 行を含める** (ユーザーが過剰なら redirect 可)。 ただし **宣言テキストだけで応答を終わらせない** — 同じターンで **必ず todo_write もしくは実装ツール (file_write / file_edit / bash 等) を呼び出す**。 「宣言だけして次ターンに作業」 は禁止 (= 計画蒸発の温床、 ハーネスは自己点検を発動する)。 例:
-- 「このタスクは standard として進めます。」 → 同ターンで todo_write を呼び 3-5 項目の Acceptance Checklist を立てる
+依頼を受けたら、 **最初のターンの応答に「このタスクは <レジスター> として進めます」 の 1 行を含める** (ユーザーが過剰なら redirect 可)。 ただし **宣言テキストだけで応答を終わらせない** — 同じターンで **必ず todo_append もしくは実装ツール (file_write / file_edit / bash 等) を呼び出す**。 「宣言だけして次ターンに作業」 は禁止 (= 計画蒸発の温床、 ハーネスは自己点検を発動する)。 例:
+- 「このタスクは standard として進めます。」 → 同ターンで **todo_append** を呼び 3-5 項目の戦略 / Acceptance Checklist を立てる
 - 「このタスクは rough として進めます。」 → 同ターンで file_write で最小実装を書く
 
 ${buildAcceptanceRules(tier)}

@@ -53,25 +53,50 @@ export function buildRegisterRules(tier?: Tier): string {
 3. 単なる挨拶 / 一般的な雑談 / コード未関連の質問 → explore で短答`;
 }
 
-/** Acceptance Checklist / Criteria の遵守 */
+/** 戦略 ToDo + Acceptance Checklist の遵守 (docs/strategic-todo-design.md §2.3) */
 export function buildAcceptanceRules(tier?: Tier): string {
   if (tier === "T1") {
-    return `# Acceptance Checklist — standard 以上で必須。 着手前に 3-5 項目を立て、 全部 ✓ になるまで完了報告しない。`;
+    return `# 戦略 ToDo — 複数ステップタスクは **着手前に \`todo_append\` で戦略を 3-5 項目 commit してから実行**。 standard 以上は完了基準として使い、 全 ✓ で response_complete。 行き詰まったら \`todo_mark(id, "blocked")\` で自己宣言。 状態更新は \`todo_mark\`、 削除は \`todo_delete\`。`;
   }
   if (tier === "T3") {
-    return `# Acceptance Checklist [必須・テンプレ厳守] — 「これが揃ったら完了」 を着手前に書く
-standard 以上では todo_write で 3 項目だけ書く。 例:
+    return `# 戦略 ToDo [必須・テンプレ厳守]
+
+## いつ何を呼ぶか
+- 複数ステップ計画: \`todo_append({items: [{content, status}, ...]})\` で 3-5 項目追加
+- 状態変更: \`todo_mark(id, status)\` (status は pending/in_progress/completed/**blocked**)
+- 不要項目削除: \`todo_delete({ids: [...]})\`
+- 行き詰まり: \`todo_mark(id, "blocked")\` で agent 自身が宣言する
+
+## standard 以上では着手前に commit
+例:
 1. <ファイル名> が file_write される
 2. node --check (またはbuild) が通る
 3. <検証コマンド> が期待通りの出力を出す
-全項目 ✓ になるまで response_complete を呼ばない。`;
+全項目 ✓ になるまで response_complete を呼ばない。
+
+## 重要
+思考しただけで実行に移らない (= 計画蒸発) は禁止。 思考の結果は必ず \`todo_append\` で commit する。
+旧 \`todo_write\` は deprecated — 上記 3 つの分離 tool を使う。`;
   }
-  return `# Acceptance Checklist / Criteria [standard / production で必須]
-standard 以上のレジスターでは「これが満たされたら完了」 のチェックリストを着手前に立てる。 委任メッセージで Acceptance Criteria が渡された場合はそれを継承:
-- 3-5 項目で具体化 (例: 「HTML が file_write される」「ブラウザで main loop が動く」「主要状態機械が含まれる」)
+  return `# 戦略 ToDo / Acceptance Checklist [standard / production で必須]
+
+## リズム — 思考 → ToDo commit → Action
+複雑タスクは **着手前に \`todo_append\` で戦略を commit** してから実行する。 これは:
+- 思考だけして実行に移らない (= 計画蒸発) を防ぐ
+- 戦略を agent / harness / user で共有可能にする (system prompt に常時表示)
+- 完了条件として使い、 全 ✓ で response_complete を許可する
+
+## ツール (旧 \`todo_write\` は deprecated)
+- \`todo_append(items)\`: 戦略の commit / 項目追加。 例: \`{items: [{content: "32x32 描画順を決める", status: "pending"}]}\`
+- \`todo_mark(id, status)\`: 状態だけ変える。 status は pending / in_progress / completed / **blocked**
+- \`todo_delete(ids)\`: 不要項目の削除。 戦略破棄したい時は delete + 新 append の 2 段
+- **\`blocked\`**: 「この項目で進めない、 別アプローチ要、 ask_user 必要」 を agent が自己宣言
+
+## standard 以上の運用
+- 着手前に 3-5 項目を \`todo_append\` で立てる (例: 「HTML が file_write される」「ブラウザで main loop が動く」「主要状態機械が含まれる」)
+- 委任メッセージで Acceptance Criteria が渡された場合はそれを継承
 - 全項目 ✓ になるまで完了報告しない
-- 完了報告には「checklist の何が満たされたか / 満たせなかった項目とその理由」 を含める
-- 計画を立てるだけで実行に消化しない (= 計画蒸発) は禁止`;
+- 完了報告には「何が満たされたか / 満たせなかった項目とその理由」 を含める`;
 }
 
 /** 検証 (詳細は tool-guides で遅延注入) */

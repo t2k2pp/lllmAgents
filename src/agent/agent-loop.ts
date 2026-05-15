@@ -1074,7 +1074,10 @@ export class AgentLoop {
             selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
             `テキスト応答のみでツール呼出がありません。 ` +
             `「了解しました」「実装します」 等の promise テキストだけではハーネスは作業継続と認識しません。 ` +
-            `依頼の遂行に必要なツール (file_write / file_edit / bash 等) を直接呼んで作業を進めてください。`
+            `思考 → ToDo → 実行 のリズムで進めてください: ` +
+            `(a) 戦略がまだ決まっていない → \`todo_append\` で計画を 3-5 項目立てる、 ` +
+            `(b) 既存 ToDo があるなら該当項目を \`todo_mark(id, "in_progress")\` してから実装 tool (file_write / file_edit / bash / mcp__...) を呼ぶ、 ` +
+            `(c) 行き詰まりなら \`todo_mark(id, "blocked")\` + \`ask_user\` で相談。`
           ),
           { ephemeral: true },
         );
@@ -1166,14 +1169,24 @@ export class AgentLoop {
           // empty-response placeholder と nudge は in-turn 専用 (応答完了時に purge)。
           // ユーザーへの最終応答が出れば、 これらの中間ノイズは過去 span から除去される。
           this.history.addAssistantMessage(placeholder, undefined, { ephemeral: true });
+          // 2026-05-15: 空応答 retry の意味反転 (docs/strategic-todo-design.md §3.3)。
+          // 旧 nudge は「ツール呼べ」 という圧力で、 弱モデルが戦略を立てる前に反応的に動く原因だった。
+          // 新 nudge: 思考の deliberation を todo_append で commit させ、 戦略 → 実行 のリズムへ誘導する。
+          // 「思考 → ToDo 化 → Action」 = ジャンプ前のしゃがみ込み。
+          const hasThinking = thinkingContent.length > 0;
           this.history.addUserMessage(
-            `[ハーネス通知] 直前の応答が空またはテキストのみで、 ツール呼出がありませんでした。\n` +
-            (thinkingContent.length > 0
-              ? `あなたの前回の思考は上の assistant メッセージに保全しました。 続きをそのまま実行に移してください (再思考は不要)。\n`
+            `[ハーネス通知] 直前の応答で thinking は記録されましたが、 実行に移っていません。\n\n` +
+            `# 期待される次の手 (思考 → ToDo → 実行 のリズム)\n` +
+            `あなたの思考から **戦略を ToDo に commit** してください:\n` +
+            `- 戦略がまだ deliberation 中なら: \`todo_append\` で「次に何を検討するか」 を 1-2 項目追加\n` +
+            `- 戦略が決まったなら: \`todo_append\` で具体的な計画 (3-5 項目) を書き出す\n` +
+            `- 既存の todo に従って進めるなら: 該当の実装 tool (file_write / file_edit / bash / mcp__... 等) を直接呼ぶ\n` +
+            `- 行き詰まりなら: \`todo_mark(id, "blocked")\` で自己宣言してから \`ask_user\` で相談\n\n` +
+            (hasThinking
+              ? `あなたの前回の思考は上の assistant メッセージに保全しました。 再思考は不要、 結論を ToDo に書き出すか実行に移してください。\n\n`
               : "") +
-            `「了解しました」「実装します」「続きを行います」 等の promise テキストだけではハーネスは作業継続と認識しません。\n` +
-            `ユーザーの意図: ${nudgeIntent}\n` +
-            `次の手として、 todo の未完了項目があれば該当ツール (file_write / file_edit / bash 等) を直接呼んで作業を進めてください。 中間報告のテキストは不要です。`,
+            `# 元依頼 (北極星)\n${nudgeIntent}\n\n` +
+            `単なる promise テキスト (「了解しました」「実装します」 等) や thinking-only ではハーネスは進捗と認識しません。`,
             { ephemeral: true },
           );
           continue;
