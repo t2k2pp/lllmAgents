@@ -62,13 +62,22 @@ export class MessageHistory {
       { role: "system", content: finalSystemContent },
       // 思考保全: assistant.thinking がある場合は content の先頭に inline 化して送信。
       // provider に未対応フィールドを渡さないために thinking フィールド自体は除外。
+      //
+      // 2026-05-15 — 命令付きフォーマットに変更 (user 指摘):
+      // 旧 `[内部思考 ...]` は単なるラベルで model が「この形式で出力せよ」 と誤解し
+      // [/内部思考] を repeat するループに陥った (T12/T13 で観測)。
+      // model は自分の過去出力を「自分のもの」 と認識する meta-awareness が無いため、
+      // 入力に置かれたタグは template として解釈される。
+      // 修正: 標準 <thinking> タグ + 明示的命令 (**以下を踏まえ答えを出す**) で
+      // 「これは consume するもの、 出力は新規生成」 を model に伝える。
       ...this.messages.map((m) => {
         if (m.role === "assistant" && m.thinking) {
           const baseContent = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
           const inlined =
-            `[内部思考 — 同一 span 内の前ターンで自分が考えたこと]\n` +
+            `<thinking>\n` +
+            `**以下を踏まえ答えを出す**\n` +
             `${m.thinking}\n` +
-            `[/内部思考]\n\n` +
+            `</thinking>\n\n` +
             `${baseContent}`;
           const out: Message = { role: m.role, content: inlined };
           if (m.tool_calls) out.tool_calls = m.tool_calls;
