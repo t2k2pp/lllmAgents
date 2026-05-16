@@ -43,6 +43,8 @@ import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
 import { getFirstUseGuide, getFailureGuide } from "./tool-guides.js";
 import { IntentClassifier } from "./intent-classifier.js";
 import { Evaluator } from "./evaluator.js";
+import { judgeProgress, buildRecentSummary } from "./progress-judge.js";
+import { checkCoherence, buildCoherenceNudge } from "./coherence-check.js";
 import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";
 import type { ChatLogger } from "./chat-logger.js";
 import { renderEditDiff, renderWriteDiff } from "../cli/diff-display.js";
@@ -402,6 +404,12 @@ export class AgentLoop {
     // T3 は scaffolding を増やしても改善しないため早めにユーザに戻す。
     const MAX_SELF_CHECK_ROUNDS = this.capability.maxSelfCheckRounds;
     const MAX_REPEAT_TOOL = 3; // 同じツール呼び出しがN回連続で失敗したら中断
+
+    // 2026-05-16 (docs/strategic-todo-design.md 議論): base harness の persistence 機構。
+    // 既存 self-check と独立した並列カウンタ。 standard 以上のレジスターでのみ発火。
+    let progressGateRetries = 0;        // Axis (1) Q→A 進捗 gate (response_complete 時)
+    let coherenceGateRetries = 0;       // Axis (2a) thinking-text コヒーレンス
+    const MAX_NEW_GATE_RETRIES = 2;     // 各 gate の上限 (自己点検と独立)
 
     // Phase C-2: hard cap を tier 別に。 T1=100, T2=80, T3=50。
     // ユーザー override (config.json modelCapabilities) で上書きも可能。
@@ -800,6 +808,30 @@ export class AgentLoop {
         }
       }
 
+      // 2026-05-16: Axis (2a) thinking-text コヒーレンス検査。
+      // standard 以上のレジスターでのみ発火。 model が thinking で「続きある」 と書いているのに
+      // text/response_complete で「完了」 を宣言しているズレを拾う。
+      // - 緩めの regex パターン (兆候レベルで拾う)
+      // - LLM 呼出なし (軽量)
+      // - 検出時は ephemeral nudge を inject、 retry counter 制限あり
+      {
+        const isStandardOrUp = this.isStandardOrAboveRegister();
+        if (isStandardOrUp && coherenceGateRetries < MAX_NEW_GATE_RETRIES) {
+          const hasRC = toolCalls.some((tc) => tc.function.name === "response_complete");
+          const coherence = checkCoherence(thinkingContent, textContent, hasRC);
+          if (coherence.mismatch) {
+            coherenceGateRetries++;
+            console.log(chalk.yellow(
+              `  [coherence ${coherenceGateRetries}/${MAX_NEW_GATE_RETRIES}] thinking「${coherence.continuationHit}」 vs 完了「${coherence.completionHit}」 ズレ検出`,
+            ));
+            // 元 response は履歴に積まずに (= 完了宣言を確定させず)、 nudge だけ inject して loop 続行
+            this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
+            this.history.addUserMessage(buildCoherenceNudge(coherence), { ephemeral: true });
+            continue;
+          }
+        }
+      }
+
       // Tool calls: execute (parallel when multiple) and continue
       if (toolCalls.length > 0) {
         hasExecutedTools = true;
@@ -917,6 +949,47 @@ export class AgentLoop {
             }
             // それ以外 (todos 0 件 等) は mode を抜けず保持。 次の span でも goal を継続。
           }
+
+          // 2026-05-16: Axis (1) Q→A 進捗 gate (docs/strategic-todo-design.md 議論)。
+          // standard 以上のレジスターで、 force=false の時のみ発火。
+          // sub-agent パターンで isolated に「本当に Q に答えたか?」 を判定し、
+          // stalled なら span 終了させず ephemeral nudge を inject して継続。
+          const isStandardOrUp = this.isStandardOrAboveRegister();
+          if (
+            isStandardOrUp &&
+            !forceFlag &&
+            progressGateRetries < MAX_NEW_GATE_RETRIES
+          ) {
+            const recentSummary = buildRecentSummary(this.history.getRawMessages(), 5);
+            const judge = await judgeProgress({
+              originalUserMessage: userMessageText,
+              recentSummary,
+              latestResponse: { text: textContent, toolCalls },
+              provider: this.provider,
+              model: this.model,
+            });
+            if (judge.verdict === "stalled") {
+              progressGateRetries++;
+              console.log(chalk.yellow(
+                `  [Q→A gate ${progressGateRetries}/${MAX_NEW_GATE_RETRIES}] stalled — ${judge.reason.slice(0, 100)}`,
+              ));
+              this.history.addUserMessage(
+                `[ハーネス] 完了宣言を受けましたが、 Q→A 進捗判定で **stalled** と判断されました。\n` +
+                `理由: ${judge.reason}\n\n` +
+                `# 元の Q (北極星)\n${userMessageText.slice(0, 300)}${userMessageText.length > 300 ? "..." : ""}\n\n` +
+                `元 Q への進捗を実質的に進めてください。 必要なら ToDo を再確認し、 該当する実装 tool を呼ぶか ` +
+                `(${MAX_NEW_GATE_RETRIES - progressGateRetries + 1} 回まで再判定可、 その後は force=true で強制完了可能)。`,
+                { ephemeral: true },
+              );
+              // tool_call として response_complete は既に履歴に積まれているが、 span は終わらせず continue
+              continue;
+            }
+            if (judge.verdict === "took_step") {
+              console.log(chalk.dim(`  [Q→A gate] took_step — ${judge.reason.slice(0, 100)}`));
+            }
+            // answered or took_step なら span 終了に進む
+          }
+
           // span 境界: in-turn の harness 注入 (self-check / nudge / 空応答 placeholder 等) を破棄。
           // 過去 span のノイズを次 span に持ち込まない。 docs/ephemeral-context-design.md 参照。
           this.purgeEphemeralAtSpanEnd("response_complete");
@@ -1511,6 +1584,15 @@ export class AgentLoop {
     production: 100, // hard cap と同値
     unknown: 100, // レジスター宣言なし → 従来動作と同じ
   };
+  /**
+   * 「standard 以上」 のレジスター判定。 base harness の persistence gate
+   * (Q→A 進捗 / コヒーレンス) の発火条件。 docs/strategic-todo-design.md §2.2 議論。
+   */
+  private isStandardOrAboveRegister(): boolean {
+    const reg: string = this.currentRegister;
+    return reg === "standard" || reg === "production";
+  }
+
   private computeRegisterSoftCap(): number {
     return AgentLoop.REGISTER_SOFT_CAP[this.currentRegister] ?? MAX_TOOL_ITERATIONS;
   }
