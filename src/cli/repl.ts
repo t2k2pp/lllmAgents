@@ -96,6 +96,20 @@ export class REPL {
     //   処理中1回目 → ソフト中断 (abort) + "もう一度で終了" 案内
     //   処理中2回目 → プロセス終了（強制脱出手段を保持）
     //   待機中      → プロセス終了（通常動作）
+    //
+    // 2026-05-16 修正: 強制終了経路でも resume 可能にするため save を必ず実行する。
+    // 旧: process.exit(1) 直叩きで save が走らず、 翌日 /resume で見つからない症状 (user 報告) があった。
+    const saveBeforeExit = (reason: string): void => {
+      try {
+        this.agent.saveCurrentSession();
+        const msgCount = this.agent.getCurrentSessionMessageCount();
+        if (msgCount > 0) {
+          console.log(chalk.dim(`  セッション保存 (${reason}): ${chalk.cyan(this.agent.getCurrentSessionId())} (${msgCount} messages)`));
+        }
+      } catch (e) {
+        console.error(chalk.red(`  セッション保存に失敗: ${String(e).slice(0, 100)}`));
+      }
+    };
     let ctrlCCount = 0;
     let ctrlCResetTimer: ReturnType<typeof setTimeout> | null = null;
     const sigintHandler = () => {
@@ -109,16 +123,24 @@ export class REPL {
           // 3秒以内に2回目が来なければリセット
           ctrlCResetTimer = setTimeout(() => { ctrlCCount = 0; }, 3000);
         } else {
-          // 2回目: 強制終了
+          // 2回目: 強制終了 (save してから)
           console.log(chalk.yellow("\n  強制終了します..."));
+          saveBeforeExit("Ctrl+C×2");
           process.exit(1);
         }
       } else {
-        // 待機中: 通常通り終了
+        // 待機中: 通常通り終了 (save してから)
+        saveBeforeExit("Ctrl+C 待機中");
         process.exit(0);
       }
     };
     process.on("SIGINT", sigintHandler);
+    // SIGTERM (= kill / システム shutdown / Docker stop 等) でも save して終了
+    process.on("SIGTERM", () => {
+      console.log(chalk.yellow("\n  SIGTERM 受信、 セッションを保存して終了します..."));
+      saveBeforeExit("SIGTERM");
+      process.exit(0);
+    });
 
     // listenEnabled が有効なら起動時に Interaction Server を自動起動
     if (this.config.discord?.listenEnabled && this.config.discord.publicKey) {
@@ -190,6 +212,15 @@ export class REPL {
 
         // ── 通常入力 → エージェントへ ──
         await this.processInput(trimmed);
+        // 2026-05-16: 各 turn 完了後に save (= 進捗 checkpoint)。
+        // 旧来は /quit / finally でしか save しなかったため、 長 session 中の crash や
+        // SIGKILL で全消失していた。 turn 単位で save しておけば最悪でも直前 turn まで復元可能。
+        try {
+          this.agent.saveCurrentSession();
+        } catch (e) {
+          // save 失敗で REPL を止めない (= 主処理を優先)。 ログだけ出す
+          console.error(chalk.dim(`  [warn] turn save 失敗: ${String(e).slice(0, 80)}`));
+        }
       }
     } finally {
       this.agent.saveCurrentSession();
