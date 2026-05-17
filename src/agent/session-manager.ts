@@ -2,6 +2,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { Message } from "../providers/base-provider.js";
+import type { TodoItem } from "../tools/definitions/todo-write.js";
+import type { GoalDefinition, EvaluationRecord } from "./goal-slot.js";
 
 const SESSION_DIR = path.join(os.homedir(), ".localllm", "sessions");
 
@@ -14,9 +16,21 @@ export interface SessionMeta {
   title: string;
 }
 
+/**
+ * 圧縮対象外の in-memory slot を永続化するためのフィールド。
+ * docs/todo-goal-lifecycle.md §2.3 参照。 旧 session ファイル (フィールドなし)
+ * は optional のためそのまま読める (後方互換)。
+ */
+export interface SessionGoalSnapshot {
+  definition: GoalDefinition;
+  history: EvaluationRecord[];
+}
+
 export interface SessionData {
   meta: SessionMeta;
   messages: Message[];
+  todos?: TodoItem[];
+  goal?: SessionGoalSnapshot | null;
 }
 
 function ensureDir(): void {

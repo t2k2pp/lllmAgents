@@ -70,6 +70,15 @@ export function clearGoal(): void {
 }
 
 /**
+ * Session resume 用。 setGoal() は history を [] リセットするため復元には使えない。
+ * docs/todo-goal-lifecycle.md §2.3 参照。
+ */
+export function restoreGoalState(goal: GoalDefinition, history: EvaluationRecord[]): void {
+  _goal = goal;
+  _history = [...history];
+}
+
+/**
  * 収穫逓減 (diminishing returns) 検出。
  * 直近 N 反復で平均スコアが ε 未満しか改善せず、 unmet 集合が変わっていない場合 true。
  * 設計書 §3.5 参照。

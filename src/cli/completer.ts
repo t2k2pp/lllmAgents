@@ -62,7 +62,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/model top_p", description: "Top-p サンプリング (0.0〜1.0、1.0で無効化)", needsArg: true },
   { command: "/model top_k", description: "Top-k サンプリング (整数、20〜50推奨。Ollama系で有効)", needsArg: true },
   { command: "/model rep_penalty", description: "繰り返しペナルティ (1.0で中立、>1で抑制)", needsArg: true },
-  { command: "/todo", description: "タスクリスト" },
+  { command: "/todo", description: "タスクリスト (active のみ / all=全件 / archive=完了済み削除)" },
   { command: "/goal-seek", description: "Goal Seek mode 開始 — acceptance criteria を立て合格まで自律実行", needsArg: true },
   { command: "/exit-goal-seek", description: "Goal Seek mode を抜ける (acceptance 未達成でも user 明示で中断)" },
   { command: "/sessions", description: "セッション一覧" },

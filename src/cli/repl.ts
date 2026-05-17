@@ -8,7 +8,7 @@ import { globalTokenTracker } from "../cost/token-tracker.js";
 import { displayHelp, type SkillSummary } from "./renderer.js";
 import { estimateMessageTokens } from "../agent/token-counter.js";
 import { buildContextBreakdown, formatContextBreakdown } from "./context-breakdown.js";
-import { formatTodos } from "../tools/definitions/todo-write.js";
+import { formatTodos, formatTodosActive, clearTodos, archiveCompletedTodos } from "../tools/definitions/todo-write.js";
 import { collectResponse } from "../providers/base-provider.js";
 import type { GoalDefinition } from "../agent/goal-slot.js";
 import { getGoal as getGoalSlot } from "../agent/goal-slot.js";
@@ -869,8 +869,12 @@ export class REPL {
       }
 
       case "/clear":
+        // docs/todo-goal-lifecycle.md §2.2 — session 境界の責任主体。
+        // 履歴・goal-slot・todos を一括リセット (cross-contamination 阻止)。
         this.agent.getHistory().clear();
-        console.log(chalk.dim("  会話履歴をクリアしました。"));
+        this.agent.exitGoalSeek("abort");
+        clearTodos();
+        console.log(chalk.dim("  会話履歴・ToDo・Goal slot をクリアしました。"));
         break;
 
       case "/context": {
@@ -1658,9 +1662,25 @@ export class REPL {
         break;
       }
 
-      case "/todo":
-        console.log(chalk.dim(formatTodos()));
+      case "/todo": {
+        // docs/todo-goal-lifecycle.md §2.4 — active / all / archive サブコマンド
+        const sub = (args[0] ?? "").toLowerCase();
+        if (sub === "all") {
+          console.log(chalk.dim(formatTodos()));
+        } else if (sub === "archive") {
+          const removed = archiveCompletedTodos();
+          if (removed === 0) {
+            console.log(chalk.dim("  完了済み ToDo はありませんでした。"));
+          } else {
+            console.log(chalk.dim(`  完了済み ToDo を ${removed} 件削除しました。`));
+          }
+          console.log(chalk.dim(formatTodosActive()));
+        } else {
+          // default: active のみ
+          console.log(chalk.dim(formatTodosActive()));
+        }
         break;
+      }
 
       case "/goal-seek": {
         // Goal Seek mode 開始。 設計: docs/goal-seek-mode-design.md §3.3

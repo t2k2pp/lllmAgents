@@ -55,10 +55,13 @@ import {
   clearGoal as clearGoalSlot,
   hasGoal as hasGoalSlot,
   buildGoalSlotSection,
+  getEvaluationHistory,
+  restoreGoalState,
 } from "./goal-slot.js";
 import {
   setTodos as setTodosFromGoal,
   getTodos as getTodosCurrent,
+  clearTodos,
   buildTodoSection,
 } from "../tools/definitions/todo-write.js";
 
@@ -1927,6 +1930,10 @@ export class AgentLoop {
 
   saveCurrentSession(): void {
     this.session.messages = this.history.getRawMessages();
+    // docs/todo-goal-lifecycle.md §2.3 — in-memory slot を session JSON に保存
+    this.session.todos = getTodosCurrent();
+    const goal = getGoalSlot();
+    this.session.goal = goal ? { definition: goal, history: getEvaluationHistory() } : null;
     saveSession(this.session);
     logger.debug(`Session saved: ${this.session.meta.id}`);
   }
@@ -1955,6 +1962,11 @@ export class AgentLoop {
 
   restoreSession(sessionData: SessionData): void {
     this.session = sessionData;
+    // docs/todo-goal-lifecycle.md §2.2 — session 境界の責任主体。
+    // 別 session を載せ替える前に in-memory slot を一斉リセット
+    // (同プロセス内 /resume での cross-contamination 阻止)。
+    this.exitGoalSeek("abort");
+    clearTodos();
     // Phase B-2: tier 反映
     const systemPrompt = buildSystemPrompt(undefined, undefined, undefined, this.llmProfiles, this.capability.tier);
     this.history = new MessageHistory(systemPrompt);
@@ -1971,6 +1983,14 @@ export class AgentLoop {
       } else if (msg.role === "tool") {
         this.history.addToolResult(msg.tool_call_id ?? "", typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content));
       }
+    }
+    // docs/todo-goal-lifecycle.md §2.3 — in-memory slot 復元 (旧 session は optional のためスキップ)
+    if (sessionData.todos && sessionData.todos.length > 0) {
+      setTodosFromGoal(sessionData.todos);
+    }
+    if (sessionData.goal) {
+      restoreGoalState(sessionData.goal.definition, sessionData.goal.history);
+      this.currentMode = "goal-seek";
     }
   }
 

@@ -64,7 +64,7 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/swap")}           メインLLM ⇔ セカンドLLM を入れ替え (-y で確認スキップ。alias: /switch)
     ${chalk.cyan("/slack")}          Slack設定 (status/url/test/bot-token/app-token)
     ${chalk.cyan("/search")}         Web検索プロバイダー設定 (SearXNG/DuckDuckGo)
-    ${chalk.cyan("/todo")}           タスクリスト表示
+    ${chalk.cyan("/todo")}           タスクリスト (active のみ。 all / archive サブコマンドあり)
     ${chalk.cyan("/goal-seek <goal>")} Goal Seek mode 開始 — acceptance criteria を立て合格まで自律実行
     ${chalk.cyan("/exit-goal-seek")}  Goal Seek mode を抜ける (acceptance 未達成でも user 明示で中断)
     ${chalk.cyan("/sessions [N]")}   保存済みセッション一覧 (デフォルト 20 件)

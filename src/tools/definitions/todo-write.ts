@@ -45,29 +45,67 @@ function ensureIds(): void {
   }
 }
 
+function isActive(t: TodoItem): boolean {
+  return t.status !== "completed";
+}
+
+function renderTodoLine(t: TodoItem, idx: number): string {
+  const icon =
+    t.status === "completed" ? "[x]"
+    : t.status === "in_progress" ? "[>]"
+    : t.status === "blocked" ? "[!]"
+    : "[ ]";
+  return `${idx + 1}. ${icon} ${t.content} (id: ${t.id})`;
+}
+
+/** 全件 (completed 含む) を整形。 REPL `/todo all` 経路で使う。 */
 export function formatTodos(): string {
   if (todos.length === 0) return "No tasks.";
   ensureIds();
-  return todos
-    .map((t, i) => {
-      const icon =
-        t.status === "completed" ? "[x]"
-        : t.status === "in_progress" ? "[>]"
-        : t.status === "blocked" ? "[!]"
-        : "[ ]";
-      return `${i + 1}. ${icon} ${t.content} (id: ${t.id})`;
-    })
-    .join("\n");
+  return todos.map((t, i) => renderTodoLine(t, i)).join("\n");
+}
+
+/**
+ * active のみ (completed を除外) 整形。 REPL `/todo` (引数なし) 経路で使う。
+ * docs/todo-goal-lifecycle.md §2.4 参照。
+ */
+export function formatTodosActive(): string {
+  ensureIds();
+  const active = todos.filter(isActive);
+  const completedCount = todos.length - active.length;
+  if (active.length === 0 && completedCount === 0) return "No tasks.";
+  const lines = active.map((t, i) => renderTodoLine(t, i));
+  if (completedCount > 0) {
+    lines.push("");
+    lines.push(`(completed: ${completedCount} 件 — /todo all で表示)`);
+  }
+  if (active.length === 0) {
+    return `(active: 0 件 — completed のみ ${completedCount} 件)\n/todo all で全件表示、 /todo archive で完了済みを削除`;
+  }
+  return lines.join("\n");
+}
+
+/** 完了済み todo を物理削除する。 REPL `/todo archive` 経路で user 明示時のみ呼ぶ。 */
+export function archiveCompletedTodos(): number {
+  const before = todos.length;
+  todos = todos.filter(isActive);
+  return before - todos.length;
 }
 
 /**
  * 準システムプロンプトに injection する todo セクション。
- * 全 todo を status 込みで表示。 todos 空のときは空文字を返す (section 自体を出さない)。
- * docs/strategic-todo-design.md §3.1 / §3.2 参照。
+ * active (pending / in_progress / blocked) のみフル表示。 completed は末尾に件数のみ。
+ * docs/strategic-todo-design.md §3.1 / §3.2 + docs/todo-goal-lifecycle.md §2.4 参照。
+ * todos 空 (active も completed も 0 件) なら空文字を返す (section 自体を出さない)。
  */
 export function buildTodoSection(): string {
   if (todos.length === 0) return "";
   ensureIds();
+  const active = todos.filter(isActive);
+  const completedCount = todos.length - active.length;
+  // active が 0 で completed のみの場合も section は出さない (戦略 frame を圧迫しない)
+  if (active.length === 0) return "";
+
   const lines: string[] = [];
   lines.push("# 現在の ToDo (戦略)");
   lines.push("");
@@ -77,14 +115,12 @@ export function buildTodoSection(): string {
   lines.push("- 不要項目削除: `todo_delete(ids)`");
   lines.push("- 行き詰まったら status を `blocked` にして自己宣言してください");
   lines.push("");
-  for (let i = 0; i < todos.length; i++) {
-    const t = todos[i];
-    const icon =
-      t.status === "completed" ? "[x]"
-      : t.status === "in_progress" ? "[>]"
-      : t.status === "blocked" ? "[!]"
-      : "[ ]";
-    lines.push(`${i + 1}. ${icon} ${t.content} (id: ${t.id})`);
+  for (let i = 0; i < active.length; i++) {
+    lines.push(renderTodoLine(active[i], i));
+  }
+  if (completedCount > 0) {
+    lines.push("");
+    lines.push(`(completed: ${completedCount} 件 — system prompt から省略)`);
   }
   return lines.join("\n");
 }
