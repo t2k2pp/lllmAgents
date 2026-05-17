@@ -5,6 +5,15 @@
       "args": ["blender-mcp"],
       "transport": "stdio",
       "permissionLevel": "ask"
+    },
+    "drawdot": {
+      "name": "drawdot",
+      "command": "node",
+      "args": [
+        "/Users/osia/Documents/claude/lllmAgents/proj/drawDot Cli/dist/src/mcp-server.js"
+      ],
+      "transport": "stdio",
+      "permissionLevel": "auto"
     }
   }
 }
