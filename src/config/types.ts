@@ -1,6 +1,16 @@
 export type ProviderType = "ollama" | "lmstudio" | "llamacpp" | "vllm";
 
-export type CloudProviderType = "vertex-ai" | "azure-openai" | "azure-gpt" | "azure-claude" | "azure-foundry" | "azure-anthropic";
+export type CloudProviderType =
+  | "vertex-ai"
+  | "azure-openai"
+  | "azure-gpt"
+  | "azure-claude"
+  | "azure-foundry"
+  | "azure-anthropic"
+  /** Anthropic Messages API (api.anthropic.com) を直接叩く。 ANTHROPIC_API_KEY 必須 */
+  | "anthropic"
+  /** ローカルにインストールされた Claude Code CLI (`claude -p`) をサブプロセスで呼ぶ */
+  | "claude-cli";
 
 // セカンドLLMはローカルまたはクラウドのいずれかを指定可能
 export type SecondLLMProviderType = ProviderType | CloudProviderType;
@@ -264,8 +274,40 @@ export interface Config {
 
 // ヘルパー: セカンドLLMがクラウドかローカルかを判定
 export function isCloudProvider(type: SecondLLMProviderType): boolean {
-  return (["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic"] as string[]).includes(type);
+  return ([
+    "vertex-ai",
+    "azure-openai",
+    "azure-gpt",
+    "azure-claude",
+    "azure-foundry",
+    "azure-anthropic",
+    "anthropic",
+    "claude-cli",
+  ] as string[]).includes(type);
 }
+
+/**
+ * Claude (Anthropic) モデルのハードコード一覧。
+ * `anthropic` (直接 API) / `claude-cli` (CLI ラッパー) 両プロバイダで /model list の選択肢として使う。
+ *
+ * 動的取得 (api.anthropic.com/v1/models) ではなく固定リストを採用している理由:
+ * - claude-cli はオフライン (API キー不要) でモデル切替できるべき
+ * - 主要モデルは数個に集約されており、API 失敗時の UX を単純化したい
+ * - alias (`opus` / `sonnet` / `haiku`) も同時に登録できる
+ */
+export interface ClaudeModelEntry {
+  id: string;
+  label: string;
+  contextWindow: number;
+  /** CLI で `claude --model <alias>` に渡せる短縮名 (なければ id をそのまま使う) */
+  cliAlias?: string;
+}
+export const CLAUDE_MODELS: readonly ClaudeModelEntry[] = [
+  { id: "claude-opus-4-7", label: "Claude Opus 4.7", contextWindow: 200_000, cliAlias: "opus" },
+  { id: "claude-opus-4-7[1m]", label: "Claude Opus 4.7 (1M context)", contextWindow: 1_000_000 },
+  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", contextWindow: 1_000_000, cliAlias: "sonnet" },
+  { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", contextWindow: 200_000, cliAlias: "haiku" },
+];
 
 export interface ModelInfo {
   name: string;
@@ -317,6 +359,8 @@ export const PROVIDER_LABELS: Record<SecondLLMProviderType, string> = {
   "azure-claude": "Azure Claude",
   "azure-foundry": "Azure AI Foundry",
   "azure-anthropic": "Azure Anthropic (Messages API)",
+  anthropic: "Anthropic API (Claude direct)",
+  "claude-cli": "Claude Code CLI (claude -p)",
 };
 
 export function getDefaultConfig(): Config {

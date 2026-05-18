@@ -11,6 +11,8 @@ import { AzureGPTProvider } from "./azure-gpt.js";
 import { AzureClaudeProvider } from "./azure-claude.js";
 import { AzureFoundryProvider } from "./azure-foundry.js";
 import { AzureAnthropicProvider } from "./azure-anthropic.js";
+import { AnthropicProvider } from "./anthropic.js";
+import { ClaudeCliProvider } from "./claude-cli.js";
 import { CredentialVault } from "../security/credential-vault.js";
 
 /**
@@ -99,6 +101,33 @@ function createProviderFromEndpoint(
           endpoint: endpoint.endpoint,
           apiKey: gptToken,
           model: endpoint.model,
+        });
+      }
+
+      case "anthropic": {
+        if (!endpoint.model) {
+          throw new Error("Missing model for anthropic provider");
+        }
+        // apiKey 解決: 設定値があればそれを優先、 無ければ env:ANTHROPIC_API_KEY にフォールバック
+        const raw = endpoint.apiKey ?? "env:ANTHROPIC_API_KEY";
+        const token = CredentialVault.resolve(raw, passphrase);
+        if (!token) {
+          throw new Error("ANTHROPIC_API_KEY が見つかりません。/model setup anthropic で設定するか、 環境変数 ANTHROPIC_API_KEY をセットしてください。");
+        }
+        return new AnthropicProvider({
+          apiKey: token,
+          model: endpoint.model,
+        });
+      }
+
+      case "claude-cli": {
+        if (!endpoint.model) {
+          throw new Error("Missing model for claude-cli provider");
+        }
+        return new ClaudeCliProvider({
+          model: endpoint.model,
+          // 既定で claude 内部のツール実行を許可 (= claude が自律的にファイル操作などを行う)。
+          // 「純粋なテキスト生成器」 として使いたい場合は config.json の claudeCli.allowTools=false で抑制 (未実装)。
         });
       }
 

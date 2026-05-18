@@ -58,12 +58,21 @@ const DEFAULT_MAX_TOKENS = MODEL_OUTPUT_HARD_LIMIT;
 
 export class AzureAnthropicProvider implements LLMProvider {
   readonly providerType: SecondLLMProviderType = "azure-anthropic";
-  private config: AzureAnthropicConfig;
-  private baseUrl: string;
+  protected config: AzureAnthropicConfig;
+  protected baseUrl: string;
 
   constructor(config: AzureAnthropicConfig) {
     this.config = config;
     this.baseUrl = AzureAnthropicProvider.normalizeEndpoint(config.endpoint);
+  }
+
+  /**
+   * Messages API のパス。 Azure 経由は `/anthropic/v1/messages`、
+   * 公式 Anthropic API (api.anthropic.com) は `/v1/messages`。
+   * AnthropicProvider が override して公式パスに切り替える。
+   */
+  protected getMessagesPath(): string {
+    return "/anthropic/v1/messages";
   }
 
   /**
@@ -82,8 +91,8 @@ export class AzureAnthropicProvider implements LLMProvider {
     }
   }
 
-  private chatUrl(): string {
-    return `${this.baseUrl}/anthropic/v1/messages`;
+  protected chatUrl(): string {
+    return `${this.baseUrl}${this.getMessagesPath()}`;
   }
 
   async testConnection(): Promise<boolean> {
@@ -148,7 +157,7 @@ export class AzureAnthropicProvider implements LLMProvider {
 
   // ── 内部 ────────────────────────────────────────────────────────
 
-  private headers(): Record<string, string> {
+  protected headers(): Record<string, string> {
     return {
       "Content-Type": "application/json",
       "x-api-key": this.config.apiKey,

@@ -5,6 +5,7 @@
 ## 特徴
 
 - **ローカルLLM対応**: Ollama, LM Studio, llama.cpp, vLLM をサポート
+- **クラウドLLM対応**: Anthropic API 直接 / Claude Code CLI (`claude -p`) / Azure OpenAI / Azure Claude / Azure Anthropic / Azure Foundry / Vertex AI
 - **21種のツール**: ファイル操作、コマンド実行、ブラウザ操作、Web検索をLLMが自律的に実行
 - **セキュリティ**: Claude Code準拠の3段階権限モデル（自動許可/要確認/禁止）+ 50以上の危険コマンド検出パターン
 - **サブエージェント**: タスク委譲による並列・バックグラウンド処理（explore / plan / general-purpose / bash）
@@ -212,6 +213,10 @@ src/
 │   ├── lmstudio.ts         # LM Studio
 │   ├── llamacpp.ts         # llama.cpp
 │   ├── vllm.ts             # vLLM
+│   ├── anthropic.ts        # Anthropic API (api.anthropic.com)
+│   ├── claude-cli.ts       # Claude Code CLI (`claude -p`) ラッパー
+│   ├── azure-*.ts          # Azure OpenAI / Claude / Anthropic / Foundry / GPT
+│   ├── vertex-ai.ts        # GCP Vertex AI
 │   └── provider-factory.ts # プロバイダー自動検出・生成
 ├── agent/                  # エージェントコア
 │   ├── agent-loop.ts       # メインループ（最大50イテレーション）
@@ -330,6 +335,28 @@ Markdownファイルで定義するコーディング規約・ガイドライン
 ```
 
 サンプリングパラメータ（temperature, top_p, top_k 等）は未指定ならサーバー側のモデル推奨値がそのまま使われる。明示的に指定する場合は `mainLLM` 内に追加する。
+
+### Claude をメイン/セカンドLLM として使う
+
+| providerType | 認証 | 用途 |
+|--------------|------|------|
+| `anthropic`  | `ANTHROPIC_API_KEY` (env / 暗号化 / 平文) | Anthropic Messages API を直接叩く。 ツール呼び出し対応 |
+| `claude-cli` | 不要 (`claude login` 済みの subscription を使う) | `claude -p` をサブプロセス起動。 ツールは Claude 内部で完結 (lllmAgents 側ツールには非接続) |
+
+REPL での切替:
+
+```
+/model setup anthropic        Anthropic API (ANTHROPIC_API_KEY)
+/model setup claude-cli       Claude Code CLI (claude -p)
+/second setup anthropic       セカンドLLM として Anthropic API を設定
+/second setup claude-cli      セカンドLLM として claude CLI を設定
+```
+
+選択可能モデル (`/model list` でハードコード一覧から選ぶ):
+
+- `claude-opus-4-7` / `claude-opus-4-7[1m]`
+- `claude-sonnet-4-6`
+- `claude-haiku-4-5`
 
 全設定項目の詳細・用途別パターン例は **[docs/config-reference.md](docs/config-reference.md)** を参照。
 

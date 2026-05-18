@@ -110,28 +110,32 @@ export class REPL {
         console.error(chalk.red(`  セッション保存に失敗: ${String(e).slice(0, 100)}`));
       }
     };
+    // 2026-05-17 修正: 1回押しでの即時 process.exit を廃止。
+    // 旧仕様では agentBusy=false の窓 (例: processInput の finally 直後〜次の input.question で
+    // raw mode が立つまでの一瞬) に SIGINT が届くと、 ユーザーが「思考中」と認識している間でも
+    // 1回の Ctrl+C で exit してしまう事象 (user 報告) があった。 常に 2 回押し必須にして
+    // 事故的な終了を防ぐ。 raw mode 中の Ctrl+C は interactive-input が拾うため、 通常の
+    // 待機プロンプトでは /quit を案内するメッセージのみが出る (この handler は呼ばれない)。
     let ctrlCCount = 0;
     let ctrlCResetTimer: ReturnType<typeof setTimeout> | null = null;
     const sigintHandler = () => {
-      if (this.agentBusy) {
-        ctrlCCount++;
-        if (ctrlCResetTimer) clearTimeout(ctrlCResetTimer);
-        if (ctrlCCount === 1) {
+      ctrlCCount++;
+      if (ctrlCResetTimer) clearTimeout(ctrlCResetTimer);
+      if (ctrlCCount === 1) {
+        if (this.agentBusy) {
           this.agent.abort();
           bashTool.killRunningProcess();
           console.log(chalk.yellow("\n  (Ctrl+C) 処理を中断中... もう一度 Ctrl+C でプロセス終了"));
-          // 3秒以内に2回目が来なければリセット
-          ctrlCResetTimer = setTimeout(() => { ctrlCCount = 0; }, 3000);
         } else {
-          // 2回目: 強制終了 (save してから)
-          console.log(chalk.yellow("\n  強制終了します..."));
-          saveBeforeExit("Ctrl+C×2");
-          process.exit(1);
+          console.log(chalk.yellow("\n  (Ctrl+C) もう一度 Ctrl+C で終了 (/quit でも可)"));
         }
+        // 3秒以内に2回目が来なければリセット
+        ctrlCResetTimer = setTimeout(() => { ctrlCCount = 0; }, 3000);
       } else {
-        // 待機中: 通常通り終了 (save してから)
-        saveBeforeExit("Ctrl+C 待機中");
-        process.exit(0);
+        // 2回目: 終了 (save してから)
+        console.log(chalk.yellow("\n  終了します..."));
+        saveBeforeExit(this.agentBusy ? "Ctrl+C×2 (busy)" : "Ctrl+C×2 (idle)");
+        process.exit(this.agentBusy ? 1 : 0);
       }
     };
     process.on("SIGINT", sigintHandler);
@@ -535,6 +539,167 @@ export class REPL {
           console.log(chalk.green("  実行時に反映しました。"));
         } else {
           console.log(chalk.yellow("  反映時に接続失敗しました。/second status で確認してください。"));
+        }
+      }
+    }
+    console.log();
+  }
+
+  /**
+   * Claude 系 (anthropic / claude-cli) を対話プロンプトでセットアップする。
+   * メインLLM (target=main) / セカンドLLM (target=second) の両方をカバー。
+   *
+   *  - anthropic   : ANTHROPIC_API_KEY (env: / encrypted: / 平文) + モデル選択
+   *  - claude-cli  : モデル選択のみ (認証は claude CLI 側の `claude login` に委譲)
+   *
+   * モデルは CLAUDE_MODELS のハードコード一覧から選択する。
+   */
+  private async setupClaudeLLM(
+    target: "main" | "second",
+    provider: "anthropic" | "claude-cli",
+  ): Promise<void> {
+    const { CLAUDE_MODELS } = await import("../config/types.js");
+    const targetLabel = target === "main" ? "メインLLM" : "セカンドLLM";
+    console.log(chalk.bold(`\n  ── ${targetLabel} ${provider} セットアップ ──`));
+    console.log(chalk.dim("  キャンセルは Ctrl+C\n"));
+
+    const existing =
+      target === "main" ? this.config.mainLLM : this.config.secondLLM?.endpoint;
+    const existingIsClaude =
+      existing?.providerType === "anthropic" || existing?.providerType === "claude-cli";
+
+    const chosenModel = await select({
+      message: "Claude モデルを選択:",
+      choices: CLAUDE_MODELS.map((m) => ({
+        name: `${m.label}  ${chalk.dim(`(${m.id}, ctx ${(m.contextWindow / 1000).toLocaleString()}K)`)}`,
+        value: m.id,
+      })),
+      default: existingIsClaude ? existing?.model : "claude-sonnet-4-6",
+    });
+
+    let storedApiKey: string | undefined;
+    let needsRestart = false;
+
+    if (provider === "anthropic") {
+      const storageMode = await select({
+        message: "ANTHROPIC_API_KEY の保存方法:",
+        choices: [
+          { name: "環境変数参照 (env:ANTHROPIC_API_KEY) — 推奨", value: "env" },
+          { name: "パスフレーズで暗号化保存", value: "encrypt" },
+          { name: "平文で保存 (非推奨)", value: "plain" },
+        ],
+        default: "env",
+      });
+
+      if (storageMode === "env") {
+        const envName = await input({
+          message: "環境変数名:",
+          default: "ANTHROPIC_API_KEY",
+          validate: (v: string) =>
+            /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim()) || "有効な環境変数名を入力してください",
+        });
+        storedApiKey = `env:${envName.trim()}`;
+        if (!process.env[envName.trim()]) {
+          console.log(chalk.yellow(`  ⚠ 環境変数 ${envName.trim()} は現在未設定です。アプリ起動時にセットしてください。`));
+        }
+      } else if (storageMode === "plain") {
+        const ok = await confirm({
+          message: "平文保存は config.json にそのまま記録されます。本当に続行しますか？",
+          default: false,
+        });
+        if (!ok) {
+          console.log(chalk.yellow("  セットアップを中止しました。"));
+          return;
+        }
+        const apiKey = await password({ message: "API Key (入力は表示されません):", mask: "*" });
+        if (!apiKey.trim()) {
+          console.log(chalk.red("  API Key が空です。中止しました。"));
+          return;
+        }
+        storedApiKey = apiKey.trim();
+      } else {
+        const apiKey = await password({ message: "API Key (入力は表示されません):", mask: "*" });
+        if (!apiKey.trim()) {
+          console.log(chalk.red("  API Key が空です。中止しました。"));
+          return;
+        }
+        const passphrase = await password({ message: "暗号化用パスフレーズ:", mask: "*" });
+        const passphrase2 = await password({ message: "もう一度入力 (確認):", mask: "*" });
+        if (passphrase !== passphrase2) {
+          console.log(chalk.red("  パスフレーズが一致しません。中止しました。"));
+          return;
+        }
+        if (passphrase.length < 4) {
+          console.log(chalk.red("  パスフレーズが短すぎます (4文字以上)。中止しました。"));
+          return;
+        }
+        storedApiKey = CredentialVault.encrypt(apiKey.trim(), passphrase);
+        needsRestart = true;
+      }
+    } else {
+      // claude-cli は事前に `claude login` 済みである必要がある旨を案内
+      console.log(chalk.dim("  認証は claude CLI 側 (subscription / oauth) を利用します。"));
+      console.log(chalk.dim("  未ログインの場合は別ターミナルで `claude login` を実行してください。"));
+    }
+
+    const ctxWindow = CLAUDE_MODELS.find((m) => m.id === chosenModel)?.contextWindow;
+
+    if (target === "main") {
+      const cur = this.config.mainLLM;
+      this.config.mainLLM = {
+        ...cur,
+        providerType: provider,
+        model: chosenModel,
+        apiKey: storedApiKey,
+        contextWindow: ctxWindow ?? cur.contextWindow,
+        // ローカル/他クラウド用フィールドはクリア
+        baseUrl: undefined,
+        endpoint: undefined,
+        deploymentName: undefined,
+        projectId: undefined,
+        region: undefined,
+      };
+    } else {
+      this.config.secondLLM = {
+        enabled: true,
+        endpoint: {
+          providerType: provider,
+          model: chosenModel,
+          apiKey: storedApiKey,
+          contextWindow: ctxWindow,
+          description: existingIsClaude ? existing?.description : undefined,
+        },
+        budget: this.config.secondLLM?.budget ?? null,
+        cost: this.config.secondLLM?.cost ?? { referenceModels: [] },
+      };
+    }
+    saveConfig(this.config);
+
+    console.log(chalk.green(`\n  ✓ ${targetLabel} (${provider}) を設定しました:`));
+    console.log(chalk.dim(`    モデル:  ${chosenModel}`));
+    if (ctxWindow) console.log(chalk.dim(`    Context: ${(ctxWindow / 1000).toLocaleString()}K tokens`));
+    if (storedApiKey) {
+      const kind = storedApiKey.startsWith("encrypted:")
+        ? "暗号化保存"
+        : storedApiKey.startsWith("env:")
+          ? `環境変数 (${storedApiKey})`
+          : "平文保存";
+      console.log(chalk.dim(`    API Key: ${kind}`));
+    }
+
+    if (needsRestart) {
+      console.log(chalk.yellow("\n  ⚠ 暗号化保存のため、 反映にはアプリの再起動と合言葉入力が必要です。"));
+    } else {
+      if (target === "main") {
+        await this.applyMainLLMEndpoint();
+        console.log(chalk.green("  実行時に反映しました。"));
+      } else {
+        await this.applySecondLLMEndpoint();
+        const isAvail = this.secondLLMManager?.isAvailable() ?? false;
+        if (isAvail) {
+          console.log(chalk.green("  実行時に反映しました。"));
+        } else {
+          console.log(chalk.yellow("  反映時に接続失敗しました。 /second status で確認してください。"));
         }
       }
     }
@@ -1372,7 +1537,8 @@ export class REPL {
               console.log(chalk.bold("\n  ── サーバー報告 ──"));
               if (detail.contextLength > 0) {
                 const serverCtx = detail.contextLength >= 1000 ? `${Math.round(detail.contextLength / 1000)}K` : `${detail.contextLength}`;
-                const mismatch = detail.contextLength !== ctxWindow;
+                // K単位で丸めて比較: 262144 (二進256K) と 262000 (十進262K) のような僅差を許容
+                const mismatch = Math.round(detail.contextLength / 1000) !== Math.round(ctxWindow / 1000);
                 console.log(chalk.dim(`  コンテキスト長: ${mismatch ? chalk.red(serverCtx) : chalk.green(serverCtx)} トークン${mismatch ? chalk.red(" ⚠ 設定値と不一致!") : ""}`));
               }
               if (detail.size > 0) {
@@ -1569,7 +1735,7 @@ export class REPL {
         } else if (args[0] === "provider") {
           const newProvider = args[1]?.trim();
           const localProviders: ProviderType[] = ["ollama", "lmstudio", "llamacpp", "vllm"];
-          const cloudProviders = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic"];
+          const cloudProviders = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli"];
           const validProviders = [...localProviders, ...cloudProviders];
           if (!newProvider) {
             console.log(chalk.dim(`  現在のプロバイダー: ${this.config.mainLLM.providerType}`));
@@ -1630,10 +1796,22 @@ export class REPL {
                 console.log(chalk.yellow("  セットアップを中止しました。"));
               }
             }
+          } else if (targetProvider === "anthropic" || targetProvider === "claude-cli") {
+            try {
+              await this.setupClaudeLLM("main", targetProvider);
+            } catch (e) {
+              if (!(e instanceof Error && e.message.includes("User force closed"))) {
+                console.log(chalk.red(`  Claude セットアップ中にエラー: ${e instanceof Error ? e.message : String(e)}`));
+              } else {
+                console.log(chalk.yellow("  セットアップを中止しました。"));
+              }
+            }
           } else {
             console.log(chalk.red(`  対話セットアップ未対応のプロバイダー: ${targetProvider}`));
             console.log(chalk.dim("  使い方:"));
             console.log(chalk.dim("    /model setup                  ローカル系LLM (ollama/lmstudio/llamacpp/vllm) ウィザード"));
+            console.log(chalk.dim("    /model setup anthropic        Anthropic API (Claude direct, ANTHROPIC_API_KEY)"));
+            console.log(chalk.dim("    /model setup claude-cli       Claude Code CLI (claude -p、 認証は claude login)"));
             console.log(chalk.dim("    /model setup azure-foundry    Azure AI Foundry (Kimi/Mistral等)"));
             console.log(chalk.dim("    /model setup azure-anthropic  Azure Claude — Anthropic Messages API"));
             console.log(chalk.dim("    /model setup azure-openai     Azure OpenAI — Chat Completions API"));
@@ -1971,7 +2149,7 @@ export class REPL {
           }
         } else if (subCmd === "provider") {
           const newProvider = args[1]?.trim();
-          const validProviders = ["ollama", "lmstudio", "llamacpp", "vllm", "vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic"];
+          const validProviders = ["ollama", "lmstudio", "llamacpp", "vllm", "vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli"];
           if (!newProvider) {
             console.log(chalk.dim(`  現在のプロバイダー: ${this.config.secondLLM?.endpoint.providerType ?? "(未設定)"}`));
             console.log(chalk.dim(`  使い方: /second provider <タイプ>`));
@@ -1985,7 +2163,7 @@ export class REPL {
             saveConfig(this.config);
             await this.applySecondLLMEndpoint();
             console.log(chalk.dim(`  プロバイダー: ${chalk.yellow(oldProvider)} → ${chalk.cyan(newProvider)}`));
-            const isCloud = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic"].includes(newProvider);
+            const isCloud = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli"].includes(newProvider);
             if (isCloud) {
               console.log(chalk.dim(`  クラウドプロバイダーは追加の認証情報が必要な場合があります。/second status で確認してください。`));
             } else {
@@ -2003,6 +2181,16 @@ export class REPL {
             } catch (e) {
               if (!(e instanceof Error && e.message.includes("User force closed"))) {
                 console.log(chalk.red(`  Azure セットアップ中にエラー: ${e instanceof Error ? e.message : String(e)}`));
+              } else {
+                console.log(chalk.yellow("  セットアップを中止しました。"));
+              }
+            }
+          } else if (provider === "anthropic" || provider === "claude-cli") {
+            try {
+              await this.setupClaudeLLM("second", provider);
+            } catch (e) {
+              if (!(e instanceof Error && e.message.includes("User force closed"))) {
+                console.log(chalk.red(`  Claude セットアップ中にエラー: ${e instanceof Error ? e.message : String(e)}`));
               } else {
                 console.log(chalk.yellow("  セットアップを中止しました。"));
               }
@@ -2084,6 +2272,8 @@ export class REPL {
            console.log(chalk.dim("    /second setup azure-claude             Azure Claude (OpenAI互換ルート) 対話セットアップ"));
            console.log(chalk.dim("    /second setup azure-foundry            Azure AI Foundry (Kimi/Mistral等) 対話セットアップ"));
            console.log(chalk.dim("    /second setup azure-anthropic          Azure Claude (Anthropic Messages API) 対話セットアップ"));
+           console.log(chalk.dim("    /second setup anthropic                Anthropic API (Claude direct, ANTHROPIC_API_KEY) 対話セットアップ"));
+           console.log(chalk.dim("    /second setup claude-cli               Claude Code CLI (claude -p、 認証は claude login) 対話セットアップ"));
            console.log(chalk.dim("    /second enable / disable      有効化・無効化"));
            console.log(chalk.dim("    /second model <名前>          モデル変更"));
            console.log(chalk.dim("    /second url <URL>             エンドポイントURL変更"));

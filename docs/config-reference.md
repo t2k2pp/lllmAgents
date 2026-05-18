@@ -174,10 +174,14 @@
 
 | キー | 型 | 必須 | 説明 |
 |------|-----|------|------|
-| `providerType` | `"ollama"` \| `"lmstudio"` \| `"llamacpp"` \| `"vllm"` | Yes | 推論サーバーの種別 |
-| `baseUrl` | string | Yes | APIエンドポイントURL |
+| `providerType` | ProviderType (ローカル) または CloudProviderType | Yes | 推論サーバーの種別。 ローカル: `"ollama"` \| `"lmstudio"` \| `"llamacpp"` \| `"vllm"`。 クラウド: `"vertex-ai"` \| `"azure-openai"` \| `"azure-gpt"` \| `"azure-claude"` \| `"azure-foundry"` \| `"azure-anthropic"` \| `"anthropic"` \| `"claude-cli"` |
+| `baseUrl` | string | Local Only | APIエンドポイントURL (ローカル系のみ)。 クラウド系では `endpoint` / `apiKey` を使う |
 | `model` | string | Yes | モデル名（サーバーに登録されている名前） |
 | `contextWindow` | number | No | コンテキストウィンドウサイズ（トークン数）。未指定時はサーバーから取得を試みる |
+| `apiKey` | string | Cloud | クラウド系 (`anthropic` / `azure-*`) の認証情報。 `env:VAR_NAME` / `encrypted:...` / 平文。 `anthropic` は省略時 `env:ANTHROPIC_API_KEY` にフォールバック |
+| `endpoint` | string | Azure | Azure 系のリソース endpoint (`https://...`) |
+| `deploymentName` | string | Azure | Azure OpenAI / Azure Claude の deployment 名 (Foundry / Anthropic / GPT-Responses は不要) |
+| `projectId`, `region` | string | Vertex | Vertex AI 用 |
 | `temperature` | number | No | サンプリング温度。[後述](#サンプリングパラメータ) |
 | `top_p` | number | No | Top-p (nucleus sampling)。[後述](#サンプリングパラメータ) |
 | `top_k` | number | No | Top-k sampling。[後述](#サンプリングパラメータ) |
@@ -275,6 +279,32 @@
   "deploymentName": "gpt-4o-deployment"
 }
 ```
+
+**Anthropic API (公式) の場合:**
+```json
+{
+  "providerType": "anthropic",
+  "model": "claude-sonnet-4-6",
+  "apiKey": "env:ANTHROPIC_API_KEY",
+  "contextWindow": 1000000
+}
+```
+
+`apiKey` を省略すると `env:ANTHROPIC_API_KEY` にフォールバックする。
+利用可能モデル一覧は `docs/claude-providers.md` の CLAUDE_MODELS 表を参照。
+
+**Claude Code CLI (`claude -p`) の場合:**
+```json
+{
+  "providerType": "claude-cli",
+  "model": "claude-sonnet-4-6",
+  "contextWindow": 1000000
+}
+```
+
+API キー不要 (claude CLI 側の `claude login` 済みセッションを再利用)。
+ツール呼び出しは claude 内部で完結し、 lllmAgents のツールには非接続。
+詳細: `docs/claude-providers.md`
 
 ### BudgetConfig
 
