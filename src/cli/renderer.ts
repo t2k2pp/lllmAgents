@@ -62,6 +62,7 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/model temperature")} 温度設定 (top_p/top_k/rep_penaltyも同様、各コマンドで)
     ${chalk.cyan("/second")}         セカンドLLM管理 (status/url/provider/model/description/temperature等、/secondで全表示)
     ${chalk.cyan("/swap")}           メインLLM ⇔ セカンドLLM を入れ替え (-y で確認スキップ。alias: /switch)
+    ${chalk.cyan("/profiles")}       LLM 接続プロファイル履歴 (矢印+スペース選択。 list / delete / help)
     ${chalk.cyan("/slack")}          Slack設定 (status/url/test/bot-token/app-token)
     ${chalk.cyan("/search")}         Web検索プロバイダー設定 (SearXNG/DuckDuckGo)
     ${chalk.cyan("/todo")}           タスクリスト (active のみ。 all / archive サブコマンドあり)
