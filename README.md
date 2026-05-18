@@ -86,6 +86,7 @@ $ npm start
 | `/compact` | コンテキストを手動圧縮 |
 | `/model` | 現在のモデル情報 / `/model list` / `/model <name>` / `/model url <URL>` / `/model provider <type>` / `/model description <text>` / `/model temperature <値>` / `/model top_p <値>` / `/model top_k <値>` / `/model rep_penalty <値>` |
 | `/second` | セカンドLLM管理 (status/enable/disable/setup/url/provider/model/context/description) |
+| `/profiles` | LLM 接続プロファイル履歴 (`/profiles` で選択、`list` / `delete` / `help`)。 詳細: docs/llm-profiles.md |
 | `/todo` | タスクリスト表示 |
 | `/sessions` | 保存済みセッション一覧（直近10件） |
 | `/resume <id>` | セッション復元 |
@@ -365,6 +366,7 @@ REPL での切替:
 | パス | 内容 |
 |------|------|
 | `~/.localllm/config.json` | 設定ファイル |
+| `~/.localllm/llm-profiles.json` | LLM 接続プロファイル履歴 (`/profiles` で管理) |
 | `~/.localllm/sessions/` | セッション履歴 |
 | `~/.localllm/memory/MEMORY.md` | 永続メモリ |
 | `~/.localllm/plans/` | プランモードの計画書 |

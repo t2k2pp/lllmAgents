@@ -40,6 +40,13 @@ import { AzureOpenAIProvider } from "../providers/azure-openai.js";
 import { AzureClaudeProvider } from "../providers/azure-claude.js";
 import { saveConfig } from "../config/config-manager.js";
 import { runLocalLLMSetup, connectAndListModels } from "../config/setup-wizard.js";
+import {
+  recordLLMProfile,
+  listLLMProfiles,
+  deleteLLMProfiles,
+  touchProfile,
+  type LLMProfile,
+} from "../config/llm-profiles.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
 import { secondLLMConsultTool, secondLLMAgentTool, setSecondLLMManager } from "../tools/definitions/second-llm.js";
@@ -320,6 +327,8 @@ export class REPL {
       subAgentMgr.setProvider(newProvider, this.config.mainLLM.model);
     }
     this.refreshLLMProfiles();
+    // 履歴に記録 (失敗しても本体動作には影響させない)
+    try { recordLLMProfile(this.config.mainLLM); } catch { /* ignore */ }
   }
 
   /**
@@ -339,6 +348,8 @@ export class REPL {
     const targetLabel = target === "main" ? "メインLLM" : "セカンドLLM";
     console.log(chalk.bold(`\n  ── ${targetLabel} ${provider} セットアップ ──`));
     console.log(chalk.dim("  キャンセルは Ctrl+C\n"));
+
+    if (await this.maybeOfferProfileHistory(target, provider)) return;
 
     const existing =
       target === "main" ? this.config.mainLLM : this.config.secondLLM?.endpoint;
@@ -545,6 +556,215 @@ export class REPL {
     console.log();
   }
 
+  // ─── LLM プロファイル履歴 (/profiles) ────────────────────────────
+
+  /**
+   * `/profiles` コマンドハンドラ。
+   *
+   *   /profiles              対話的に履歴一覧 → 選んで main/second に適用
+   *   /profiles list         一覧表示のみ (適用なし)
+   *   /profiles delete       チェックボックスで複数選択削除
+   *   /profiles help         使い方表示
+   *
+   * プロファイル選択 → 適用先 (main/second) を選ぶ → 該当 endpoint を書き戻し → applyXxxEndpoint で反映。
+   */
+  private async handleProfilesCommand(args: string[]): Promise<void> {
+    const sub = (args[0] ?? "").toLowerCase();
+    const profiles = listLLMProfiles();
+
+    if (sub === "help" || sub === "--help" || sub === "-h") {
+      console.log(chalk.bold("\n  ── /profiles ──"));
+      console.log(chalk.dim("    /profiles            履歴から選んで main/second に適用"));
+      console.log(chalk.dim("    /profiles list       一覧のみ表示"));
+      console.log(chalk.dim("    /profiles delete     複数選択して削除"));
+      console.log(chalk.dim("    /profiles help       このヘルプ"));
+      console.log(chalk.dim("\n  ※ メイン/セカンドLLM を変更するたびに自動で履歴に記録されます。"));
+      console.log(chalk.dim("  ※ 同じ接続情報 (providerType + model + URL/endpoint) は自動マージされます。"));
+      console.log();
+      return;
+    }
+
+    if (profiles.length === 0) {
+      console.log(chalk.dim("  履歴はまだありません。"));
+      console.log(chalk.dim("  /model setup や /second setup でメイン/セカンドLLM を設定すると自動的に履歴が残ります。"));
+      return;
+    }
+
+    if (sub === "list") {
+      this.printProfilesList(profiles);
+      return;
+    }
+
+    if (sub === "delete" || sub === "del" || sub === "rm") {
+      try {
+        const targets = await checkbox({
+          message: "削除するプロファイルを選択 (スペースで複数選択):",
+          choices: profiles.map((p) => ({
+            name: `${p.name}  ${chalk.dim(`(last used: ${formatRelativeTime(p.lastUsedAt)})`)}`,
+            value: p.id,
+          })),
+        });
+        if (targets.length === 0) {
+          console.log(chalk.dim("  削除対象が選択されませんでした。"));
+          return;
+        }
+        const removed = deleteLLMProfiles(targets);
+        console.log(chalk.green(`  ${removed} 件のプロファイルを削除しました。`));
+      } catch (e) {
+        if (!(e instanceof Error && e.message.includes("User force closed"))) {
+          console.log(chalk.red(`  削除に失敗: ${e instanceof Error ? e.message : String(e)}`));
+        }
+      }
+      return;
+    }
+
+    // デフォルト動作: プロファイル選択 → 適用先選択
+    if (sub && sub !== "switch" && sub !== "apply") {
+      console.log(chalk.yellow(`  未知のサブコマンド: ${sub}`));
+      console.log(chalk.dim("  /profiles help で使い方を表示"));
+      return;
+    }
+
+    const curMain = this.config.mainLLM;
+    const curSec = this.config.secondLLM?.endpoint;
+    try {
+      const chosenId = await select({
+        message: "適用するプロファイルを選択:",
+        choices: profiles.map((p) => {
+          const isMain = curMain && profileMatchesEndpoint(p, curMain);
+          const isSec = curSec && profileMatchesEndpoint(p, curSec);
+          const tag = isMain && isSec
+            ? chalk.cyan("  [main + second]")
+            : isMain
+              ? chalk.cyan("  [main]")
+              : isSec
+                ? chalk.cyan("  [second]")
+                : "";
+          const used = chalk.dim(`  (${formatRelativeTime(p.lastUsedAt)})`);
+          return { name: `${p.name}${tag}${used}`, value: p.id };
+        }),
+      });
+
+      const chosen = profiles.find((p) => p.id === chosenId);
+      if (!chosen) return;
+
+      const target = await select({
+        message: `「${chosen.name}」 をどこに適用しますか?`,
+        choices: [
+          { name: "メインLLM に適用", value: "main" },
+          { name: "セカンドLLM に適用", value: "second" },
+          { name: "キャンセル", value: "cancel" },
+        ],
+        default: "main",
+      });
+      if (target === "cancel") {
+        console.log(chalk.dim("  キャンセルしました。"));
+        return;
+      }
+      await this.applyProfileTo(chosen, target as "main" | "second");
+    } catch (e) {
+      if (!(e instanceof Error && e.message.includes("User force closed"))) {
+        console.log(chalk.red(`  操作失敗: ${e instanceof Error ? e.message : String(e)}`));
+      }
+    }
+  }
+
+  private printProfilesList(profiles: LLMProfile[]): void {
+    console.log(chalk.bold(`\n  ── LLM プロファイル履歴 (${profiles.length} 件) ──`));
+    const curMain = this.config.mainLLM;
+    const curSec = this.config.secondLLM?.endpoint;
+    for (const p of profiles) {
+      const tags: string[] = [];
+      if (curMain && profileMatchesEndpoint(p, curMain)) tags.push(chalk.cyan("main"));
+      if (curSec && profileMatchesEndpoint(p, curSec)) tags.push(chalk.cyan("second"));
+      const tagStr = tags.length > 0 ? `  [${tags.join(", ")}]` : "";
+      console.log(`  ${chalk.bold(p.name)}${tagStr}`);
+      console.log(chalk.dim(`    id: ${p.id}  /  last used: ${formatRelativeTime(p.lastUsedAt)}`));
+    }
+    console.log();
+  }
+
+  /**
+   * 選んだプロファイルを main または second に書き戻して反映する。
+   * apiKey が暗号化済みの場合は applyXxxEndpoint 側で合言葉を要求する。
+   */
+  private async applyProfileTo(profile: LLMProfile, target: "main" | "second"): Promise<void> {
+    const ep = { ...profile.endpoint };
+    if (target === "main") {
+      this.config.mainLLM = ep;
+      saveConfig(this.config);
+      await this.applyMainLLMEndpoint();
+      console.log(chalk.green(`  メインLLM を 「${profile.name}」 に切り替えました。`));
+    } else {
+      // secondLLM の枠組みを維持しつつ endpoint だけ差し替え
+      this.config.secondLLM = {
+        enabled: true,
+        endpoint: ep,
+        budget: this.config.secondLLM?.budget ?? null,
+        cost: this.config.secondLLM?.cost ?? { referenceModels: [] },
+        samplingDefaults: this.config.secondLLM?.samplingDefaults,
+        iterationLimits: this.config.secondLLM?.iterationLimits,
+      };
+      saveConfig(this.config);
+      await this.applySecondLLMEndpoint();
+      console.log(chalk.green(`  セカンドLLM を 「${profile.name}」 に切り替えました。`));
+    }
+    touchProfile(profile.id);
+  }
+
+  /**
+   * setup フロー冒頭で「履歴から選ぶ / 新規セットアップ」 を提示する共通ヘルパ。
+   *  - 履歴が空、 または provider にマッチする履歴が無ければ何もせず undefined を返す
+   *  - ユーザが履歴を選んだら applyProfileTo して true を返す (呼び出し側はそこで return すれば良い)
+   *  - ユーザが「新規セットアップ」 を選んだら false を返す (呼び出し側は従来フローを継続)
+   *
+   * matchProvider に文字列 or 関数を渡すと候補を絞り込める (例: "anthropic" でその provider のみ)。
+   */
+  private async maybeOfferProfileHistory(
+    target: "main" | "second",
+    matchProvider?: string | ((p: LLMProfile) => boolean),
+  ): Promise<boolean> {
+    const allProfiles = listLLMProfiles();
+    if (allProfiles.length === 0) return false;
+
+    const filter = typeof matchProvider === "string"
+      ? (p: LLMProfile) => p.endpoint.providerType === matchProvider
+      : matchProvider;
+    const candidates = filter ? allProfiles.filter(filter) : allProfiles;
+    if (candidates.length === 0) return false;
+
+    const targetLabel = target === "main" ? "メインLLM" : "セカンドLLM";
+    try {
+      const action = await select({
+        message: `${targetLabel} の設定方法を選択 (履歴 ${candidates.length} 件):`,
+        choices: [
+          { name: "履歴から選ぶ", value: "history" },
+          { name: "新規セットアップ", value: "new" },
+        ],
+        default: "history",
+      });
+      if (action === "new") return false;
+
+      const chosenId = await select({
+        message: "プロファイルを選択:",
+        choices: candidates.map((p) => ({
+          name: `${p.name}  ${chalk.dim(`(${formatRelativeTime(p.lastUsedAt)})`)}`,
+          value: p.id,
+        })),
+      });
+      const chosen = candidates.find((p) => p.id === chosenId);
+      if (!chosen) return false;
+      await this.applyProfileTo(chosen, target);
+      return true;
+    } catch (e) {
+      if (e instanceof Error && e.message.includes("User force closed")) {
+        // Ctrl+C → そのまま setup を抜ける扱い
+        throw e;
+      }
+      return false;
+    }
+  }
+
   /**
    * Claude 系 (anthropic / claude-cli) を対話プロンプトでセットアップする。
    * メインLLM (target=main) / セカンドLLM (target=second) の両方をカバー。
@@ -562,6 +782,9 @@ export class REPL {
     const targetLabel = target === "main" ? "メインLLM" : "セカンドLLM";
     console.log(chalk.bold(`\n  ── ${targetLabel} ${provider} セットアップ ──`));
     console.log(chalk.dim("  キャンセルは Ctrl+C\n"));
+
+    // 履歴があれば「履歴から選ぶ / 新規セットアップ」 を提示
+    if (await this.maybeOfferProfileHistory(target, provider)) return;
 
     const existing =
       target === "main" ? this.config.mainLLM : this.config.secondLLM?.endpoint;
@@ -739,6 +962,10 @@ export class REPL {
       reg.register(federatedDelegateTool);
     }
     this.refreshLLMProfiles();
+    // 履歴に記録 (失敗しても本体動作には影響させない)
+    if (this.config.secondLLM?.endpoint) {
+      try { recordLLMProfile(this.config.secondLLM.endpoint); } catch { /* ignore */ }
+    }
   }
 
   /**
@@ -881,6 +1108,21 @@ export class REPL {
     const cur = this.config.mainLLM;
     const isCloud = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic"]
       .includes(cur.providerType);
+
+    // 履歴がある場合は冒頭で選択肢を提示 (ローカル系プロバイダのみに絞る)
+    const localProviders = new Set(["ollama", "lmstudio", "llamacpp", "vllm"]);
+    try {
+      if (await this.maybeOfferProfileHistory("main", (p) => localProviders.has(p.endpoint.providerType))) {
+        return;
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.includes("User force closed")) {
+        console.log(chalk.yellow("\n  セットアップを中止しました。"));
+        return;
+      }
+      throw e;
+    }
+
     try {
       const result = await runLocalLLMSetup({
         headline: "メインLLM 再設定",
@@ -2195,6 +2437,19 @@ export class REPL {
                 console.log(chalk.yellow("  セットアップを中止しました。"));
               }
             }
+          } else if (!args[1]) {
+            // /second setup (引数なし) → 履歴があれば履歴から選ぶ UI を提示
+            try {
+              if (await this.maybeOfferProfileHistory("second")) break;
+            } catch (e) {
+              if (e instanceof Error && e.message.includes("User force closed")) {
+                console.log(chalk.yellow("  セットアップを中止しました。"));
+                break;
+              }
+              throw e;
+            }
+            console.log(chalk.dim("  履歴がありません。 provider/url/model を指定して /second setup を再実行してください。"));
+            console.log(chalk.dim("  例: /second setup vllm http://localhost:8000 qwen3-8b"));
           } else {
             const url = args[2] ?? "http://localhost:8000";
             const model = args[3] ?? "";
@@ -2347,6 +2602,12 @@ export class REPL {
           console.log(chalk.yellow("  ※ セカンドLLM の接続テストに失敗しています。/second status で確認してください。"));
         }
         console.log();
+        break;
+      }
+
+      case "/profiles":
+      case "/profile": {
+        await this.handleProfilesCommand(args);
         break;
       }
 
@@ -3422,6 +3683,34 @@ export class REPL {
         console.log(chalk.dim("  /help でコマンド一覧を表示"));
     }
   }
+}
+
+/** ISO8601 → 「3分前」 「2時間前」 「5日前」 のような相対表示。 1 年以上前は日付そのもの */
+function formatRelativeTime(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return iso;
+  const diffMs = Date.now() - t;
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 60) return "たった今";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}分前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}時間前`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}日前`;
+  const mo = Math.floor(day / 30);
+  if (mo < 12) return `${mo}ヶ月前`;
+  return new Date(t).toISOString().slice(0, 10);
+}
+
+/** プロファイルが endpoint と「同じ接続」 を指しているか判定 */
+function profileMatchesEndpoint(profile: LLMProfile, ep: LLMEndpoint): boolean {
+  const a = profile.endpoint;
+  return a.providerType === ep.providerType
+    && (a.model ?? "") === (ep.model ?? "")
+    && (a.baseUrl ?? "") === (ep.baseUrl ?? "")
+    && (a.endpoint ?? "") === (ep.endpoint ?? "")
+    && (a.deploymentName ?? "") === (ep.deploymentName ?? "");
 }
 
 function progressBar(pct: number): string {
