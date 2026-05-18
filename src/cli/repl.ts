@@ -322,6 +322,11 @@ export class REPL {
     }
 
     this.agent.setProvider(newProvider, this.config.mainLLM.model);
+    // contextWindow も切り替える。 ollama 32K → anthropic 200K 等の急変で
+    // 古い値が残ると context 圧縮や max_tokens 計算が壊れる (= 旧バグ)
+    if (this.config.mainLLM.contextWindow && this.config.mainLLM.contextWindow > 0) {
+      this.agent.setContextWindow(this.config.mainLLM.contextWindow);
+    }
     const subAgentMgr = getSubAgentManager();
     if (subAgentMgr) {
       subAgentMgr.setProvider(newProvider, this.config.mainLLM.model);
@@ -865,7 +870,19 @@ export class REPL {
       console.log(chalk.dim("  未ログインの場合は別ターミナルで `claude login` を実行してください。"));
     }
 
-    const ctxWindow = CLAUDE_MODELS.find((m) => m.id === chosenModel)?.contextWindow;
+    // コンテキストウィンドウ: モデル既定値を提示しつつユーザが上書きできるようにする。
+    // 例: Sonnet 4.6 は 1M だが、 コスト/応答速度の都合で 200K に絞りたい等
+    const modelDefaultCtx = CLAUDE_MODELS.find((m) => m.id === chosenModel)?.contextWindow ?? 200_000;
+    const ctxInput = await input({
+      message: `コンテキスト長 (例: 200k / 1m / 200000、 既定: ${(modelDefaultCtx / 1000).toLocaleString()}K):`,
+      default: String(modelDefaultCtx),
+      validate: (v: string) => {
+        const n = parseTokenCount(v);
+        if (!Number.isFinite(n) || n <= 0) return "正の数値、 または '200k' / '1m' 形式で指定してください";
+        return true;
+      },
+    });
+    const ctxWindow = parseTokenCount(ctxInput) || modelDefaultCtx;
 
     if (target === "main") {
       const cur = this.config.mainLLM;
