@@ -2154,6 +2154,15 @@ export class AgentLoop {
     this.contextManager.setProvider(provider, this.model);
     this.intentClassifier.setProvider(provider, this.model);
     this.evaluator.setMainProvider(provider, this.model);
+    // 新 provider が attachToolBridge を持つなら (例: claude-agent-sdk) ToolRegistry を注入する。
+    // ランタイム切替時に MCP bridge を再 attach しないと、 SDK に lllmAgent ツールが届かず
+    // Claude が XML 形式の擬似 tool_use を text として吐き続ける状態になる。
+    const bridgeable = provider as unknown as {
+      attachToolBridge?: (r: ToolRegistry, e: ToolExecutor) => void;
+    };
+    if (typeof bridgeable.attachToolBridge === "function") {
+      bridgeable.attachToolBridge(this.toolRegistry, this.toolExecutor);
+    }
     // Phase A-3: provider 切替でも (model が変わる可能性あるため) capability を再解決 (override 反映)
     this.capability = resolveCapability(this.model, this.contextWindow, this.getCapabilityOverride(this.model));
     // Phase C-2 + D-4: 圧縮閾値・keepRecentMessages も追従

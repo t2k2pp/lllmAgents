@@ -37,6 +37,20 @@ describe("ClaudeAgentSdkProvider — 構造的保証", () => {
     expect(() => provider.attachToolBridge(fakeRegistry, fakeExecutor)).not.toThrow();
   });
 
+  it("attachToolBridge は複数回呼ぶと上書きされる (ランタイム切替対応)", () => {
+    // /model setup でランタイム切替するたびに setProvider→attachToolBridge が再走するので
+    // 後勝ちで上書きできる必要がある (前回の registry/executor を保持し続けるとリーク)
+    const provider = new ClaudeAgentSdkProvider({ model: "claude-haiku-4-5" });
+    const r1 = { getToolNames: () => ["a"], get: () => undefined } as never;
+    const e1 = { tag: "e1" } as never;
+    const r2 = { getToolNames: () => ["b"], get: () => undefined } as never;
+    const e2 = { tag: "e2" } as never;
+    expect(() => {
+      provider.attachToolBridge(r1, e1);
+      provider.attachToolBridge(r2, e2);
+    }).not.toThrow();
+  });
+
   it("supportsVision は true (Claude 系は全て vision 対応想定)", async () => {
     const provider = new ClaudeAgentSdkProvider({ model: "claude-haiku-4-5" });
     expect(await provider.supportsVision("claude-haiku-4-5")).toBe(true);
