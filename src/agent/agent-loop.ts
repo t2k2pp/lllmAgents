@@ -288,6 +288,15 @@ export class AgentLoop {
       this.capability.keepRecentMessages,
     );
     this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager);
+    // claude-agent-sdk プロバイダの場合、 lllmAgent ツールを in-process MCP として
+    // SDK に公開する (docs/claude-agent-sdk-provider-design.md §3.3)。
+    // duck typing で attach メソッドを持つプロバイダのみに適用。
+    const bridgeable = provider as unknown as {
+      attachToolBridge?: (r: ToolRegistry, e: ToolExecutor) => void;
+    };
+    if (typeof bridgeable.attachToolBridge === "function") {
+      bridgeable.attachToolBridge(toolRegistry, this.toolExecutor);
+    }
     this.session = createSession(model);
     this.llmLogger = new LLMLogger(agentId, sessionId);
     this.intentClassifier = new IntentClassifier(provider, model);

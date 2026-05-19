@@ -13,6 +13,7 @@ import { AzureFoundryProvider } from "./azure-foundry.js";
 import { AzureAnthropicProvider } from "./azure-anthropic.js";
 import { AnthropicProvider } from "./anthropic.js";
 import { ClaudeCliProvider } from "./claude-cli.js";
+import { ClaudeAgentSdkProvider } from "./claude-agent-sdk.js";
 import { CredentialVault } from "../security/credential-vault.js";
 
 /**
@@ -128,6 +129,16 @@ function createProviderFromEndpoint(
           model: endpoint.model,
           // 既定で claude 内部のツール実行を許可 (= claude が自律的にファイル操作などを行う)。
           // 「純粋なテキスト生成器」 として使いたい場合は config.json の claudeCli.allowTools=false で抑制 (未実装)。
+        });
+      }
+
+      case "claude-agent-sdk": {
+        if (!endpoint.model) {
+          throw new Error("Missing model for claude-agent-sdk provider");
+        }
+        // ツール公開 (in-process MCP bridge) は agent-loop 初期化時に attachToolBridge() で行う
+        return new ClaudeAgentSdkProvider({
+          model: endpoint.model,
         });
       }
 

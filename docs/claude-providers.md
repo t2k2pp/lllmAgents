@@ -1,9 +1,10 @@
 ---
-title: Claude プロバイダ (anthropic / claude-cli) 設計
-status: 2026-05-18 提案 / 同日実装
+title: Claude プロバイダ (anthropic / claude-cli / claude-agent-sdk) 設計
+status: 2026-05-18 提案 / 同日実装 / 2026-05-20 claude-agent-sdk 追加・claude-cli を Fail loud 化
+related: docs/claude-agent-sdk-provider-design.md
 ---
 
-# Claude プロバイダ - 公式 Anthropic API と Claude Code CLI ラッパー
+# Claude プロバイダ - 公式 Anthropic API / Claude Code CLI / Claude Agent SDK
 
 ## 背景
 
@@ -19,9 +20,11 @@ status: 2026-05-18 提案 / 同日実装
 
 - **`anthropic`** — `api.anthropic.com` を直接叩く (個人 API キーで OK)
 - **`claude-cli`** — ローカルにインストール済みの `claude` CLI を `-p` でサブプロセス起動
-  (subscription / oauth セッションをそのまま流用、 API キー不要)
+  (subscription / oauth セッションをそのまま流用、 API キー不要、 **tool calling 不可**)
+- **`claude-agent-sdk`** (2026-05-20 追加) — `@anthropic-ai/claude-agent-sdk` を
+  **in-process** で使う (subscription 継承で API キー不要、 in-process MCP で **tool calling 対応**)
 
-の 2 系統を追加する。 メインLLM / セカンドLLM 両方で使えるよう、 `LLMEndpoint` の
+の 3 系統を追加する。 メインLLM / セカンドLLM 両方で使えるよう、 `LLMEndpoint` の
 `CloudProviderType` に追加する。
 
 ## providerType 比較
@@ -29,7 +32,8 @@ status: 2026-05-18 提案 / 同日実装
 | providerType    | 認証                                              | エンドポイント                          | ツール呼び出し | 用途                              |
 |-----------------|---------------------------------------------------|------------------------------------------|----------------|-----------------------------------|
 | `anthropic`     | `ANTHROPIC_API_KEY` (env / encrypted / 平文)      | `https://api.anthropic.com/v1/messages`  | ◯ (ネイティブ) | API キーを持つ開発者向け           |
-| `claude-cli`    | 不要 (`claude login` 済みの subscription を再利用) | サブプロセス (`claude -p ...`)           | △ (claude 内部で完結、 lllmAgents 側ツールには非接続) | サブスクユーザー向け |
+| `claude-cli`    | 不要 (`claude login` 済みの subscription を再利用) | サブプロセス (`claude -p ...`)           | **✕ Fail loud** (tools 渡されたら明示 error) — text 生成専用 | テキスト生成のみで OK のサブスクユーザー |
+| **`claude-agent-sdk`** | 不要 (`claude login` 済みの subscription を継承) | **in-process** (`@anthropic-ai/claude-agent-sdk`) | **◯ (in-process MCP)** lllmAgent ツールを SDK の MCP として公開 | tool 委任もしたいサブスクユーザー |
 | `azure-anthropic` | Azure API key                                    | `https://<resource>.azure.com/anthropic/v1/messages` | ◯              | Azure 利用組織                    |
 | `vertex-ai`     | GCP ADC                                           | `aiplatform.googleapis.com`              | ◯              | GCP 利用組織                       |
 
@@ -128,20 +132,19 @@ claude の `Bash` / `Read` などの実行履歴とは別の意味なので衝�
 
 ### ツール呼び出しの扱い
 
-claude `-p` は内部で自律的にツールを実行する (`Bash`, `Read`, `Edit` 等)。
-**lllmAgents 側の ToolRegistry には橋渡ししない** 設計とした:
+claude `-p` には外部 tool 定義を注入する経路が無いため、 **lllmAgents の tool calling は
+非対応** (`supportsFunctionCalling: false`)。 過去はサイレントに tools を捨てる実装だったが、
+2026-05-20 に **Fail loud 修正** を入れた:
 
-- 理由 1: claude のツール一覧と lllmAgents のツール一覧は名前が衝突する (`Bash` 等)
-- 理由 2: claude が tool を呼ぶたびに lllmAgents 側の権限チェックを通すと UX が壊れる
-- 理由 3: 「claude が完成形のテキスト/成果物を返す → lllmAgents はそれを assistant message として受け取る」
-  という設計が最もシンプル
+- `chatWithTools` に `tools` が渡されたら ChatChunk `type:"error"` で明示中断
+- エラーメッセージで `anthropic` / `claude-agent-sdk` プロバイダへの切替を案内
+- 詳細: `docs/claude-agent-sdk-provider-design.md` §1.2 / §4
 
-つまり `claude-cli` プロバイダは **lllmAgents から見たら text-only LLM**。
-ツール呼び出しが必要なエージェントループ用途には `anthropic` プロバイダの方が適切。
+`-p` モード自体の制約 (issue [anthropics/claude-code#26364](https://github.com/anthropics/claude-code/issues/26364)
+で MCP も `mcp_servers:[]` になり、 Anthropic は close as "not planned") のため、 CLI 経由で
+tool 橋渡しを成立させる道は事実上塞がれている。 同等の用途は `claude-agent-sdk` プロバイダで実現する。
 
-純粋なテキスト生成器として使いたい場合は `ClaudeCliProvider` コンストラクタで
-`allowTools: false` を渡すと `--disallowedTools "*"` が付与される (現状 factory 経由では
-未公開フラグ、 必要になったら config.json から指定可能にする)。
+純粋なテキスト生成器として使う場合 (= tools 無しで対話するだけ) は従来通り動作する。
 
 ### 認証
 
@@ -151,15 +154,17 @@ lllmAgents の config には API キーを持たない (= 個人 subscription �
 
 ## REPL UX
 
-| コマンド                       | 動作                                             |
-|--------------------------------|--------------------------------------------------|
-| `/model setup anthropic`       | API キー保管方法 (env / encrypted / 平文) → モデル選択 |
-| `/model setup claude-cli`      | モデル選択のみ (認証は claude CLI 側)            |
-| `/model list`                  | CLAUDE_MODELS を選択肢として表示                 |
-| `/model <id>`                  | モデル ID を直接指定 (例: `/model claude-haiku-4-5`) |
-| `/second setup anthropic`      | セカンドLLM として anthropic を設定              |
-| `/second setup claude-cli`     | セカンドLLM として claude-cli を設定             |
-| `/swap`                        | メインLLM ⇔ セカンドLLM の入れ替え (Claude プロバイダ含む) |
+| コマンド                              | 動作                                             |
+|---------------------------------------|--------------------------------------------------|
+| `/model setup anthropic`              | API キー保管方法 (env / encrypted / 平文) → モデル選択 |
+| `/model setup claude-cli`             | モデル選択のみ (認証は claude CLI 側) ※tool calling 不可 |
+| `/model setup claude-agent-sdk`       | モデル選択のみ (認証は claude login 継承) ※tool calling 対応 |
+| `/model list`                         | CLAUDE_MODELS を選択肢として表示                 |
+| `/model <id>`                         | モデル ID を直接指定 (例: `/model claude-haiku-4-5`) |
+| `/second setup anthropic`             | セカンドLLM として anthropic を設定              |
+| `/second setup claude-cli`            | セカンドLLM として claude-cli を設定             |
+| `/second setup claude-agent-sdk`      | セカンドLLM として claude-agent-sdk を設定 (subscription + tool 両立) |
+| `/swap`                               | メインLLM ⇔ セカンドLLM の入れ替え (Claude プロバイダ含む) |
 
 REPL 側の実装は `setupClaudeLLM(target, provider)` (cli/repl.ts) に集約。
 `setupAzureLLM` の API キー保管フローを簡略化したものを再利用。
@@ -169,12 +174,15 @@ REPL 側の実装は `setupClaudeLLM(target, provider)` (cli/repl.ts) に集約�
 ```
 src/
 ├── providers/
-│   ├── anthropic.ts      # 新規: api.anthropic.com 用 (AzureAnthropicProvider 継承)
-│   ├── claude-cli.ts     # 新規: claude -p サブプロセス用
-│   ├── azure-anthropic.ts # 既存: 一部 private → protected に格上げ
-│   └── provider-factory.ts # 既存: case "anthropic" / case "claude-cli" を追加
+│   ├── anthropic.ts            # api.anthropic.com 用 (AzureAnthropicProvider 継承)
+│   ├── claude-cli.ts           # claude -p サブプロセス用 (Fail loud で tool calling 拒否)
+│   ├── claude-agent-sdk.ts     # 新規 2026-05-20: in-process SDK 経由 (tool calling 対応)
+│   ├── azure-anthropic.ts      # 既存: 一部 private → protected に格上げ
+│   └── provider-factory.ts     # 既存: case anthropic / claude-cli / claude-agent-sdk
+├── tools/
+│   └── sdk-mcp-bridge.ts       # 新規 2026-05-20: ToolHandler → SDK MCP tool アダプタ
 └── config/
-    └── types.ts          # 既存: CloudProviderType に追加、 CLAUDE_MODELS 定数を export
+    └── types.ts                # 既存: CloudProviderType に追加、 CLAUDE_MODELS 定数を export
 ```
 
 ## 後方互換
@@ -184,9 +192,9 @@ src/
 
 ## 今後の拡張余地
 
-- **claude-cli のツール橋渡し**: lllmAgents の tool 呼び出しを stream-json 経由で
-  claude に伝え、 claude が呼びたい tool を lllmAgents 側で実行して結果を戻す
-  双方向プロトコル。 実装複雑性が高いため将来検討
+- ~~**claude-cli のツール橋渡し**~~ → **`claude-agent-sdk` プロバイダで実装済み** (2026-05-20)。
+  CLI の `-p` モード制約 (#26364 で MCP 不可) を回避し、 SDK の in-process MCP server で
+  lllmAgent ツールを公開する形に着地。 詳細: `docs/claude-agent-sdk-provider-design.md`
 - **動的モデル一覧**: `https://api.anthropic.com/v1/models` を叩いて CLAUDE_MODELS を
   上書きする (失敗時は CLAUDE_MODELS にフォールバック)。 alias 解決を維持するため
   まずは静的でも十分

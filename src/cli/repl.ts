@@ -771,17 +771,18 @@ export class REPL {
   }
 
   /**
-   * Claude 系 (anthropic / claude-cli) を対話プロンプトでセットアップする。
+   * Claude 系 (anthropic / claude-cli / claude-agent-sdk) を対話プロンプトでセットアップする。
    * メインLLM (target=main) / セカンドLLM (target=second) の両方をカバー。
    *
-   *  - anthropic   : ANTHROPIC_API_KEY (env: / encrypted: / 平文) + モデル選択
-   *  - claude-cli  : モデル選択のみ (認証は claude CLI 側の `claude login` に委譲)
+   *  - anthropic         : ANTHROPIC_API_KEY (env: / encrypted: / 平文) + モデル選択
+   *  - claude-cli        : モデル選択のみ (認証は claude CLI 側の `claude login` に委譲)。 tool calling 不可
+   *  - claude-agent-sdk  : モデル選択のみ (認証は claude login 継承)。 in-process MCP で tool calling 対応
    *
    * モデルは CLAUDE_MODELS のハードコード一覧から選択する。
    */
   private async setupClaudeLLM(
     target: "main" | "second",
-    provider: "anthropic" | "claude-cli",
+    provider: "anthropic" | "claude-cli" | "claude-agent-sdk",
   ): Promise<void> {
     const { CLAUDE_MODELS } = await import("../config/types.js");
     const targetLabel = target === "main" ? "メインLLM" : "セカンドLLM";
@@ -794,7 +795,9 @@ export class REPL {
     const existing =
       target === "main" ? this.config.mainLLM : this.config.secondLLM?.endpoint;
     const existingIsClaude =
-      existing?.providerType === "anthropic" || existing?.providerType === "claude-cli";
+      existing?.providerType === "anthropic" ||
+      existing?.providerType === "claude-cli" ||
+      existing?.providerType === "claude-agent-sdk";
 
     const chosenModel = await select({
       message: "Claude モデルを選択:",
@@ -865,9 +868,14 @@ export class REPL {
         needsRestart = true;
       }
     } else {
-      // claude-cli は事前に `claude login` 済みである必要がある旨を案内
+      // claude-cli / claude-agent-sdk は事前に `claude login` 済みである必要がある旨を案内
       console.log(chalk.dim("  認証は claude CLI 側 (subscription / oauth) を利用します。"));
       console.log(chalk.dim("  未ログインの場合は別ターミナルで `claude login` を実行してください。"));
+      if (provider === "claude-agent-sdk") {
+        console.log(chalk.dim("  in-process MCP で lllmAgent ツールを公開します (tool calling 対応)。"));
+      } else {
+        console.log(chalk.dim("  注: claude-cli は tool calling 非対応。 ツール委任には claude-agent-sdk か anthropic を使ってください。"));
+      }
     }
 
     // コンテキストウィンドウ: モデル既定値を提示しつつユーザが上書きできるようにする。
@@ -1994,7 +2002,7 @@ export class REPL {
         } else if (args[0] === "provider") {
           const newProvider = args[1]?.trim();
           const localProviders: ProviderType[] = ["ollama", "lmstudio", "llamacpp", "vllm"];
-          const cloudProviders = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli"];
+          const cloudProviders = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli", "claude-agent-sdk"];
           const validProviders = [...localProviders, ...cloudProviders];
           if (!newProvider) {
             console.log(chalk.dim(`  現在のプロバイダー: ${this.config.mainLLM.providerType}`));
@@ -2055,7 +2063,11 @@ export class REPL {
                 console.log(chalk.yellow("  セットアップを中止しました。"));
               }
             }
-          } else if (targetProvider === "anthropic" || targetProvider === "claude-cli") {
+          } else if (
+            targetProvider === "anthropic" ||
+            targetProvider === "claude-cli" ||
+            targetProvider === "claude-agent-sdk"
+          ) {
             try {
               await this.setupClaudeLLM("main", targetProvider);
             } catch (e) {
@@ -2070,7 +2082,8 @@ export class REPL {
             console.log(chalk.dim("  使い方:"));
             console.log(chalk.dim("    /model setup                  ローカル系LLM (ollama/lmstudio/llamacpp/vllm) ウィザード"));
             console.log(chalk.dim("    /model setup anthropic        Anthropic API (Claude direct, ANTHROPIC_API_KEY)"));
-            console.log(chalk.dim("    /model setup claude-cli       Claude Code CLI (claude -p、 認証は claude login)"));
+            console.log(chalk.dim("    /model setup claude-cli       Claude Code CLI (claude -p、 認証は claude login、 tool calling 不可)"));
+            console.log(chalk.dim("    /model setup claude-agent-sdk Claude Agent SDK (in-process MCP、 認証は claude login、 tool calling 対応)"));
             console.log(chalk.dim("    /model setup azure-foundry    Azure AI Foundry (Kimi/Mistral等)"));
             console.log(chalk.dim("    /model setup azure-anthropic  Azure Claude — Anthropic Messages API"));
             console.log(chalk.dim("    /model setup azure-openai     Azure OpenAI — Chat Completions API"));
@@ -2408,7 +2421,7 @@ export class REPL {
           }
         } else if (subCmd === "provider") {
           const newProvider = args[1]?.trim();
-          const validProviders = ["ollama", "lmstudio", "llamacpp", "vllm", "vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli"];
+          const validProviders = ["ollama", "lmstudio", "llamacpp", "vllm", "vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli", "claude-agent-sdk"];
           if (!newProvider) {
             console.log(chalk.dim(`  現在のプロバイダー: ${this.config.secondLLM?.endpoint.providerType ?? "(未設定)"}`));
             console.log(chalk.dim(`  使い方: /second provider <タイプ>`));
@@ -2422,7 +2435,7 @@ export class REPL {
             saveConfig(this.config);
             await this.applySecondLLMEndpoint();
             console.log(chalk.dim(`  プロバイダー: ${chalk.yellow(oldProvider)} → ${chalk.cyan(newProvider)}`));
-            const isCloud = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli"].includes(newProvider);
+            const isCloud = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli", "claude-agent-sdk"].includes(newProvider);
             if (isCloud) {
               console.log(chalk.dim(`  クラウドプロバイダーは追加の認証情報が必要な場合があります。/second status で確認してください。`));
             } else {
@@ -2444,7 +2457,7 @@ export class REPL {
                 console.log(chalk.yellow("  セットアップを中止しました。"));
               }
             }
-          } else if (provider === "anthropic" || provider === "claude-cli") {
+          } else if (provider === "anthropic" || provider === "claude-cli" || provider === "claude-agent-sdk") {
             try {
               await this.setupClaudeLLM("second", provider);
             } catch (e) {

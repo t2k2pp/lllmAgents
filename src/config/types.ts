@@ -10,7 +10,9 @@ export type CloudProviderType =
   /** Anthropic Messages API (api.anthropic.com) を直接叩く。 ANTHROPIC_API_KEY 必須 */
   | "anthropic"
   /** ローカルにインストールされた Claude Code CLI (`claude -p`) をサブプロセスで呼ぶ */
-  | "claude-cli";
+  | "claude-cli"
+  /** Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) を in-process で使う。 claude login 済みセッション継承 (API キー不要)、 lllmAgent ツールを MCP 経由で公開してネイティブ tool_use を成立させる */
+  | "claude-agent-sdk";
 
 // セカンドLLMはローカルまたはクラウドのいずれかを指定可能
 export type SecondLLMProviderType = ProviderType | CloudProviderType;
@@ -283,6 +285,7 @@ export function isCloudProvider(type: SecondLLMProviderType): boolean {
     "azure-anthropic",
     "anthropic",
     "claude-cli",
+    "claude-agent-sdk",
   ] as string[]).includes(type);
 }
 
@@ -361,6 +364,7 @@ export const PROVIDER_LABELS: Record<SecondLLMProviderType, string> = {
   "azure-anthropic": "Azure Anthropic (Messages API)",
   anthropic: "Anthropic API (Claude direct)",
   "claude-cli": "Claude Code CLI (claude -p)",
+  "claude-agent-sdk": "Claude Agent SDK (in-process)",
 };
 
 export function getDefaultConfig(): Config {
