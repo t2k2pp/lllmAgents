@@ -11,8 +11,9 @@
  *  - 最終的に `result` イベントで usage と finish_reason を yield
  *
  * 制約:
- *  - lllmAgents の tool calling は使えない (claude の応答は常に text のみ)。
- *    エージェントループでツール実行が必要な用途には `anthropic` プロバイダの方が適切
+ *  - lllmAgents の tool calling は橋渡しせず、 tools が渡された場合は明示エラーで止める
+ *    (claude -p には外部 tool 定義を注入する経路が無いため)。
+ *    ツール付きエージェントループには `anthropic` または `claude-agent-sdk` プロバイダを使う
  *  - max_tokens / temperature 等のサンプリングパラメータは無視される (claude 側が制御)
  *  - 認証は claude CLI が事前に `claude login` 済みである必要がある
  */
@@ -97,7 +98,22 @@ export class ClaudeCliProvider implements LLMProvider {
   }
 
   async *chatWithTools(params: ChatWithToolsParams): AsyncGenerator<ChatChunk> {
-    // tool calling は claude 内部で完結するため、 lllmAgents 側の tool 定義は無視する
+    // claude -p (--print) は外部 tool 定義を注入できない (内部ツールのみで完結する)。
+    // tools を渡されても claude には届かないため、 サイレント degrade せず Fail loud。
+    // ツール委任前提のループに使うなら 'anthropic' か 'claude-agent-sdk' プロバイダへ。
+    if (params.tools && params.tools.length > 0) {
+      yield {
+        type: "error",
+        error:
+          `[claude-cli] このプロバイダは tool calling を橋渡ししません ` +
+          `(claude -p の仕様上、外部 tool 定義を注入する経路がありません)。\n` +
+          `[対処] ツール付きエージェントループには次のいずれかを使ってください:\n` +
+          `  - 'anthropic' プロバイダ (API キー必要、 ネイティブ tool 対応)\n` +
+          `  - 'claude-agent-sdk' プロバイダ (subscription 再利用、 in-process MCP で tool 対応)\n` +
+          `  → /model setup claude-agent-sdk / /second setup claude-agent-sdk で切替可能`,
+      };
+      return;
+    }
     yield* this.doChat(params);
   }
 
