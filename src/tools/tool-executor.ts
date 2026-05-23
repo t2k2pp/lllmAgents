@@ -2,9 +2,11 @@ import chalk from "chalk";
 import type { ToolCall } from "../providers/base-provider.js";
 import type { ToolRegistry, ToolResult } from "./tool-registry.js";
 import type { PermissionManager, RequestSource } from "../security/permission-manager.js";
+import { formatToolSummary } from "../security/permission-manager.js";
 import type { HookManager } from "../hooks/hook-manager.js";
 import { ROOT_ANCESTORS, type AncestorTypes } from "../agent/delegation-context.js";
 import { validateAgainstSchema, formatValidationError } from "./schema-validator.js";
+import { progressIndicator } from "../cli/progress-indicator.js";
 import * as logger from "../utils/logger.js";
 
 export class ToolExecutor {
@@ -91,6 +93,12 @@ export class ToolExecutor {
     }
 
     // Execute
+    // 進捗インジケータ: 1 秒経過したら spinner で経過時間を表示。
+    // root (= main) 経路のみで描画して、 サブエージェント実行内の重複表示を防ぐ。
+    const isRoot = this.ancestors === ROOT_ANCESTORS;
+    if (isRoot) {
+      progressIndicator.begin(toolName, formatToolSummary(toolName, params));
+    }
     try {
       logger.debug(`Executing tool: ${toolName}`, params);
       const result = await handler.execute(params, { ancestors: this.ancestors });
@@ -109,6 +117,10 @@ export class ToolExecutor {
         output: "",
         error: errorMsg,
       };
+    } finally {
+      if (isRoot) {
+        progressIndicator.end();
+      }
     }
   }
 }

@@ -19,6 +19,8 @@ import {
   InteractiveInput,
   SIGINT_SIGNAL,
 } from "./interactive-input.js";
+import { interruptWatcher } from "./interrupt-watcher.js";
+import { progressIndicator } from "./progress-indicator.js";
 import {
   createCommandMenuProvider,
   createFileMenuProvider,
@@ -1207,6 +1209,14 @@ export class REPL {
 
   private async processInput(input: string): Promise<void> {
     this.agentBusy = true;
+    let interruptedByEsc = false;
+    interruptWatcher.start(() => {
+      interruptedByEsc = true;
+      progressIndicator.end();
+      console.log(chalk.yellow("\n  (ESC) 処理を中断します..."));
+      this.agent.abort();
+      bashTool.killRunningProcess();
+    });
     try {
       if (input.startsWith("@second ")) {
          if (!this.secondLLMManager || !this.secondLLMManager.isAvailable()) {
@@ -1246,7 +1256,12 @@ export class REPL {
         chalk.red(`\n  Error: ${e instanceof Error ? e.message : String(e)}\n`),
       );
     } finally {
+      interruptWatcher.stop();
+      progressIndicator.end();
       this.agentBusy = false;
+      if (interruptedByEsc) {
+        console.log(chalk.dim("  プロンプトに戻ります"));
+      }
     }
   }
 

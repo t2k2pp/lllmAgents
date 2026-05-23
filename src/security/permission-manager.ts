@@ -454,7 +454,7 @@ export class PermissionManager {
     await prev;
 
     try {
-      const summary = this.formatToolSummary(toolName, params);
+      const summary = formatToolSummary(toolName, params);
       console.log(chalk.cyan(`\n  [${toolName}] ${summary}`));
 
       // 非TTYモード（パイプ等）: readline テキストメニューにフォールバック
@@ -558,31 +558,32 @@ export class PermissionManager {
     return { allowed: true };
   }
 
-  private formatToolSummary(toolName: string, params: Record<string, unknown>): string {
-    switch (toolName) {
-      case "bash":
-        return `$ ${params.command}`;
-      case "file_write":
-        return `書き込み: ${params.file_path}`;
-      case "file_edit":
-        return `編集: ${params.file_path}`;
-      case "browser_navigate":
-        return `ナビゲート: ${params.url}`;
-      case "browser_click":
-        return `クリック: ${params.selector ?? params.ref}`;
-      case "browser_type":
-        return `入力: ${params.text}`;
-      case "web_fetch":
-        return `取得: ${params.url}`;
-      case "web_search":
-        return `検索: ${params.query}`;
-      case "second_llm_consult":
-        return `相談:\n${params.prompt}`;
-      case "second_llm_agent":
-        return `委任タスク:\n${params.task}`;
-      default:
-        return JSON.stringify(params, null, 2);
-    }
+}
+
+export function formatToolSummary(toolName: string, params: Record<string, unknown>): string {
+  switch (toolName) {
+    case "bash":
+      return `$ ${params.command}`;
+    case "file_write":
+      return `書き込み: ${params.file_path}`;
+    case "file_edit":
+      return `編集: ${params.file_path}`;
+    case "browser_navigate":
+      return `ナビゲート: ${params.url}`;
+    case "browser_click":
+      return `クリック: ${params.selector ?? params.ref}`;
+    case "browser_type":
+      return `入力: ${params.text}`;
+    case "web_fetch":
+      return `取得: ${params.url}`;
+    case "web_search":
+      return `検索: ${params.query}`;
+    case "second_llm_consult":
+      return `相談:\n${params.prompt}`;
+    case "second_llm_agent":
+      return `委任タスク:\n${params.task}`;
+    default:
+      return JSON.stringify(params, null, 2);
   }
 }
 
