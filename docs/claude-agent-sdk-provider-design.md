@@ -309,6 +309,73 @@ Phase 0 だけ即時入れて、Phase 1-6 は user 合意後に進める。
 3. **新プロバイダ名 `claude-agent-sdk` でよいか** — 代替案: `claude-sdk`, `claude-local`
 4. **`tools: []` で built-in 全消去する方針でよいか** — 代替: claude の Read/Write 等も併用させる（重複・混乱リスク有）
 
+## 改訂 (2026-05-23) — tool_use リーク修正、 outer agent-loop ループ方式へ転換
+
+### 観察した問題
+
+実運用 (`~/.localllm/logs/sessions/2026-05-22T16-13-10_main.jsonl` 等、 keyman 開発の
+5 セッション以上) で、 LLM 応答が「assistant.tool_calls = 0 のまま、 content に
+`[tool: mcp__lllmagents__bash({...})]` というテキストだけ含む」 状態になっており、
+outer agent-loop が「テキスト応答のみ = 仕事してない」 と判定して
+`[自己点検 1/3] → 2/3 → 3/3 → ターン強制終了` の self-check ループが発生していた。
+LLM コスト 3 倍、 response_complete が呼ばれず、 ユーザーから見て「Claude が固まる /
+何もしない」 体験につながっていた。
+
+### 根本原因
+
+`src/providers/claude-agent-sdk.ts:217-242` の `convertSdkMessage` で、
+SDK から流れてきた `tool_use` ブロックを **`type: "text"`** chunk として
+`[tool: name(input)]` 形式に**テキスト化**して yield していた。
+コメントは「実行は SDK 内部で MCP 経由のため lllmAgent agent-loop に tool_call を
+渡す必要はない」 と書いてあったが、 実態として SDK 内部 MCP のループは起きていない。
+
+考えられる失敗要因 (どれか単独 or 複合):
+- `options.mcpServers = { lllmagents: mcpServer }` の渡し方が SDK の現行 API シグネチャと不一致
+- `buildLllmAgentsMcpServer` の戻り値が `McpSdkServerConfigWithInstance` 型に合っていない
+- SDK が tool_use を出したあと、 in-process MCP に転送せず即 end_turn してしまう
+
+### 修正方針 — outer agent-loop に流す
+
+「SDK 内部で tool 実行完結」 案を **撤回**し、 他プロバイダ (azure-anthropic 等) と
+同じく **outer agent-loop ループ**方式に切り替える:
+
+```
+[ lllmAgent agent-loop ]
+        │ provider.chatWithTools(messages + tool history)
+        ▼
+[ ClaudeAgentSdkProvider ]
+        │  query() を呼ぶ。 mcpServers は使わない (tools: [] 固定)
+        ▼
+[ SDK ] ─tool_use─► ClaudeAgentSdkProvider が ChatChunk.tool_call として yield
+        │
+        ▼
+[ agent-loop が ToolExecutor.execute() で実行 ]
+        │ 結果を messages に追記して provider.chatWithTools を再度呼ぶ
+        ▼
+       … 続き
+```
+
+### 実装変更
+
+| 場所 | 変更 |
+|---|---|
+| `convertSdkMessage` (`claude-agent-sdk.ts:217-242`) | tool_use ブロックを `ChatChunk.tool_call` (id / name / arguments=JSON.stringify) として yield。 テキスト化はやめる |
+| `doChat` (`claude-agent-sdk.ts:128-156`) | `options.mcpServers` と `options.allowedTools` の設定を削除 (二重実行を防ぐ。 内部 MCP ルートを使わない) |
+| `flattenMessages` (`claude-agent-sdk.ts:252-285`) | assistant の `tool_calls` を `ASSISTANT: ... \n[tool_call: name({args})]` 形式でテキスト化。 SDK のプロンプトに「過去のターンで何のツールを呼んだか」 が見えるようにする。 tool ロールの `TOOL_RESULT (id=...)` 形式は維持 |
+| `attachToolBridge` の保持理由 | 後方互換のため method は残すが、 mcpServers を使わなくなった旨を JSDoc に記載 |
+
+### 期待される効果
+
+- outer agent-loop が tool_call を正しく受け取り、 ToolExecutor で実行
+- self-check ループが発生せず、 1 ターン 1 LLM 呼び出しに戻る (コスト改善)
+- 権限チェック・hook が outer 経由で動く (元々の意図と合致)
+- 既存プロバイダ (claude-cli / azure-anthropic 等) と同じパターンに収束 → 保守容易
+
+### 残課題
+
+- SDK の query() を**毎ターン**呼び直す前提で問題ないか (resumable session API があれば最適化余地。 但し初期実装では毎回 query で十分)
+- `flattenMessages` のテキスト化 tool history が SDK のトークン消費を増やす可能性 → 後追いで構造化 prompt をサポートする手段を探す
+
 ## 10. 参考
 
 - [Claude Agent SDK – Custom Tools](https://code.claude.com/docs/en/agent-sdk/custom-tools)

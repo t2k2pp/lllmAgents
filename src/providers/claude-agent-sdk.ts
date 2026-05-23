@@ -24,10 +24,10 @@ import type {
   VisionChatParams,
   ChatChunk,
   Message,
+  ToolCall,
 } from "./base-provider.js";
 import type { ModelInfo, ModelDetail, SecondLLMProviderType } from "../config/types.js";
 import { CLAUDE_MODELS } from "../config/types.js";
-import { buildLllmAgentsMcpServer } from "../tools/sdk-mcp-bridge.js";
 import type { ToolExecutor } from "../tools/tool-executor.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
 import { getOpsLogger } from "../utils/ops-logger.js";
@@ -57,14 +57,13 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
   }
 
   /**
-   * lllmAgent のツール群を SDK 経由で呼べるよう、 ToolRegistry + ToolExecutor を後付け登録する。
+   * 2026-05-23 改訂以降は no-op に近い。 旧実装では SDK 内部 MCP server に
+   * lllmAgent ツールを公開していたが、 SDK 内部ループが起きず tool_use が
+   * テキストとして outer にリークする問題があったため、 tool 実行は outer
+   * agent-loop に戻した (docs/claude-agent-sdk-provider-design.md 改訂節)。
    *
-   * 設計理由: provider-factory は endpoint config のみを見て provider を作るため、
-   * lllmAgent agent-loop のランタイム状態 (registry / executor) を知らない。
-   * agent-loop 初期化時にこのメソッドで bridge を attach する。
-   *
-   * 未呼び出しのまま chatWithTools を呼ぶと、 SDK は built-in ツール無し (`tools: []`) の
-   * 純テキスト生成器として動作する (= ツール無しエージェントループ)。
+   * 後方互換のため method は残す。 渡された registry / executor は参照のみ
+   * 保持し、 doChat では使わない。
    */
   attachToolBridge(registry: ToolRegistry, executor: ToolExecutor): void {
     this.config.toolRegistry = registry;
@@ -144,16 +143,12 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
       options.pathToClaudeCodeExecutable = this.config.pathToClaudeCodeExecutable;
     }
 
-    // toolRegistry が指定されていれば lllmAgent ツールを MCP server として公開
-    if (this.config.toolRegistry && this.config.toolExecutor) {
-      const handlers = this.config.toolRegistry
-        .getToolNames()
-        .map((n) => this.config.toolRegistry!.get(n)!)
-        .filter((h) => h !== undefined);
-      const mcpServer = buildLllmAgentsMcpServer(handlers, this.config.toolExecutor);
-      options.mcpServers = { lllmagents: mcpServer };
-      options.allowedTools = ["mcp__lllmagents__*"];
-    }
+    // 2026-05-23 改訂: SDK 内部 MCP server (mcpServers / allowedTools) は使用しない。
+    // tool 実行は outer agent-loop に戻し、 convertSdkMessage が tool_use を
+    // ChatChunk.tool_call として yield する設計に切り替えた。
+    // 旧実装の渡し方では SDK 内部ループが起きず tool_use がテキストにリークしていた
+    // (~/.localllm/logs/sessions/2026-05-22T16-13-10_main.jsonl 等で確認、 self-check
+    // 3 連発で LLM コスト 3 倍 + response_complete が呼ばれない症状)。
 
     let promptTokens = 0;
     let completionTokens = 0;
@@ -209,10 +204,12 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
   /**
    * SDKMessage を ChatChunk に変換。
    *  - assistant message の text content block → text chunk
-   *  - assistant message の tool_use block → 可視化のため "[tool: name]" 形式の text chunk
-   *    (実行は SDK 内部で MCP 経由のため、 lllmAgent agent-loop に tool_call を渡す必要はない)
+   *  - assistant message の tool_use block → tool_call chunk (outer agent-loop で実行)
    *  - result message は doChat 側で usage 採取するため、 ここでは何も yield しない
    *  - その他 (system/auth/notification 等) は無視
+   *
+   * 2026-05-23 改訂: 旧実装は tool_use を "[tool: name(...)]" テキスト化していたが、
+   * SDK 内部 MCP ループが起きないため self-check ループの原因になっていた。
    */
   private async *convertSdkMessage(msg: SDKMessage): AsyncGenerator<ChatChunk> {
     if (msg.type === "assistant") {
@@ -223,11 +220,15 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
         if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
           yield { type: "text", text: block.text };
         } else if (block.type === "tool_use") {
-          const inputPreview = JSON.stringify(block.input).slice(0, 120);
-          yield {
-            type: "text",
-            text: `\n[tool: ${block.name}(${inputPreview})]\n`,
+          const toolCall: ToolCall = {
+            id: block.id,
+            type: "function",
+            function: {
+              name: block.name,
+              arguments: JSON.stringify(block.input ?? {}),
+            },
           };
+          yield { type: "tool_call", toolCall };
         }
       }
 
@@ -248,6 +249,10 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
  * lllmAgent の messages を SDK の (systemPrompt, prompt) ペアに分解する。
  * - system messages は連結して systemPrompt に切り出す (SDK の claude_code preset を抑制)
  * - 残りは role ラベル付きで 1 本のテキストに連結 (claude-cli の flatten と同じ方式)
+ *
+ * 2026-05-23 改訂: assistant の tool_calls もテキスト化して履歴に含める。
+ * outer agent-loop で tool 実行する方式に切り替えたため、 SDK が「過去のターンで
+ * 何のツールを呼んで何が返ったか」 を読めるようにする必要がある。
  */
 function flattenMessages(messages: Message[]): { systemPrompt: string; prompt: string } {
   const systemParts: string[] = [];
@@ -260,20 +265,29 @@ function flattenMessages(messages: Message[]): { systemPrompt: string; prompt: s
           .filter((p) => p.type === "text")
           .map((p) => p.text ?? "")
           .join("");
-    if (!text) continue;
 
     switch (m.role) {
       case "system":
-        systemParts.push(text);
+        if (text) systemParts.push(text);
         break;
       case "user":
-        convoParts.push(`USER:\n${text}`);
+        if (text) convoParts.push(`USER:\n${text}`);
         break;
-      case "assistant":
-        convoParts.push(`ASSISTANT:\n${text}`);
+      case "assistant": {
+        const parts: string[] = [];
+        if (text) parts.push(text);
+        if (m.tool_calls && m.tool_calls.length > 0) {
+          for (const tc of m.tool_calls) {
+            parts.push(`[tool_call id=${tc.id} name=${tc.function.name}]\n${tc.function.arguments}`);
+          }
+        }
+        if (parts.length > 0) {
+          convoParts.push(`ASSISTANT:\n${parts.join("\n")}`);
+        }
         break;
+      }
       case "tool":
-        convoParts.push(`TOOL_RESULT (id=${m.tool_call_id ?? ""}):\n${text}`);
+        if (text) convoParts.push(`TOOL_RESULT (id=${m.tool_call_id ?? ""}):\n${text}`);
         break;
     }
   }
