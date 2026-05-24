@@ -40,6 +40,7 @@ llamacpp で複数モデルを別ポートで起動する運用 (8080 以外を�
 | `/model setup azure-foundry` 他 | Azure 系の対話セットアップ (既存) |
 | `/model setup anthropic` | Anthropic API (api.anthropic.com) を対話セットアップ (2026-05-18) |
 | `/model setup claude-cli` | Claude Code CLI (`claude -p`) を対話セットアップ (2026-05-18)。 詳細: `docs/claude-providers.md` |
+| `/model setup gemini` | Google AI Studio (Gemini API) を対話セットアップ (2026-05-24)。 詳細: `docs/gemini-aistudio-provider.md` |
 | `/model host <host>` | ホスト or IP のみ変更。 ポート/プロバイダーは保持 |
 | `/model port <port>` | ポートのみ変更 |
 | `/model provider <type> [<URL>]` | プロバイダー切替 (URL 同時指定可、既存) |

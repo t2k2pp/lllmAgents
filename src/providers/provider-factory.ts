@@ -14,6 +14,7 @@ import { AzureAnthropicProvider } from "./azure-anthropic.js";
 import { AnthropicProvider } from "./anthropic.js";
 import { ClaudeCliProvider } from "./claude-cli.js";
 import { ClaudeAgentSdkProvider } from "./claude-agent-sdk.js";
+import { GeminiProvider } from "./gemini.js";
 import { CredentialVault } from "../security/credential-vault.js";
 
 /**
@@ -138,6 +139,22 @@ function createProviderFromEndpoint(
         }
         // ツール公開 (in-process MCP bridge) は agent-loop 初期化時に attachToolBridge() で行う
         return new ClaudeAgentSdkProvider({
+          model: endpoint.model,
+        });
+      }
+
+      case "gemini": {
+        if (!endpoint.model) {
+          throw new Error("Missing model for gemini provider");
+        }
+        // apiKey 解決: 設定値があればそれを優先、 無ければ env:GEMINI_API_KEY にフォールバック
+        const raw = endpoint.apiKey ?? "env:GEMINI_API_KEY";
+        const token = CredentialVault.resolve(raw, passphrase);
+        if (!token) {
+          throw new Error("GEMINI_API_KEY が見つかりません。 /model setup gemini で設定するか、 環境変数 GEMINI_API_KEY をセットしてください。");
+        }
+        return new GeminiProvider({
+          apiKey: token,
           model: endpoint.model,
         });
       }

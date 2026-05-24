@@ -957,6 +957,169 @@ export class REPL {
   }
 
   /**
+   * Google AI Studio (Gemini) を対話プロンプトでセットアップする。
+   *
+   * `setupClaudeLLM` (anthropic 用) の API キー入力 + モデル選択フローを Gemini 向けに簡略化したもの。
+   * 認証は GEMINI_API_KEY 1 個のみ (endpoint / deploymentName / projectId は不要)。
+   * モデルは GEMINI_MODELS のハードコード一覧から選択する (= /model setup gemini はオフラインでも完走できる)。
+   */
+  private async setupGeminiLLM(target: "main" | "second"): Promise<void> {
+    const { GEMINI_MODELS } = await import("../config/types.js");
+    const targetLabel = target === "main" ? "メインLLM" : "セカンドLLM";
+    console.log(chalk.bold(`\n  ── ${targetLabel} gemini (Google AI Studio) セットアップ ──`));
+    console.log(chalk.dim("  キャンセルは Ctrl+C\n"));
+
+    // 履歴があれば「履歴から選ぶ / 新規セットアップ」 を提示
+    if (await this.maybeOfferProfileHistory(target, "gemini")) return;
+
+    const existing =
+      target === "main" ? this.config.mainLLM : this.config.secondLLM?.endpoint;
+    const existingIsGemini = existing?.providerType === "gemini";
+
+    const chosenModel = await select({
+      message: "Gemini モデルを選択:",
+      choices: GEMINI_MODELS.map((m) => ({
+        name: `${m.label}  ${chalk.dim(`(${m.id}, ctx ${(m.contextWindow / 1000).toLocaleString()}K)`)}`,
+        value: m.id,
+      })),
+      default: existingIsGemini ? existing?.model : "gemini-2.5-flash",
+    });
+
+    const storageMode = await select({
+      message: "GEMINI_API_KEY の保存方法:",
+      choices: [
+        { name: "環境変数参照 (env:GEMINI_API_KEY) — 推奨", value: "env" },
+        { name: "パスフレーズで暗号化保存", value: "encrypt" },
+        { name: "平文で保存 (非推奨)", value: "plain" },
+      ],
+      default: "env",
+    });
+
+    let storedApiKey: string | undefined;
+    let needsRestart = false;
+
+    if (storageMode === "env") {
+      const envName = await input({
+        message: "環境変数名:",
+        default: "GEMINI_API_KEY",
+        validate: (v: string) =>
+          /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim()) || "有効な環境変数名を入力してください",
+      });
+      storedApiKey = `env:${envName.trim()}`;
+      if (!process.env[envName.trim()]) {
+        console.log(chalk.yellow(`  ⚠ 環境変数 ${envName.trim()} は現在未設定です。 アプリ起動時にセットしてください。`));
+      }
+    } else if (storageMode === "plain") {
+      const ok = await confirm({
+        message: "平文保存は config.json にそのまま記録されます。 本当に続行しますか？",
+        default: false,
+      });
+      if (!ok) {
+        console.log(chalk.yellow("  セットアップを中止しました。"));
+        return;
+      }
+      const apiKey = await password({ message: "API Key (入力は表示されません):", mask: "*" });
+      if (!apiKey.trim()) {
+        console.log(chalk.red("  API Key が空です。 中止しました。"));
+        return;
+      }
+      storedApiKey = apiKey.trim();
+    } else {
+      const apiKey = await password({ message: "API Key (入力は表示されません):", mask: "*" });
+      if (!apiKey.trim()) {
+        console.log(chalk.red("  API Key が空です。 中止しました。"));
+        return;
+      }
+      const passphrase = await password({ message: "暗号化用パスフレーズ:", mask: "*" });
+      const passphrase2 = await password({ message: "もう一度入力 (確認):", mask: "*" });
+      if (passphrase !== passphrase2) {
+        console.log(chalk.red("  パスフレーズが一致しません。 中止しました。"));
+        return;
+      }
+      if (passphrase.length < 4) {
+        console.log(chalk.red("  パスフレーズが短すぎます (4文字以上)。 中止しました。"));
+        return;
+      }
+      storedApiKey = CredentialVault.encrypt(apiKey.trim(), passphrase);
+      needsRestart = true;
+    }
+
+    // コンテキストウィンドウ: モデル既定値を提示しつつユーザが上書きできるようにする
+    const modelDefaultCtx = GEMINI_MODELS.find((m) => m.id === chosenModel)?.contextWindow ?? 1_048_576;
+    const ctxInput = await input({
+      message: `コンテキスト長 (例: 128k / 1m / 1048576、 既定: ${(modelDefaultCtx / 1000).toLocaleString()}K):`,
+      default: String(modelDefaultCtx),
+      validate: (v: string) => {
+        const n = parseTokenCount(v);
+        if (!Number.isFinite(n) || n <= 0) return "正の数値、 または '128k' / '1m' 形式で指定してください";
+        return true;
+      },
+    });
+    const ctxWindow = parseTokenCount(ctxInput) || modelDefaultCtx;
+
+    if (target === "main") {
+      const cur = this.config.mainLLM;
+      this.config.mainLLM = {
+        ...cur,
+        providerType: "gemini",
+        model: chosenModel,
+        apiKey: storedApiKey,
+        contextWindow: ctxWindow ?? cur.contextWindow,
+        // ローカル/他クラウド用フィールドはクリア
+        baseUrl: undefined,
+        endpoint: undefined,
+        deploymentName: undefined,
+        projectId: undefined,
+        region: undefined,
+      };
+    } else {
+      this.config.secondLLM = {
+        enabled: true,
+        endpoint: {
+          providerType: "gemini",
+          model: chosenModel,
+          apiKey: storedApiKey,
+          contextWindow: ctxWindow,
+          description: existingIsGemini ? existing?.description : undefined,
+        },
+        budget: this.config.secondLLM?.budget ?? null,
+        cost: this.config.secondLLM?.cost ?? { referenceModels: [] },
+      };
+    }
+    saveConfig(this.config);
+
+    console.log(chalk.green(`\n  ✓ ${targetLabel} (gemini) を設定しました:`));
+    console.log(chalk.dim(`    モデル:  ${chosenModel}`));
+    if (ctxWindow) console.log(chalk.dim(`    Context: ${(ctxWindow / 1000).toLocaleString()}K tokens`));
+    if (storedApiKey) {
+      const kind = storedApiKey.startsWith("encrypted:")
+        ? "暗号化保存"
+        : storedApiKey.startsWith("env:")
+          ? `環境変数 (${storedApiKey})`
+          : "平文保存";
+      console.log(chalk.dim(`    API Key: ${kind}`));
+    }
+
+    if (needsRestart) {
+      console.log(chalk.yellow("\n  ⚠ 暗号化保存のため、 反映にはアプリの再起動と合言葉入力が必要です。"));
+    } else {
+      if (target === "main") {
+        await this.applyMainLLMEndpoint();
+        console.log(chalk.green("  実行時に反映しました。"));
+      } else {
+        await this.applySecondLLMEndpoint();
+        const isAvail = this.secondLLMManager?.isAvailable() ?? false;
+        if (isAvail) {
+          console.log(chalk.green("  実行時に反映しました。"));
+        } else {
+          console.log(chalk.yellow("  反映時に接続失敗しました。 /second status で確認してください。"));
+        }
+      }
+    }
+    console.log();
+  }
+
+  /**
    * セカンドLLMの接続先 (providerType / baseUrl / model / description) 変更を実行時に反映する。
    * SecondLLMManager を再初期化して新しいProviderを作成する。
    */
@@ -2017,7 +2180,7 @@ export class REPL {
         } else if (args[0] === "provider") {
           const newProvider = args[1]?.trim();
           const localProviders: ProviderType[] = ["ollama", "lmstudio", "llamacpp", "vllm"];
-          const cloudProviders = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli", "claude-agent-sdk"];
+          const cloudProviders = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli", "claude-agent-sdk", "gemini"];
           const validProviders = [...localProviders, ...cloudProviders];
           if (!newProvider) {
             console.log(chalk.dim(`  現在のプロバイダー: ${this.config.mainLLM.providerType}`));
@@ -2092,6 +2255,16 @@ export class REPL {
                 console.log(chalk.yellow("  セットアップを中止しました。"));
               }
             }
+          } else if (targetProvider === "gemini") {
+            try {
+              await this.setupGeminiLLM("main");
+            } catch (e) {
+              if (!(e instanceof Error && e.message.includes("User force closed"))) {
+                console.log(chalk.red(`  Gemini セットアップ中にエラー: ${e instanceof Error ? e.message : String(e)}`));
+              } else {
+                console.log(chalk.yellow("  セットアップを中止しました。"));
+              }
+            }
           } else {
             console.log(chalk.red(`  対話セットアップ未対応のプロバイダー: ${targetProvider}`));
             console.log(chalk.dim("  使い方:"));
@@ -2099,6 +2272,7 @@ export class REPL {
             console.log(chalk.dim("    /model setup anthropic        Anthropic API (Claude direct, ANTHROPIC_API_KEY)"));
             console.log(chalk.dim("    /model setup claude-cli       Claude Code CLI (claude -p、 認証は claude login、 tool calling 不可)"));
             console.log(chalk.dim("    /model setup claude-agent-sdk Claude Agent SDK (in-process MCP、 認証は claude login、 tool calling 対応)"));
+            console.log(chalk.dim("    /model setup gemini           Google AI Studio (Gemini、 GEMINI_API_KEY)"));
             console.log(chalk.dim("    /model setup azure-foundry    Azure AI Foundry (Kimi/Mistral等)"));
             console.log(chalk.dim("    /model setup azure-anthropic  Azure Claude — Anthropic Messages API"));
             console.log(chalk.dim("    /model setup azure-openai     Azure OpenAI — Chat Completions API"));
@@ -2436,7 +2610,7 @@ export class REPL {
           }
         } else if (subCmd === "provider") {
           const newProvider = args[1]?.trim();
-          const validProviders = ["ollama", "lmstudio", "llamacpp", "vllm", "vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli", "claude-agent-sdk"];
+          const validProviders = ["ollama", "lmstudio", "llamacpp", "vllm", "vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli", "claude-agent-sdk", "gemini"];
           if (!newProvider) {
             console.log(chalk.dim(`  現在のプロバイダー: ${this.config.secondLLM?.endpoint.providerType ?? "(未設定)"}`));
             console.log(chalk.dim(`  使い方: /second provider <タイプ>`));
@@ -2450,7 +2624,7 @@ export class REPL {
             saveConfig(this.config);
             await this.applySecondLLMEndpoint();
             console.log(chalk.dim(`  プロバイダー: ${chalk.yellow(oldProvider)} → ${chalk.cyan(newProvider)}`));
-            const isCloud = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli", "claude-agent-sdk"].includes(newProvider);
+            const isCloud = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli", "claude-agent-sdk", "gemini"].includes(newProvider);
             if (isCloud) {
               console.log(chalk.dim(`  クラウドプロバイダーは追加の認証情報が必要な場合があります。/second status で確認してください。`));
             } else {
@@ -2478,6 +2652,16 @@ export class REPL {
             } catch (e) {
               if (!(e instanceof Error && e.message.includes("User force closed"))) {
                 console.log(chalk.red(`  Claude セットアップ中にエラー: ${e instanceof Error ? e.message : String(e)}`));
+              } else {
+                console.log(chalk.yellow("  セットアップを中止しました。"));
+              }
+            }
+          } else if (provider === "gemini") {
+            try {
+              await this.setupGeminiLLM("second");
+            } catch (e) {
+              if (!(e instanceof Error && e.message.includes("User force closed"))) {
+                console.log(chalk.red(`  Gemini セットアップ中にエラー: ${e instanceof Error ? e.message : String(e)}`));
               } else {
                 console.log(chalk.yellow("  セットアップを中止しました。"));
               }
@@ -2574,6 +2758,7 @@ export class REPL {
            console.log(chalk.dim("    /second setup azure-anthropic          Azure Claude (Anthropic Messages API) 対話セットアップ"));
            console.log(chalk.dim("    /second setup anthropic                Anthropic API (Claude direct, ANTHROPIC_API_KEY) 対話セットアップ"));
            console.log(chalk.dim("    /second setup claude-cli               Claude Code CLI (claude -p、 認証は claude login) 対話セットアップ"));
+           console.log(chalk.dim("    /second setup gemini                   Google AI Studio (Gemini、 GEMINI_API_KEY) 対話セットアップ"));
            console.log(chalk.dim("    /second enable / disable      有効化・無効化"));
            console.log(chalk.dim("    /second model <名前>          モデル変更"));
            console.log(chalk.dim("    /second url <URL>             エンドポイントURL変更"));

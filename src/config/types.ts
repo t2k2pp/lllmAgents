@@ -12,7 +12,9 @@ export type CloudProviderType =
   /** ローカルにインストールされた Claude Code CLI (`claude -p`) をサブプロセスで呼ぶ */
   | "claude-cli"
   /** Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) を in-process で使う。 claude login 済みセッション継承 (API キー不要)、 lllmAgent ツールを MCP 経由で公開してネイティブ tool_use を成立させる */
-  | "claude-agent-sdk";
+  | "claude-agent-sdk"
+  /** Google AI Studio の Gemini API (generativelanguage.googleapis.com)。 GEMINI_API_KEY 1 個で Gemini 2.5 Pro/Flash 等を呼べる軽量ルート。 vertex-ai が GCP プロジェクト経由なのに対し、 こちらは個人開発者向けの直叩き API */
+  | "gemini";
 
 // セカンドLLMはローカルまたはクラウドのいずれかを指定可能
 export type SecondLLMProviderType = ProviderType | CloudProviderType;
@@ -286,6 +288,7 @@ export function isCloudProvider(type: SecondLLMProviderType): boolean {
     "anthropic",
     "claude-cli",
     "claude-agent-sdk",
+    "gemini",
   ] as string[]).includes(type);
 }
 
@@ -365,7 +368,29 @@ export const PROVIDER_LABELS: Record<SecondLLMProviderType, string> = {
   anthropic: "Anthropic API (Claude direct)",
   "claude-cli": "Claude Code CLI (claude -p)",
   "claude-agent-sdk": "Claude Agent SDK (in-process)",
+  gemini: "Google AI Studio (Gemini)",
 };
+
+/**
+ * Google AI Studio (Gemini API) のモデルハードコード一覧。
+ * `gemini` プロバイダの /model list / /model setup gemini で選択肢として使う。
+ * 動的取得 (generativelanguage.googleapis.com/v1beta/openai/models) もフォールバック可能だが、
+ * 主要モデルはここに固定で持ち、 オフラインでも切替できるようにする。
+ */
+export interface GeminiModelEntry {
+  id: string;
+  label: string;
+  contextWindow: number;
+  supportsVision: boolean;
+  supportsTool: boolean;
+}
+export const GEMINI_MODELS: readonly GeminiModelEntry[] = [
+  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", contextWindow: 1_048_576, supportsVision: true, supportsTool: true },
+  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", contextWindow: 1_048_576, supportsVision: true, supportsTool: true },
+  { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", contextWindow: 1_048_576, supportsVision: true, supportsTool: true },
+  { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash", contextWindow: 1_048_576, supportsVision: true, supportsTool: true },
+  { id: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite", contextWindow: 1_048_576, supportsVision: true, supportsTool: true },
+];
 
 export function getDefaultConfig(): Config {
   return {
