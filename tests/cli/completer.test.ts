@@ -267,4 +267,68 @@ describe("createFileMenuProvider", () => {
     const items = provider("nonexistent/");
     expect(items).toHaveLength(0);
   });
+
+  describe("部分一致候補 (Claude Code 風)", () => {
+    let fuzzyDir: string;
+
+    beforeAll(() => {
+      fuzzyDir = fs.mkdtempSync(path.join(os.tmpdir(), "fuzzy-test-"));
+      fs.mkdirSync(path.join(fuzzyDir, "src", "cli"), { recursive: true });
+      fs.mkdirSync(path.join(fuzzyDir, "src", "agent"), { recursive: true });
+      fs.mkdirSync(path.join(fuzzyDir, "tests", "cli"), { recursive: true });
+      fs.mkdirSync(path.join(fuzzyDir, "docs"), { recursive: true });
+      fs.writeFileSync(path.join(fuzzyDir, "src", "cli", "completer.ts"), "");
+      fs.writeFileSync(path.join(fuzzyDir, "src", "cli", "repl.ts"), "");
+      fs.writeFileSync(path.join(fuzzyDir, "src", "agent", "agent-loop.ts"), "");
+      fs.writeFileSync(path.join(fuzzyDir, "tests", "cli", "completer.test.ts"), "");
+      fs.writeFileSync(path.join(fuzzyDir, "docs", "workspace-separation.md"), "");
+      fs.writeFileSync(path.join(fuzzyDir, "README.md"), "");
+    });
+
+    afterAll(() => {
+      fs.rmSync(fuzzyDir, { recursive: true, force: true });
+    });
+
+    it("basename 部分一致でプロジェクト全域から候補を返す", () => {
+      const provider = createFileMenuProvider(fuzzyDir);
+      const items = provider("completer");
+      const labels = items.map((i) => i.label);
+      expect(labels).toContain("src/cli/completer.ts");
+      expect(labels).toContain("tests/cli/completer.test.ts");
+    });
+
+    it("ディレクトリ名の部分一致も拾う", () => {
+      const provider = createFileMenuProvider(fuzzyDir);
+      const items = provider("cli");
+      const labels = items.map((i) => i.label);
+      expect(labels).toContain("src/cli/");
+      expect(labels).toContain("tests/cli/");
+    });
+
+    it("パスの一部 (docs/work) でも候補が出る", () => {
+      const provider = createFileMenuProvider(fuzzyDir);
+      const items = provider("docs/work");
+      const labels = items.map((i) => i.label);
+      expect(labels).toContain("docs/workspace-separation.md");
+    });
+
+    it("basename 前方一致は他より上位にランクされる", () => {
+      const provider = createFileMenuProvider(fuzzyDir);
+      const items = provider("comp");
+      // src/cli/completer.ts は basename が "comp" で始まるので先頭付近
+      const idx = items.findIndex((i) => i.label === "src/cli/completer.ts");
+      expect(idx).toBeGreaterThanOrEqual(0);
+      expect(idx).toBeLessThan(2);
+    });
+
+    it("末尾スラッシュはディレクトリ列挙 (部分一致ではなく直下)", () => {
+      const provider = createFileMenuProvider(fuzzyDir);
+      const items = provider("src/");
+      const labels = items.map((i) => i.label);
+      expect(labels).toContain("src/cli/");
+      expect(labels).toContain("src/agent/");
+      // tests/cli/ は src/ 直下ではないので含まれない
+      expect(labels).not.toContain("tests/cli/");
+    });
+  });
 });

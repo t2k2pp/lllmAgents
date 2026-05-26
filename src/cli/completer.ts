@@ -285,55 +285,129 @@ export function createCompleter(
 }
 
 // ─── ファイルパス補完（共通ロジック） ────────────────────
+//
+// 動作:
+//   1. partial が空 / "/" 終わりの場合 → そのディレクトリ直下を列挙（ドリルダウン用）
+//   2. それ以外 → プロジェクト配下を再帰スキャンしてフルパスに対し部分一致
+//      Claude Code 風: "@completer" → src/cli/completer.ts がヒット
+//
+// 再帰走査は cwd ごとに数秒キャッシュ。除外: 巨大/無関係ディレクトリと dotfile/dir。
 
-function completeFilePath(partial: string, cwd: string): string[] {
+const FILE_TREE_IGNORE = new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  "deploy",
+  "coverage",
+  ".vitest",
+  "__pycache__",
+  ".next",
+  ".turbo",
+  "out",
+  ".cache",
+]);
+const FILE_TREE_MAX_DEPTH = 8;
+const FILE_TREE_MAX_ENTRIES = 20000;
+const FILE_TREE_CACHE_TTL_MS = 3000;
+const FILE_TREE_RESULT_LIMIT = 30;
+
+const fileTreeCache = new Map<string, { fetchedAt: number; entries: string[] }>();
+
+function getProjectFiles(cwd: string): string[] {
+  const cached = fileTreeCache.get(cwd);
+  const now = Date.now();
+  if (cached && now - cached.fetchedAt < FILE_TREE_CACHE_TTL_MS) {
+    return cached.entries;
+  }
+  const entries: string[] = [];
+  walkDir(cwd, cwd, 0, entries);
+  entries.sort();
+  fileTreeCache.set(cwd, { fetchedAt: now, entries });
+  return entries;
+}
+
+function walkDir(dir: string, root: string, depth: number, out: string[]): void {
+  if (depth > FILE_TREE_MAX_DEPTH) return;
+  if (out.length >= FILE_TREE_MAX_ENTRIES) return;
+  let dirents: fs.Dirent[];
   try {
-    const dir = path.dirname(partial);
-    const prefix = path.basename(partial);
-    const targetDir = path.resolve(cwd, dir === "." && partial === "" ? "." : dir);
-
-    if (!fs.existsSync(targetDir) || !fs.statSync(targetDir).isDirectory()) {
-      return [];
+    dirents = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const ent of dirents) {
+    if (out.length >= FILE_TREE_MAX_ENTRIES) return;
+    if (ent.name.startsWith(".")) continue;
+    if (FILE_TREE_IGNORE.has(ent.name)) continue;
+    const full = path.join(dir, ent.name);
+    const rel = path.relative(root, full).replace(/\\/g, "/");
+    if (ent.isDirectory()) {
+      out.push(rel + "/");
+      walkDir(full, root, depth + 1, out);
+    } else if (ent.isFile()) {
+      out.push(rel);
     }
+  }
+}
 
+function listDirEntries(partial: string, cwd: string): string[] {
+  try {
     const isExactDir = partial.endsWith("/") || partial.endsWith("\\");
-    let searchDir: string;
-    let searchPrefix: string;
-
-    if (isExactDir) {
-      searchDir = path.resolve(cwd, partial);
-      searchPrefix = "";
-    } else {
-      searchDir = targetDir;
-      searchPrefix = prefix;
-    }
-
+    const searchDir = isExactDir ? path.resolve(cwd, partial) : cwd;
     if (!fs.existsSync(searchDir) || !fs.statSync(searchDir).isDirectory()) {
       return [];
     }
-
-    const entries = fs.readdirSync(searchDir, { withFileTypes: true });
+    const dirents = fs.readdirSync(searchDir, { withFileTypes: true });
     const results: string[] = [];
-
-    for (const entry of entries) {
-      if (entry.name.startsWith(".")) continue;
-      if (searchPrefix && !entry.name.startsWith(searchPrefix)) continue;
-
-      const relativePath = isExactDir
-        ? `${partial}${entry.name}`
-        : dir === "."
-          ? entry.name
-          : `${dir}/${entry.name}`;
-
-      if (entry.isDirectory()) {
-        results.push(`${relativePath}/`);
-      } else {
-        results.push(relativePath);
-      }
+    for (const ent of dirents) {
+      if (ent.name.startsWith(".")) continue;
+      if (FILE_TREE_IGNORE.has(ent.name)) continue;
+      const rel = isExactDir ? `${partial}${ent.name}` : ent.name;
+      results.push(ent.isDirectory() ? `${rel}/` : rel);
     }
-
     return results.sort();
   } catch {
     return [];
   }
+}
+
+function completeFilePath(partial: string, cwd: string): string[] {
+  // 1. 空 or "/" 終わり: そのディレクトリ直下を列挙
+  if (partial === "" || partial.endsWith("/") || partial.endsWith("\\")) {
+    return listDirEntries(partial, cwd);
+  }
+
+  // 2. 部分一致モード: 再帰スキャン + フルパス部分一致
+  const needle = partial.toLowerCase().replace(/\\/g, "/");
+  const all = getProjectFiles(cwd);
+
+  type Hit = { path: string; score: number };
+  const hits: Hit[] = [];
+  for (const p of all) {
+    const lower = p.toLowerCase();
+    // basename 抽出 (ディレクトリは末尾 "/" の手前まで)
+    const baseEnd = lower.endsWith("/") ? lower.length - 1 : lower.length;
+    const lastSlash = lower.lastIndexOf("/", baseEnd - 1);
+    const basename = lower.slice(lastSlash + 1, baseEnd);
+
+    let score: number;
+    if (basename.startsWith(needle)) {
+      score = 1000;
+    } else if (basename.includes(needle)) {
+      score = 500;
+    } else if (lower.includes(needle)) {
+      score = 200;
+    } else {
+      continue;
+    }
+    // 浅いパス優先
+    const depth = (p.match(/\//g)?.length ?? 0);
+    score -= depth;
+    // 同スコアならファイル優先（ディレクトリは末尾"/"分だけ僅かに減点）
+    if (p.endsWith("/")) score -= 0.5;
+    hits.push({ path: p, score });
+  }
+
+  hits.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
+  return hits.slice(0, FILE_TREE_RESULT_LIMIT).map((h) => h.path);
 }
