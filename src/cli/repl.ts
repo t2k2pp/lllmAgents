@@ -2013,6 +2013,190 @@ export class REPL {
     }
   }
 
+  // ─── /integrations (Phase optimize #3、 2026-05-28) ─────────────
+  //
+  // /discord / /slack / /chatlog / /search の 4 つの "外部統合" 設定パネルを
+  // 1 つの picker に束ねる。 旧 4 コマンドは dispatcher 互換維持 (この picker は
+  // 内部的に this.handleCommand("/discord <sub>") 等を再帰呼び出しする)。
+
+  private async handleIntegrationsCommand(): Promise<void> {
+    while (true) {
+      const dEnabled = this.config.discord?.enabled ?? false;
+      const dListening = this.interactionServer?.running ?? false;
+      const sEnabled = this.config.slack?.enabled ?? false;
+      const cEnabled = this.config.chatLog?.enabled ?? false;
+      const cVault = this.config.chatLog?.vaultPath;
+      const searchProv = this.config.search?.provider ?? "duckduckgo";
+      const dTag = `${dEnabled ? chalk.green("enabled") : chalk.yellow("disabled")}${dListening ? ", " + chalk.cyan("listening") : ""}`;
+      const sTag = sEnabled ? chalk.green("enabled") : chalk.yellow("disabled");
+      const cTag = cVault ? (cEnabled ? chalk.green("enabled") : chalk.yellow("disabled")) : chalk.yellow("未設定");
+      const searchTag = chalk.cyan(searchProv);
+
+      let pick: string;
+      try {
+        pick = await select({
+          message: "Integrations — 設定する対象を選択:",
+          choices: [
+            { name: `Discord    [${dTag}]`, value: "discord" },
+            { name: `Slack      [${sTag}]`, value: "slack" },
+            { name: `Chatlog    [${cTag}]`, value: "chatlog" },
+            { name: `Search     [${searchTag}]`, value: "search" },
+            { name: chalk.dim("Done"), value: "done" },
+          ],
+        });
+      } catch { return; }
+      if (pick === "done") return;
+      if (pick === "discord") await this.integrationsDiscordMenu();
+      else if (pick === "slack") await this.integrationsSlackMenu();
+      else if (pick === "chatlog") await this.integrationsChatlogMenu();
+      else if (pick === "search") await this.integrationsSearchMenu();
+    }
+  }
+
+  /** /integrations → Discord 編集サブメニュー (旧 /discord と互換) */
+  private async integrationsDiscordMenu(): Promise<void> {
+    while (true) {
+      await this.handleCommand("/discord status");
+      let action: string;
+      try {
+        action = await select({
+          message: "Discord 操作:",
+          choices: [
+            { name: "Enable webhook notifications", value: "enable" },
+            { name: "Disable webhook notifications", value: "disable" },
+            { name: "Set Webhook URL", value: "url" },
+            { name: "Test webhook", value: "test" },
+            { name: "Set Application ID", value: "app-id" },
+            { name: "Set Public Key", value: "public-key" },
+            { name: "Set Bot Token", value: "bot-token" },
+            { name: "Set Interaction Port", value: "port" },
+            { name: "Register /ask slash command", value: "register" },
+            { name: "Start interaction server", value: "listen-start" },
+            { name: "Stop interaction server", value: "listen-stop" },
+            { name: "Toggle interaction-server auto-start", value: "auto-start-toggle" },
+            { name: chalk.dim("Back"), value: "back" },
+          ],
+          pageSize: 14,
+        });
+      } catch { return; }
+      if (action === "back") return;
+
+      if (["enable", "disable", "test", "register"].includes(action)) {
+        await this.handleCommand(`/discord ${action}`);
+      } else if (action === "listen-start") {
+        await this.handleCommand("/discord listen start");
+      } else if (action === "listen-stop") {
+        await this.handleCommand("/discord listen stop");
+      } else if (action === "auto-start-toggle") {
+        const cur = this.config.discord?.listenEnabled ?? false;
+        await this.handleCommand(`/discord listen auto-start ${cur ? "off" : "on"}`);
+      } else {
+        // url / app-id / public-key / bot-token / port — 1 引数
+        try {
+          const val = await input({ message: `${action} の値を入力 (空でキャンセル):` });
+          if (!val.trim()) { console.log(chalk.dim("  キャンセル。")); continue; }
+          await this.handleCommand(`/discord ${action} ${val.trim()}`);
+        } catch { /* cancel */ }
+      }
+    }
+  }
+
+  /** /integrations → Slack 編集サブメニュー (旧 /slack と互換) */
+  private async integrationsSlackMenu(): Promise<void> {
+    while (true) {
+      await this.handleCommand("/slack status");
+      let action: string;
+      try {
+        action = await select({
+          message: "Slack 操作:",
+          choices: [
+            { name: "Enable webhook notifications", value: "enable" },
+            { name: "Disable webhook notifications", value: "disable" },
+            { name: "Set Webhook URL", value: "url" },
+            { name: "Test webhook", value: "test" },
+            { name: "Set Bot Token (xoxb-...)", value: "bot-token" },
+            { name: "Set App-Level Token (xapp-...)", value: "app-token" },
+            { name: chalk.dim("Back"), value: "back" },
+          ],
+        });
+      } catch { return; }
+      if (action === "back") return;
+
+      if (["enable", "disable", "test"].includes(action)) {
+        await this.handleCommand(`/slack ${action}`);
+      } else {
+        // url / bot-token / app-token
+        try {
+          const val = await input({ message: `${action} の値を入力 (空でキャンセル):` });
+          if (!val.trim()) { console.log(chalk.dim("  キャンセル。")); continue; }
+          await this.handleCommand(`/slack ${action} ${val.trim()}`);
+        } catch { /* cancel */ }
+      }
+    }
+  }
+
+  /** /integrations → Chatlog 編集サブメニュー (旧 /chatlog と互換) */
+  private async integrationsChatlogMenu(): Promise<void> {
+    while (true) {
+      await this.handleCommand("/chatlog status");
+      let action: string;
+      try {
+        action = await select({
+          message: "Chatlog 操作:",
+          choices: [
+            { name: "Enable", value: "enable" },
+            { name: "Disable", value: "disable" },
+            { name: "Set Vault path", value: "vault" },
+            { name: chalk.dim("Back"), value: "back" },
+          ],
+        });
+      } catch { return; }
+      if (action === "back") return;
+      if (action === "enable" || action === "disable") {
+        await this.handleCommand(`/chatlog ${action}`);
+      } else {
+        try {
+          const val = await input({ message: "Obsidian Vault のパス (空でキャンセル):" });
+          if (!val.trim()) { console.log(chalk.dim("  キャンセル。")); continue; }
+          await this.handleCommand(`/chatlog vault ${val.trim()}`);
+        } catch { /* cancel */ }
+      }
+    }
+  }
+
+  /** /integrations → Search 編集サブメニュー (旧 /search と互換) */
+  private async integrationsSearchMenu(): Promise<void> {
+    while (true) {
+      await this.handleCommand("/search status");
+      let action: string;
+      try {
+        action = await select({
+          message: "Search provider 操作:",
+          choices: [
+            { name: "Switch to DuckDuckGo", value: "ddg" },
+            { name: "Switch to SearXNG", value: "searxng" },
+            { name: "Test search", value: "test" },
+            { name: chalk.dim("Back"), value: "back" },
+          ],
+        });
+      } catch { return; }
+      if (action === "back") return;
+      if (action === "ddg") {
+        await this.handleCommand("/search duckduckgo");
+      } else if (action === "test") {
+        await this.handleCommand("/search test");
+      } else if (action === "searxng") {
+        try {
+          const val = await input({
+            message: "SearXNG URL (空で現状維持):",
+            default: this.config.search?.searxngUrl ?? "",
+          });
+          await this.handleCommand(`/search searxng ${val.trim()}`.trim());
+        } catch { /* cancel */ }
+      }
+    }
+  }
+
   /**
    * setup フロー冒頭で「履歴から選ぶ / 新規セットアップ」 を提示する共通ヘルパ。
    *  - 履歴が空、 または provider にマッチする履歴が無ければ何もせず undefined を返す
@@ -3851,6 +4035,15 @@ export class REPL {
         // 2026-05-27: /models へ統合された。 alias として動作するが deprecation を表示。
         console.log(chalk.dim("  ℹ /profiles は /models に名称変更されました (alias として動作中)。 詳細: docs/model-registry.md"));
         await this.handleProfilesCommand(args);
+        break;
+      }
+
+      case "/integrations":
+      case "/integration":
+      case "/intg": {
+        // 2026-05-28: Discord / Slack / Chatlog / Search の設定パネルを 1 つの picker に
+        // 集約 (Phase optimize #3)。 旧 4 コマンドは dispatcher 互換維持。
+        await this.handleIntegrationsCommand();
         break;
       }
 

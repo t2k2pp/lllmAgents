@@ -230,24 +230,37 @@ describe("createCommandMenuProvider", () => {
     expect(labels).toContain("/models help");
   });
 
-  it("/discord/slack/search/loop の主要サブコマンドが補完候補に出る", () => {
+  it("/integrations が補完候補に出る (Phase optimize #3 統合後)", () => {
+    // Phase optimize #3 (2026-05-28): /discord / /slack / /chatlog / /search は
+    // /integrations の picker 配下に統合され、 補完候補からは [非推奨] alias 1 件のみ残る。
     const provider = createCommandMenuProvider();
-    const dItems = provider("discord ").map((i) => i.label);
-    expect(dItems).toContain("/discord url");
-    expect(dItems).toContain("/discord test");
-    expect(dItems).toContain("/discord bot-token");
-    expect(dItems).toContain("/discord listen start");
+    const items = provider("integrations");
+    const labels = items.map((i) => i.label);
+    expect(labels).toContain("/integrations");
+    // 短縮形
+    expect(provider("intg").map((i) => i.label)).toContain("/intg");
+  });
 
-    const sItems = provider("slack ").map((i) => i.label);
-    expect(sItems).toContain("/slack url");
-    expect(sItems).toContain("/slack bot-token");
-    expect(sItems).toContain("/slack app-token");
+  it("旧 /discord /slack /chatlog /search のサブコマンドは補完から除外 (dispatcher 互換は維持)", () => {
+    const provider = createCommandMenuProvider();
+    const allLabels = provider("").map((i) => i.label);
+    // 残存する [非推奨] alias 1 件
+    expect(allLabels).toContain("/discord");
+    expect(allLabels).toContain("/slack");
+    expect(allLabels).toContain("/chatlog");
+    expect(allLabels).toContain("/search");
+    // 個別サブは除外済み
+    expect(allLabels).not.toContain("/discord url");
+    expect(allLabels).not.toContain("/discord listen start");
+    expect(allLabels).not.toContain("/slack url");
+    expect(allLabels).not.toContain("/slack bot-token");
+    expect(allLabels).not.toContain("/chatlog vault");
+    expect(allLabels).not.toContain("/search searxng");
+    expect(allLabels).not.toContain("/search duckduckgo");
+  });
 
-    const searchItems = provider("search ").map((i) => i.label);
-    expect(searchItems).toContain("/search searxng");
-    expect(searchItems).toContain("/search duckduckgo");
-    expect(searchItems).toContain("/search test");
-
+  it("/loop の主要サブコマンドは引き続き補完候補に出る", () => {
+    const provider = createCommandMenuProvider();
     const loopItems = provider("loop").map((i) => i.label);
     expect(loopItems).toContain("/loop");
     expect(loopItems).toContain("/loop list");
