@@ -1,5 +1,7 @@
 # チャットログ保存機能 設計書
 
+> **2026-05-28 更新**: REPL からの操作は `/integrations` (短縮: `/intg`) の picker 経由が canonical (Phase optimize #3 で Discord / Slack / Chatlog / Search を統合)。 本書中の `/chatlog xxx` は dispatcher 互換として引き続き動作するが、 補完候補からは外れている。
+
 ## 概要
 
 ユーザーとAIの会話ログをObsidian Vaultに自動保存する機能。
@@ -7,7 +9,7 @@
 
 ## 要件
 
-- 有効/無効の切り替え（`/chatlog enable` / `disable`）
+- 有効/無効の切り替え（`/integrations` → Chatlog、 または旧 `/chatlog enable` / `disable` alias）
 - ナレッジベースとは独立したVaultパス指定
 - セッションごとにファイルを分離
 - コンテキスト圧縮前後でファイルを分割（Part 1, 2, ...）
@@ -81,12 +83,15 @@ tags:
 
 ## CLIコマンド
 
+canonical な操作経路は `/integrations` の Chatlog セクション (picker)。 旧 `/chatlog ...` も dispatcher 互換で動作するが、 補完候補からは外れている。
+
 | コマンド | 説明 |
 |----------|------|
-| `/chatlog` | ステータス表示 |
-| `/chatlog vault <path>` | Vault パスを設定（自動で enabled） |
-| `/chatlog enable` | チャットログ ON |
-| `/chatlog disable` | チャットログ OFF |
+| `/integrations` → Chatlog | ステータス表示 + Enable / Disable / Set Vault path の picker |
+| `/chatlog` (alias) | ステータス表示 |
+| `/chatlog vault <path>` (alias) | Vault パスを設定（自動で enabled） |
+| `/chatlog enable` (alias) | チャットログ ON |
+| `/chatlog disable` (alias) | チャットログ OFF |
 
 ## アーキテクチャ
 

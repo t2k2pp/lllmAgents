@@ -371,7 +371,7 @@ API キー不要 (claude CLI 側の `claude login` 済みセッションを再�
 | `enabled` | boolean | 通知の有効/無効 |
 | `webhookUrl` | string | Discord Webhook URL |
 
-CLIコマンド `/discord url <URL>` → `/discord enable` → `/discord test` でも設定可能。
+CLI からは `/integrations` (短縮: `/intg`) → Discord の picker で対話設定 (canonical)。 旧 `/discord url <URL>` → `/discord enable` → `/discord test` も dispatcher 互換のため動作する。
 
 ### Slash Command受信（オプション）
 
@@ -393,7 +393,7 @@ CLIコマンド `/discord url <URL>` → `/discord enable` → `/discord test` �
 | `appToken` | string | `xapp-` App-Level Token (Socket Mode用) |
 
 Slack Bot (`--slack` モード) を使う場合は `botToken` + `appToken` の両方が必要。
-CLIコマンド `/slack bot-token <TOKEN>` → `/slack app-token <TOKEN>` でも設定可能。
+CLI からは `/integrations` → Slack の picker で対話設定 (canonical)。 旧 `/slack bot-token <TOKEN>` → `/slack app-token <TOKEN>` も dispatcher 互換で動作する。
 
 ## search
 

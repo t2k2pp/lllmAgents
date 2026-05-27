@@ -15,10 +15,18 @@ Claude Code の `/loop` スキルと同等の UX を提供する。
 
 ```
 /loop [interval] <prompt>   新しいループを開始する
-/loop list                  アクティブなループ一覧を表示
-/loop stop <id>             指定IDのループを停止
-/loop stop all              全ループを停止
+/loop status                アクティブなループ一覧 + 停止 picker (checkbox 複数選択)
 ```
+
+### 旧コマンドとの互換 (dispatcher 経由でのみ動作、 補完候補からは外れる)
+
+```
+/loop list                  アクティブなループ一覧のみ表示 (picker は出ない)
+/loop stop <id>             指定 ID のループを停止 (スクリプト用)
+/loop stop all              全ループを停止 (スクリプト用)
+```
+
+`/loop status` は一覧表示の直後に停止対象を checkbox で複数選択できるため、 通常の運用ではこちらが推奨。 `/loop list` と `/loop stop` は旧仕様との互換のため残されている。
 
 ### 間隔指定フォーマット
 
@@ -100,5 +108,5 @@ Node.js は単一スレッドのため、エージェント実行中（`await ag
 
 - `/loop` はスキルシステムを経由しない（REPL の switch 文で直接処理）
 - ループは REPL セッション内のみ有効（セッション終了時に全タイマーをクリア）
-- 実行中のループを `Ctrl+C` でキャンセルする場合は `/loop stop all` を使う
+- 実行中のループをまとめてキャンセルする場合は `/loop status` で全選択 → Enter、 または旧形式の `/loop stop all` (alias) を使う
 - CLAUDE.md の「絶対パス使用」ルールは本機能には非該当（パス操作なし）

@@ -1,5 +1,7 @@
 # Slack統合 設計書
 
+> **2026-05-28 更新**: REPL からの設定は `/integrations` (短縮: `/intg`) → Slack の picker 経由が canonical (Phase optimize #3 で Discord / Slack / Chatlog / Search を統合)。 本書中の `/slack xxx` は dispatcher 互換で引き続き動作するが、 補完候補からは外れている。 Slack-auto-approve ツールも `/permission` の picker から編集可能になった (旧 `/permission slack-add` は完全互換のため残存)。
+
 ## 概要
 
 lllmAgentsにSlack統合を追加し、Slackを主要なインターフェースとして使用可能にする。
@@ -81,21 +83,24 @@ slackAutoApproveTools: string[]  // Slack経由で自動許可するツール
 
 ## CLIコマンド
 
+canonical な操作経路は `/integrations` → Slack の picker。 下表の `/slack xxx` 形式は dispatcher 互換のため残存 (補完候補からは外れている)。
+
 ### 通知設定
 
 ```
-/slack status              設定状態表示
-/slack enable              Webhook通知有効化
-/slack disable             Webhook通知無効化
-/slack url <URL>           Incoming Webhook URL設定
-/slack test                テスト通知送信
+/integrations              picker から Slack を選択 → status / enable / disable / url / test
+/slack status              設定状態表示 (alias)
+/slack enable              Webhook通知有効化 (alias)
+/slack disable             Webhook通知無効化 (alias)
+/slack url <URL>           Incoming Webhook URL設定 (alias)
+/slack test                テスト通知送信 (alias)
 ```
 
 ### Bot設定（--slackモード用）
 
 ```
-/slack bot-token <xoxb-...>   Bot Token設定
-/slack app-token <xapp-...>   App-Level Token設定
+/slack bot-token <xoxb-...>   Bot Token設定 (alias / または /integrations → Slack → Set Bot Token)
+/slack app-token <xapp-...>   App-Level Token設定 (alias / または /integrations → Slack → Set App-Level Token)
 ```
 
 ## Slack App セットアップ手順
@@ -171,7 +176,7 @@ Slack経由のリクエストはDiscordと同じheadlessモデル:
 4. 上記以外のツールは拒否（インタラクティブ確認不可のため）
 5. ファイル操作はサンドボックスチェック適用
 
-`/permission slack-add <tool>` で許可ツール追加可能。
+`/permission` の picker → "Slack auto-approve tools" → "Add tool" でツール追加可能。 旧仕様の `/permission slack-add <tool>` は dispatcher 上で **未公開** のまま `permission-manager` 側だけに API があった (Phase optimize #1 で picker から初めて UI 露出した)。
 
 ## 制限事項・将来拡張
 

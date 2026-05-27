@@ -121,51 +121,69 @@ stateDiagram-v2
 | `/clear` | 現在の会話履歴とコンテキストをクリアします |
 | `/context` | 現在のコンテキスト（トークン）使用状況を表示します |
 | `/compact` | コンテキストの手動圧縮を実行します |
-| `/model` | 使用中のLLMモデルを変更します |
+| `/model` | 現在のスロット (main / second / vision) 状況を表示します。 編集は `/models` (登録レジストリ) または `/model <slot> <verb>` |
+| `/models` | 登録モデルの一覧 → アクション (Set as main/second/vision / Edit / Duplicate / Delete / Add new) |
+| `/swap` | main ⇔ second のスロット入れ替え |
 | `/plan` | タスクを事前に分析・設計する「プランモード」を手動で開始します |
 | `/skills` | 追加ロードされているスキル（builtin含む）の一覧を表示します |
-| `/status` | 全体の稼働ステータス（コンテキスト・タスク・エージェント）を一括表示します |
+| `/status` | セッション全体の状態を 1 画面で表示 (slot / context / capability / metrics / cost / tasks) |
 | `/todo` | 現在のTODOリストを表示します |
-| `/sessions` | 保存されたセッション一覧を表示します |
-| `/resume` | 過去のセッションを再開します |
+| `/resume` | セッション復元 (引数なしで picker / `latest` で最新 / `list` で一覧) |
 | `/memory` | 永続メモリの内容を表示します |
 | `/remember` | 指定した情報を永続メモリに記録します |
 | `/diff` | 現在のセッションでの変更差分を表示します |
-| `/discord` | Discord通知設定の確認・有効化・無効化・URL設定を行います |
-| `/permission` | ツール実行権限の表示・変更を行います（サブコマンドあり） |
-| `/second` | セカンドLLMの設定・状態確認を行います (v0.3.0) |
-| `/cost` | セカンドLLMのトークン使用量とコストを表示します (v0.3.0) |
+| `/integrations` | 外部統合 (Discord / Slack / Chatlog / Search) を 1 画面で設定 |
+| `/permission` | ツール実行権限を picker で編集 (Pattern rules / Auto / Require / Discord / Slack) |
+| `/stream` | 表示モード (ストリーミング / スピナー+Markdown) を toggle |
+| `/loop` | プロンプトを定期実行 (例: `/loop 5m /pr-review`)。 一覧 + 停止は `/loop status` |
+| `/autorun` | 自律実行モードの toggle |
 
-※ `/setup` は REPL コマンドではなく、CLI起動時のフラグ `--setup` で実行します。
+※ `/setup` は REPL コマンドではなく、 CLI 起動時のフラグ `--setup` で実行します。
+※ 旧コマンドの alias は dispatcher 互換のため動作しますが、 補完候補からは外れています:
+  - `/sessions` → `/resume list`、 `/continue` → `/resume latest`
+  - `/second xxx` → `/model second xxx`
+  - `/profiles` → `/models`
+  - `/discord` `/slack` `/chatlog` `/search` の各サブ → `/integrations` 配下
+  - `/metrics` `/cost` `/capability` → `/status` に集約 (完全削除)
 
-#### `/permission` サブコマンド一覧
+#### `/models` (Model Registry) — main / second / vision 統合管理
 
-| サブコマンド | 説明 |
-|---|---|
-| `/permission list` | 現在の権限設定を一覧表示 |
-| `/permission rules` | パターンルール（allow/deny/ask）一覧表示 |
-| `/permission auto-add <tool>` | CLIの自動許可ツールに追加 |
-| `/permission auto-remove <tool>` | CLIの自動許可ツールから削除 |
-| `/permission require-add <tool>` | CLI確認必須ツールに追加 |
-| `/permission require-remove <tool>` | CLI確認必須ツールから削除 |
-| `/permission discord-add <tool>` | Discord自動許可ツールに追加 |
-| `/permission discord-remove <tool>` | Discord自動許可ツールから削除 |
-| `/permission rule-add allow <pattern>` | allowルールを追加（例: `bash(npm *)`） |
-| `/permission rule-add deny <pattern>` | denyルールを追加（例: `bash(rm -rf *)`） |
-| `/permission rule-add ask <pattern>` | askルールを追加（例: `bash(git push *)`） |
-| `/permission rule-remove allow <pattern>` | allowルールを削除 |
-| `/permission rule-remove deny <pattern>` | denyルールを削除 |
-| `/permission rule-remove ask <pattern>` | askルールを削除 |
-
-#### `/second` サブコマンド一覧（v0.3.0）
+詳細: `docs/model-registry.md`
 
 | サブコマンド | 説明 |
 |---|---|
-| `/second setup` | 対話式セカンドLLM設定ウィザードを起動 |
-| `/second status` | 現在の設定と利用状況を表示 |
-| `/second enable` | セカンドLLMを有効化 |
-| `/second disable` | セカンドLLMを無効化 |
-| `/second budget <金額>` | 予算上限を変更 (USD) |
+| `/models` | 登録モデル一覧 → エントリ選択 → Set as main / Set as second / Set as vision / Edit / Duplicate / Delete / Add new... |
+| `/models list` | 一覧のみ表示 (操作なし) |
+| `/models help` | 使い方表示 |
+
+#### `/model <slot>` — スロット別操作
+
+| サブコマンド | 説明 |
+|---|---|
+| `/model` | main / second / vision の状態を 1 画面で表示 |
+| `/model list` | main slot の利用可能モデル一覧から選択 |
+| `/model context <値>` | main slot のコンテキスト長を変更 (例: `128k`) |
+| `/model setup` | main slot の新規セットアップ wizard |
+| `/model second <sub>` | second slot 操作 (`status` / `enable` / `disable` / `setup` / `list` / `context` / `description`) |
+| `/model vision <sub>` | vision slot 操作 (`status` / `setup` / `list` / `context` / `description` / `clear`) |
+
+#### `/integrations` — 外部統合の集約 (Discord / Slack / Chatlog / Search)
+
+`/integrations` (短縮: `/intg`) で 4 系統の状態を一覧表示し、 picker で対象を選択 → そのプロバイダの設定画面に入る。 内部的には旧 `/discord ...` 等の dispatcher が再利用されるため、 旧コマンドはそのまま動作する (補完候補からは除外)。
+
+#### `/permission` — 権限設定 picker
+
+引数なしで対話 picker:
+
+| カテゴリ | 内容 |
+|---|---|
+| Pattern rules | `allow` / `deny` / `ask` パターン (例: `bash(npm *)` / `bash(rm -rf *)` / `bash(git push *)`) |
+| Auto-approve tools (CLI) | CLI 経由で自動承認するツール |
+| Require-approval tools (CLI) | CLI 経由で常に確認するツール |
+| Discord auto-approve tools | Discord 経由のリクエストで自動承認するツール |
+| Slack auto-approve tools | Slack 経由のリクエストで自動承認するツール |
+
+各カテゴリ → Add / Remove のサブ picker → ツール picker。 引数付きの旧形式 (`/permission auto-add <tool>` / `/permission rule-add allow <pattern>` 等) も dispatcher 互換で利用可能 (スクリプト用途向け)。
 
 ---
 
@@ -396,7 +414,7 @@ DiscordのWebhookを用いて、エージェントからの応答を任意のチ
 2. **URLの取得**: 作成したWebhookの「ウェブフックURLをコピー」をクリックしてURLを取得します。
 3. **設定の反映**: `~/.localllm/config.json` 内の `"discord"` ブロックに対し、`"enabled": true` とし、`"webhookUrl": "取得したURL"` を設定します。
 
-> **注意**: Webhook URLは `https://discord.com/api/webhooks/<id>/<token>` 形式である必要があります。招待URL（`discord.gg/...`）は使用できません。`/discord test` コマンドで送信テストが可能です。
+> **注意**: Webhook URLは `https://discord.com/api/webhooks/<id>/<token>` 形式である必要があります。招待URL（`discord.gg/...`）は使用できません。`/integrations` → Discord → "Test webhook" で送信テストが可能です (旧 `/discord test` も alias で動作)。
 
 ---
 

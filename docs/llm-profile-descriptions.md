@@ -38,7 +38,7 @@ interface SecondLLMEndpoint {  // セカンドLLM
 ```
 # 利用可能なLLMモデル
 あなた (メインLLM): <model> (<provider> @ <url>)
-特性: <description> または (未設定 — ユーザーが /model description <text> で設定可能)
+特性: <description> または (未設定 — ユーザーが /models から Edit で設定可能)
 
 セカンドLLM: <model> (<provider> @ <url>)  ← 別マシン / 同一マシン
 特性: <description>
@@ -60,18 +60,22 @@ interface SecondLLMEndpoint {  // セカンドLLM
 
 ### 4. REPL コマンド (`src/cli/repl.ts`)
 
-- `/model description` — 現在値表示＋使い方＋記載例
-- `/model description <text>` — 設定
-- `/model description clear` — クリア
-- `/second description` / `/second description <text>` / `/second description clear` — 同上
-- `/model info` と `/second status` の出力に特性を表示
-- 設定直後 `REPL.refreshLLMProfiles()` が `AgentLoop.updateLLMProfiles()` を呼び、次ターン以降のシステムプロンプトに反映
+**2026-05-28 更新**: 個別編集系のコマンドは `/models` (Model Registry) の Edit ダイアログに統合された。 旧 `/model description` 等は dispatcher 互換で動作するが、 補完候補からは外れている。
+
+- `/models` → エントリ選択 → Edit → Description フィールド (canonical)
+- `/model description` (alias) — 現在値表示＋使い方＋記載例
+- `/model description <text>` (alias) — 設定
+- `/model description clear` (alias) — クリア
+- `/model second description` / `/model second description <text>` / `/model second description clear` — second slot 用 (旧 `/second description ...` も alias で動作)
+- `/model vision description` — vision slot 用 (Phase 5 で追加)
+- `/model` の status 出力に各 slot の特性を表示 (旧 `/model info` は `/model` と同義になり、 補完からは削除)
+- 設定直後 `REPL.refreshLLMProfiles()` が `AgentLoop.updateLLMProfiles()` を呼び、 次ターン以降のシステムプロンプトに反映
 
 ### 5. Setup ウィザード (`src/config/setup-wizard.ts`)
 
-メインLLM選択後に任意で description を入力するプロンプトを追加（空のままEnterでスキップ可、後から `/model description` で設定可能）。
+メインLLM選択後に任意で description を入力するプロンプトを追加（空のままEnterでスキップ可、 後から `/models` Edit または `/model description` で設定可能）。
 
-セカンドLLM の description はウィザード対象外。REPL の `/second setup` → `/second description <text>` の流れで設定する。
+セカンドLLM の description はウィザード対象外。 REPL の `/model second setup` → `/models` Edit (もしくは旧 `/model second description <text>` alias) の流れで設定する。
 
 ## 動作確認
 
