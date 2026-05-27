@@ -206,15 +206,18 @@ modelRef: <registry-id> # この registry entry を直接指定 (slot バイン�
 
 | コマンド | 役割 | 状態 |
 |---|---|---|
-| `/model` | 現状のスロット状況を 1 画面で表示 (main / second / 他 named slot) | **保持** (役割を「ステータス表示専用」 に限定) |
+| `/model` | main + second + 他 named slot の状態を 1 画面で表示 + main slot 操作の入口 | **保持** |
+| `/model second ...` | second slot のサブコマンド (旧 `/second ...` の正準形) | **Phase 4 で追加** |
 | `/models` | レジストリピッカー。 すべての登録・編集・割当はここから | **新規** |
 | `/swap` | main ⇔ second の slot 入替 | **保持** (1 動詞コマンドとして残す) |
 | `/profiles` | (旧) 履歴ピッカー | **alias** として `/models` を呼ぶ (deprecation 注記) |
+| `/second ...` | (旧) second 編集系 | **alias** として `/model second ...` を呼ぶ (deprecation 注記) |
+| `/model info` | (旧) `/model` と完全に同一の重複 | **削除** (`/model` に統一) |
 | `/model setup *` (×9) | (旧) プロバイダ別 setup | **補完から外す**。 `/models` の "Add new..." に統合 |
-| `/model host/port/url/provider/context/temperature/top_p/top_k/rep_penalty/description` | (旧) main 個別編集 | **deprecated 警告**。 `/models` の Edit を推奨。 1 リリース後に削除 |
-| `/second setup *` (×9)、 `/second host/...` 等 | (旧) second 個別編集 | 同上 |
+| `/model host/port/url/provider/temperature/top_p/top_k/rep_penalty/description` | (旧) main 個別編集 | **deprecated 警告**。 `/models` の Edit を推奨。 1 リリース後に削除 |
+| `/second setup *` (×9)、 `/second model/url/provider/temperature/...` 等 | (旧) second 個別編集 | 同上 (補完候補から削除済み、 dispatcher 互換維持) |
 
-合計: 170 件超 → 40 件以上削減。
+合計: 170 件超 → 約 40 件削減 (補完候補ベース)。 第 1 階層メニューの肥大化を解消。
 
 ### 4.2 `/models` の UI フロー
 
@@ -310,14 +313,15 @@ slot.main と slot.second の id を入れ替えるだけ。 entry そのもの�
 
 ## 5. 段階的実装プラン
 
-| Phase | 内容 | 破壊性 |
-|-------|------|--------|
-| 1 | データ層: types 追加、 model-registry.ts 新設 (llm-profiles.ts を内部に吸収)、 起動時マイグレーション、 apply*Endpoint の配線 | 旧 API は同名 export で温存 → 表面的には無破壊 |
-| 2 | UI: `/models` 実装。 `/profiles` は alias 化 + deprecation 注記 | 旧 `/profiles` は残るので無破壊 |
-| 3 | コマンド整理: `/model setup *` 等を補完候補から外す。 `/model temperature` 系を deprecated 警告付きに | 補完が変わる (= 体感は変わるが機能は残る) |
-| 4 (将来) | named slot の REPL 操作 (`/models slot vision <id>` 等)、 サブエージェントカタログとのバインド | 必要になったら |
+| Phase | 内容 | 破壊性 | 状態 |
+|-------|------|--------|------|
+| 1 | データ層: types 追加、 model-registry.ts 新設 (llm-profiles.ts を内部に吸収)、 起動時マイグレーション、 apply*Endpoint の配線 | 旧 API は同名 export で温存 → 表面的には無破壊 | **済 (`f8cc680`)** |
+| 2 | UI: `/models` 実装。 `/profiles` は alias 化 + deprecation 注記 | 旧 `/profiles` は残るので無破壊 | **済 (`b2f244e`)** |
+| 3 | コマンド整理: `/model setup *` 等を補完候補から外す。 `/model temperature` 系を deprecated 警告付きに | 補完が変わる (= 体感は変わるが機能は残る) | **済 (`67e71ee`)** |
+| 4 | `/model` と `/second` の統合。 `/model second ...` を正準形とし、 `/second ...` は alias に。 `/model info` 重複削除 | 補完が変わる。 dispatcher は alias 維持で無破壊 | **済 (Phase 4)** |
+| 5 (将来) | named slot の REPL 操作 (`/models slot vision <id>` 等)、 サブエージェントカタログとのバインド | 必要になったら | 構想のみ |
 
-各 Phase で push 可能な単位にする。
+各 Phase で push 可能な単位。
 
 ---
 

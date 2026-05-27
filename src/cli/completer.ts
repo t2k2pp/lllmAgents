@@ -49,11 +49,18 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   //   - /model host / port / url / provider / temperature / top_p / top_k / rep_penalty / description
   //     等の個別編集は /models Edit から行う → 補完から除外 (dispatcher は互換のため残存)
   //   - 残すのは: /model (状態表示), /model info, /model list, /model context, /model setup
-  { command: "/model", description: "メインLLM の状態を表示 (詳細編集は /models)" },
-  { command: "/model info", description: "メインLLM の詳細情報を表示" },
-  { command: "/model list", description: "メインLLM の利用可能モデル一覧から選択" },
-  { command: "/model context", description: "メインLLM のコンテキスト長を変更 (例: 128k)", needsArg: true },
-  { command: "/model setup", description: "メインLLM の新規セットアップ wizard (プロバイダ選択は wizard 内で)" },
+  { command: "/model", description: "main / second / 他 slot の状態を 1 画面で表示 (詳細編集は /models)" },
+  { command: "/model list", description: "main slot の利用可能モデル一覧から選択" },
+  { command: "/model context", description: "main slot のコンテキスト長を変更 (例: 128k)", needsArg: true },
+  { command: "/model setup", description: "main slot の新規セットアップ wizard (プロバイダ選択は wizard 内で)" },
+  // /model second 系 (docs/model-registry.md §4.1)
+  { command: "/model second", description: "second slot の状態表示・サブコマンド (旧 /second)" },
+  { command: "/model second enable", description: "second slot を有効化" },
+  { command: "/model second disable", description: "second slot を無効化" },
+  { command: "/model second setup", description: "second slot の新規セットアップ wizard" },
+  { command: "/model second list", description: "second slot の利用可能モデル一覧から選択" },
+  { command: "/model second context", description: "second slot のコンテキスト長を変更 (例: 128k)", needsArg: true },
+  { command: "/model second description", description: "second slot の特性説明 (サブエージェント選択の材料)", needsArg: true },
   { command: "/todo", description: "タスクリスト (active のみ / all=全件 / archive=完了済み削除)" },
   { command: "/goal-seek", description: "Goal Seek mode 開始 — acceptance criteria を立て合格まで自律実行", needsArg: true },
   { command: "/exit-goal-seek", description: "Goal Seek mode を抜ける (acceptance 未達成でも user 明示で中断)" },
@@ -70,14 +77,8 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/autorun", description: "Autorunモード切り替え（非破壊操作の自動許可）" },
   { command: "/parallel", description: "並列ツール実行数の確認・変更", needsArg: true },
   { command: "/status", description: "ステータス" },
-  // /second 系も /models へ集約 (詳細編集は /models Edit、 新規追加は /models Add new)。
-  // 残すのは: /second (状態), /second enable, /second disable, /second setup, /second list, /second context
-  { command: "/second", description: "セカンドLLM の状態を表示 (詳細編集は /models)" },
-  { command: "/second enable", description: "セカンドLLM を有効化" },
-  { command: "/second disable", description: "セカンドLLM を無効化" },
-  { command: "/second setup", description: "セカンドLLM の新規セットアップ wizard (プロバイダ選択は wizard 内で)" },
-  { command: "/second list", description: "セカンドLLM の利用可能モデル一覧から選択" },
-  { command: "/second context", description: "セカンドLLM のコンテキスト長を変更 (例: 128k)", needsArg: true },
+  // /second は /model second の alias として動作 (Phase 4)。 補完には alias のみ残す。
+  { command: "/second", description: "[非推奨] /model second の alias。 新規には /model second を推奨" },
   { command: "/swap", description: "メインLLM ⇔ セカンドLLM を入れ替え (確認あり)" },
   { command: "/swap -y", description: "メインLLM ⇔ セカンドLLM を入れ替え (確認なし)" },
   { command: "/switch", description: "メインLLM ⇔ セカンドLLM を入れ替え (/swap と同じ)" },

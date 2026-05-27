@@ -142,25 +142,44 @@ describe("createCommandMenuProvider", () => {
     expect(labels).toContain("/model list");
   });
 
-  it("/model 系の主要サブコマンドが補完候補に出る (info/list/context/setup)", () => {
+  it("/model 系の主要サブコマンドが補完候補に出る (list/context/setup)", () => {
+    // Phase 4 (2026-05-27): /model info は重複だったので削除済み
     const provider = createCommandMenuProvider();
     const items = provider("model ");
     const labels = items.map((i) => i.label);
-    expect(labels).toContain("/model info");
     expect(labels).toContain("/model list");
     expect(labels).toContain("/model context");
     expect(labels).toContain("/model setup");
+    // /model info は廃止
+    expect(labels).not.toContain("/model info");
   });
 
-  it("/second 系の主要サブコマンドが補完候補に出る (enable/disable/setup/list/context)", () => {
+  it("/model second 系の主要サブコマンドが補完候補に出る (Phase 4 統合後)", () => {
+    // Phase 4: /second ... は /model second ... に統合
     const provider = createCommandMenuProvider();
-    const items = provider("second ");
+    const items = provider("model second");
     const labels = items.map((i) => i.label);
-    expect(labels).toContain("/second enable");
-    expect(labels).toContain("/second disable");
-    expect(labels).toContain("/second setup");
-    expect(labels).toContain("/second list");
-    expect(labels).toContain("/second context");
+    expect(labels).toContain("/model second");
+    expect(labels).toContain("/model second enable");
+    expect(labels).toContain("/model second disable");
+    expect(labels).toContain("/model second setup");
+    expect(labels).toContain("/model second list");
+    expect(labels).toContain("/model second context");
+    expect(labels).toContain("/model second description");
+  });
+
+  it("/second は alias として補完に残るが [非推奨] 表記", () => {
+    const provider = createCommandMenuProvider();
+    const items = provider("second");
+    const second = items.find((i) => i.label === "/second");
+    expect(second).toBeDefined();
+    expect(second!.description).toContain("非推奨");
+    // 個別サブ (enable/disable/...) は /second 側からは消えている
+    const labels = items.map((i) => i.label);
+    expect(labels).not.toContain("/second enable");
+    expect(labels).not.toContain("/second setup");
+    expect(labels).not.toContain("/second list");
+    expect(labels).not.toContain("/second context");
   });
 
   it("Phase 3: 個別編集系コマンドは補完候補から除外 (dispatcher 互換は維持)", () => {
