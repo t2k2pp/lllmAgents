@@ -27,8 +27,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/clear", description: "会話履歴クリア" },
   { command: "/context", description: "コンテキスト使用状況 (System prompt / Memory / Skills / Tools / Messages 内訳)" },
   { command: "/compact", description: "コンテキスト圧縮" },
-  { command: "/capability", description: "LLM能力ティア (T1/T2/T3) と profile を表示" },
-  { command: "/metrics", description: "現セッションのテレメトリ (反復・bash累積・stuck-loop・トークン)" },
+  // /capability /metrics /cost は /status に集約 (Phase optimize #4、 2026-05-28)
   { command: "/mcp status", description: "MCP サーバの接続状態を表示" },
   { command: "/mcp on", description: "MCP 全体を有効化 (/mcp reload で接続)" },
   { command: "/mcp off", description: "MCP 全体を無効化 (設定ファイルは変更しない)" },
@@ -40,9 +39,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/skills toggle", description: "個別スキルの有効/無効切替", needsArg: true },
   { command: "/try", description: "試行錯誤モード: 自動的に評価・改善を繰り返す", needsArg: true },
   { command: "/try 3", description: "最大3回試行（デフォルト）", needsArg: true },
-  { command: "/stream", description: "ストリーミング表示モードの確認/切り替え" },
-  { command: "/stream on", description: "ストリーミング表示モードに切り替え" },
-  { command: "/stream off", description: "スピナー+Markdownレンダリングモードに切り替え" },
+  { command: "/stream", description: "ストリーミング表示モードの確認/切り替え (引数なしで対話 toggle)" },
   // ── Model / Second LLM コマンド (docs/model-registry.md) ──
   // Phase 3 (2026-05-27): 個別編集系のコマンドは /models Edit に統合された。
   //   - /model setup <provider> の各バリアントは /models Add new... の wizard へ集約 → 補完から除外
@@ -71,19 +68,21 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/todo", description: "タスクリスト (active のみ / all=全件 / archive=完了済み削除)" },
   { command: "/goal-seek", description: "Goal Seek mode 開始 — acceptance criteria を立て合格まで自律実行", needsArg: true },
   { command: "/exit-goal-seek", description: "Goal Seek mode を抜ける (acceptance 未達成でも user 明示で中断)" },
-  { command: "/sessions", description: "セッション一覧" },
-  { command: "/resume", description: "セッション復元" },
-  { command: "/continue", description: "最新セッション復元" },
+  { command: "/resume", description: "セッション復元 (引数なしで picker / latest = 最新 / list = 一覧)" },
+  { command: "/resume latest", description: "最新セッションを即復元 (旧 /continue)" },
+  { command: "/resume list", description: "保存セッション一覧 (旧 /sessions)" },
+  { command: "/sessions", description: "[非推奨] /resume list の alias" },
+  { command: "/continue", description: "[非推奨] /resume latest の alias" },
   { command: "/memory", description: "メモリ表示" },
   { command: "/remember", description: "メモリに追記", needsArg: true },
   { command: "/loglevel", description: "運用ログのレベル確認・変更 (trace/debug/info/warn/error)" },
   { command: "/diff", description: "git diff" },
   { command: "/plan", description: "プランモード" },
   { command: "/skills", description: "スキル一覧" },
-  { command: "/cost", description: "セッションのトークン・コスト表示" },
+  // /cost は /status に集約 (Phase optimize #4)
   { command: "/autorun", description: "Autorunモード切り替え（非破壊操作の自動許可）" },
   { command: "/parallel", description: "並列ツール実行数の確認・変更", needsArg: true },
-  { command: "/status", description: "ステータス" },
+  { command: "/status", description: "セッション状態を 1 画面で表示 (slot / context / capability / metrics / cost / tasks)" },
   // /second は /model second の alias として動作 (Phase 4)。 補完には alias のみ残す。
   { command: "/second", description: "[非推奨] /model second の alias。 新規には /model second を推奨" },
   { command: "/swap", description: "メインLLM ⇔ セカンドLLM を入れ替え (確認あり)" },
@@ -139,21 +138,10 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/loop", description: "プロンプトを定期実行 (例: /loop 5m /pr-review)", needsArg: true },
   { command: "/loop list", description: "アクティブなループ一覧" },
   { command: "/loop stop", description: "ループを停止 (任意: id|all)", needsArg: true },
-  { command: "/permission", description: "権限設定" },
-  { command: "/permission list", description: "権限設定一覧" },
-  { command: "/permission auto-add", description: "CLI自動許可に追加", needsArg: true },
-  { command: "/permission auto-remove", description: "CLI自動許可から削除", needsArg: true },
-  { command: "/permission require-add", description: "CLI確認必要に追加", needsArg: true },
-  { command: "/permission require-remove", description: "CLI確認必要から削除", needsArg: true },
-  { command: "/permission discord-add", description: "Discord許可に追加", needsArg: true },
-  { command: "/permission discord-remove", description: "Discord許可から削除", needsArg: true },
-  { command: "/permission rules", description: "パターンルール一覧" },
-  { command: "/permission rule-add allow", description: "allowルールを追加", needsArg: true },
-  { command: "/permission rule-add deny", description: "denyルールを追加", needsArg: true },
-  { command: "/permission rule-add ask", description: "askルールを追加", needsArg: true },
-  { command: "/permission rule-remove allow", description: "allowルールを削除", needsArg: true },
-  { command: "/permission rule-remove deny", description: "denyルールを削除", needsArg: true },
-  { command: "/permission rule-remove ask", description: "askルールを削除", needsArg: true },
+  // /permission は引数なしで対話 picker (Phase optimize #1)。
+  // 旧サブコマンド (auto-add / require-add / rule-add allow / 等) は dispatcher 互換のため残存するが、
+  // 補完候補からは外して 1 件に集約。
+  { command: "/permission", description: "権限設定 (引数なしで picker: rules / auto / require / discord / slack)" },
 ];
 
 

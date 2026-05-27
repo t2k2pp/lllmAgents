@@ -1678,6 +1678,342 @@ export class REPL {
   }
 
   /**
+   * /resume サブコマンドの共通ハンドラ (Phase optimize #2、 2026-05-28)。
+   * /sessions と /continue を alias として吸収。
+   *
+   *   /resume               → 対話 picker で選択
+   *   /resume <id>          → ID 直接指定
+   *   /resume latest        → 最新セッションを即復元 (旧 /continue)
+   *   /resume list [<n>]    → 一覧表示のみ (旧 /sessions)
+   */
+  private async handleResumeCommand(args: string[]): Promise<void> {
+    const sub = args[0]?.toLowerCase();
+
+    // /resume list [<n>] → 一覧表示のみ
+    if (sub === "list") {
+      const limitArg = parseInt(args[1] ?? "", 10);
+      const limit = Number.isFinite(limitArg) && limitArg > 0 ? limitArg : 20;
+      const sessions = listSessions(limit);
+      if (sessions.length === 0) {
+        console.log(chalk.dim("  保存されたセッションはありません。"));
+        console.log(chalk.dim("  会話を 1 ターン以上行ったあと /quit すると保存されます。"));
+        return;
+      }
+      console.log(chalk.bold(`\n  保存されたセッション (新しい順、 上位 ${sessions.length} 件):`));
+      for (const s of sessions) {
+        const date = new Date(s.updatedAt).toLocaleString();
+        const title = (s.title || "(タイトルなし)").replace(/\s+/g, " ").slice(0, 60);
+        console.log(`    ${chalk.cyan(s.id)}  ${chalk.dim(date)}  ${chalk.dim(`(${s.messageCount}msgs)`)}  ${title}`);
+      }
+      console.log(chalk.dim(`\n  復元方法:`));
+      console.log(chalk.dim(`    /resume                   ← 対話 picker から選ぶ`));
+      console.log(chalk.dim(`    /resume <session-id>      ← ID 直接指定`));
+      console.log(chalk.dim(`    /resume latest            ← 一番新しいセッションを即復元`));
+      console.log();
+      return;
+    }
+
+    // /resume latest → 最新を即復元
+    if (sub === "latest") {
+      const latest = getLatestSession();
+      if (!latest) {
+        console.log(chalk.yellow("  復元可能なセッションがありません。"));
+        return;
+      }
+      this.agent.restoreSession(latest);
+      console.log(chalk.dim(`  最新セッションを復元しました: ${latest.meta.id} (${latest.meta.messageCount} messages)`));
+      return;
+    }
+
+    // /resume <id> または /resume (引数なし→ picker)
+    let sessionId = args[0];
+    if (!sessionId) {
+      const sessions = listSessions(20);
+      if (sessions.length === 0) {
+        console.log(chalk.dim("  保存されたセッションはありません。"));
+        console.log(chalk.dim("  会話を 1 ターン以上行ったあと /quit すると保存されます。"));
+        return;
+      }
+      try {
+        sessionId = await select({
+          message: "復元するセッションを選択 (Ctrl+C でキャンセル):",
+          choices: sessions.map((s) => {
+            const date = new Date(s.updatedAt).toLocaleString();
+            const title = (s.title || "(タイトルなし)").replace(/\s+/g, " ").slice(0, 50);
+            return {
+              name: `${date}  (${s.messageCount}msgs)  ${title}`,
+              value: s.id,
+              description: `id=${s.id}  model=${s.model}`,
+            };
+          }),
+          pageSize: 10,
+        });
+      } catch {
+        console.log(chalk.dim("  キャンセルしました。"));
+        return;
+      }
+    }
+    const session = loadSession(sessionId);
+    if (!session) {
+      console.log(chalk.red(`  セッション ${sessionId} が見つかりません。`));
+      console.log(chalk.dim(`  /resume list で一覧を表示できます。`));
+      return;
+    }
+    this.agent.restoreSession(session);
+    console.log(chalk.dim(`  セッション ${chalk.cyan(sessionId)} を復元しました (${session.meta.messageCount} messages)`));
+  }
+
+  /**
+   * /permission の対話 picker (Phase optimize #1、 2026-05-28)。
+   * 引数なし呼び出しから入り、 カテゴリ → アクション → ツール/ルール選択 のループ。
+   * Esc / Ctrl+C で終了。 引数付きの旧形式は dispatcher 側で従来通り処理される。
+   */
+  private async handlePermissionInteractive(): Promise<void> {
+    const permissions = this.agent.getPermissions();
+    while (true) {
+      const rules = permissions.getRules();
+      const auto = permissions.getAutoApproveList();
+      const requireL = permissions.getRequireApprovalList();
+      const discord = permissions.getDiscordAutoApproveList();
+      const slack = permissions.getSlackAutoApproveList();
+      const ruleCount = rules.deny.length + rules.allow.length + rules.ask.length;
+
+      let category: string;
+      try {
+        category = await select({
+          message: "Permission settings — 編集する対象を選択:",
+          choices: [
+            { name: `Pattern rules                              [${rules.deny.length} deny / ${rules.allow.length} allow / ${rules.ask.length} ask]`, value: "rules" },
+            { name: `Auto-approve tools (CLI)                   [${auto.length} tools]`, value: "auto" },
+            { name: `Require-approval tools (CLI)               [${requireL.length} tools]`, value: "require" },
+            { name: `Discord auto-approve tools                 [${discord.length} tools]`, value: "discord" },
+            { name: `Slack auto-approve tools                   [${slack.length} tools]`, value: "slack" },
+            { name: chalk.dim(`View all (${ruleCount} rules + ${auto.length + requireL.length + discord.length + slack.length} entries)`), value: "list" },
+            { name: chalk.dim("Done"), value: "done" },
+          ],
+          pageSize: 10,
+        });
+      } catch { return; }
+      if (category === "done") return;
+      if (category === "list") {
+        this.printPermissionAll();
+        continue;
+      }
+      if (category === "rules") {
+        await this.permissionPatternRulesMenu();
+        continue;
+      }
+      await this.permissionToolListMenu(category as "auto" | "require" | "discord" | "slack");
+    }
+  }
+
+  /** /permission 対話 picker から呼ばれる「全リスト一覧表示」 */
+  private printPermissionAll(): void {
+    const permissions = this.agent.getPermissions();
+    const rules = permissions.getRules();
+    console.log(chalk.bold("\n  [Pattern rules] (ツール名リストより優先):"));
+    for (const action of ["deny", "allow", "ask"] as const) {
+      const icon = action === "deny" ? chalk.red("✗") : action === "allow" ? chalk.green("✓") : chalk.yellow("?");
+      console.log(chalk.bold(`    ${action}:`));
+      if (rules[action].length === 0) console.log(chalk.dim("      (なし)"));
+      else for (const r of rules[action]) console.log(`      ${icon} ${r}`);
+    }
+    const dump = (label: string, list: string[], col: (s: string) => string): void => {
+      console.log(chalk.bold(`  ${label}:`));
+      if (list.length === 0) console.log(chalk.dim("    (なし)"));
+      else for (const t of list) console.log(col(`    ✓ ${t}`));
+    };
+    dump("[CLI] Auto-approve", permissions.getAutoApproveList(), chalk.green);
+    dump("[CLI] Require-approval", permissions.getRequireApprovalList(), chalk.yellow);
+    dump("[Discord] Auto-approve", permissions.getDiscordAutoApproveList(), chalk.cyan);
+    dump("[Slack] Auto-approve", permissions.getSlackAutoApproveList(), chalk.cyan);
+    console.log();
+  }
+
+  /** /permission 対話 picker のパターンルール編集サブメニュー */
+  private async permissionPatternRulesMenu(): Promise<void> {
+    const permissions = this.agent.getPermissions();
+    while (true) {
+      const rules = permissions.getRules();
+      console.log(chalk.bold("\n  ── Pattern rules ──"));
+      for (const a of ["deny", "allow", "ask"] as const) {
+        const icon = a === "deny" ? chalk.red("✗") : a === "allow" ? chalk.green("✓") : chalk.yellow("?");
+        console.log(chalk.bold(`  ${a}:`));
+        if (rules[a].length === 0) console.log(chalk.dim("    (なし)"));
+        else for (const r of rules[a]) console.log(`    ${icon} ${r}`);
+      }
+      const totalRules = rules.deny.length + rules.allow.length + rules.ask.length;
+      let action: string;
+      try {
+        action = await select({
+          message: "操作:",
+          choices: [
+            { name: "Add deny rule (常に拒否)", value: "add-deny" },
+            { name: "Add allow rule (常に許可)", value: "add-allow" },
+            { name: "Add ask rule (常に確認)", value: "add-ask" },
+            { name: "Remove rule", value: "remove", disabled: totalRules === 0 },
+            { name: chalk.dim("Back"), value: "back" },
+          ],
+        });
+      } catch { return; }
+      if (action === "back") return;
+
+      if (action.startsWith("add-")) {
+        const kind = action.slice(4) as "deny" | "allow" | "ask";
+        try {
+          const pattern = await input({
+            message: `${kind} ルールのパターン (例: bash(npm *) / file_write(./src/**) / web_fetch(domain:github.com)):`,
+          });
+          if (!pattern.trim()) { console.log(chalk.dim("  キャンセル。")); continue; }
+          permissions.addRule(kind, pattern);
+          this.config.security.rules ??= { allow: [], deny: [], ask: [] };
+          if (!this.config.security.rules[kind].includes(pattern)) {
+            this.config.security.rules[kind].push(pattern);
+          }
+          saveConfig(this.config);
+          const icon = kind === "deny" ? "🚫" : kind === "allow" ? "✅" : "❓";
+          console.log(chalk.green(`  ${icon} ${kind}: "${pattern}" を追加`));
+        } catch { /* cancel */ }
+      } else if (action === "remove") {
+        const flat = [
+          ...rules.deny.map((p) => ({ act: "deny" as const, pat: p })),
+          ...rules.allow.map((p) => ({ act: "allow" as const, pat: p })),
+          ...rules.ask.map((p) => ({ act: "ask" as const, pat: p })),
+        ];
+        try {
+          const chosen = await select({
+            message: "削除するルールを選択:",
+            choices: flat.map((r) => {
+              const icon = r.act === "deny" ? chalk.red("✗") : r.act === "allow" ? chalk.green("✓") : chalk.yellow("?");
+              return { name: `${icon} ${r.act}: ${r.pat}`, value: `${r.act}|${r.pat}` };
+            }),
+          });
+          const sepIdx = chosen.indexOf("|");
+          const a = chosen.slice(0, sepIdx) as "deny" | "allow" | "ask";
+          const pat = chosen.slice(sepIdx + 1);
+          permissions.removeRule(a, pat);
+          if (this.config.security.rules) {
+            this.config.security.rules[a] = this.config.security.rules[a].filter((p) => p !== pat);
+          }
+          saveConfig(this.config);
+          console.log(chalk.green(`  ✓ ${a}: "${pat}" を削除`));
+        } catch { /* cancel */ }
+      }
+    }
+  }
+
+  /** /permission 対話 picker のツールリスト編集サブメニュー (auto/require/discord/slack) */
+  private async permissionToolListMenu(kind: "auto" | "require" | "discord" | "slack"): Promise<void> {
+    const permissions = this.agent.getPermissions();
+    const labelMap = {
+      auto: "Auto-approve (CLI)",
+      require: "Require-approval (CLI)",
+      discord: "Discord auto-approve",
+      slack: "Slack auto-approve",
+    };
+    const getList = (): string[] => {
+      switch (kind) {
+        case "auto": return permissions.getAutoApproveList();
+        case "require": return permissions.getRequireApprovalList();
+        case "discord": return permissions.getDiscordAutoApproveList();
+        case "slack": return permissions.getSlackAutoApproveList();
+      }
+    };
+    const addTo = (tool: string): void => {
+      switch (kind) {
+        case "auto":
+          permissions.addAutoApprove(tool);
+          if (!this.config.security.autoApproveTools.includes(tool)) this.config.security.autoApproveTools.push(tool);
+          break;
+        case "require":
+          permissions.addRequireApproval(tool);
+          if (!this.config.security.requireApprovalTools.includes(tool)) this.config.security.requireApprovalTools.push(tool);
+          break;
+        case "discord":
+          permissions.addDiscordAutoApprove(tool);
+          this.config.security.discordAutoApproveTools ??= [];
+          if (!this.config.security.discordAutoApproveTools.includes(tool)) this.config.security.discordAutoApproveTools.push(tool);
+          break;
+        case "slack":
+          permissions.addSlackAutoApprove(tool);
+          this.config.security.slackAutoApproveTools ??= [];
+          if (!this.config.security.slackAutoApproveTools.includes(tool)) this.config.security.slackAutoApproveTools.push(tool);
+          break;
+      }
+    };
+    const removeFrom = (tool: string): void => {
+      switch (kind) {
+        case "auto":
+          permissions.removeAutoApprove(tool);
+          this.config.security.autoApproveTools = this.config.security.autoApproveTools.filter((t) => t !== tool);
+          break;
+        case "require":
+          permissions.removeRequireApproval(tool);
+          this.config.security.requireApprovalTools = this.config.security.requireApprovalTools.filter((t) => t !== tool);
+          break;
+        case "discord":
+          permissions.removeDiscordAutoApprove(tool);
+          this.config.security.discordAutoApproveTools = (this.config.security.discordAutoApproveTools ?? []).filter((t) => t !== tool);
+          break;
+        case "slack":
+          permissions.removeSlackAutoApprove(tool);
+          this.config.security.slackAutoApproveTools = (this.config.security.slackAutoApproveTools ?? []).filter((t) => t !== tool);
+          break;
+      }
+    };
+
+    while (true) {
+      const list = getList();
+      console.log(chalk.bold(`\n  ── ${labelMap[kind]} ──`));
+      if (list.length === 0) console.log(chalk.dim("  (なし)"));
+      else for (const t of list) console.log(chalk.green(`  ✓ ${t}`));
+
+      let action: string;
+      try {
+        action = await select({
+          message: "操作:",
+          choices: [
+            { name: "Add tool", value: "add" },
+            { name: "Remove tool", value: "remove", disabled: list.length === 0 },
+            { name: chalk.dim("Back"), value: "back" },
+          ],
+        });
+      } catch { return; }
+      if (action === "back") return;
+
+      if (action === "add") {
+        const allTools = this.agent.getToolRegistry().getToolNames();
+        const candidates = allTools.filter((t) => !list.includes(t)).sort();
+        if (candidates.length === 0) {
+          console.log(chalk.dim("  追加可能なツールはありません。"));
+          continue;
+        }
+        try {
+          const chosen = await select({
+            message: "追加するツールを選択:",
+            choices: candidates.map((t) => ({ name: t, value: t })),
+            pageSize: 12,
+          });
+          addTo(chosen);
+          saveConfig(this.config);
+          console.log(chalk.green(`  ✓ ${chosen} を追加`));
+        } catch { /* cancel */ }
+      } else if (action === "remove") {
+        try {
+          const chosen = await select({
+            message: "削除するツールを選択:",
+            choices: list.map((t) => ({ name: t, value: t })),
+            pageSize: 12,
+          });
+          removeFrom(chosen);
+          saveConfig(this.config);
+          console.log(chalk.green(`  ✓ ${chosen} を削除`));
+        } catch { /* cancel */ }
+      }
+    }
+  }
+
+  /**
    * setup フロー冒頭で「履歴から選ぶ / 新規セットアップ」 を提示する共通ヘルパ。
    *  - 履歴が空、 または provider にマッチする履歴が無ければ何もせず undefined を返す
    *  - ユーザが履歴を選んだら applyProfileTo して true を返す (呼び出し側はそこで return すれば良い)
@@ -2519,38 +2855,6 @@ export class REPL {
         console.log(chalk.dim("  完了。"));
         break;
 
-      case "/metrics": {
-        // Phase F-4: 現セッションのテレメトリ可視化
-        const m = this.agent.getMetrics();
-        const tok = globalTokenTracker.getSessionTotal();
-        const cap = this.agent.getCapability();
-        const ctxKb = Math.round(cap.contextWindow / 1000);
-        const lastTokIn = (this.agent as unknown as { lastPromptTokens: number }).lastPromptTokens ?? 0;
-        const lastPct = cap.contextWindow > 0 ? Math.round(lastTokIn / cap.contextWindow * 100) : 0;
-        const bashSec = Math.round(m.bashCumulativeMs / 1000);
-        // 警告フラグ整形
-        const flag = (b: boolean): string => b ? chalk.yellow("● fired") : chalk.dim("○ ok");
-        console.log(chalk.bold("\n  Session metrics (Phase F-4)"));
-        console.log(chalk.dim(`  ── 進行状況 ────────────────────────────`));
-        console.log(chalk.dim(`    iteration         : ${m.iteration} / softCap=${m.softCap} / hardCap=${m.hardCap}`));
-        console.log(chalk.dim(`    register          : ${m.register} (tier=${cap.tier})`));
-        console.log(chalk.dim(`    mode              : ${m.mode === "goal-seek" ? chalk.cyan(m.mode) : m.mode}${m.goalStatement ? ` — ${m.goalStatement.slice(0, 60)}${m.goalStatement.length > 60 ? "..." : ""} (criteria ${m.acceptanceCriteriaCount})` : ""}`));
-        console.log(chalk.dim(`    last prompt size  : ~${lastTokIn} / ${ctxKb}K (${lastPct}%)`));
-        console.log(chalk.dim(`  ── ハーネス警告状態 ─────────────────────`));
-        console.log(chalk.dim(`    softCap warned    : ${flag(m.softCapWarned)}`));
-        console.log(chalk.dim(`    bash cumulative   : ${bashSec}s ${flag(m.bashWarned)}${cap.bashCumulativeWarnEnabled ? "" : chalk.dim(" (disabled in tier)")}`));
-        console.log(chalk.dim(`    plan-mode entries : ${m.planModeEntries}${cap.planTodoOveruseEnabled ? "" : chalk.dim(" (warn disabled in tier)")}`));
-        console.log(chalk.dim(`    todo_write count  : ${m.todoWriteCount}${cap.planTodoOveruseEnabled ? "" : chalk.dim(" (warn disabled in tier)")}`));
-        console.log(chalk.dim(`    plan/todo warned  : ${flag(m.planTodoWarned)}`));
-        console.log(chalk.dim(`    stuck-loop window : ${m.recentFailures} 件 (直近 10 反復)`));
-        console.log(chalk.dim(`  ── 累計トークン・コスト ─────────────────`));
-        console.log(chalk.dim(`    LLM calls         : ${tok.recordCount}`));
-        console.log(chalk.dim(`    tokens in/out     : ${tok.totalInputTokens.toLocaleString()} / ${tok.totalOutputTokens.toLocaleString()}`));
-        console.log(chalk.dim(`    estimated cost    : $${tok.totalCostUsd.toFixed(4)} USD`));
-        console.log(chalk.dim(`  詳細レポート: npm run analyze:loop`));
-        break;
-      }
-
       case "/mcp": {
         // Phase F-1: MCP server 状態管理 (status / reload / on / off / toggle)
         if (!this.mcpManager) {
@@ -2823,34 +3127,6 @@ export class REPL {
         break;
       }
 
-      case "/capability": {
-        // Phase A-4 + C-1: 現在の LLM 能力ティア / profile / tunables を表示
-        const cap = this.agent.getCapability();
-        const ctxK = cap.contextWindow >= 1000
-          ? `${Math.round(cap.contextWindow / 1000)}K`
-          : `${cap.contextWindow}`;
-        const truncKB = Math.round(cap.toolResultTruncateBytes / 1024);
-        console.log(chalk.dim("  Capability profile:"));
-        console.log(chalk.dim(`    model         : ${this.agent.getModel()}`));
-        console.log(chalk.dim(`    tier          : ${cap.tier}`));
-        console.log(chalk.dim(`    ctxWindow     : ${ctxK} (${cap.contextWindow} tokens)`));
-        console.log(chalk.dim(`    promptStyle   : ${cap.promptStyle}`));
-        console.log(chalk.dim(`    toolCalling   : ${cap.supportsToolCalling}`));
-        console.log(chalk.dim(`    parallelTools : ${cap.supportsParallelTools}`));
-        console.log(chalk.dim(`    instrFollow   : ${cap.reliableInstructionFollowing}`));
-        console.log(chalk.dim("  Loop tunables (Phase C):"));
-        console.log(chalk.dim(`    maxIterations : ${cap.maxIterations}`));
-        console.log(chalk.dim(`    selfCheck max : ${cap.maxSelfCheckRounds}`));
-        console.log(chalk.dim(`    compress @    : ${Math.round(cap.compressionThreshold * 100)}% of ctxWindow`));
-        console.log(chalk.dim(`    truncate >    : ${truncKB}KB`));
-        console.log(chalk.dim(`    keepRecent    : ${cap.keepRecentMessages} msgs`));
-        console.log(chalk.dim(`    bash warn     : ${cap.bashCumulativeWarnEnabled ? "ON" : "OFF"}`));
-        console.log(chalk.dim(`    plan/todo警告 : ${cap.planTodoOveruseEnabled ? "ON" : "OFF"}`));
-        console.log(chalk.dim(`    判定根拠       : ${cap.reason}`));
-        console.log(chalk.dim("  詳細: docs/multi-tier-harness-roadmap.md §3-4"));
-        break;
-      }
-
       case "/try": {
         const tryArgsStr = args.join(" ").trim();
         if (!tryArgsStr) {
@@ -2941,22 +3217,43 @@ export class REPL {
       }
 
       case "/stream": {
-        if (args.length === 0) {
-          const current = this.agent.getStreamingDisplay();
-          console.log(chalk.dim(`  表示モード: ${current ? "ストリーミング表示" : "スピナー+Markdownレンダリング"}`));
-          console.log(chalk.dim("  切り替え: /stream on  または  /stream off"));
-        } else if (args[0] === "on") {
+        // 2026-05-28: /stream は引数なし toggle / picker 化 (Phase optimize #5)。
+        // 旧 /stream on / /stream off は dispatcher 互換のため残すが補完候補からは外す。
+        const current = this.agent.getStreamingDisplay();
+        const sub = args[0]?.toLowerCase();
+        if (sub === "on") {
           this.agent.setStreamingDisplay(true);
           this.config.streamingDisplay = true;
           saveConfig(this.config);
           console.log(chalk.dim("  ストリーミング表示モードに切り替えました。（設定を保存しました）"));
-        } else if (args[0] === "off") {
+          break;
+        }
+        if (sub === "off") {
           this.agent.setStreamingDisplay(false);
           this.config.streamingDisplay = false;
           saveConfig(this.config);
           console.log(chalk.dim("  スピナー+Markdownレンダリングモードに切り替えました。（設定を保存しました）"));
-        } else {
-          console.log(chalk.yellow("  使用方法: /stream [on|off]"));
+          break;
+        }
+        // 引数なし → 現状表示 + toggle
+        console.log(chalk.bold("\n  ── Stream display ──"));
+        console.log(chalk.dim(`  現在: ${current ? chalk.cyan("ストリーミング表示") : chalk.cyan("スピナー+Markdownレンダリング")}`));
+        try {
+          const ok = await confirm({
+            message: current ? "スピナー+Markdown に切り替えますか?" : "ストリーミング表示に切り替えますか?",
+            default: true,
+          });
+          if (ok) {
+            const next = !current;
+            this.agent.setStreamingDisplay(next);
+            this.config.streamingDisplay = next;
+            saveConfig(this.config);
+            console.log(chalk.green(`  切り替えました: ${next ? "ストリーミング表示" : "スピナー+Markdown"}`));
+          } else {
+            console.log(chalk.dim("  変更なし。"));
+          }
+        } catch {
+          console.log(chalk.dim("  変更なし。"));
         }
         break;
       }
@@ -3471,17 +3768,6 @@ export class REPL {
         break;
       }
 
-      case "/cost": {
-        const stats = globalTokenTracker.getSessionTotal();
-        console.log(chalk.bold("\n  === Session Cost & Usage ==="));
-        console.log(chalk.dim(`  Requests: ${stats.recordCount}`));
-        console.log(chalk.dim(`  Input Tokens: ${stats.totalInputTokens.toLocaleString()}`));
-        console.log(chalk.dim(`  Output Tokens: ${stats.totalOutputTokens.toLocaleString()}`));
-        console.log(chalk.dim(`  Total Cost: $${stats.totalCostUsd.toFixed(4)}`));
-        console.log();
-        break;
-      }
-
       case "/second": {
         // 2026-05-27: /model second ... に統合 (docs/model-registry.md §4.1)。
         // /second 系は alias として動作するが deprecation を 1 行表示する。
@@ -3881,6 +4167,11 @@ export class REPL {
       }
 
       case "/permission": {
+        // 2026-05-28: 引数なしは対話 picker (Phase optimize #1)。 引数付きは互換のため legacy 経路。
+        if (args.length === 0) {
+          await this.handlePermissionInteractive();
+          break;
+        }
         const permissions = this.agent.getPermissions();
         const subCmd = args[0];
         const toolName = args[1];
@@ -4333,86 +4624,21 @@ export class REPL {
       }
 
       case "/sessions": {
-        const limitArg = parseInt(args[0] ?? "", 10);
-        const limit = Number.isFinite(limitArg) && limitArg > 0 ? limitArg : 20;
-        const sessions = listSessions(limit);
-        if (sessions.length === 0) {
-          console.log(chalk.dim("  保存されたセッションはありません。"));
-          console.log(chalk.dim("  会話を 1 ターン以上行ったあと /quit すると保存されます。"));
-        } else {
-          console.log(chalk.bold(`\n  保存されたセッション (新しい順、 上位 ${sessions.length} 件):`));
-          for (const s of sessions) {
-            const date = new Date(s.updatedAt).toLocaleString();
-            const title = (s.title || "(タイトルなし)").replace(/\s+/g, " ").slice(0, 60);
-            console.log(
-              `    ${chalk.cyan(s.id)}  ${chalk.dim(date)}  ${chalk.dim(`(${s.messageCount}msgs)`)}  ${title}`,
-            );
-          }
-          console.log(chalk.dim(`\n  復元方法:`));
-          console.log(chalk.dim(`    /resume                   ← 対話的にリストから選ぶ`));
-          console.log(chalk.dim(`    /resume <session-id>      ← ID 直接指定`));
-          console.log(chalk.dim(`    /continue                 ← 一番新しいセッションを即復元`));
-          console.log(chalk.dim(`    起動時: --resume <id> / --continue\n`));
-        }
-        break;
-      }
-
-      case "/resume": {
-        let sessionId = args[0];
-        // 無引数なら対話的に選択させる (Claude Code 流儀)
-        if (!sessionId) {
-          const sessions = listSessions(20);
-          if (sessions.length === 0) {
-            console.log(chalk.dim("  保存されたセッションはありません。"));
-            console.log(chalk.dim("  会話を 1 ターン以上行ったあと /quit すると保存されます。"));
-            break;
-          }
-          try {
-            sessionId = await select({
-              message: "復元するセッションを選択 (Ctrl+C でキャンセル):",
-              choices: sessions.map((s) => {
-                const date = new Date(s.updatedAt).toLocaleString();
-                const title = (s.title || "(タイトルなし)").replace(/\s+/g, " ").slice(0, 50);
-                return {
-                  name: `${date}  (${s.messageCount}msgs)  ${title}`,
-                  value: s.id,
-                  description: `id=${s.id}  model=${s.model}`,
-                };
-              }),
-              pageSize: 10,
-            });
-          } catch {
-            console.log(chalk.dim("  キャンセルしました。"));
-            break;
-          }
-        }
-        const session = loadSession(sessionId);
-        if (!session) {
-          console.log(chalk.red(`  セッション ${sessionId} が見つかりません。`));
-          console.log(chalk.dim(`  /sessions で一覧を表示できます。`));
-          break;
-        }
-        this.agent.restoreSession(session);
-        console.log(
-          chalk.dim(
-            `  セッション ${chalk.cyan(sessionId)} を復元しました (${session.meta.messageCount} messages)`,
-          ),
-        );
+        // 2026-05-28: /sessions は /resume list の alias に集約 (Phase optimize #2)。
+        console.log(chalk.dim("  ℹ /sessions は /resume list に統合されました (alias として動作中)。"));
+        await this.handleResumeCommand(["list", ...args]);
         break;
       }
 
       case "/continue": {
-        const latest = getLatestSession();
-        if (!latest) {
-          console.log(chalk.yellow("  復元可能なセッションがありません。"));
-          break;
-        }
-        this.agent.restoreSession(latest);
-        console.log(
-          chalk.dim(
-            `  最新セッションを復元しました: ${latest.meta.id} (${latest.meta.messageCount} messages)`,
-          ),
-        );
+        // 2026-05-28: /continue は /resume latest の alias に集約 (Phase optimize #2)。
+        console.log(chalk.dim("  ℹ /continue は /resume latest に統合されました (alias として動作中)。"));
+        await this.handleResumeCommand(["latest"]);
+        break;
+      }
+
+      case "/resume": {
+        await this.handleResumeCommand(args);
         break;
       }
 
@@ -4515,25 +4741,73 @@ export class REPL {
       }
 
       case "/status": {
+        // 2026-05-28: /metrics / /cost / /capability を /status に集約 (Phase optimize #4)。
+        // 旧 3 コマンドは alias を作らずそのまま削除。
         const messages = this.agent.getHistory().getMessages();
         const tokens = estimateMessageTokens(messages);
         const ctxWindow = this.config.mainLLM.contextWindow ?? 4096;
         const pct = Math.round((tokens / ctxWindow) * 100);
         const planState = this.planManager?.getState() ?? "idle";
         const todoSummary = formatTodos();
+        const m = this.agent.getMetrics();
+        const cap = this.agent.getCapability();
+        const tok = globalTokenTracker.getSessionTotal();
+        const flag = (b: boolean): string => b ? chalk.yellow("●") : chalk.dim("○");
+        const ctxK = cap.contextWindow >= 1000 ? `${Math.round(cap.contextWindow / 1000)}K` : `${cap.contextWindow}`;
 
-        console.log(chalk.bold("\n  === Status ==="));
-        console.log(chalk.dim(`  Model: ${this.config.mainLLM.model}`));
-        console.log(chalk.dim(`  Context: ${progressBar(pct)}`));
+        console.log(chalk.bold("\n  === Session Status ==="));
+
+        // ─── Slots ───
+        console.log(chalk.dim("\n  ── Slots ──"));
+        const main = this.config.mainLLM;
+        const mainLoc = main.baseUrl ?? main.endpoint ?? "(クラウド)";
+        console.log(chalk.dim(`  Main:    ${main.providerType}:${main.model} @ ${mainLoc}`));
+        if (this.config.secondLLM) {
+          const sec = this.config.secondLLM.endpoint;
+          const secLoc = sec.baseUrl ?? sec.endpoint ?? "(クラウド)";
+          const secState = this.config.secondLLM.enabled
+            ? (this.secondLLMManager?.isAvailable() ? chalk.green("有効") : chalk.yellow("有効 (接続失敗)"))
+            : chalk.red("無効");
+          console.log(chalk.dim(`  Second:  ${sec.providerType}:${sec.model} @ ${secLoc}  [${secState}]`));
+        } else {
+          console.log(chalk.dim(`  Second:  ${chalk.yellow("未設定")}`));
+        }
+        if (this.config.visionLLM) {
+          const v = this.config.visionLLM;
+          const vLoc = v.baseUrl ?? v.endpoint ?? "(クラウド)";
+          console.log(chalk.dim(`  Vision:  ${v.providerType}:${v.model} @ ${vLoc}`));
+        } else {
+          console.log(chalk.dim(`  Vision:  ${chalk.yellow("未設定")} (main にフォールバック)`));
+        }
+
+        // ─── Context ───
+        console.log(chalk.dim("\n  ── Context ──"));
+        console.log(chalk.dim(`  Messages:  ${messages.length}`));
+        console.log(chalk.dim(`  Tokens:    ${progressBar(pct)}  ~${tokens.toLocaleString()} / ${ctxK}`));
         console.log(chalk.dim(`  Plan mode: ${planState}`));
-        console.log(chalk.dim(`  Messages: ${messages.length}`));
-        if (
-          todoSummary.includes("pending") ||
-          todoSummary.includes("in_progress")
-        ) {
-          console.log(chalk.dim(`\n  --- Tasks ---`));
+
+        // ─── Capability (main) ───
+        console.log(chalk.dim("\n  ── Capability (main) ──"));
+        console.log(chalk.dim(`  tier=${cap.tier}  promptStyle=${cap.promptStyle}  toolCalling=${cap.supportsToolCalling}  parallel=${cap.supportsParallelTools}`));
+        console.log(chalk.dim(`  maxIterations=${cap.maxIterations}  compress@${Math.round(cap.compressionThreshold * 100)}%  truncate>${Math.round(cap.toolResultTruncateBytes / 1024)}KB  keepRecent=${cap.keepRecentMessages}`));
+        console.log(chalk.dim(`  判定根拠: ${cap.reason}`));
+
+        // ─── Metrics ───
+        console.log(chalk.dim("\n  ── Metrics (this session) ──"));
+        console.log(chalk.dim(`  iteration=${m.iteration} / softCap=${m.softCap} / hardCap=${m.hardCap}  register=${m.register}  mode=${m.mode === "goal-seek" ? chalk.cyan(m.mode) : m.mode}`));
+        console.log(chalk.dim(`  warnings:  softCap=${flag(m.softCapWarned)}  bash=${flag(m.bashWarned)} (${Math.round(m.bashCumulativeMs / 1000)}s)  plan/todo=${flag(m.planTodoWarned)}  stuck-loop=${m.recentFailures}/10`));
+
+        // ─── Cost ───
+        console.log(chalk.dim("\n  ── Cost ──"));
+        console.log(chalk.dim(`  Requests: ${tok.recordCount}  /  tokens in=${tok.totalInputTokens.toLocaleString()}  out=${tok.totalOutputTokens.toLocaleString()}  /  estimated: $${tok.totalCostUsd.toFixed(4)}`));
+
+        // ─── Tasks ───
+        if (todoSummary.includes("pending") || todoSummary.includes("in_progress")) {
+          console.log(chalk.dim("\n  ── Tasks ──"));
           console.log(chalk.dim(todoSummary));
         }
+
+        console.log(chalk.dim("\n  詳細レポート: npm run analyze:loop  /  Goal-seek: /goal-seek"));
         console.log();
         break;
       }
