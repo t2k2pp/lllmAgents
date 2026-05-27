@@ -49,7 +49,16 @@ import {
   touchProfile,
   type LLMProfile,
 } from "../config/llm-profiles.js";
-import { setSlot as setRegistrySlot } from "../config/model-registry.js";
+import {
+  setSlot as setRegistrySlot,
+  listEntries as listRegistryEntries,
+  getEntry as getRegistryEntry,
+  updateEntry as updateRegistryEntry,
+  deleteEntry as deleteRegistryEntry,
+  recordEntry as recordRegistryEntry,
+  getSlots as getRegistrySlots,
+} from "../config/model-registry.js";
+import type { LLMRegistryEntry } from "../config/types.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
 import { secondLLMConsultTool, secondLLMAgentTool, setSecondLLMManager } from "../tools/definitions/second-llm.js";
@@ -721,6 +730,355 @@ export class REPL {
       console.log(chalk.green(`  セカンドLLM を 「${profile.name}」 に切り替えました。`));
     }
     touchProfile(profile.id);
+  }
+
+  // ─── Model Registry (/models) ─────────────────────────────────
+  //
+  // docs/model-registry.md
+  // /profiles を一般化したコマンド: registry エントリ一覧 → アクション選択
+  // (Set as main / Set as second / Edit / Duplicate / Delete / Add new)
+  //
+  // 互換: /profiles は alias として残し、 deprecation 注記を出す。
+
+  private async handleModelsCommand(args: string[]): Promise<void> {
+    const sub = (args[0] ?? "").toLowerCase();
+
+    if (sub === "help" || sub === "--help" || sub === "-h") {
+      console.log(chalk.bold("\n  ── /models ──"));
+      console.log(chalk.dim("    /models          レジストリ一覧 → アクション選択"));
+      console.log(chalk.dim("    /models help     このヘルプ"));
+      console.log(chalk.dim("\n  アクション:"));
+      console.log(chalk.dim("    Set as main / second   現在の slot 割当を更新"));
+      console.log(chalk.dim("    Edit                   name / サンプリング / description を編集"));
+      console.log(chalk.dim("    Duplicate              バリアント (temperature 違い等) を別エントリとして複製"));
+      console.log(chalk.dim("    Delete                 エントリ削除 (slot は未割当に)"));
+      console.log(chalk.dim("    Add new                プロバイダ選択 → setup wizard で新規追加"));
+      console.log(chalk.dim("\n  接続情報の編集 (provider / model / URL 等) は当面 Duplicate + Add new で対応。"));
+      console.log(chalk.dim("  詳細: docs/model-registry.md"));
+      console.log();
+      return;
+    }
+
+    if (sub && sub !== "list") {
+      console.log(chalk.yellow(`  未知のサブコマンド: ${sub}`));
+      console.log(chalk.dim("  /models help で使い方を表示"));
+      return;
+    }
+
+    if (sub === "list") {
+      this.modelsPrintList();
+      return;
+    }
+
+    // メインループ: 一覧表示 → アクション → 戻る
+    // user が Exit を選ぶか Ctrl+C で抜けるまで繰り返す
+    while (true) {
+      const r = await this.modelsListMenu();
+      if (r === "exit") break;
+    }
+  }
+
+  /** /models list — 静的な一覧表示。 操作なし。 */
+  private modelsPrintList(): void {
+    const entries = listRegistryEntries();
+    const slots = getRegistrySlots();
+    if (entries.length === 0) {
+      console.log(chalk.dim("  登録モデルはまだありません。"));
+      return;
+    }
+    console.log(chalk.bold(`\n  ── Model Registry (${entries.length} 件) ──`));
+    for (const e of entries) {
+      const tags: string[] = [];
+      if (e.id === slots.main) tags.push("main");
+      if (e.id === slots.second) tags.push("second");
+      if (slots.named) {
+        for (const [k, v] of Object.entries(slots.named)) {
+          if (v === e.id) tags.push(k);
+        }
+      }
+      const tagStr = tags.length > 0 ? `  ${chalk.cyan("[" + tags.join(", ") + "]")}` : "";
+      const sp = formatSamplingHint(e.endpoint);
+      console.log(`  ${chalk.bold(e.name)}${tagStr}${sp ? "  " + chalk.dim(sp) : ""}`);
+      console.log(chalk.dim(`    id: ${e.id}  last used: ${formatRelativeTime(e.lastUsedAt)}`));
+    }
+    console.log();
+  }
+
+  /** インタラクティブ一覧 + Exit/Add のキー。 */
+  private async modelsListMenu(): Promise<"continue" | "exit"> {
+    const entries = listRegistryEntries();
+    const slots = getRegistrySlots();
+
+    if (entries.length === 0) {
+      console.log(chalk.dim("\n  モデル未登録です。"));
+      try {
+        const ok = await confirm({ message: "新規追加する?", default: true });
+        if (!ok) return "exit";
+      } catch { return "exit"; }
+      await this.modelsAddNew();
+      return "continue";
+    }
+
+    const choices = entries.map((e) => {
+      const tags: string[] = [];
+      if (e.id === slots.main) tags.push("main");
+      if (e.id === slots.second) tags.push("second");
+      if (slots.named) {
+        for (const [k, v] of Object.entries(slots.named)) {
+          if (v === e.id) tags.push(k);
+        }
+      }
+      const tagStr = tags.length > 0 ? chalk.cyan(` [${tags.join(", ")}]`) : "";
+      const sp = formatSamplingHint(e.endpoint);
+      return {
+        name: `${chalk.bold(e.name)}${tagStr}${sp ? chalk.dim("  " + sp) : ""}`,
+        value: `entry:${e.id}`,
+      };
+    });
+    choices.push({ name: chalk.green("  + Add new..."), value: "add" });
+    choices.push({ name: chalk.dim("  Exit"), value: "exit" });
+
+    let chosen: string;
+    try {
+      chosen = await select({
+        message: `Model Registry (${entries.length} 件):`,
+        choices,
+        pageSize: Math.min(15, choices.length),
+      });
+    } catch { return "exit"; }
+
+    if (chosen === "exit") return "exit";
+    if (chosen === "add") { await this.modelsAddNew(); return "continue"; }
+    if (chosen.startsWith("entry:")) {
+      const id = chosen.slice("entry:".length);
+      const entry = getRegistryEntry(id);
+      if (entry) await this.modelsEntryActionMenu(entry);
+      return "continue";
+    }
+    return "continue";
+  }
+
+  /** エントリ選択後のアクションメニュー。 */
+  private async modelsEntryActionMenu(entry: LLMRegistryEntry): Promise<void> {
+    const slots = getRegistrySlots();
+    const isMain = entry.id === slots.main;
+    const isSec = entry.id === slots.second;
+    const tag = isMain && isSec ? " [main + second]" : isMain ? " [main]" : isSec ? " [second]" : "";
+
+    let action: string;
+    try {
+      action = await select({
+        message: `${entry.name}${chalk.cyan(tag)}`,
+        choices: [
+          { name: "Set as main" + (isMain ? chalk.dim("  (現在)") : ""), value: "set-main", disabled: isMain },
+          { name: "Set as second" + (isSec ? chalk.dim("  (現在)") : ""), value: "set-second", disabled: isSec },
+          { name: "Edit (name / サンプリング / description)", value: "edit" },
+          { name: "Duplicate (バリアント作成)", value: "duplicate" },
+          { name: chalk.red("Delete"), value: "delete" },
+          { name: chalk.dim("Back"), value: "back" },
+        ],
+      });
+    } catch { return; }
+
+    switch (action) {
+      case "set-main":
+        await this.applyProfileTo(entry, "main");
+        break;
+      case "set-second":
+        await this.applyProfileTo(entry, "second");
+        break;
+      case "edit":
+        await this.modelsEditDialog(entry);
+        break;
+      case "duplicate":
+        await this.modelsDuplicate(entry);
+        break;
+      case "delete":
+        await this.modelsDelete(entry);
+        break;
+      // "back" は何もしない
+    }
+  }
+
+  /**
+   * Edit ダイアログ。 Phase 2 では name / サンプリングパラメータ / description のみ。
+   * 接続情報 (provider / model / URL 等) は Duplicate + Add new で対応 (docs/model-registry.md §4.3)。
+   */
+  private async modelsEditDialog(entry: LLMRegistryEntry): Promise<void> {
+    try {
+      const newName = await input({ message: "Name:", default: entry.name });
+      const tempStr = await input({
+        message: "Temperature (空で未指定):",
+        default: entry.endpoint.temperature !== undefined ? String(entry.endpoint.temperature) : "",
+      });
+      const topPStr = await input({
+        message: "Top-p (空で未指定):",
+        default: entry.endpoint.top_p !== undefined ? String(entry.endpoint.top_p) : "",
+      });
+      const topKStr = await input({
+        message: "Top-k (空で未指定):",
+        default: entry.endpoint.top_k !== undefined ? String(entry.endpoint.top_k) : "",
+      });
+      const repPStr = await input({
+        message: "Repetition penalty (空で未指定):",
+        default: entry.endpoint.repetition_penalty !== undefined ? String(entry.endpoint.repetition_penalty) : "",
+      });
+      const desc = await input({ message: "Description (空で未指定):", default: entry.endpoint.description ?? "" });
+
+      const parseOpt = (s: string): number | undefined => {
+        const t = s.trim();
+        if (t === "") return undefined;
+        const n = Number(t);
+        return Number.isNaN(n) ? NaN : n;
+      };
+      const parsedTemp = parseOpt(tempStr);
+      const parsedTopP = parseOpt(topPStr);
+      const parsedTopK = parseOpt(topKStr);
+      const parsedRepP = parseOpt(repPStr);
+      const numerics: [string, number | undefined][] = [
+        ["temperature", parsedTemp],
+        ["top_p", parsedTopP],
+        ["top_k", parsedTopK],
+        ["repetition_penalty", parsedRepP],
+      ];
+      for (const [n, v] of numerics) {
+        if (v !== undefined && Number.isNaN(v)) {
+          console.log(chalk.red(`  ${n} が数値ではありません。 編集を中止しました。`));
+          return;
+        }
+      }
+
+      const newEndpoint: LLMEndpoint = {
+        ...entry.endpoint,
+        temperature: parsedTemp,
+        top_p: parsedTopP,
+        top_k: parsedTopK,
+        repetition_penalty: parsedRepP,
+        description: desc.trim() === "" ? undefined : desc,
+      };
+
+      updateRegistryEntry(entry.id, { name: newName, endpoint: newEndpoint });
+      console.log(chalk.green(`  「${newName}」 を更新しました。`));
+
+      // slot に居れば config も同期 + apply
+      const slots = getRegistrySlots();
+      if (entry.id === slots.main) {
+        this.config.mainLLM = newEndpoint;
+        saveConfig(this.config);
+        await this.applyMainLLMEndpoint();
+      } else if (entry.id === slots.second && this.config.secondLLM) {
+        this.config.secondLLM.endpoint = newEndpoint;
+        saveConfig(this.config);
+        await this.applySecondLLMEndpoint();
+      }
+    } catch (e) {
+      if (!(e instanceof Error && e.message.includes("User force closed"))) {
+        console.log(chalk.red(`  編集失敗: ${e instanceof Error ? e.message : String(e)}`));
+      }
+    }
+  }
+
+  /** Duplicate: 同 endpoint で新規 UUID のエントリを作る。 サンプリング違いを試したい用途。 */
+  private async modelsDuplicate(entry: LLMRegistryEntry): Promise<void> {
+    try {
+      const newName = await input({ message: "新しいエントリ名:", default: `${entry.name} (copy)` });
+      const created = recordRegistryEntry(entry.endpoint, { forceNew: true });
+      if (!created) {
+        console.log(chalk.red("  複製に失敗しました (endpoint が不完全)。"));
+        return;
+      }
+      updateRegistryEntry(created.id, { name: newName });
+      console.log(chalk.green(`  「${newName}」 として複製しました。`));
+      console.log(chalk.dim("  サンプリングパラメータ等の変更は Edit から。"));
+    } catch (e) {
+      if (!(e instanceof Error && e.message.includes("User force closed"))) {
+        console.log(chalk.red(`  複製失敗: ${e instanceof Error ? e.message : String(e)}`));
+      }
+    }
+  }
+
+  /** Delete: 確認の上 entry 削除。 slot に居た場合は警告。 */
+  private async modelsDelete(entry: LLMRegistryEntry): Promise<void> {
+    const slots = getRegistrySlots();
+    const isMain = entry.id === slots.main;
+    const isSec = entry.id === slots.second;
+    try {
+      if (isMain || isSec) {
+        const t = isMain && isSec ? "main + second" : isMain ? "main" : "second";
+        console.log(chalk.yellow(`  ⚠ このエントリは現在 [${t}] slot に割り当てられています。 削除すると slot は未割当になります。`));
+      }
+      const ok = await confirm({ message: `「${entry.name}」 を削除しますか?`, default: false });
+      if (!ok) {
+        console.log(chalk.dim("  キャンセルしました。"));
+        return;
+      }
+      deleteRegistryEntry(entry.id);
+      console.log(chalk.green("  削除しました。"));
+      if (isMain) console.log(chalk.yellow("  main slot が空になりました。 /models から Set as main で再割当してください。"));
+      if (isSec) console.log(chalk.yellow("  second slot が空になりました。"));
+    } catch (e) {
+      if (!(e instanceof Error && e.message.includes("User force closed"))) {
+        console.log(chalk.red(`  削除失敗: ${e instanceof Error ? e.message : String(e)}`));
+      }
+    }
+  }
+
+  /** Add new: provider 選択 → slot 選択 → 既存 setup wizard へ流す。 */
+  private async modelsAddNew(): Promise<void> {
+    try {
+      const target = await select<"main" | "second">({
+        message: "新規モデルを割り当てる slot:",
+        choices: [
+          { name: "メインLLM (main)", value: "main" },
+          { name: "セカンドLLM (second)", value: "second" },
+        ],
+        default: "main",
+      });
+
+      const provider = await select<string>({
+        message: "プロバイダを選択:",
+        choices: [
+          { name: "Anthropic API (Claude direct, ANTHROPIC_API_KEY)", value: "anthropic" },
+          { name: "Google AI Studio (Gemini, GEMINI_API_KEY)", value: "gemini" },
+          { name: "Claude Code CLI (claude -p、 認証は claude login、 tool calling 不可)", value: "claude-cli" },
+          { name: "Claude Agent SDK (in-process MCP、 認証は claude login、 tool calling 対応)", value: "claude-agent-sdk" },
+          { name: "Azure OpenAI — Chat Completions API", value: "azure-openai" },
+          { name: "Azure OpenAI — Responses API (gpt-5/codex系)", value: "azure-gpt" },
+          { name: "Azure Claude — Anthropic Messages API", value: "azure-anthropic" },
+          { name: "Azure Claude — OpenAI互換ルート", value: "azure-claude" },
+          { name: "Azure AI Foundry (Kimi/Mistral等)", value: "azure-foundry" },
+          { name: "Ollama (local)", value: "ollama" },
+          { name: "LM Studio (local)", value: "lmstudio" },
+          { name: "llama.cpp (local)", value: "llamacpp" },
+          { name: "vLLM (local)", value: "vllm" },
+        ],
+      });
+
+      if (provider === "anthropic" || provider === "claude-cli" || provider === "claude-agent-sdk") {
+        await this.setupClaudeLLM(target, provider);
+      } else if (provider === "gemini") {
+        await this.setupGeminiLLM(target);
+      } else if (
+        provider === "azure-openai" || provider === "azure-gpt" ||
+        provider === "azure-claude" || provider === "azure-foundry" ||
+        provider === "azure-anthropic"
+      ) {
+        await this.setupAzureLLM(target, provider);
+      } else if (provider === "ollama" || provider === "lmstudio" || provider === "llamacpp" || provider === "vllm") {
+        // 既存の handleModelSetupLocal は main 固定。 second の場合は注意喚起のみ。
+        if (target === "second") {
+          console.log(chalk.yellow("  ローカル系 LLM の second セットアップ専用フローは未実装です。"));
+          console.log(chalk.dim("  一旦 main にセットアップし、 /swap で main ⇔ second を入れ替えてください。"));
+        }
+        await this.handleModelSetupLocal();
+      } else {
+        console.log(chalk.red(`  未対応のプロバイダ: ${provider}`));
+      }
+    } catch (e) {
+      if (!(e instanceof Error && e.message.includes("User force closed"))) {
+        console.log(chalk.red(`  追加失敗: ${e instanceof Error ? e.message : String(e)}`));
+      }
+    }
   }
 
   /**
@@ -2842,8 +3200,17 @@ export class REPL {
         break;
       }
 
+      case "/models":
+      case "/model-registry":
+      case "/registry": {
+        await this.handleModelsCommand(args);
+        break;
+      }
+
       case "/profiles":
       case "/profile": {
+        // 2026-05-27: /models へ統合された。 alias として動作するが deprecation を表示。
+        console.log(chalk.dim("  ℹ /profiles は /models に名称変更されました (alias として動作中)。 詳細: docs/model-registry.md"));
         await this.handleProfilesCommand(args);
         break;
       }
@@ -3938,6 +4305,16 @@ function formatRelativeTime(iso: string): string {
   const mo = Math.floor(day / 30);
   if (mo < 12) return `${mo}ヶ月前`;
   return new Date(t).toISOString().slice(0, 10);
+}
+
+/** /models 一覧でサンプリングパラメータを 1 行ヒントとして整形 (空なら空文字)。 */
+function formatSamplingHint(ep: LLMEndpoint): string {
+  const parts: string[] = [];
+  if (ep.temperature !== undefined) parts.push(`temp=${ep.temperature}`);
+  if (ep.top_p !== undefined) parts.push(`top_p=${ep.top_p}`);
+  if (ep.top_k !== undefined) parts.push(`top_k=${ep.top_k}`);
+  if (ep.repetition_penalty !== undefined) parts.push(`rep_p=${ep.repetition_penalty}`);
+  return parts.join(" ");
 }
 
 /** プロファイルが endpoint と「同じ接続」 を指しているか判定 */
