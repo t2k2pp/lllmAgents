@@ -168,6 +168,18 @@ describe("createCommandMenuProvider", () => {
     expect(labels).toContain("/model second description");
   });
 
+  it("/model vision 系の主要サブコマンドが補完候補に出る (Phase 5)", () => {
+    const provider = createCommandMenuProvider();
+    const items = provider("model vision");
+    const labels = items.map((i) => i.label);
+    expect(labels).toContain("/model vision");
+    expect(labels).toContain("/model vision setup");
+    expect(labels).toContain("/model vision list");
+    expect(labels).toContain("/model vision context");
+    expect(labels).toContain("/model vision description");
+    expect(labels).toContain("/model vision clear");
+  });
+
   it("/second は alias として補完に残るが [非推奨] 表記", () => {
     const provider = createCommandMenuProvider();
     const items = provider("second");

@@ -390,6 +390,16 @@ export function reconcileSlotsFromConfig(config: Config): void {
     delete store.slots.second;
   }
 
+  // vision slot (docs/model-registry.md Phase 5): config.visionLLM ↔ slots.named.vision
+  // visionLLM が null の場合は main にフォールバックするので vision slot は未割当のまま。
+  const visionId = ensureEntry(config.visionLLM ?? undefined);
+  if (visionId) {
+    store.slots.named ??= {};
+    store.slots.named.vision = visionId;
+  } else if (store.slots.named?.vision) {
+    delete store.slots.named.vision;
+  }
+
   writeStore(store);
 }
 

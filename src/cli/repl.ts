@@ -88,6 +88,8 @@ export class REPL {
     private passphrase?: string,
     /** Phase F-1: /mcp slash command で参照するため optional 引数として受ける */
     private mcpManager?: import("../mcp/mcp-manager.js").MCPManager,
+    /** Phase 5: /model vision setup から hot-swap するために保持 */
+    private visionService?: import("../tools/definitions/vision.js").VisionService,
   ) {
     // スキル情報を取得してメニュープロバイダーに渡す
     const skillInfos = skillRegistry
@@ -362,17 +364,19 @@ export class REPL {
    *                  deploymentName は不要、model 名でルーティング
    */
   private async setupAzureLLM(
-    target: "main" | "second",
+    target: "main" | "second" | "vision",
     provider: "azure-openai" | "azure-gpt" | "azure-claude" | "azure-foundry" | "azure-anthropic",
   ): Promise<void> {
-    const targetLabel = target === "main" ? "メインLLM" : "セカンドLLM";
+    const targetLabel = target === "main" ? "メインLLM" : target === "vision" ? "Vision LLM" : "セカンドLLM";
     console.log(chalk.bold(`\n  ── ${targetLabel} ${provider} セットアップ ──`));
     console.log(chalk.dim("  キャンセルは Ctrl+C\n"));
 
     if (await this.maybeOfferProfileHistory(target, provider)) return;
 
     const existing =
-      target === "main" ? this.config.mainLLM : this.config.secondLLM?.endpoint;
+      target === "main" ? this.config.mainLLM
+      : target === "vision" ? this.config.visionLLM ?? undefined
+      : this.config.secondLLM?.endpoint;
     const existingIsAzure =
       existing?.providerType === "azure-openai" ||
       existing?.providerType === "azure-gpt" ||
@@ -529,6 +533,17 @@ export class REPL {
         projectId: undefined,
         region: undefined,
       };
+    } else if (target === "vision") {
+      // Vision LLM: secondLLM のような wrapper は持たない。 LLMEndpoint 直書き。
+      this.config.visionLLM = {
+        providerType: provider,
+        model: finalModel,
+        endpoint: finalEndpoint,
+        apiKey: storedApiKey,
+        deploymentName: finalDeployment,
+        description: existingIsAzure ? existing?.description : undefined,
+        contextWindow: existingIsAzure ? existing?.contextWindow : undefined,
+      };
     } else {
       this.config.secondLLM = {
         enabled: true,
@@ -563,13 +578,16 @@ export class REPL {
       if (target === "main") {
         await this.applyMainLLMEndpoint();
         console.log(chalk.green("  実行時に反映しました。"));
+      } else if (target === "vision") {
+        await this.applyVisionLLMEndpoint();
+        console.log(chalk.green("  実行時に反映しました。"));
       } else {
         await this.applySecondLLMEndpoint();
         const isAvail = this.secondLLMManager?.isAvailable() ?? false;
         if (isAvail) {
           console.log(chalk.green("  実行時に反映しました。"));
         } else {
-          console.log(chalk.yellow("  反映時に接続失敗しました。/second status で確認してください。"));
+          console.log(chalk.yellow("  反映時に接続失敗しました。/model second で確認してください。"));
         }
       }
     }
@@ -708,13 +726,18 @@ export class REPL {
    * 選んだプロファイルを main または second に書き戻して反映する。
    * apiKey が暗号化済みの場合は applyXxxEndpoint 側で合言葉を要求する。
    */
-  private async applyProfileTo(profile: LLMProfile, target: "main" | "second"): Promise<void> {
+  private async applyProfileTo(profile: LLMProfile, target: "main" | "second" | "vision"): Promise<void> {
     const ep = { ...profile.endpoint };
     if (target === "main") {
       this.config.mainLLM = ep;
       saveConfig(this.config);
       await this.applyMainLLMEndpoint();
       console.log(chalk.green(`  メインLLM を 「${profile.name}」 に切り替えました。`));
+    } else if (target === "vision") {
+      this.config.visionLLM = ep;
+      saveConfig(this.config);
+      await this.applyVisionLLMEndpoint();
+      console.log(chalk.green(`  Vision LLM を 「${profile.name}」 に切り替えました。`));
     } else {
       // secondLLM の枠組みを維持しつつ endpoint だけ差し替え
       this.config.secondLLM = {
@@ -863,7 +886,12 @@ export class REPL {
     const slots = getRegistrySlots();
     const isMain = entry.id === slots.main;
     const isSec = entry.id === slots.second;
-    const tag = isMain && isSec ? " [main + second]" : isMain ? " [main]" : isSec ? " [second]" : "";
+    const isVision = slots.named?.vision === entry.id;
+    const slotTags: string[] = [];
+    if (isMain) slotTags.push("main");
+    if (isSec) slotTags.push("second");
+    if (isVision) slotTags.push("vision");
+    const tag = slotTags.length > 0 ? ` [${slotTags.join(" + ")}]` : "";
 
     let action: string;
     try {
@@ -872,6 +900,7 @@ export class REPL {
         choices: [
           { name: "Set as main" + (isMain ? chalk.dim("  (現在)") : ""), value: "set-main", disabled: isMain },
           { name: "Set as second" + (isSec ? chalk.dim("  (現在)") : ""), value: "set-second", disabled: isSec },
+          { name: "Set as vision" + (isVision ? chalk.dim("  (現在)") : ""), value: "set-vision", disabled: isVision },
           { name: "Edit (name / サンプリング / description)", value: "edit" },
           { name: "Duplicate (バリアント作成)", value: "duplicate" },
           { name: chalk.red("Delete"), value: "delete" },
@@ -886,6 +915,9 @@ export class REPL {
         break;
       case "set-second":
         await this.applyProfileTo(entry, "second");
+        break;
+      case "set-vision":
+        await this.applyProfileTo(entry, "vision");
         break;
       case "edit":
         await this.modelsEditDialog(entry);
@@ -1026,11 +1058,12 @@ export class REPL {
   /** Add new: provider 選択 → slot 選択 → 既存 setup wizard へ流す。 */
   private async modelsAddNew(): Promise<void> {
     try {
-      const target = await select<"main" | "second">({
+      const target = await select<"main" | "second" | "vision">({
         message: "新規モデルを割り当てる slot:",
         choices: [
           { name: "メインLLM (main)", value: "main" },
           { name: "セカンドLLM (second)", value: "second" },
+          { name: "Vision LLM (画像認識を含むマルチモーダル言語生成 AI)", value: "vision" },
         ],
         default: "main",
       });
@@ -1065,12 +1098,17 @@ export class REPL {
       ) {
         await this.setupAzureLLM(target, provider);
       } else if (provider === "ollama" || provider === "lmstudio" || provider === "llamacpp" || provider === "vllm") {
-        // 既存の handleModelSetupLocal は main 固定。 second の場合は注意喚起のみ。
-        if (target === "second") {
-          console.log(chalk.yellow("  ローカル系 LLM の second セットアップ専用フローは未実装です。"));
-          console.log(chalk.dim("  一旦 main にセットアップし、 /swap で main ⇔ second を入れ替えてください。"));
+        // ローカル系: target ごとに別の setup ヘルパを使う
+        if (target === "vision") {
+          await this.setupLocalVisionLLM(provider);
+        } else {
+          // 既存の handleModelSetupLocal は main 固定。 second の場合は注意喚起のみ。
+          if (target === "second") {
+            console.log(chalk.yellow("  ローカル系 LLM の second セットアップ専用フローは未実装です。"));
+            console.log(chalk.dim("  一旦 main にセットアップし、 /swap で main ⇔ second を入れ替えてください。"));
+          }
+          await this.handleModelSetupLocal();
         }
-        await this.handleModelSetupLocal();
       } else {
         console.log(chalk.red(`  未対応のプロバイダ: ${provider}`));
       }
@@ -1406,6 +1444,240 @@ export class REPL {
   }
 
   /**
+   * Vision LLM (vision slot) のサブコマンドハンドラ (Phase 5)。
+   * 画像認識を含むマルチモーダル言語生成 AI (Claude / Gemini / GPT-4o / Llama Vision 等) を
+   * /model vision <sub> 経由で操作する。 visionLLM 未設定時は main slot に自動フォールバック。
+   *
+   * docs/model-registry.md §4.1
+   */
+  private async handleVisionLLMCommand(args: string[]): Promise<void> {
+    const subCmd = (args[0] ?? "").toLowerCase();
+    const ep = this.config.visionLLM;
+
+    if (!subCmd || subCmd === "status" || subCmd === "info") {
+      console.log(chalk.bold("\n  ── Vision LLM ──"));
+      if (!ep) {
+        console.log(chalk.dim(`  状態: ${chalk.yellow("未設定 (main LLM にフォールバック)")}`));
+        console.log(chalk.dim(`  設定するには: /model vision setup`));
+      } else {
+        const loc = ep.baseUrl ?? ep.endpoint ?? "(クラウド)";
+        console.log(chalk.dim(`  プロバイダー: ${ep.providerType} @ ${loc}`));
+        console.log(chalk.dim(`  モデル:       ${ep.model}`));
+        if (ep.contextWindow) {
+          const ctxLabel = ep.contextWindow >= 1000 ? `${Math.round(ep.contextWindow / 1000)}K` : `${ep.contextWindow}`;
+          console.log(chalk.dim(`  コンテキスト: ${ctxLabel}`));
+        }
+        const desc = ep.description?.trim();
+        if (desc) console.log(chalk.dim(`  特性:         ${chalk.cyan(desc)}`));
+        console.log(chalk.dim(`\n  ※ 画像認識を含むマルチモーダル言語生成 AI を指定 (Claude Sonnet / Gemini Pro / Llama Vision 等)`));
+        console.log(chalk.dim(`  ※ 解除して main にフォールバックする場合は /model vision clear`));
+      }
+      console.log();
+      return;
+    }
+
+    if (subCmd === "clear") {
+      if (!ep) {
+        console.log(chalk.dim("  vision LLM は元から未設定です (main にフォールバック中)。"));
+        return;
+      }
+      this.config.visionLLM = null;
+      saveConfig(this.config);
+      await this.applyVisionLLMEndpoint();
+      console.log(chalk.green("  Vision LLM をクリアしました (main LLM にフォールバック)。"));
+      return;
+    }
+
+    if (subCmd === "setup") {
+      // プロバイダ選択 → 既存 setup ヘルパに vision target で流す
+      try {
+        const provider = await select<string>({
+          message: "Vision LLM のプロバイダを選択:",
+          choices: [
+            { name: "Anthropic API (Claude vision direct, ANTHROPIC_API_KEY)", value: "anthropic" },
+            { name: "Google AI Studio (Gemini vision, GEMINI_API_KEY)", value: "gemini" },
+            { name: "Claude Code CLI (claude -p)", value: "claude-cli" },
+            { name: "Claude Agent SDK", value: "claude-agent-sdk" },
+            { name: "Azure OpenAI — Chat Completions (GPT-4o 等)", value: "azure-openai" },
+            { name: "Azure OpenAI — Responses API", value: "azure-gpt" },
+            { name: "Azure Claude — Anthropic Messages API", value: "azure-anthropic" },
+            { name: "Azure Claude — OpenAI互換ルート", value: "azure-claude" },
+            { name: "Azure AI Foundry", value: "azure-foundry" },
+            { name: "Ollama (local — Llama 3.2 Vision / Qwen2-VL / LLaVA 等)", value: "ollama" },
+            { name: "LM Studio (local)", value: "lmstudio" },
+            { name: "llama.cpp (local)", value: "llamacpp" },
+            { name: "vLLM (local)", value: "vllm" },
+          ],
+        });
+
+        if (provider === "anthropic" || provider === "claude-cli" || provider === "claude-agent-sdk") {
+          await this.setupClaudeLLM("vision", provider);
+        } else if (provider === "gemini") {
+          await this.setupGeminiLLM("vision");
+        } else if (
+          provider === "azure-openai" || provider === "azure-gpt" ||
+          provider === "azure-claude" || provider === "azure-foundry" ||
+          provider === "azure-anthropic"
+        ) {
+          await this.setupAzureLLM("vision", provider as any);
+        } else if (provider === "ollama" || provider === "lmstudio" || provider === "llamacpp" || provider === "vllm") {
+          await this.setupLocalVisionLLM(provider);
+        } else {
+          console.log(chalk.red(`  未対応のプロバイダ: ${provider}`));
+        }
+      } catch (e) {
+        if (!(e instanceof Error && e.message.includes("User force closed"))) {
+          console.log(chalk.red(`  Vision LLM セットアップ失敗: ${e instanceof Error ? e.message : String(e)}`));
+        }
+      }
+      return;
+    }
+
+    if (subCmd === "list") {
+      if (!this.visionService) {
+        console.log(chalk.red("  Vision service が初期化されていません。 再起動してください。"));
+        return;
+      }
+      // 現在の vision provider からモデル一覧を取得して選択させる。
+      // vision LLM 未設定なら main provider を使うことになるが、 list は main の list と被るので警告。
+      if (!ep) {
+        console.log(chalk.yellow("  Vision LLM 未設定です。 先に /model vision setup でプロバイダを決めてください。"));
+        return;
+      }
+      try {
+        const provider = createProvider(ep, this.passphrase);
+        const models = await provider.listModels();
+        if (models.length === 0) {
+          console.log(chalk.dim("  利用可能なモデルがありません。"));
+          return;
+        }
+        const visionModels = models.filter((m) => m.supportsVision);
+        const list = visionModels.length > 0 ? visionModels : models;
+        const chosen = await select({
+          message: "Vision LLM のモデルを選択:",
+          choices: list.map((m) => ({
+            name: `${m.name}${m.supportsVision ? " [Vision]" : ""}${m.name === ep.model ? "  ← current" : ""}`,
+            value: m.name,
+          })),
+          default: ep.model,
+        });
+        if (chosen !== ep.model) {
+          this.config.visionLLM = { ...ep, model: chosen };
+          saveConfig(this.config);
+          await this.applyVisionLLMEndpoint();
+          console.log(chalk.dim(`  Vision モデル: ${chalk.yellow(ep.model)} → ${chalk.cyan(chosen)}`));
+        }
+      } catch (e) {
+        if (!(e instanceof Error && e.message.includes("User force closed"))) {
+          console.log(chalk.red(`  モデル一覧取得に失敗: ${e instanceof Error ? e.message : String(e)}`));
+        }
+      }
+      return;
+    }
+
+    if (subCmd === "context") {
+      const val = args[1] ? parseTokenCount(args[1]) : NaN;
+      if (!ep) {
+        console.log(chalk.red("  Vision LLM 未設定です。 /model vision setup で設定してください。"));
+      } else if (isNaN(val) || val <= 0) {
+        const cur = ep.contextWindow;
+        const curLabel = cur ? (cur >= 1000 ? `${Math.round(cur / 1000)}K` : `${cur}`) : "(未設定 — サーバ側デフォルト)";
+        console.log(chalk.dim(`  Vision コンテキスト長: ${curLabel}`));
+        console.log(chalk.dim(`  使い方: /model vision context <トークン数>`));
+      } else {
+        const old = ep.contextWindow;
+        this.config.visionLLM = { ...ep, contextWindow: val };
+        saveConfig(this.config);
+        await this.applyVisionLLMEndpoint();
+        const oldLabel = old ? (old >= 1000 ? `${Math.round(old / 1000)}K` : `${old}`) : "(未設定)";
+        const newLabel = val >= 1000 ? `${Math.round(val / 1000)}K` : `${val}`;
+        console.log(chalk.dim(`  Vision コンテキスト長: ${chalk.yellow(oldLabel)} → ${chalk.cyan(newLabel)} トークン`));
+      }
+      return;
+    }
+
+    if (subCmd === "description") {
+      const text = args.slice(1).join(" ").trim();
+      if (!ep) {
+        console.log(chalk.red("  Vision LLM 未設定です。 /model vision setup で設定してください。"));
+      } else if (!text) {
+        const cur = ep.description?.trim();
+        console.log(chalk.bold("\n  ── Vision LLM 特性説明 ──"));
+        console.log(chalk.dim(`  現在: ${cur ? chalk.cyan(cur) : chalk.yellow("(未設定)")}`));
+        console.log(chalk.dim(`  使い方: /model vision description <説明文>`));
+        console.log(chalk.dim(`  クリア: /model vision description clear`));
+      } else if (text.toLowerCase() === "clear") {
+        this.config.visionLLM = { ...ep, description: undefined };
+        saveConfig(this.config);
+        console.log(chalk.yellow("  Vision LLM 特性説明をクリアしました"));
+      } else {
+        this.config.visionLLM = { ...ep, description: text };
+        saveConfig(this.config);
+        console.log(chalk.green(`  Vision LLM 特性説明を設定しました (${text.length}文字)`));
+      }
+      return;
+    }
+
+    // 不明なサブコマンド → 使い方
+    console.log(chalk.yellow("  使い方:"));
+    console.log(chalk.dim("    /model vision                  状態確認"));
+    console.log(chalk.dim("    /model vision setup            プロバイダ選択 → setup wizard"));
+    console.log(chalk.dim("    /model vision list             利用可能モデル一覧から選択"));
+    console.log(chalk.dim("    /model vision context <128k>   コンテキスト長変更"));
+    console.log(chalk.dim("    /model vision description <text>  特性説明"));
+    console.log(chalk.dim("    /model vision clear            未設定に戻す (main にフォールバック)"));
+    console.log(chalk.dim("\n  ※ 画像認識を含むマルチモーダル言語生成 AI を指定します (CLIP/YOLO 等の専用視覚モデルではない)"));
+  }
+
+  /**
+   * ローカル系 (ollama/lmstudio/llamacpp/vllm) を vision slot にセットアップする補助関数。
+   * setupLocalLLM 系がローカル系を main 専用前提で書かれているため、 vision 用は独立に実装。
+   * host/port を聞いて connectAndListModels でモデル一覧 → 選択 → applyVisionLLMEndpoint。
+   */
+  private async setupLocalVisionLLM(provider: "ollama" | "lmstudio" | "llamacpp" | "vllm"): Promise<void> {
+    const defaultPort = DEFAULT_PORTS[provider];
+    try {
+      const host = await input({ message: "サーバーの IP アドレス:", default: "localhost" });
+      const portStr = await input({ message: "ポート番号:", default: String(defaultPort) });
+      const port = parseInt(portStr, 10);
+      if (isNaN(port) || port <= 0) {
+        console.log(chalk.red(`  無効なポート番号: ${portStr}`));
+        return;
+      }
+      const baseUrl = `http://${host}:${port}`;
+      console.log(chalk.dim(`  ${baseUrl} に接続してモデル一覧を取得中...`));
+      let models;
+      try {
+        models = await connectAndListModels(provider, baseUrl);
+      } catch (e) {
+        console.log(chalk.red(`  接続失敗: ${e instanceof Error ? e.message : String(e)}`));
+        return;
+      }
+      const visionModels = models.filter((m) => m.supportsVision);
+      const list = visionModels.length > 0 ? visionModels : models;
+      if (list.length === 0) {
+        console.log(chalk.dim("  利用可能なモデルがありません。"));
+        return;
+      }
+      const model = await select({
+        message: "Vision LLM のモデルを選択:",
+        choices: list.map((m) => ({
+          name: `${m.name}${m.supportsVision ? " [Vision]" : ""}`,
+          value: m.name,
+        })),
+      });
+      this.config.visionLLM = { providerType: provider, baseUrl, model };
+      saveConfig(this.config);
+      await this.applyVisionLLMEndpoint();
+      console.log(chalk.green(`  Vision LLM を設定しました: ${provider}:${model} @ ${baseUrl}`));
+    } catch (e) {
+      if (!(e instanceof Error && e.message.includes("User force closed"))) {
+        console.log(chalk.red(`  Vision LLM セットアップ失敗: ${e instanceof Error ? e.message : String(e)}`));
+      }
+    }
+  }
+
+  /**
    * setup フロー冒頭で「履歴から選ぶ / 新規セットアップ」 を提示する共通ヘルパ。
    *  - 履歴が空、 または provider にマッチする履歴が無ければ何もせず undefined を返す
    *  - ユーザが履歴を選んだら applyProfileTo して true を返す (呼び出し側はそこで return すれば良い)
@@ -1414,7 +1686,7 @@ export class REPL {
    * matchProvider に文字列 or 関数を渡すと候補を絞り込める (例: "anthropic" でその provider のみ)。
    */
   private async maybeOfferProfileHistory(
-    target: "main" | "second",
+    target: "main" | "second" | "vision",
     matchProvider?: string | ((p: LLMProfile) => boolean),
   ): Promise<boolean> {
     const allProfiles = listLLMProfiles();
@@ -1426,7 +1698,7 @@ export class REPL {
     const candidates = filter ? allProfiles.filter(filter) : allProfiles;
     if (candidates.length === 0) return false;
 
-    const targetLabel = target === "main" ? "メインLLM" : "セカンドLLM";
+    const targetLabel = target === "main" ? "メインLLM" : target === "vision" ? "Vision LLM" : "セカンドLLM";
     try {
       const action = await select({
         message: `${targetLabel} の設定方法を選択 (履歴 ${candidates.length} 件):`,
@@ -1469,11 +1741,11 @@ export class REPL {
    * モデルは CLAUDE_MODELS のハードコード一覧から選択する。
    */
   private async setupClaudeLLM(
-    target: "main" | "second",
+    target: "main" | "second" | "vision",
     provider: "anthropic" | "claude-cli" | "claude-agent-sdk",
   ): Promise<void> {
     const { CLAUDE_MODELS } = await import("../config/types.js");
-    const targetLabel = target === "main" ? "メインLLM" : "セカンドLLM";
+    const targetLabel = target === "main" ? "メインLLM" : target === "vision" ? "Vision LLM" : "セカンドLLM";
     console.log(chalk.bold(`\n  ── ${targetLabel} ${provider} セットアップ ──`));
     console.log(chalk.dim("  キャンセルは Ctrl+C\n"));
 
@@ -1481,7 +1753,9 @@ export class REPL {
     if (await this.maybeOfferProfileHistory(target, provider)) return;
 
     const existing =
-      target === "main" ? this.config.mainLLM : this.config.secondLLM?.endpoint;
+      target === "main" ? this.config.mainLLM
+      : target === "vision" ? this.config.visionLLM ?? undefined
+      : this.config.secondLLM?.endpoint;
     const existingIsClaude =
       existing?.providerType === "anthropic" ||
       existing?.providerType === "claude-cli" ||
@@ -1595,6 +1869,14 @@ export class REPL {
         projectId: undefined,
         region: undefined,
       };
+    } else if (target === "vision") {
+      this.config.visionLLM = {
+        providerType: provider,
+        model: chosenModel,
+        apiKey: storedApiKey,
+        contextWindow: ctxWindow,
+        description: existingIsClaude ? existing?.description : undefined,
+      };
     } else {
       this.config.secondLLM = {
         enabled: true,
@@ -1629,13 +1911,16 @@ export class REPL {
       if (target === "main") {
         await this.applyMainLLMEndpoint();
         console.log(chalk.green("  実行時に反映しました。"));
+      } else if (target === "vision") {
+        await this.applyVisionLLMEndpoint();
+        console.log(chalk.green("  実行時に反映しました。"));
       } else {
         await this.applySecondLLMEndpoint();
         const isAvail = this.secondLLMManager?.isAvailable() ?? false;
         if (isAvail) {
           console.log(chalk.green("  実行時に反映しました。"));
         } else {
-          console.log(chalk.yellow("  反映時に接続失敗しました。 /second status で確認してください。"));
+          console.log(chalk.yellow("  反映時に接続失敗しました。 /model second で確認してください。"));
         }
       }
     }
@@ -1649,9 +1934,9 @@ export class REPL {
    * 認証は GEMINI_API_KEY 1 個のみ (endpoint / deploymentName / projectId は不要)。
    * モデルは GEMINI_MODELS のハードコード一覧から選択する (= /model setup gemini はオフラインでも完走できる)。
    */
-  private async setupGeminiLLM(target: "main" | "second"): Promise<void> {
+  private async setupGeminiLLM(target: "main" | "second" | "vision"): Promise<void> {
     const { GEMINI_MODELS } = await import("../config/types.js");
-    const targetLabel = target === "main" ? "メインLLM" : "セカンドLLM";
+    const targetLabel = target === "main" ? "メインLLM" : target === "vision" ? "Vision LLM" : "セカンドLLM";
     console.log(chalk.bold(`\n  ── ${targetLabel} gemini (Google AI Studio) セットアップ ──`));
     console.log(chalk.dim("  キャンセルは Ctrl+C\n"));
 
@@ -1659,7 +1944,9 @@ export class REPL {
     if (await this.maybeOfferProfileHistory(target, "gemini")) return;
 
     const existing =
-      target === "main" ? this.config.mainLLM : this.config.secondLLM?.endpoint;
+      target === "main" ? this.config.mainLLM
+      : target === "vision" ? this.config.visionLLM ?? undefined
+      : this.config.secondLLM?.endpoint;
     const existingIsGemini = existing?.providerType === "gemini";
 
     const chosenModel = await select({
@@ -1758,6 +2045,14 @@ export class REPL {
         projectId: undefined,
         region: undefined,
       };
+    } else if (target === "vision") {
+      this.config.visionLLM = {
+        providerType: "gemini",
+        model: chosenModel,
+        apiKey: storedApiKey,
+        contextWindow: ctxWindow,
+        description: existingIsGemini ? existing?.description : undefined,
+      };
     } else {
       this.config.secondLLM = {
         enabled: true,
@@ -1792,13 +2087,16 @@ export class REPL {
       if (target === "main") {
         await this.applyMainLLMEndpoint();
         console.log(chalk.green("  実行時に反映しました。"));
+      } else if (target === "vision") {
+        await this.applyVisionLLMEndpoint();
+        console.log(chalk.green("  実行時に反映しました。"));
       } else {
         await this.applySecondLLMEndpoint();
         const isAvail = this.secondLLMManager?.isAvailable() ?? false;
         if (isAvail) {
           console.log(chalk.green("  実行時に反映しました。"));
         } else {
-          console.log(chalk.yellow("  反映時に接続失敗しました。 /second status で確認してください。"));
+          console.log(chalk.yellow("  反映時に接続失敗しました。 /model second で確認してください。"));
         }
       }
     }
@@ -1844,6 +2142,38 @@ export class REPL {
         const entry = recordLLMProfile(this.config.secondLLM.endpoint);
         if (entry) setRegistrySlot("second", entry.id);
       } catch { /* ignore */ }
+    }
+  }
+
+  /**
+   * Vision LLM の hot-swap (Phase 5)。 config.visionLLM の変更を visionService に反映し、
+   * registry の vision slot も更新する。 visionLLM が null の場合は main provider に
+   * フォールバック (= 起動時の挙動と同じ)。
+   */
+  private async applyVisionLLMEndpoint(): Promise<void> {
+    if (!this.visionService) return;
+    try {
+      const ep = this.config.visionLLM;
+      if (ep) {
+        await this.ensurePassphraseFor(ep.apiKey, "Vision LLM", ep.providerType);
+        const newProvider = createProvider(ep, this.passphrase);
+        this.visionService.setProvider(newProvider, ep.model);
+        // registry に記録 + vision slot 更新
+        try {
+          const entry = recordLLMProfile(ep);
+          if (entry) setRegistrySlot("vision", entry.id);
+        } catch { /* ignore */ }
+      } else {
+        // visionLLM クリア → main provider にフォールバック
+        this.visionService.setProvider(this.agent.getProvider(), this.config.mainLLM.model);
+        // vision slot を解除 (registry helper を呼ぶ — clearSlot)
+        try {
+          const { clearSlot } = await import("../config/model-registry.js");
+          clearSlot("vision");
+        } catch { /* ignore */ }
+      }
+    } catch (e) {
+      console.log(chalk.red(`  Vision LLM 反映に失敗: ${e instanceof Error ? e.message : String(e)}`));
     }
   }
 
@@ -2638,6 +2968,11 @@ export class REPL {
           await this.handleSecondLLMCommand(args.slice(1));
           break;
         }
+        // 2026-05-28: /model vision ... を Vision LLM の操作経路として処理 (Phase 5)。
+        if (args[0] === "vision") {
+          await this.handleVisionLLMCommand(args.slice(1));
+          break;
+        }
         if (args.length === 0 || args[0] === "info") {
           // --- 基本情報 ---
           const modelName = this.agent.getModel();
@@ -2704,7 +3039,14 @@ export class REPL {
           if (this.config.visionLLM) {
             console.log(chalk.bold("\n  ── Vision LLM ──"));
             const v = this.config.visionLLM;
-            console.log(chalk.dim(`  モデル: ${v.model} @ ${v.baseUrl ?? v.endpoint ?? "(クラウド)"}`));
+            const loc = v.baseUrl ?? v.endpoint ?? "(クラウド)";
+            console.log(chalk.dim(`  モデル: ${v.model} (${v.providerType}) @ ${loc}`));
+            const vDesc = v.description?.trim();
+            if (vDesc) console.log(chalk.dim(`  特性:   ${chalk.cyan(vDesc)}`));
+            console.log(chalk.dim(`  詳細:   /model vision  /  変更: /model vision setup`));
+          } else {
+            console.log(chalk.bold("\n  ── Vision LLM ──"));
+            console.log(chalk.dim(`  ${chalk.yellow("未設定")} (main LLM にフォールバック)。 設定: /model vision setup`));
           }
           if (this.config.secondLLM?.enabled) {
             console.log(chalk.bold("\n  ── セカンドLLM ──"));
@@ -2713,6 +3055,7 @@ export class REPL {
             if (secDesc) {
               console.log(chalk.dim(`  特性:   ${chalk.cyan(secDesc)}`));
             }
+            console.log(chalk.dim(`  詳細:   /model second`));
           }
           // メインLLMの特性説明
           const mainDesc = this.config.mainLLM.description?.trim();

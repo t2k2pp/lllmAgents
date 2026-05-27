@@ -9,6 +9,19 @@ export class VisionService {
     private model: string,
   ) {}
 
+  /**
+   * REPL から /model vision setup 等で vision LLM を差し替えた際に呼ぶ。
+   * (docs/model-registry.md Phase 5)
+   */
+  setProvider(provider: LLMProvider, model: string): void {
+    this.provider = provider;
+    this.model = model;
+  }
+
+  getModel(): string {
+    return this.model;
+  }
+
   async analyzeImage(imageBase64: string, prompt: string): Promise<string> {
     const gen = this.provider.chatWithVision({
       model: this.model,

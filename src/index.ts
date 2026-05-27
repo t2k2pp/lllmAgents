@@ -528,7 +528,7 @@ async function main(): Promise<void> {
   }
 
   // Start REPL (sharedPassphrase は /swap や /second setup 後の Provider 再生成で使い回す)
-  const repl = new REPL(agent, config, skillRegistry, planManager, secondLLMManager, sharedPassphrase, mcpManager);
+  const repl = new REPL(agent, config, skillRegistry, planManager, secondLLMManager, sharedPassphrase, mcpManager, visionService);
   await repl.start();
 
   // Cleanup

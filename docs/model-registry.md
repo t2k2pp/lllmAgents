@@ -206,8 +206,9 @@ modelRef: <registry-id> # この registry entry を直接指定 (slot バイン�
 
 | コマンド | 役割 | 状態 |
 |---|---|---|
-| `/model` | main + second + 他 named slot の状態を 1 画面で表示 + main slot 操作の入口 | **保持** |
+| `/model` | main + second + vision + 他 named slot の状態を 1 画面で表示 + main slot 操作の入口 | **保持** |
 | `/model second ...` | second slot のサブコマンド (旧 `/second ...` の正準形) | **Phase 4 で追加** |
+| `/model vision ...` | vision slot のサブコマンド (画像認識を含むマルチモーダル言語生成 AI)。 `setup` / `list` / `context` / `description` / `clear`。 未設定なら main LLM にフォールバック | **Phase 5 で追加** |
 | `/models` | レジストリピッカー。 すべての登録・編集・割当はここから | **新規** |
 | `/swap` | main ⇔ second の slot 入替 | **保持** (1 動詞コマンドとして残す) |
 | `/profiles` | (旧) 履歴ピッカー | **alias** として `/models` を呼ぶ (deprecation 注記) |
@@ -318,8 +319,9 @@ slot.main と slot.second の id を入れ替えるだけ。 entry そのもの�
 | 1 | データ層: types 追加、 model-registry.ts 新設 (llm-profiles.ts を内部に吸収)、 起動時マイグレーション、 apply*Endpoint の配線 | 旧 API は同名 export で温存 → 表面的には無破壊 | **済 (`f8cc680`)** |
 | 2 | UI: `/models` 実装。 `/profiles` は alias 化 + deprecation 注記 | 旧 `/profiles` は残るので無破壊 | **済 (`b2f244e`)** |
 | 3 | コマンド整理: `/model setup *` 等を補完候補から外す。 `/model temperature` 系を deprecated 警告付きに | 補完が変わる (= 体感は変わるが機能は残る) | **済 (`67e71ee`)** |
-| 4 | `/model` と `/second` の統合。 `/model second ...` を正準形とし、 `/second ...` は alias に。 `/model info` 重複削除 | 補完が変わる。 dispatcher は alias 維持で無破壊 | **済 (Phase 4)** |
-| 5 (将来) | named slot の REPL 操作 (`/models slot vision <id>` 等)、 サブエージェントカタログとのバインド | 必要になったら | 構想のみ |
+| 4 | `/model` と `/second` の統合。 `/model second ...` を正準形とし、 `/second ...` は alias に。 `/model info` 重複削除 | 補完が変わる。 dispatcher は alias 維持で無破壊 | **済 (`8dc0776`)** |
+| 5 | `visionLLM` を slots.named.vision に統合、 `/model vision` サブツリーを `/model second` と同型で実装。 setupClaudeLLM / setupGeminiLLM / setupAzureLLM の target に "vision" を追加。 ローカル系 vision setup (setupLocalVisionLLM) も追加。 VisionService に hot-swap 機構を追加 | 既存 `config.visionLLM` は維持。 起動時 reconcile で vision slot に同期 → 無破壊 | **済 (Phase 5)** |
+| 6 (将来) | 任意 named slot の REPL 操作 (`/models slot eval <id>` 等)、 サブエージェントカタログとのバインド (`modelSlot` / `modelRef` frontmatter)、 第 3 のスロット (例: cheap / fast) | 必要になったら | 構想のみ |
 
 各 Phase で push 可能な単位。
 

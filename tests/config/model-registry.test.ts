@@ -254,6 +254,39 @@ describe("model-registry: reconcileSlotsFromConfig (起動時マイグレーシ�
     expect(listEntries()).toHaveLength(1);  // 重複追加されない
     expect(getSlot("main")).toBe(listEntries()[0].id);
   });
+
+  it("vision slot (Phase 5): config.visionLLM があれば slots.named.vision に同期される", () => {
+    reconcileSlotsFromConfig({
+      mainLLM: { providerType: "ollama", model: "main", baseUrl: "http://h1" },
+      visionLLM: { providerType: "anthropic", model: "claude-sonnet-4-6" },
+      secondLLM: null,
+    } as any);
+    const list = listEntries();
+    expect(list).toHaveLength(2);
+    expect(getSlot("main")).toBeDefined();
+    expect(getSlot("vision")).toBeDefined();
+    expect(getSlot("main")).not.toBe(getSlot("vision"));
+    expect(getSlots().named?.vision).toBe(getSlot("vision"));
+  });
+
+  it("vision slot: config.visionLLM が null なら slots.named.vision は未割当", () => {
+    // 先に vision を入れる
+    reconcileSlotsFromConfig({
+      mainLLM: { providerType: "ollama", model: "main", baseUrl: "http://h" },
+      visionLLM: { providerType: "gemini", model: "gemini-2.5-pro" },
+      secondLLM: null,
+    } as any);
+    expect(getSlot("vision")).toBeDefined();
+    // 次に vision を抜く
+    reconcileSlotsFromConfig({
+      mainLLM: { providerType: "ollama", model: "main", baseUrl: "http://h" },
+      visionLLM: null,
+      secondLLM: null,
+    } as any);
+    expect(getSlot("vision")).toBeUndefined();
+    // entry 自体は残る (削除されない)
+    expect(listEntries()).toHaveLength(2);
+  });
 });
 
 describe("model-registry: 旧 llm-profiles.json からの移行", () => {

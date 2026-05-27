@@ -61,6 +61,13 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/model second list", description: "second slot の利用可能モデル一覧から選択" },
   { command: "/model second context", description: "second slot のコンテキスト長を変更 (例: 128k)", needsArg: true },
   { command: "/model second description", description: "second slot の特性説明 (サブエージェント選択の材料)", needsArg: true },
+  // /model vision 系 (docs/model-registry.md Phase 5) — 画像認識を含むマルチモーダル言語生成 AI を指定
+  { command: "/model vision", description: "vision slot の状態表示 (画像認識を含むマルチモーダル言語生成 AI)" },
+  { command: "/model vision setup", description: "vision slot の新規セットアップ wizard" },
+  { command: "/model vision list", description: "vision slot の利用可能モデル一覧から選択 (vision 対応モデル優先)" },
+  { command: "/model vision context", description: "vision slot のコンテキスト長を変更 (例: 128k)", needsArg: true },
+  { command: "/model vision description", description: "vision slot の特性説明", needsArg: true },
+  { command: "/model vision clear", description: "vision slot を解除 (main LLM にフォールバック)" },
   { command: "/todo", description: "タスクリスト (active のみ / all=全件 / archive=完了済み削除)" },
   { command: "/goal-seek", description: "Goal Seek mode 開始 — acceptance criteria を立て合格まで自律実行", needsArg: true },
   { command: "/exit-goal-seek", description: "Goal Seek mode を抜ける (acceptance 未達成でも user 明示で中断)" },
