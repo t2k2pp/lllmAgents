@@ -142,32 +142,61 @@ describe("createCommandMenuProvider", () => {
     expect(labels).toContain("/model list");
   });
 
-  it("model系のサブコマンドが補完候補に出る (url/provider/description)", () => {
+  it("/model 系の主要サブコマンドが補完候補に出る (info/list/context/setup)", () => {
     const provider = createCommandMenuProvider();
     const items = provider("model ");
     const labels = items.map((i) => i.label);
-    expect(labels).toContain("/model url");
-    expect(labels).toContain("/model provider");
-    expect(labels).toContain("/model description");
+    expect(labels).toContain("/model info");
+    expect(labels).toContain("/model list");
+    expect(labels).toContain("/model context");
+    expect(labels).toContain("/model setup");
   });
 
-  it("second系のサブコマンドが補完候補に出る (description含む)", () => {
+  it("/second 系の主要サブコマンドが補完候補に出る (enable/disable/setup/list/context)", () => {
     const provider = createCommandMenuProvider();
     const items = provider("second ");
     const labels = items.map((i) => i.label);
-    expect(labels).toContain("/second url");
-    expect(labels).toContain("/second provider");
-    expect(labels).toContain("/second description");
+    expect(labels).toContain("/second enable");
+    expect(labels).toContain("/second disable");
+    expect(labels).toContain("/second setup");
+    expect(labels).toContain("/second list");
+    expect(labels).toContain("/second context");
   });
 
-  it("ハイパーパラメータ系コマンドが補完候補に出る", () => {
+  it("Phase 3: 個別編集系コマンドは補完候補から除外 (dispatcher 互換は維持)", () => {
+    // docs/model-registry.md §4.1 — /models Edit に統合済み
     const provider = createCommandMenuProvider();
-    const items = provider("model ");
+    const allLabels = provider("").map((i) => i.label);
+    // 旧 /model 個別編集
+    expect(allLabels).not.toContain("/model temperature");
+    expect(allLabels).not.toContain("/model top_p");
+    expect(allLabels).not.toContain("/model top_k");
+    expect(allLabels).not.toContain("/model rep_penalty");
+    expect(allLabels).not.toContain("/model url");
+    expect(allLabels).not.toContain("/model provider");
+    expect(allLabels).not.toContain("/model host");
+    expect(allLabels).not.toContain("/model port");
+    expect(allLabels).not.toContain("/model description");
+    // 旧 /second 個別編集
+    expect(allLabels).not.toContain("/second model");
+    expect(allLabels).not.toContain("/second url");
+    expect(allLabels).not.toContain("/second provider");
+    expect(allLabels).not.toContain("/second description");
+    expect(allLabels).not.toContain("/second temperature");
+    expect(allLabels).not.toContain("/second top_p");
+    // プロバイダ別 setup variants
+    expect(allLabels).not.toContain("/model setup azure-openai");
+    expect(allLabels).not.toContain("/model setup gemini");
+    expect(allLabels).not.toContain("/second setup gemini");
+  });
+
+  it("/models コマンドが補完候補に出る", () => {
+    const provider = createCommandMenuProvider();
+    const items = provider("models");
     const labels = items.map((i) => i.label);
-    expect(labels).toContain("/model temperature");
-    expect(labels).toContain("/model top_p");
-    expect(labels).toContain("/model top_k");
-    expect(labels).toContain("/model rep_penalty");
+    expect(labels).toContain("/models");
+    expect(labels).toContain("/models list");
+    expect(labels).toContain("/models help");
   });
 
   it("/discord/slack/search/loop の主要サブコマンドが補完候補に出る", () => {
