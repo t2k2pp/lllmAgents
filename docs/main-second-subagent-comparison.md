@@ -4,6 +4,7 @@
 > **目的**: 「メインLLM」「セカンドLLM」「サブエージェント」 という 3 つの実行主体について、**何が違うのか / 何が同じなのか** を 1 か所に集約し、現在のコード実装と過去の設計書の間に生じているズレを可視化する。
 > **位置付け**: 修正の足掛かりとなる現状把握資料。 設計の最終形ではない。
 > **関連設計書**:
+> - **上位 (新)**: `docs/model-registry.md` (2026-05-27 — main/second を slot として一般化。 サブエージェントとのバインドは §2.4 で将来余地を確保)
 > - 元設計: `docs/v030_second_llm_design.md` (Orchestrator-Worker パターン、 階層型委任ルール)
 > - 対称化: `docs/main_second_swap_design.md` (型統一・swap 機能、 主従の対称性)
 > - 補助情報: `docs/llm-profile-descriptions.md` (description によるルーティング誘導)

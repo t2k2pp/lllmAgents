@@ -49,6 +49,7 @@ import {
   touchProfile,
   type LLMProfile,
 } from "../config/llm-profiles.js";
+import { setSlot as setRegistrySlot } from "../config/model-registry.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
 import { secondLLMConsultTool, secondLLMAgentTool, setSecondLLMManager } from "../tools/definitions/second-llm.js";
@@ -334,8 +335,11 @@ export class REPL {
       subAgentMgr.setProvider(newProvider, this.config.mainLLM.model);
     }
     this.refreshLLMProfiles();
-    // 履歴に記録 (失敗しても本体動作には影響させない)
-    try { recordLLMProfile(this.config.mainLLM); } catch { /* ignore */ }
+    // Model Registry に記録 + main slot を更新 (失敗しても本体動作には影響させない)
+    try {
+      const entry = recordLLMProfile(this.config.mainLLM);
+      if (entry) setRegistrySlot("main", entry.id);
+    } catch { /* ignore */ }
   }
 
   /**
@@ -1152,9 +1156,12 @@ export class REPL {
       reg.register(federatedDelegateTool);
     }
     this.refreshLLMProfiles();
-    // 履歴に記録 (失敗しても本体動作には影響させない)
+    // Model Registry に記録 + second slot を更新 (失敗しても本体動作には影響させない)
     if (this.config.secondLLM?.endpoint) {
-      try { recordLLMProfile(this.config.secondLLM.endpoint); } catch { /* ignore */ }
+      try {
+        const entry = recordLLMProfile(this.config.secondLLM.endpoint);
+        if (entry) setRegistrySlot("second", entry.id);
+      } catch { /* ignore */ }
     }
   }
 

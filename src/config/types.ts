@@ -218,6 +218,47 @@ export interface ModelCapabilityOverride {
   reliableInstructionFollowing?: boolean;
 }
 
+/**
+ * Model Registry: 接続設定の登録一覧。 docs/model-registry.md §2.1
+ *
+ * LLMProfile (旧) を一般化し、 サンプリング違いのバリアントを別エントリで持てるよう
+ * ID を UUID 化したもの。 既存 LLMProfile は本型の alias。
+ */
+export interface LLMRegistryEntry {
+  /** 安定 ID (UUID v4 新規 / 旧データから移行された場合は 8 文字 hex のまま) */
+  id: string;
+  /** 表示名。 初期値は generateEntryName で自動生成、 後から user 編集可能 */
+  name: string;
+  /** 接続情報 + サンプリングパラメータ */
+  endpoint: LLMEndpoint;
+  /** ISO 8601 */
+  createdAt: string;
+  /** ISO 8601。 並び替えキー */
+  lastUsedAt: string;
+  /** 任意タグ (将来: グループ・絞り込み用) */
+  tags?: string[];
+}
+
+/**
+ * 現在の slot 割当。 main / second は型に直書きで互換維持、 named は任意拡張用。
+ * docs/model-registry.md §2.3
+ */
+export interface LLMSlotAssignments {
+  /** main slot に居る registry entry の id (空文字なら未割当) */
+  main: string;
+  /** second slot に居る registry entry の id */
+  second?: string;
+  /** 任意名前付きスロット (third / vision / eval / cheap 等)。 Phase 4 で UI 追加予定 */
+  named?: Record<string, string>;
+}
+
+/** model-registry.json の永続化形式。 docs/model-registry.md §3 */
+export interface ModelRegistryStore {
+  version: 1;
+  entries: LLMRegistryEntry[];
+  slots: LLMSlotAssignments;
+}
+
 export interface Config {
   mainLLM: LLMEndpoint;
   visionLLM: LLMEndpoint | null;

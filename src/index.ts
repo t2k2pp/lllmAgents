@@ -2,6 +2,7 @@
 
 import chalk from "chalk";
 import { configExists, loadConfig, saveConfig } from "./config/config-manager.js";
+import { reconcileSlotsFromConfig } from "./config/model-registry.js";
 import { runSetupWizard } from "./config/setup-wizard.js";
 import { createProvider } from "./providers/provider-factory.js";
 import { AgentLoop } from "./agent/agent-loop.js";
@@ -72,6 +73,11 @@ async function main(): Promise<void> {
     console.error("Model not configured. Run: localllm --setup");
     process.exit(1);
   }
+
+  // Model Registry (docs/model-registry.md): config.mainLLM / secondLLM を
+  // registry に同期し、 main/second slot を確定させる。 旧 llm-profiles.json から
+  // の透過移行もここで完了する (本処理は失敗しても起動を止めない)。
+  try { reconcileSlotsFromConfig(config); } catch { /* ignore */ }
 
   // メインLLM が暗号化された apiKey を持つクラウド系の場合、起動時に合言葉を取得する。
   // セカンドLLM 側でも同じパスフレーズを使い回せるよう shared scope で保持。

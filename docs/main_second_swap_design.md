@@ -1,11 +1,16 @@
 # メイン⇔セカンド LLM 入れ替え機能 設計書
 
-> **ステータス**: 実装済み (2026-04-29)
+> **ステータス**: 実装済み (2026-04-29) — **2026-05-27: slot 表現への移行を予定**
 > **作成日**: 2026-04-29
 > **関連**:
+> - **上位 (新)**: `docs/model-registry.md` (registry + slot 二層モデル。 `/swap` は slot 入替として位置付け直し)
 > - 上位設計: `docs/v030_second_llm_design.md` (セカンドLLM 機能全体)
 > - 構成リファレンス: `docs/config-reference.md` §secondLLM
 > - LLM プロファイル: `docs/llm-profile-descriptions.md`
+>
+> **注**: 本書の機能 (型統一・`/swap`) はそのまま継続する。 ただし「main / second」 を
+> registry 上の slot として扱うようになるため、 第 3 のスロットを足したい等の拡張は
+> `model-registry.md` 側で議論する。
 
 ---
 
