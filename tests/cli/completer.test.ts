@@ -259,12 +259,16 @@ describe("createCommandMenuProvider", () => {
     expect(allLabels).not.toContain("/search duckduckgo");
   });
 
-  it("/loop の主要サブコマンドは引き続き補完候補に出る", () => {
+  it("/loop の主要サブコマンドは引き続き補完候補に出る (B-2 統合後)", () => {
+    // B-2 (2026-05-28): /loop list と /loop stop は /loop status の picker に集約。
+    // 補完候補は /loop と /loop status の 2 件のみ。 /loop list / /loop stop は
+    // dispatcher 互換維持 (補完からは外れる)。
     const provider = createCommandMenuProvider();
     const loopItems = provider("loop").map((i) => i.label);
     expect(loopItems).toContain("/loop");
-    expect(loopItems).toContain("/loop list");
-    expect(loopItems).toContain("/loop stop");
+    expect(loopItems).toContain("/loop status");
+    expect(loopItems).not.toContain("/loop list");
+    expect(loopItems).not.toContain("/loop stop");
   });
 
   it("スキルトリガーも候補に含む", () => {

@@ -112,8 +112,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/search", description: "[非推奨] Search 単体設定。 /integrations 推奨" },
   // /search のサブコマンド (duckduckgo / ddg / test / status) は /integrations 配下に集約済み
   { command: "/loop", description: "プロンプトを定期実行 (例: /loop 5m /pr-review)", needsArg: true },
-  { command: "/loop list", description: "アクティブなループ一覧" },
-  { command: "/loop stop", description: "ループを停止 (任意: id|all)", needsArg: true },
+  { command: "/loop status", description: "アクティブなループ一覧 + 停止 picker (旧 /loop list の発展形)" },
   // /permission は引数なしで対話 picker (Phase optimize #1)。
   // 旧サブコマンド (auto-add / require-add / rule-add allow / 等) は dispatcher 互換のため残存するが、
   // 補完候補からは外して 1 件に集約。

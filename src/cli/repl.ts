@@ -5008,31 +5008,52 @@ export class REPL {
       case "/loop": {
         const subCmd = args[0]?.toLowerCase();
 
-        // /loop list
-        if (subCmd === "list") {
+        // /loop status (新): アクティブループ一覧 + 各ループに対する Stop checkbox の picker。
+        // /loop list は status の alias として残す (引数なし表示のみ)。
+        if (subCmd === "status" || subCmd === "list") {
           const entries = this.loopManager.list();
           if (entries.length === 0) {
             console.log(chalk.dim("  アクティブなループはありません。"));
-          } else {
-            console.log(chalk.bold(`\n  アクティブなループ (${entries.length} 件):`));
-            for (const e of entries) {
-              const lastRun = e.lastRunAt
-                ? e.lastRunAt.toLocaleTimeString()
-                : "未実行";
-              console.log(
-                chalk.cyan(`    [${e.id}]`) +
-                  chalk.dim(` 間隔: ${e.intervalStr}`) +
-                  chalk.dim(` | 実行数: ${e.runCount}`) +
-                  chalk.dim(` | 最終実行: ${lastRun}`) +
-                  `\n        ${chalk.white(e.prompt)}`,
-              );
+            break;
+          }
+          console.log(chalk.bold(`\n  アクティブなループ (${entries.length} 件):`));
+          for (const e of entries) {
+            const lastRun = e.lastRunAt ? e.lastRunAt.toLocaleTimeString() : "未実行";
+            console.log(
+              chalk.cyan(`    [${e.id}]`) +
+                chalk.dim(` 間隔: ${e.intervalStr}`) +
+                chalk.dim(` | 実行数: ${e.runCount}`) +
+                chalk.dim(` | 最終実行: ${lastRun}`) +
+                `\n        ${chalk.white(e.prompt)}`,
+            );
+          }
+          console.log();
+          // /loop list は一覧表示のみで終了 (旧挙動)。
+          // /loop status は続けて停止 picker を出す。
+          if (subCmd === "list") break;
+          try {
+            const toStop = await checkbox<string>({
+              message: "停止するループを選択 (スペースで選択、 Enter で確定、 Esc で何もしない):",
+              choices: entries.map((e) => ({
+                name: `[${e.id}] ${e.intervalStr}  ${e.prompt.slice(0, 50)}${e.prompt.length > 50 ? "..." : ""}`,
+                value: e.id,
+              })),
+              pageSize: Math.min(15, entries.length),
+            });
+            if (toStop.length === 0) {
+              console.log(chalk.dim("  停止対象が選択されませんでした。"));
+              break;
             }
-            console.log();
+            let stopped = 0;
+            for (const id of toStop) if (this.loopManager.stop(id)) stopped++;
+            console.log(chalk.green(`  ${stopped} 件のループを停止しました。`));
+          } catch {
+            console.log(chalk.dim("  キャンセルしました。"));
           }
           break;
         }
 
-        // /loop stop [id|all]
+        // /loop stop [id|all] (旧形式): dispatcher 互換維持
         if (subCmd === "stop") {
           const target = args[1];
           if (!target || target === "all") {
@@ -5060,8 +5081,7 @@ export class REPL {
           console.log(chalk.dim("  例: /loop 5m /pr-review"));
           console.log(chalk.dim("  例: /loop 30m デプロイ状況を確認"));
           console.log(chalk.dim("  間隔: 10s, 5m, 2h, 1d (省略時: 10m)"));
-          console.log(chalk.dim("  /loop list  - 一覧表示"));
-          console.log(chalk.dim("  /loop stop [id|all]  - 停止"));
+          console.log(chalk.dim("  /loop status  - 一覧 + 停止 picker"));
           break;
         }
 
