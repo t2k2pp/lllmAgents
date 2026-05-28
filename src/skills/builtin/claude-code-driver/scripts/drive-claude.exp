@@ -1,0 +1,293 @@
+#!/usr/bin/env expect
+# drive-claude.exp
+# lllmAgents から Claude Code CLI を対話TTY (PTY) で駆動するためのドライバ
+#
+# 使い方:
+#   expect drive-claude.exp \
+#     [--prompt "<最初のプロンプト>"] \
+#     [--timeout <seconds>] \
+#     [--auto-yes-readonly] \
+#     [--auto-deny] \
+#     [--resume <session-id>] \
+#     [--quit-after-response] \
+#     [--bin <claude path>] \
+#     [-- <extra args passed to claude>]
+#
+# stdin: --prompt 後の追加プロンプト (1 行 1 ターン)。 EOF または "/__quit__" で終了
+# stdout: claude のアシスタント応答 (ANSI除去後)。 ターン毎に "----- TURN END -----" で区切る
+# stderr: 起動・終了・診断ログ
+#
+# 終了コード:
+#   0  正常終了
+#   1  タイムアウト
+#   2  認証エラー (Please login / Not authenticated)
+#   3  権限ダイアログで拒否を選択した
+#   4  引数エラー
+#   99 想定外
+#
+# 注意:
+#   - PTY 必須。 パイプ入力 (lllmagents-test の非TTY 経路) では動作しない
+#   - claude CLI の UI 文言が変わると pattern マッチが破綻する。
+#     破綻時は references/permissions.md と本ファイルの pattern を更新する
+#   - subscription / API key を消費する。 副作用のあるコマンドの自動ループは避ける
+
+# --------------------------- 引数パース ---------------------------
+set initial_prompt ""
+set timeout_sec 300
+set auto_yes_readonly 0
+set auto_deny 0
+set resume_id ""
+set quit_after_response 0
+set claude_bin "claude"
+set extra_args [list]
+
+set i 0
+set argc_local [llength $argv]
+while {$i < $argc_local} {
+    set a [lindex $argv $i]
+    switch -- $a {
+        "--prompt" {
+            incr i
+            set initial_prompt [lindex $argv $i]
+        }
+        "--timeout" {
+            incr i
+            set timeout_sec [lindex $argv $i]
+        }
+        "--auto-yes-readonly" {
+            set auto_yes_readonly 1
+        }
+        "--auto-deny" {
+            set auto_deny 1
+        }
+        "--resume" {
+            incr i
+            set resume_id [lindex $argv $i]
+        }
+        "--quit-after-response" {
+            set quit_after_response 1
+        }
+        "--bin" {
+            incr i
+            set claude_bin [lindex $argv $i]
+        }
+        "--" {
+            incr i
+            while {$i < $argc_local} {
+                lappend extra_args [lindex $argv $i]
+                incr i
+            }
+            break
+        }
+        default {
+            puts stderr "drive-claude.exp: unknown arg: $a"
+            exit 4
+        }
+    }
+    incr i
+}
+
+if {$auto_yes_readonly && $auto_deny} {
+    puts stderr "drive-claude.exp: --auto-yes-readonly と --auto-deny は同時指定不可"
+    exit 4
+}
+
+set timeout $timeout_sec
+log_user 0     ;# expect 自身のエコーを抑制 (出力は明示的に puts で出す)
+
+# --------------------------- 起動 ---------------------------
+set spawn_args [list $claude_bin]
+if {$resume_id ne ""} {
+    lappend spawn_args "--resume" $resume_id
+}
+foreach a $extra_args {
+    lappend spawn_args $a
+}
+
+puts stderr "\[drive-claude\] spawning: $spawn_args (timeout=${timeout_sec}s)"
+
+if {[catch {eval spawn $spawn_args} err]} {
+    puts stderr "\[drive-claude\] spawn failed: $err"
+    exit 99
+}
+
+# --------------------------- ユーティリティ ---------------------------
+# ANSI エスケープ・カーソル制御を除去する
+proc strip_ansi {s} {
+    # CSI (ESC[) sequences
+    regsub -all {\x1b\[[0-9;?]*[a-zA-Z]} $s "" s
+    # OSC (ESC]) sequences ending with BEL or ST
+    regsub -all {\x1b\][^\x07\x1b]*(\x07|\x1b\\)} $s "" s
+    # その他の ESC + 1 文字
+    regsub -all {\x1b[=>]} $s "" s
+    # CR を除去 (画面更新で頻出)
+    regsub -all {\r} $s "" s
+    return $s
+}
+
+# 子プロセスを強制終了して reap する。 wait は子が死ぬまで block するので、
+# tail を呼ぶ前に必ず close と SIGTERM/SIGKILL を入れること
+proc cleanup_child {} {
+    global spawn_id
+    catch {exec kill -TERM [exp_pid] }
+    after 200
+    catch {exec kill -KILL [exp_pid] }
+    catch {close}
+    catch {wait}
+}
+
+# プロンプト記号らしさを検出するパターン
+# claude 2.x の "│ >" 風入力欄を想定。 バージョン変更で破綻したら追加すること
+set prompt_patterns {
+    {│ >}
+    {>\s*$}
+    {Try "/help"}
+}
+
+# 権限ダイアログのパターン (lllmagents-test と同じ番号体系の事もあるので両対応)
+set permission_patterns {
+    {Do you want to (proceed|allow|run|edit)}
+    {\[y/N\]}
+    {\[1\].*\[2\].*\[4\]}
+    {Yes, and don't ask again}
+}
+
+# 認証エラーのパターン
+set auth_error_patterns {
+    {Please log in}
+    {Please login}
+    {Not authenticated}
+    {Invalid API key}
+}
+
+# --------------------------- メインループ ---------------------------
+set current_prompt $initial_prompt
+set turn_count 0
+
+proc emit_turn {buf} {
+    upvar $buf b
+    set clean [strip_ansi $b]
+    # 出力先頭の入力欄エコーを軽く落とす (簡易)
+    set trimmed [string trim $clean]
+    puts -- $trimmed
+    puts "----- TURN END -----"
+    flush stdout
+    set b ""
+}
+
+# 最初のプロンプト記号が出るまで待機 (起動完了待ち)
+expect {
+    -re "Please log ?in|Not authenticated|Invalid API key" {
+        puts stderr "\[drive-claude\] auth error detected"
+        catch {send -- "/quit\r"}
+        cleanup_child
+        exit 2
+    }
+    -re "│ >|Try \"/help\"" {
+        # ready
+    }
+    timeout {
+        puts stderr "\[drive-claude\] timeout waiting for initial prompt"
+        cleanup_child
+        exit 1
+    }
+    eof {
+        puts stderr "\[drive-claude\] EOF before prompt ready"
+        cleanup_child
+        exit 99
+    }
+}
+
+while {1} {
+    # 送るプロンプトが無ければ stdin から読む
+    if {$current_prompt eq ""} {
+        if {[gets stdin line] < 0} {
+            # EOF
+            break
+        }
+        if {$line eq "/__quit__"} {
+            break
+        }
+        set current_prompt $line
+    }
+
+    # プロンプト送信
+    incr turn_count
+    puts stderr "\[drive-claude\] turn $turn_count send: [string range $current_prompt 0 80]..."
+    send -- "$current_prompt\r"
+    set current_prompt ""
+
+    # 応答収集
+    set response_buf ""
+    set done 0
+    while {!$done} {
+        expect {
+            -re {Please log ?in|Not authenticated|Invalid API key} {
+                puts stderr "\[drive-claude\] auth error mid-session"
+                catch {send -- "/quit\r"}
+                cleanup_child
+                exit 2
+            }
+            -re {Do you want to (proceed|allow|run|edit)|\[y/N\]} {
+                append response_buf $expect_out(buffer)
+                if {$auto_deny} {
+                    puts stderr "\[drive-claude\] permission prompt -> deny"
+                    send -- "n\r"
+                    cleanup_child
+                    exit 3
+                } elseif {$auto_yes_readonly} {
+                    # 読み取り系は許可、 書き込み・実行系は拒否、 のような厳密判定は
+                    # ここでは pattern だけでは難しい。 保守的に y を返すのではなく、
+                    # 「許可しない」 を返して安全側に倒す。 真に読み取り限定で使うなら
+                    # claude 側を --permission-mode plan で起動するのが筋
+                    puts stderr "\[drive-claude\] permission prompt seen; auto-yes-readonly は安全側で n を返します"
+                    send -- "n\r"
+                } else {
+                    puts stderr "\[drive-claude\] permission prompt; no auto policy -> deny"
+                    send -- "n\r"
+                }
+            }
+            -re {\[1\].*\[2\].*\[4\]} {
+                append response_buf $expect_out(buffer)
+                puts stderr "\[drive-claude\] numeric permission prompt; choosing 4 (deny) for safety"
+                send -- "4\r"
+            }
+            -re {│ >} {
+                # 次プロンプト記号 = ターン完了
+                append response_buf $expect_out(buffer)
+                set done 1
+            }
+            -re {.+} {
+                append response_buf $expect_out(buffer)
+            }
+            timeout {
+                puts stderr "\[drive-claude\] timeout waiting for response (turn $turn_count)"
+                catch {send -- "/quit\r"}
+                cleanup_child
+                exit 1
+            }
+            eof {
+                puts stderr "\[drive-claude\] EOF mid-response"
+                set done 1
+                emit_turn response_buf
+                cleanup_child
+                exit 0
+            }
+        }
+    }
+
+    emit_turn response_buf
+
+    if {$quit_after_response} {
+        break
+    }
+}
+
+# 終了処理
+catch {send -- "/quit\r"}
+expect {
+    eof {}
+    timeout {}
+}
+cleanup_child
+exit 0
