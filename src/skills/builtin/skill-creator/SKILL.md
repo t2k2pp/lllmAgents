@@ -357,3 +357,80 @@ After testing the skill, users may request improvements. Often this happens righ
 2. Notice struggles or inefficiencies
 3. Identify how SKILL.md or bundled resources should be updated
 4. Implement changes and test again
+
+---
+
+## 【lllmAgents 差分】 このリポジトリでスキルを作る時の追加ルール
+
+上記は Anthropic 公式のスキル設計ガイド。 lllmAgents プロジェクトで builtin スキルを追加する場合は、 以下の追加ルールに従う。
+
+### 配置と同期
+
+- **配置先**: `src/skills/builtin/<skill-name>/SKILL.md` (本体) + 任意で `references/` `scripts/`
+- **同期**: `npm run sync:skills` (= `scripts/sync-skills.js`) が `src/skills/builtin/` → `~/.localllm/skills/` に差分同期する。 Stop フック (`scripts/on-stop.js`) でも自動実行される
+- **配布**: `npm run build:deploy` で deploy/ に同梱される
+
+### lllmAgents の skill-loader 固有仕様 (`src/skills/skill-loader.ts`)
+
+`SKILL.md` の YAML frontmatter で受け付けるフィールド:
+
+| フィールド | 既定 | 意味 |
+|-----------|------|------|
+| `name` (必須) | — | スキル名 (kebab-case) |
+| `description` (必須) | — | トリガー条件を含む説明 |
+| `trigger` | `/<name>` | スラッシュコマンド (= `name`) と異なる名前にしたい時 |
+| `context` | (なし) | `fork` を指定すると別コンテキストで実行 (code-stats が例) |
+| `tools` | 全ツール | `[bash, file_read, grep]` のように使えるツールを絞る |
+
+### description の書き方 (lllmAgents 向け)
+
+- **日本語可** (他の builtin スキルが日本語なので統一)
+- **トリガー条件を明示** — 「ユーザーが〜と要求した時」 「〜と判断した時」 を含める
+- **使い分けを書く** — 似た名前のスキルがあれば 「PR レビューは `/pr-review`、 任意範囲は `/code-review`」 のように対比
+
+### tools 制限の使いどころ
+
+- `context: fork` のスキルで使用ツールを最小化 (code-stats が例: `[bash, glob, grep, file_read]`)
+- 副作用のあるツール (file_write, bash) を意図的に外して 「読むだけ」 のスキルにする (`research` 等で検討)
+
+### references/ / scripts/ の置き場所と参照
+
+- 同一スキル内: `../code-review/references/code-review-criteria.md` のように相対参照可能 (例: `pr-review` SKILL.md から)
+- 同期後の絶対パス: `~/.localllm/skills/<skill-name>/scripts/<file>` (例: claude-code-driver の expect スクリプト呼び出し)
+- script を bash ツールから叩く場合は **絶対パスを使う** (CLAUDE.md ルール)
+
+### init_skill.py / package_skill.py
+
+scripts/ 配下に置いてあるが、 lllmAgents の builtin スキルでは **使わないことが多い**:
+
+- 配置は手動 (`src/skills/builtin/<name>/SKILL.md` を直接 `file_write`)
+- 配布は `npm run build:deploy` (公式の `.skill` パッケージ形式ではなく deploy 同梱)
+- ただし他環境 (Anthropic Claude Code 等) と共有したい時はこれらが役立つ
+
+### CLAUDE.md 準拠
+
+新規スキル追加時は:
+
+1. `docs/<skill-name>-skill-design.md` に設計書を書く (CLAUDE.md ルール: 機能追加 = 設計書同期)
+2. SKILL.md + references + scripts を `src/skills/builtin/` 配下に置く
+3. `npm run lint` で他コードへの影響ゼロを確認
+4. commit & push (CLAUDE.md ルール: 実装後 push)
+
+参考: `claude-code-driver` がこの流儀で作られている (`docs/claude-code-driver-skill.md` + `src/skills/builtin/claude-code-driver/` 構成)。
+
+### 既存スキルへの追記時の注意
+
+- description を変えるとトリガー条件が変わる → 影響を考えて変更
+- references を増やすなら SKILL.md から導線を貼る (`「詳細は references/foo.md 参照」`)
+- ツール制限を後付けで足すと、 既存の呼び出しが失敗するかも → 必ず動作確認
+
+### 他 builtin スキルとの整合性
+
+新規スキルが既存スキルと重複・近接していないか確認:
+
+```bash
+# description を全件 grep して類似トリガーをチェック
+grep -A1 "^description:" src/skills/builtin/*/SKILL.md | head -50
+```
+
+重複しているなら、 統合か対比明記 (本スキルの「用途分担」 セクションのように) を検討。
