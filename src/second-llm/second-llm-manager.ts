@@ -316,10 +316,12 @@ export class SecondLLMManager {
           } else if (chunk.type === "done" && chunk.usage) {
             tokensIn = chunk.usage.promptTokens;
             tokensOut = chunk.usage.completionTokens;
-            const cost = globalCostCalculator.calculateForModel(
+            const cachedTokens = chunk.usage.cachedTokens ?? 0;
+            const cost = globalCostCalculator.calculateForModelWithCache(
               this.endpoint.model,
               chunk.usage.promptTokens ?? 0,
               chunk.usage.completionTokens ?? 0,
+              cachedTokens,
             );
             globalTokenTracker.record({
               timestamp: new Date().toISOString(),
@@ -328,7 +330,7 @@ export class SecondLLMManager {
               slot: "second",
               inputTokens: chunk.usage.promptTokens ?? 0,
               outputTokens: chunk.usage.completionTokens ?? 0,
-              cachedTokens: 0,
+              cachedTokens,
               estimatedCostUsd: cost,
             });
           }
@@ -449,10 +451,12 @@ export class SecondLLMManager {
           } else if (chunk.type === "done" && chunk.usage) {
             tokensIn = chunk.usage.promptTokens;
             tokensOut = chunk.usage.completionTokens;
-            const cost = globalCostCalculator.calculateForModel(
+            const cachedTokens = chunk.usage.cachedTokens ?? 0;
+            const cost = globalCostCalculator.calculateForModelWithCache(
               this.endpoint.model,
               chunk.usage.promptTokens ?? 0,
               chunk.usage.completionTokens ?? 0,
+              cachedTokens,
             );
             globalTokenTracker.record({
               timestamp: new Date().toISOString(),
@@ -461,7 +465,7 @@ export class SecondLLMManager {
               slot: "second",
               inputTokens: chunk.usage.promptTokens ?? 0,
               outputTokens: chunk.usage.completionTokens ?? 0,
-              cachedTokens: 0,
+              cachedTokens,
               estimatedCostUsd: cost,
             });
           }

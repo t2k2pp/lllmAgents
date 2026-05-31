@@ -103,6 +103,23 @@ interface UsageAggregate {
 cost は**記録時点の estimatedCostUsd を信頼**（後から単価が変わっても過去コストは保持）。
 ただし `/cost models` の単価列は現行 `pricing-table.ts` から引く（参考表示）。
 
+### 4.1 プロンプトキャッシュの計上（2026-06-01 追加）
+
+当初 `cachedTokens` は記録箇所で `0` 固定、 コスト計算もキャッシュ非考慮だったため、
+共通プレフィックスを多数回再送する agent ループ（例: 49 リクエストで入力累計 250 万 tokens）
+で**実 Azure 請求額より過大評価**していた（ニュース調査 2 件で $6.55 と表示、 実額はキャッシュ
+ヒット分が割引されるため相当低い見込み）。修正:
+
+- `azure-gpt.ts`: Responses API の `usage.input_tokens_details.cached_tokens` を読み、
+  `ChatChunk.usage.cachedTokens` として surface（`response.completed` / `response.incomplete` 両方）。
+- `agent-loop.ts` / `second-llm-manager.ts`: 固定 `0` を廃し実 `cachedTokens` を記録、
+  `CostCalculator.calculateForModelWithCache` でキャッシュ割引単価を適用。
+- `pricing-table.ts`: gpt-5.x に `cachedInputPerMToken`（入力の 0.1×）、 gpt-4o 系に 0.5× を追加。
+  実契約と異なる場合は `~/.localllm/pricing.json` で上書き可。
+
+`cachedTokens` は `inputTokens` の内数（キャッシュヒットした入力分）。 provider が報告しなければ
+`0`＝従来どおり全額計上にフォールバックするため、 非対応 provider でも壊れない。
+
 ## 5. コマンド UX
 
 `/cost [sub] [period]`、`/token` は alias。period 既定は `window`（現在の計測窓）。

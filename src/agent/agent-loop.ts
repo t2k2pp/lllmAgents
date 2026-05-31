@@ -679,10 +679,14 @@ export class AgentLoop {
                   this.lastPromptTokens = chunk.usage.promptTokens ?? this.lastPromptTokens;
                   tokensIn = chunk.usage.promptTokens;
                   tokensOut = chunk.usage.completionTokens;
-                  const cost = globalCostCalculator.calculateForModel(
+                  // プロンプトキャッシュヒット分 (provider が報告すれば) を割引単価で計上。
+                  // 報告が無い (=0) なら従来どおり全額。 docs/cost-token-command-design.md §3
+                  const cachedTokens = chunk.usage.cachedTokens ?? 0;
+                  const cost = globalCostCalculator.calculateForModelWithCache(
                     this.model,
                     chunk.usage.promptTokens ?? 0,
-                    chunk.usage.completionTokens ?? 0
+                    chunk.usage.completionTokens ?? 0,
+                    cachedTokens,
                   );
                   globalTokenTracker.record({
                     timestamp: new Date().toISOString(),
@@ -691,7 +695,7 @@ export class AgentLoop {
                     slot: "main",
                     inputTokens: chunk.usage.promptTokens ?? 0,
                     outputTokens: chunk.usage.completionTokens ?? 0,
-                    cachedTokens: 0,
+                    cachedTokens,
                     estimatedCostUsd: cost,
                     sessionId: this.session.meta.id
                   });

@@ -30,6 +30,22 @@ export class CostCalculator {
   }
 
   /**
+   * キャッシュ考慮でモデル名から計算。
+   * cachedTokens は inputTokens の内数 (キャッシュヒットした入力分)。
+   * pricing に cachedInputPerMToken が無ければ通常入力単価にフォールバック (= 割引なし)。
+   */
+  calculateForModelWithCache(
+    model: string,
+    inputTokens: number,
+    outputTokens: number,
+    cachedTokens: number,
+  ): number {
+    const pricing = getModelPricing(model);
+    if (!pricing) return 0;
+    return this.calculateWithCache(inputTokens, outputTokens, cachedTokens, pricing);
+  }
+
+  /**
    * キャッシュ考慮のコスト計算
    */
   calculateWithCache(

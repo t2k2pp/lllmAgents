@@ -341,6 +341,7 @@ async function* parseResponsesStream(
   const partialCalls = new Map<string, PartialFunctionCall>();
   let promptTokens = 0;
   let completionTokens = 0;
+  let cachedTokens = 0;
   let stopStatus: string | undefined;
 
   try {
@@ -466,13 +467,20 @@ async function* parseResponsesStream(
 
           case "response.completed": {
             const resp = (data.response ?? {}) as {
-              usage?: { input_tokens?: number; output_tokens?: number };
+              usage?: {
+                input_tokens?: number;
+                output_tokens?: number;
+                input_tokens_details?: { cached_tokens?: number };
+              };
               status?: string;
               incomplete_details?: { reason?: string };
             };
             if (resp.usage) {
               promptTokens = resp.usage.input_tokens ?? promptTokens;
               completionTokens = resp.usage.output_tokens ?? completionTokens;
+              // プロンプトキャッシュヒット分 (Responses API は input_tokens_details.cached_tokens で返す)。
+              // input_tokens に含まれる「うちキャッシュ済み」 の内数。 コスト計算で割引単価を当てる。
+              cachedTokens = resp.usage.input_tokens_details?.cached_tokens ?? cachedTokens;
             }
             stopStatus = resp.status ?? "completed";
 
@@ -495,25 +503,30 @@ async function* parseResponsesStream(
             yield {
               type: "done",
               finishReason: mapResponsesStatus(stopStatus, hasToolCalls),
-              usage: { promptTokens, completionTokens },
+              usage: { promptTokens, completionTokens, cachedTokens },
             };
             break;
           }
 
           case "response.incomplete": {
             const resp = (data.response ?? {}) as {
-              usage?: { input_tokens?: number; output_tokens?: number };
+              usage?: {
+                input_tokens?: number;
+                output_tokens?: number;
+                input_tokens_details?: { cached_tokens?: number };
+              };
               incomplete_details?: { reason?: string };
             };
             if (resp.usage) {
               promptTokens = resp.usage.input_tokens ?? promptTokens;
               completionTokens = resp.usage.output_tokens ?? completionTokens;
+              cachedTokens = resp.usage.input_tokens_details?.cached_tokens ?? cachedTokens;
             }
             const reason = resp.incomplete_details?.reason ?? "incomplete";
             yield {
               type: "done",
               finishReason: reason === "max_output_tokens" ? "length" : reason,
-              usage: { promptTokens, completionTokens },
+              usage: { promptTokens, completionTokens, cachedTokens },
             };
             break;
           }

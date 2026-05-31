@@ -55,6 +55,27 @@ describe("CostCalculator", () => {
     });
   });
 
+  describe("calculateForModelWithCache", () => {
+    it("gpt-5.4 のキャッシュ単価 (入力 0.1×) を適用する", () => {
+      // 全量キャッシュヒット: 1M × $0.25/M = $0.25 (通常入力 $2.50 の 0.1×)
+      expect(calc.calculateForModelWithCache("gpt-5.4", 1_000_000, 0, 1_000_000)).toBeCloseTo(0.25);
+      // キャッシュなし: 1M × $2.50/M = $2.50
+      expect(calc.calculateForModelWithCache("gpt-5.4", 1_000_000, 0, 0)).toBeCloseTo(2.5);
+    });
+
+    it("キャッシュ加味で大幅に安くなる (250万入力の実例)", () => {
+      const inTok = 2_557_113, outTok = 10_842;
+      const noCache = calc.calculateForModelWithCache("gpt-5.4", inTok, outTok, 0);
+      const cached80 = calc.calculateForModelWithCache("gpt-5.4", inTok, outTok, Math.round(inTok * 0.8));
+      expect(noCache).toBeCloseTo(6.55, 1); // 表示されていた値
+      expect(cached80).toBeLessThan(noCache * 0.45); // 8 割キャッシュで半分以下
+    });
+
+    it("未登録モデルは 0", () => {
+      expect(calc.calculateForModelWithCache("totally-fake-xyz", 1000, 1000, 500)).toBe(0);
+    });
+  });
+
   describe("calculateReferencesCosts", () => {
     it("参考モデルのコストを算出", () => {
       const refs = calc.calculateReferencesCosts(10_000, 5_000, ["gemini-3-flash", "gpt-5.2"]);

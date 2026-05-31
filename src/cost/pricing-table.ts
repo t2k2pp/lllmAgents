@@ -18,13 +18,15 @@ export const BUILTIN_PRICING: Record<string, ModelPricing> = {
   "gemini-2.5-flash-lite": { inputPerMToken: 0.10,  outputPerMToken: 0.40 },
 
   // --- GPT (Azure OpenAI) ---
-  "gpt-5.4":     { inputPerMToken: 2.50,  outputPerMToken: 15.00 },
-  "gpt-5.2":     { inputPerMToken: 1.75,  outputPerMToken: 14.00 },
-  "gpt-5.1":     { inputPerMToken: 1.25,  outputPerMToken: 10.00 },
-  "gpt-5-mini":  { inputPerMToken: 0.25,  outputPerMToken: 2.00 },
-  "gpt-5-nano":  { inputPerMToken: 0.05,  outputPerMToken: 0.40 },
-  "gpt-4o":      { inputPerMToken: 5.00,  outputPerMToken: 15.00 },
-  "gpt-4o-mini": { inputPerMToken: 0.15,  outputPerMToken: 0.60 },
+  // cachedInputPerMToken: プロンプトキャッシュヒット分の単価。 OpenAI/Azure 標準の入力 0.1× で設定。
+  // 実契約で異なる場合は ~/.localllm/pricing.json で上書き。
+  "gpt-5.4":     { inputPerMToken: 2.50,  outputPerMToken: 15.00, cachedInputPerMToken: 0.25 },
+  "gpt-5.2":     { inputPerMToken: 1.75,  outputPerMToken: 14.00, cachedInputPerMToken: 0.175 },
+  "gpt-5.1":     { inputPerMToken: 1.25,  outputPerMToken: 10.00, cachedInputPerMToken: 0.125 },
+  "gpt-5-mini":  { inputPerMToken: 0.25,  outputPerMToken: 2.00,  cachedInputPerMToken: 0.025 },
+  "gpt-5-nano":  { inputPerMToken: 0.05,  outputPerMToken: 0.40,  cachedInputPerMToken: 0.005 },
+  "gpt-4o":      { inputPerMToken: 5.00,  outputPerMToken: 15.00, cachedInputPerMToken: 2.50 },
+  "gpt-4o-mini": { inputPerMToken: 0.15,  outputPerMToken: 0.60,  cachedInputPerMToken: 0.075 },
 
   // --- Claude (Azure AI Foundry / Vertex AI Model Garden) ---
   "claude-opus-4.6":    { inputPerMToken: 5.00,  outputPerMToken: 25.00 },
