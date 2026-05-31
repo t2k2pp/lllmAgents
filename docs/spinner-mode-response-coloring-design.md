@@ -113,6 +113,43 @@ if (summary.length > 0) {
 
 （narration は同 turn の `toolCalls.length > 0` 経路で既に灰色 flush 済み。summary だけ白に昇格。）
 
+## 3.4 ToDo 未完了ゲート（final_text_response 経路）— 挙動修正
+
+色分けとは別の挙動課題として「ToDo 未完了なのにユーザーへ応答を返してターン終了する」
+問題があった。ターン終了経路は 2 つある:
+
+- `response_complete` 経路: `src/tools/definitions/response-complete.ts` に **未完了 todo ゲートあり**
+  （open todo があり `force` でなければ `success:false` でブロック）。
+- **`final_text_response` 経路**（`response_complete` を呼ばずテキストだけで返す `agent-loop.ts:1312`）:
+  **ゲートが無かった**。再プロンプト判定 `shouldReprompt` は `!hasExecutedTools` が条件のため、
+  一度でもツールを実行した後にテキストだけで返すと再プロンプトもスキップされ素通りで終了していた。
+
+実ログ `2026-05-30T01-34-11_main.jsonl` では 21 ターン中 4 ターンがこの無ゲート経路で終了していた。
+
+### 修正
+
+`final_text_response` の直前にゲートを追加（ユーザー合意済み 2026-05-31、発火条件=タスク作業中のみ）:
+
+```ts
+if (hasExecutedTools && selfCheckRounds < MAX_SELF_CHECK_ROUNDS && !this.planManager?.isInPlanMode()) {
+  const allTodos = getTodosCurrent();
+  const openTodos = allTodos.filter((t) => t.status !== "completed");
+  if (allTodos.length > 0 && openTodos.length > 0) {
+    selfCheckRounds++;
+    flushAssistantText(true); // 灰色
+    // [自己点検 N/3] ToDo未完了 → nudge 注入して continue
+    //   (1) 残項目を完了  (2) response_complete(force=true) で部分完了報告  (3) blocked + ask_user
+    continue;
+  }
+}
+// 上限到達などで未完了のまま抜ける場合は黄色で「ToDo N 項目未完了のまま応答」 を明示してから終了。
+```
+
+- 発火条件は `hasExecutedTools=true`（このターンで実装/検証ツールを実行済み = タスク作業中）のみ。
+  会話的返答・挨拶では発火しない。
+- 上限（`MAX_SELF_CHECK_ROUNDS`）で無限ループを防止。上限到達時は警告を出して終了。
+- `ask_user` 等のツール呼び出しに移れば toolCalls 経路へ抜けるため、ゲートで詰まらない。
+
 ## 4. 影響範囲・非対象
 
 - スピナーモードのみ。ストリーミングモードのライブ出力は変更しない。

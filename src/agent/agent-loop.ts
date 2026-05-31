@@ -63,6 +63,7 @@ import {
   getTodos as getTodosCurrent,
   clearTodos,
   buildTodoSection,
+  formatTodos,
 } from "../tools/definitions/todo-write.js";
 
 /**
@@ -1314,6 +1315,52 @@ export class AgentLoop {
         this.purgeEphemeralAtSpanEnd("empty_response_giveup");
         return;
       }
+      // ToDo 未完了ゲート (final_text_response 経路)。
+      // docs/spinner-mode-response-coloring-design.md / docs/strategic-todo-design.md
+      // response_complete は response-complete.ts で未完了 todo をブロックするが、
+      // response_complete を呼ばずテキストだけで終わるこの経路にはゲートが無かった。
+      // hasExecutedTools=true (このターンで実装/検証ツールを実行済み = タスク作業中) かつ
+      // 未完了 todo がある場合、 自己点検 nudge を注入して「完了 or response_complete(force)」 を促す。
+      // 上限到達時は未完了を明示してそのまま終了 (無限ループ防止)。
+      if (
+        hasExecutedTools &&
+        selfCheckRounds < MAX_SELF_CHECK_ROUNDS &&
+        !this.planManager?.isInPlanMode()
+      ) {
+        const allTodos = getTodosCurrent();
+        const openTodos = allTodos.filter((t) => t.status !== "completed");
+        if (allTodos.length > 0 && openTodos.length > 0) {
+          selfCheckRounds++;
+          flushAssistantText(true); // まだ完了していない中間テキスト = 灰色
+          console.log(chalk.dim(
+            `  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ToDo未完了 (${openTodos.length}/${allTodos.length})`,
+          ));
+          this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
+          this.history.addUserMessage(
+            formatSelfCheck(
+              selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
+              `Acceptance Checklist (todo) に未完了が ${openTodos.length} 項目あります:\n${formatTodos()}\n` +
+              `テキストだけで終わらせず、 次のいずれかを実行してください: ` +
+              `(1) 残項目を実装/検証して該当 todo を completed にする、 ` +
+              `(2) 部分完了で報告するなら \`response_complete(force=true)\` を呼び summary に未完了の理由を明記、 ` +
+              `(3) 行き詰まりなら該当 todo を \`todo_mark(id, "blocked")\` してから \`ask_user\` で相談。`,
+            ),
+            { ephemeral: true },
+          );
+          continue;
+        }
+      }
+
+      // 上限到達などでゲートを通過したが未完了 todo が残る場合: ユーザーに明示してから終了。
+      if (hasExecutedTools) {
+        const openAtEnd = getTodosCurrent().filter((t) => t.status !== "completed");
+        if (openAtEnd.length > 0) {
+          console.log(chalk.yellow(
+            `\n  ⚠ ToDo が ${openAtEnd.length} 項目未完了のまま応答を返します (自己点検上限到達)。`,
+          ));
+        }
+      }
+
       // ここに到達 = ツールも自己点検も無く turn が終わる = ユーザーへの最終応答 → 白/Markdown。
       flushAssistantText(false);
       this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
