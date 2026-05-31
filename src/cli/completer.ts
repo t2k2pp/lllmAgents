@@ -79,7 +79,19 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/diff", description: "git diff" },
   { command: "/plan", description: "プランモード" },
   { command: "/skills", description: "スキル一覧" },
-  // /cost は /status に集約 (Phase optimize #4)
+  // /cost (詳細表示として復活、 2026-06-01): /status は要約のみ、 詳細は /cost 配下に集約。
+  // 設計: docs/cost-token-command-design.md
+  { command: "/cost", description: "LLM 使用量サマリ (計測窓 / 合計 / 上位モデル)。 既定は計測窓 (/cost reset で区切り)" },
+  { command: "/cost models", description: "モデル別の token / コスト / 単価・算出根拠 (期間: today|month|all|session 追記可)" },
+  { command: "/cost providers", description: "provider 別 + slot (main/second/vision) 別の集計" },
+  { command: "/cost today", description: "今日の使用量サマリ" },
+  { command: "/cost yesterday", description: "昨日の使用量サマリ (任意日は /cost YYYY-MM-DD)" },
+  { command: "/cost month", description: "今月の使用量サマリ" },
+  { command: "/cost lastmonth", description: "先月の使用量サマリ (任意月は /cost YYYY-MM)" },
+  { command: "/cost all", description: "全期間の使用量サマリ" },
+  { command: "/cost reset", description: "計測窓をリセット (履歴 jsonl は保持)" },
+  { command: "/cost export", description: "使用量を jsonl/csv で出力 (例: /cost export csv all)", needsArg: true },
+  { command: "/token", description: "/cost の alias (token / コスト可視化)" },
   { command: "/autorun", description: "Autorunモード切り替え（非破壊操作の自動許可）" },
   { command: "/parallel", description: "並列ツール実行数の確認・変更", needsArg: true },
   { command: "/status", description: "セッション状態を 1 画面で表示 (slot / context / capability / metrics / cost / tasks)" },

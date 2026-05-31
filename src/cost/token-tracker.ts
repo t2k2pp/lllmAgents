@@ -1,11 +1,13 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
-import * as os from "node:os";
+import { appendUsageRecord } from "./usage-store.js";
+
+export type UsageSlot = "main" | "second" | "vision";
 
 export interface TokenUsageRecord {
   timestamp: string;         // ISO 8601
   provider: string;
   model: string;
+  /** どのスロットの消費か。 未指定は "main" 扱い (後方互換) */
+  slot?: UsageSlot;
   inputTokens: number;
   outputTokens: number;
   cachedTokens: number;
@@ -20,14 +22,19 @@ export interface SessionTotal {
   recordCount: number;
 }
 
-const USAGE_DIR = path.join(os.homedir(), ".localllm", "usage");
-
 export class TokenTracker {
   private sessionRecords: TokenUsageRecord[] = [];
 
-  /** API呼び出し後にトークン使用量を記録 */
+  /** API呼び出し後にトークン使用量を記録 (in-memory + 月次 jsonl へインクリメンタル永続化) */
   record(usage: TokenUsageRecord): void {
     this.sessionRecords.push(usage);
+    // 永続化は best-effort (失敗してもセッション表示には影響させない)
+    appendUsageRecord(usage);
+  }
+
+  /** in-memory のセッションレコードをクリア (/cost reset 用) */
+  clearSession(): void {
+    this.sessionRecords = [];
   }
 
   /** セッション全体のトークン合計・コスト合計を取得 */
@@ -53,29 +60,6 @@ export class TokenTracker {
   /** セッション内の全レコードを取得 */
   getRecords(): readonly TokenUsageRecord[] {
     return this.sessionRecords;
-  }
-
-  /** 月次ログファイルに永続化 */
-  flush(): void {
-    if (this.sessionRecords.length === 0) return;
-
-    try {
-      if (!fs.existsSync(USAGE_DIR)) {
-        fs.mkdirSync(USAGE_DIR, { recursive: true });
-      }
-
-      const now = new Date();
-      const filename = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}.jsonl`;
-      const filePath = path.join(USAGE_DIR, filename);
-
-      const lines = this.sessionRecords
-        .map((r) => JSON.stringify(r))
-        .join("\n") + "\n";
-
-      fs.appendFileSync(filePath, lines, "utf-8");
-    } catch {
-      // 永続化エラーは無視（データ損失は許容）
-    }
   }
 }
 

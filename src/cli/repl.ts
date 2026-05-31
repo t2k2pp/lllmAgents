@@ -5,6 +5,8 @@ import type { AgentLoop } from "../agent/agent-loop.js";
 import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";
 import { bashTool } from "../tools/definitions/bash.js";
 import { globalTokenTracker } from "../cost/token-tracker.js";
+import { resetWindow, exportUsage, resolvePeriod, type PeriodSpec } from "../cost/usage-store.js";
+import { formatSummary, formatModels, formatProviders } from "./cost-view.js";
 import { displayHelp, type SkillSummary } from "./renderer.js";
 import { estimateMessageTokens } from "../agent/token-counter.js";
 import { buildContextBreakdown, formatContextBreakdown } from "./context-breakdown.js";
@@ -5001,6 +5003,59 @@ export class REPL {
         }
 
         console.log(chalk.dim("\n  詳細レポート: npm run analyze:loop  /  Goal-seek: /goal-seek"));
+        console.log(chalk.dim("  コスト詳細 (モデル/provider/期間別): /cost"));
+        console.log();
+        break;
+      }
+
+      // /cost (alias /token): クラウド/ローカル LLM 使用量の可視化。
+      // 設計: docs/cost-token-command-design.md
+      case "/cost":
+      case "/token": {
+        const lower = args.map((a) => a.toLowerCase());
+        const a0 = lower[0] ?? "";
+        const subs = ["models", "model", "providers", "provider", "reset", "export"];
+        const sub = subs.includes(a0) ? a0 : "";
+        // 期間トークンを引数のどこからでも拾う (session/window/all/today/yesterday/month/lastmonth/YYYY-MM-DD/YYYY-MM)。
+        // 無指定なら window (計測窓)。
+        let period: PeriodSpec = { type: "window" };
+        for (const tok of lower) {
+          const p = resolvePeriod(tok);
+          if (p) { period = p; break; }
+        }
+        const sessionRecords = globalTokenTracker.getRecords();
+
+        if (sub === "reset") {
+          const ts = resetWindow();
+          globalTokenTracker.clearSession();
+          console.log(chalk.green(
+            `\n  計測窓をリセットしました (${new Date(ts).toLocaleString()})。`,
+          ));
+          console.log(chalk.dim("  履歴 jsonl (~/.localllm/usage/) は保持されています。 過去は /cost all や /cost yesterday, /cost 2026-05 等で参照可。\n"));
+          break;
+        }
+
+        if (sub === "export") {
+          const format: "jsonl" | "csv" = lower.includes("csv") ? "csv" : "jsonl";
+          try {
+            const outPath = exportUsage(period, format, sessionRecords);
+            console.log(chalk.green(`\n  使用量を出力しました (${format}):`));
+            console.log(chalk.dim(`  ${outPath}\n`));
+          } catch (e) {
+            console.log(chalk.red(`\n  出力に失敗しました: ${String(e)}\n`));
+          }
+          break;
+        }
+
+        let lines: string[];
+        if (sub === "models" || sub === "model") {
+          lines = formatModels(period, sessionRecords);
+        } else if (sub === "providers" || sub === "provider") {
+          lines = formatProviders(period, sessionRecords);
+        } else {
+          lines = formatSummary(period, sessionRecords);
+        }
+        for (const l of lines) console.log(l);
         console.log();
         break;
       }

@@ -688,6 +688,7 @@ export class AgentLoop {
                     timestamp: new Date().toISOString(),
                     provider: this.provider.providerType,
                     model: this.model,
+                    slot: "main",
                     inputTokens: chunk.usage.promptTokens ?? 0,
                     outputTokens: chunk.usage.completionTokens ?? 0,
                     cachedTokens: 0,
