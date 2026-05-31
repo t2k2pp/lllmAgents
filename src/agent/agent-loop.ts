@@ -783,6 +783,27 @@ export class AgentLoop {
       // P3-A: アシスタント応答テキストからレジスター宣言を検出 (1 user span に 1 度だけ反映)
       this.detectRegisterFromText(textContent);
 
+      // 応答テキストの遅延表示ヘルパー (docs/spinner-mode-response-coloring-design.md)。
+      // スピナーモードでは「このターンが続くか終わるか」 を判定してから色を決める:
+      //   - dim=true : 中間ナレーション (ツール前の「〜します」/ 自己点検で継続する中間テキスト) → 灰色
+      //   - dim=false: ユーザーへの最終応答 → 白/Markdown
+      // assistantTextFlushed で 1 イテレーションにつき 1 回だけ表示する。
+      let assistantTextFlushed = false;
+      const flushAssistantText = (dim: boolean): void => {
+        if (assistantTextFlushed || this.streamingDisplay || !hasStartedOutput) return;
+        assistantTextFlushed = true;
+        const filteredText = createThinkingFilter()(textContent);
+        if (!filteredText.trim()) return;
+        if (dim) {
+          const indented = filteredText.split("\n").map((l) => "  " + l).join("\n");
+          console.log("\n" + chalk.dim(indented));
+        } else if (hasMarkdown(filteredText)) {
+          console.log(renderMarkdown(filteredText));
+        } else {
+          console.log("\n" + filteredText);
+        }
+      };
+
       // finish_reason="length": max_tokensに達して出力が途中で切れた場合、自動的に続きを生成する
       // 安全ネット: vLLMがfinish_reason="stop"を誤って返す場合に備え、
       // 構造的に不完全（未閉じコードブロック/テーブル、単語途中終端など）を検出して自動継続する
@@ -808,16 +829,11 @@ export class AgentLoop {
         continue;
       }
 
-      if (hasStartedOutput && !this.streamingDisplay) {
-        // スピナーモード: 収集した全テキストをフィルター・レンダリングして表示
-        const filteredText = createThinkingFilter()(textContent);
-        if (filteredText.trim()) {
-          if (hasMarkdown(filteredText)) {
-            console.log(renderMarkdown(filteredText));
-          } else {
-            console.log("\n" + filteredText);
-          }
-        }
+      // ツール呼び出しを伴うテキストは「これから〜する」 という中間ナレーションと確定 → 灰色で表示。
+      // ツールを伴わないテキストは「最終応答」 か「自己点検で継続する中間」 か未確定なので、
+      // ここでは出さず下流のディスポジション地点 (最終応答=白 / 自己点検=灰色) で flush する。
+      if (toolCalls.length > 0) {
+        flushAssistantText(true);
       }
 
       // 2026-05-16: Axis (2a) thinking-text コヒーレンス検査。
@@ -944,7 +960,14 @@ export class AgentLoop {
             forceFlag = (args.force as boolean) ?? false;
           } catch { /* ignore */ }
           if (summary.length > 0) {
-            console.log("\n" + chalk.dim(`  [response_complete] ${summary}`));
+            // summary はユーザーへの最終応答。 docs/spinner-mode-response-coloring-design.md
+            // スピナーモード: 白/Markdown で表示 (narration は toolCalls 経路で灰色 flush 済み)。
+            // ストリーミングモード: 本文は既にライブ出力済みなので二重表示を避け従来どおり灰色サマリ。
+            if (this.streamingDisplay) {
+              console.log("\n" + chalk.dim(`  [response_complete] ${summary}`));
+            } else {
+              console.log("\n" + (hasMarkdown(summary) ? renderMarkdown(summary) : summary));
+            }
           }
           // Goal Seek mode: acceptance 充足で span 終了したら自動的に mode を抜ける。
           // (todo gate は response-complete.ts で実施済み。 ここに来た = ゲート通過 = 全 criteria 完了 or force)
@@ -1064,6 +1087,7 @@ export class AgentLoop {
           selfCheckRounds < MAX_SELF_CHECK_ROUNDS &&
           !this.planManager?.isInPlanMode()) {
         selfCheckRounds++;
+        flushAssistantText(true); // 継続する中間テキスト = 灰色
         const fileList = pendingVerification.map(f => `    - ${f}`).join("\n");
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] 検証未実施`));
         // 中間 promise テキストと self-check nudge は in-turn 専用 (応答完了時に purge)
@@ -1099,6 +1123,7 @@ export class AgentLoop {
         });
         if (!result.passed) {
           selfCheckRounds++;
+          flushAssistantText(true); // 継続する中間テキスト = 灰色
           const feedback = Evaluator.formatForInjection(result);
           console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`));
           // Evaluator 指摘と中間応答は in-turn 専用、 thinking も保全
@@ -1141,7 +1166,8 @@ export class AgentLoop {
 
       if (shouldReprompt && isTask && !isCompleted) {
         if (selfCheckRounds >= MAX_SELF_CHECK_ROUNDS) {
-          // 上限到達: ユーザーに報告して中断
+          // 上限到達: ユーザーに報告して中断。 ここで turn が終わるので最終応答として白で表示。
+          flushAssistantText(false);
           console.log(chalk.yellow(`\n  自己点検を${MAX_SELF_CHECK_ROUNDS}回実施しましたが response_complete が呼ばれませんでした。`));
           this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
           this.purgeEphemeralAtSpanEnd("self_check_limit");
@@ -1149,6 +1175,7 @@ export class AgentLoop {
         }
 
         selfCheckRounds++;
+        flushAssistantText(true); // promise テキスト (継続する中間) = 灰色
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ツール未呼び出し`));
         // promise テキストと nudge は in-turn 専用、 thinking も保全
         this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
@@ -1174,6 +1201,7 @@ export class AgentLoop {
           selfCheckRounds < MAX_SELF_CHECK_ROUNDS) {
         codeBlockRetried = true;
         selfCheckRounds++;
+        flushAssistantText(true); // 継続する中間テキスト = 灰色
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] コードがテキスト応答に含まれています`));
         // コードを含む中間応答と nudge は in-turn 専用、 thinking も保全
         this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
@@ -1286,6 +1314,8 @@ export class AgentLoop {
         this.purgeEphemeralAtSpanEnd("empty_response_giveup");
         return;
       }
+      // ここに到達 = ツールも自己点検も無く turn が終わる = ユーザーへの最終応答 → 白/Markdown。
+      flushAssistantText(false);
       this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
       this.purgeEphemeralAtSpanEnd("final_text_response");
       return;
