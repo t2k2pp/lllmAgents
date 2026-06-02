@@ -3057,7 +3057,7 @@ export class REPL {
                 console.log(chalk.dim(`    #${e.n} ${e.shortHash} ${e.date}  ${e.message}`));
               }
             }
-            console.log(chalk.dim("  使用例: /checkpoint on|off | list | restore <n> | diff <n>"));
+            console.log(chalk.dim("  使用例: /checkpoint on|off | list | restore <n> | diff <n> | clear [--all]"));
             break;
           }
           case "on": {
@@ -3108,8 +3108,22 @@ export class REPL {
             console.log(chalk.dim(await cp.diffStat(n)));
             break;
           }
+          case "clear": {
+            if (args[1]?.trim() === "--all") {
+              const removed = cp.clearAll();
+              console.log(chalk.dim(`  全セッションのチェックポイントを削除しました (${removed} 件)。 作業フォルダのファイルは無傷です。`));
+            } else {
+              const ok = cp.clearCurrent();
+              console.log(
+                ok
+                  ? chalk.dim("  今セッションのチェックポイント履歴を削除しました。 作業フォルダのファイルは無傷です。 (全削除は /checkpoint clear --all)")
+                  : chalk.yellow("  削除対象のチェックポイントがありませんでした。"),
+              );
+            }
+            break;
+          }
           default:
-            console.log(chalk.dim("  使用方法: /checkpoint [status|on|off|list|restore <n>|diff <n>]"));
+            console.log(chalk.dim("  使用方法: /checkpoint [status|on|off|list|restore <n>|diff <n>|clear [--all]]"));
         }
         break;
       }

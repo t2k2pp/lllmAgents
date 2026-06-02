@@ -325,6 +325,16 @@ export interface Config {
 export interface CheckpointConfig {
   /** true で file_write/file_edit 後にシャドウ Git へ自動コミット。 既定 false */
   enabled?: boolean;
+  /**
+   * 古いセッションのチェックポイントを自動掃除する保持ポリシー (セッション開始時に適用)。
+   * 1 年前・100 セッション前のスナップショットを溜め込まないための上限。 数字は好みで調整。
+   */
+  retention?: {
+    /** 保持する最大セッション数 (新しい順)。 0 で無制限。 既定 20 */
+    maxSessions?: number;
+    /** この日数より古いセッションは削除。 0 で無制限。 既定 60 */
+    maxAgeDays?: number;
+  };
 }
 
 // ヘルパー: セカンドLLMがクラウドかローカルかを判定

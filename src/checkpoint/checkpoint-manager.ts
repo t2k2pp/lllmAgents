@@ -28,19 +28,40 @@ export interface CheckpointEntry {
   message: string;
 }
 
+export interface RetentionPolicy {
+  /** 保持する最大セッション数 (新しい順)。 0 で無制限 */
+  maxSessions?: number;
+  /** この日数より古いセッションは削除。 0 で無制限 */
+  maxAgeDays?: number;
+}
+
 export class CheckpointManager {
+  /** ~/.localllm/checkpoints (全セッションの親) */
+  private readonly root: string;
+  private readonly sessionId: string;
   private readonly gitDir: string;
   private readonly workTree: string;
   private enabled: boolean;
+  private readonly retention?: RetentionPolicy;
   private gitAvailable: boolean | null = null;
   private initialized = false;
+  /** gc --auto を間引くためのコミット数カウンタ */
+  private commitCount = 0;
   /** index.lock 競合を避けるための直列化キュー */
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(opts: { sessionId: string; workTree?: string; enabled?: boolean }) {
-    this.gitDir = path.join(os.homedir(), ".localllm", "checkpoints", opts.sessionId);
+  constructor(opts: {
+    sessionId: string;
+    workTree?: string;
+    enabled?: boolean;
+    retention?: RetentionPolicy;
+  }) {
+    this.root = path.join(os.homedir(), ".localllm", "checkpoints");
+    this.sessionId = opts.sessionId;
+    this.gitDir = path.join(this.root, opts.sessionId);
     this.workTree = opts.workTree ?? process.cwd();
     this.enabled = opts.enabled ?? false;
+    this.retention = opts.retention;
   }
 
   isEnabled(): boolean {
@@ -156,6 +177,10 @@ export class CheckpointManager {
     }
     const msg = message.replace(/\s+/g, " ").slice(0, 200) || "checkpoint";
     await this.git(["commit", "-q", "-m", msg]);
+    // セッション内ストレージ圧縮: 50 コミットごとに git の自動 gc を促す (閾値未満なら no-op)
+    if (++this.commitCount % 50 === 0) {
+      await this.git(["gc", "--auto", "-q"]).catch(() => {});
+    }
     return true;
   }
 
@@ -195,6 +220,98 @@ export class CheckpointManager {
     } catch (e) {
       return { ok: false, entry, error: String(e) };
     }
+  }
+
+  /** 今セッションのチェックポイント履歴を削除 (作業フォルダのファイルは無傷) */
+  clearCurrent(): boolean {
+    try {
+      fs.rmSync(this.gitDir, { recursive: true, force: true });
+      this.initialized = false;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** 全セッションのチェックポイントを削除。 削除したセッション数を返す */
+  clearAll(): number {
+    let n = 0;
+    try {
+      if (!fs.existsSync(this.root)) return 0;
+      for (const d of fs.readdirSync(this.root)) {
+        const p = path.join(this.root, d);
+        try {
+          if (fs.statSync(p).isDirectory()) {
+            fs.rmSync(p, { recursive: true, force: true });
+            n++;
+          }
+        } catch {
+          /* skip */
+        }
+      }
+      this.initialized = false;
+    } catch {
+      /* ignore */
+    }
+    return n;
+  }
+
+  /**
+   * 保持ポリシーに沿って古いセッションを掃除する (セッション開始時に呼ぶ)。
+   * 現在のセッションは常に残す。 同期 fs 操作で軽量。 削除数を返す。
+   */
+  pruneOldSessions(): number {
+    const maxSessions = this.retention?.maxSessions ?? 20;
+    const maxAgeDays = this.retention?.maxAgeDays ?? 60;
+    let removed = 0;
+    try {
+      if (!fs.existsSync(this.root)) return 0;
+      const now = Date.now();
+      const entries = fs
+        .readdirSync(this.root)
+        .map((d) => {
+          const p = path.join(this.root, d);
+          try {
+            const st = fs.statSync(p);
+            if (!st.isDirectory()) return null;
+            return { d, p, mtime: st.mtimeMs };
+          } catch {
+            return null;
+          }
+        })
+        .filter((x): x is { d: string; p: string; mtime: number } => !!x && x.d !== this.sessionId);
+
+      const survivors: { d: string; p: string; mtime: number }[] = [];
+      // 年齢ベース
+      for (const e of entries) {
+        if (maxAgeDays > 0 && now - e.mtime > maxAgeDays * 86_400_000) {
+          try {
+            fs.rmSync(e.p, { recursive: true, force: true });
+            removed++;
+          } catch {
+            /* skip */
+          }
+        } else {
+          survivors.push(e);
+        }
+      }
+      // 件数ベース (新しい順に maxSessions だけ残す)
+      if (maxSessions > 0 && survivors.length > maxSessions) {
+        survivors.sort((a, b) => b.mtime - a.mtime);
+        for (const e of survivors.slice(maxSessions)) {
+          try {
+            fs.rmSync(e.p, { recursive: true, force: true });
+            removed++;
+          } catch {
+            /* skip */
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    if (removed > 0) logger.debug(`checkpoint: 古いセッションを ${removed} 件掃除`);
+    return removed;
   }
 
   /** n 番目との差分サマリ */

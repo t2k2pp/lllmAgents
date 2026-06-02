@@ -11,7 +11,8 @@
 - **2026-06-02 (改訂2)**: D はスキル強化で実装と確定。A はシャドウ Git を一旦「過剰」として見送り、声がけ案に縮小。
 - **2026-06-02 (改訂3・確定)**: **A は シャドウ Git を「オプトイン機能」として採用**に再転換。見送り理由だった SSD 寿命懸念は過剰見積りと判明（コミットはテキストで数 KB/ターン、アプリ自身の session ログ 44MB/回の方が桁違いに大）。スキル/MCP 同様に簡単に ON/OFF できる前提で、ユーザーの「やりたい」意向を採用。**声がけ（本物 Git）は従の補助**に降格。**D はスキル強化で実装**で不変。
 - **2026-06-02 (改訂4・実装)**: A・D とも実装完了。実装ファイルは §8 参照。tsc 通過。実証: (1) シャドウ Git の commit→list→restore→scope外skip を一時ディレクトリで確認、(2) `game_smoke` が good HTML=pass / bad HTML(=`THREE.MathUtils.lerpAngle` 例外)=fail を正しく判定（本事象の発端バグを実際に検知）。
-- **2026-06-02 (本版・活用導線)**: 「裏で撮るだけで活用されない」ギャップを是正。ユーザー判断: 回帰時は**モデルが提案・人間が `/checkpoint restore` で実行**（restore ツールは作らない）／build系タスクで**モデルが `/checkpoint on` を提案**（既定 OFF のまま）。§9 参照。
+- **2026-06-02 (改訂5・活用導線)**: 「裏で撮るだけで活用されない」ギャップを是正。ユーザー判断: 回帰時は**モデルが提案・人間が `/checkpoint restore` で実行**（restore ツールは作らない）／build系タスクで**モデルが `/checkpoint on` を提案**（既定 OFF のまま）。§9 参照。
+- **2026-06-02 (本版・掃除)**: 溜め込み対策を実装。`/checkpoint clear [--all]` と、セッション開始時の保持ポリシー自動掃除（`retention.maxSessions`=既定20 / `maxAgeDays`=既定60、現在セッションは常に保持）＋50コミットごとの `git gc --auto`。実証: 100日超を年齢削除＋件数超過の最古を削除し現在セッションは保持。tsc 通過。
 
 ---
 
@@ -99,15 +100,18 @@ ToDo 49 件と実メッセージから、挙動は典型的な **リグレッシ
 実体は「Hook を発火させるか否か」だけなので、トグルは素直：
 
 - **設定フラグ** `checkpoints.enabled`（`config.json`）でグローバル ON/OFF。
-- **REPL コマンド**：`/checkpoint on|off`（ランタイム切替）、`/checkpoint list`、`/checkpoint restore <n>`、`/checkpoint diff <n>`。入力補完対象に含める。
+- **REPL コマンド**：`/checkpoint on|off`（ランタイム切替）、`/checkpoint list`、`/checkpoint restore <n>`、`/checkpoint diff <n>`、`/checkpoint clear [--all]`（履歴削除）。入力補完対象に含める。
 - 既定値（要確定）：ユーザーは賛成派のため **既定 ON**＋スコープ限定が候補。
 
 ### 4.5 スコープ・除外・保持（書き込みとサイズの制御）
 
 - **スコープ**：`sandbox/output/` など**成果物フォルダ配下のみ**有効。アプリ自身の `src/` 編集時は撮らない。
 - **除外**：`node_modules/`・巨大バイナリディレクトリは内部除外リストで弾く。一方でユーザーの `.gitignore` に引きずられて歯抜けにならないよう、対象範囲内は `git add -A`（必要に応じ `-f`）で確実に拾う。
-- **粒度**：1 ターン 1 コミット（毎編集はノイジー）。コミットメッセージにそのターンの ToDo 文言／意図を入れる。
-- **保持**：定期 `git gc`＋保持件数/容量上限で頭打ちにする。
+- **粒度**：file_write/file_edit ごとにコミット（テキストは git が差分のみ格納するため軽量）。
+- **保持（実装済み）**：
+  - **セッション横断の自動掃除**：セッション開始時に `pruneOldSessions()` が `~/.localllm/checkpoints/` を走査し、`maxAgeDays`（既定 60 日）より古い／`maxSessions`（既定 20）を超える古いセッションを削除。現在のセッションは常に残す。`config.checkpoints.retention.{maxSessions,maxAgeDays}` で調整可（0=無制限）。1 年前・100 セッション前のスナップショットを溜め込まない。
+  - **手動削除**：`/checkpoint clear`（今セッション）／`/checkpoint clear --all`（全セッション）。作業フォルダのファイルは無傷。
+  - **セッション内圧縮**：50 コミットごとに `git gc --auto`（閾値未満は no-op）。
 
 ### 4.6 コミットの引き金（D との連携）
 
@@ -198,10 +202,10 @@ ToDo 49 件と実メッセージから、挙動は典型的な **リグレッシ
 - `src/skills/builtin/game-development/SKILL.md`：Step5 スモークゲート＋完了条件＋版管理の声がけを追記。
 
 **A（チェックポイント）**
-- `src/checkpoint/checkpoint-manager.ts`：シャドウ Git 運用（`--git-dir=~/.localllm/checkpoints/<session-id>` / `--work-tree=cwd`）。init/commitForFile/commit/list/restore/diffStat、scope 判定、info/exclude、直列化キュー。
-- `src/config/types.ts`：`CheckpointConfig`（`checkpoints.enabled`、既定 false）。
+- `src/checkpoint/checkpoint-manager.ts`：シャドウ Git 運用（`--git-dir=~/.localllm/checkpoints/<session-id>` / `--work-tree=cwd`）。init/commitForFile/commit/list/restore/diffStat、scope 判定、info/exclude、直列化キュー、clearCurrent/clearAll/pruneOldSessions、gc。
+- `src/config/types.ts`：`CheckpointConfig`（`checkpoints.enabled`=既定 false、`retention.{maxSessions,maxAgeDays}`）。
 - `src/tools/tool-executor.ts`：file_write/file_edit 成功後に `commitForFile` を呼ぶ（有効時のみ）。
-- `src/agent/agent-loop.ts`：`CheckpointManager` を生成し ToolExecutor へ注入、`getCheckpointManager()` を公開。
+- `src/agent/agent-loop.ts`：`CheckpointManager` を生成し ToolExecutor へ注入、起動時 `pruneOldSessions()`、`getCheckpointManager()` を公開。
 - `src/cli/repl.ts`：`/checkpoint status|on|off|list|restore <n>|diff <n>`。
 - `src/cli/completer.ts`：`/checkpoint` 系の入力補完。
 

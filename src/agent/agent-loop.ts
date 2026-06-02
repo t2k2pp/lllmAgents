@@ -292,11 +292,19 @@ export class AgentLoop {
       this.capability.keepRecentMessages,
     );
     // 自動チェックポイント (既定 OFF のオプトイン)。 main ループのみで版管理する。
+    const cpCfg = loadConfig().checkpoints;
     this.checkpointManager = new CheckpointManager({
       sessionId: sessionId ?? "default",
       workTree: process.cwd(),
-      enabled: loadConfig().checkpoints?.enabled === true,
+      enabled: cpCfg?.enabled === true,
+      retention: cpCfg?.retention,
     });
+    // 起動時に古いセッションのチェックポイントを掃除 (1 年前・100 セッション前を溜めない)
+    try {
+      this.checkpointManager.pruneOldSessions();
+    } catch {
+      /* 掃除失敗は無視 */
+    }
     this.toolExecutor = new ToolExecutor(
       toolRegistry,
       permissions,
