@@ -326,6 +326,14 @@ export interface CheckpointConfig {
   /** true で file_write/file_edit 後にシャドウ Git へ自動コミット。 既定 false */
   enabled?: boolean;
   /**
+   * 版管理する作業フォルダ (work-tree)。 cwd 相対 or 絶対。
+   * 未指定なら `<cwd>/sandbox/output` があればそこ、 無ければ cwd。
+   * 成果物フォルダに限定して src/ や機密の巻き込みを避ける用途。
+   */
+  workTreeDir?: string;
+  /** これを超えるファイルはチェックポイント対象から外す (MB)。 既定 25。 0 で無制限 */
+  maxFileSizeMb?: number;
+  /**
    * 古いセッションのチェックポイントを自動掃除する保持ポリシー (セッション開始時に適用)。
    * 1 年前・100 セッション前のスナップショットを溜め込まないための上限。 数字は好みで調整。
    */

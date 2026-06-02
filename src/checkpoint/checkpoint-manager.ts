@@ -35,26 +35,46 @@ export interface RetentionPolicy {
   maxAgeDays?: number;
 }
 
+/** 機密ファイルの混入防止 (M3)。 作業フォルダ配下でも版管理しない */
+const SECRET_EXCLUDES = [
+  ".env",
+  ".env.*",
+  "*.pem",
+  "*.key",
+  "id_rsa",
+  "id_dsa",
+  "id_ecdsa",
+  "id_ed25519",
+  "*.p12",
+  "*.pfx",
+];
+
 export class CheckpointManager {
   /** ~/.localllm/checkpoints (全セッションの親) */
   private readonly root: string;
-  private readonly sessionId: string;
-  private readonly gitDir: string;
+  /** チェックポイントの名前空間 (resume を跨いで安定させる = session.meta.id 推奨) */
+  private sessionId: string;
+  private gitDir: string;
   private readonly workTree: string;
   private enabled: boolean;
   private readonly retention?: RetentionPolicy;
+  /** これを超えるファイルはステージから外す (シャドウGit肥大防止)。 0 で無制限 */
+  private readonly maxFileSizeBytes: number;
   private gitAvailable: boolean | null = null;
   private initialized = false;
   /** gc --auto を間引くためのコミット数カウンタ */
   private commitCount = 0;
   /** index.lock 競合を避けるための直列化キュー */
   private queue: Promise<unknown> = Promise.resolve();
+  /** 直近の commit 失敗メッセージ (status 表示用)。 成功で null に戻す */
+  private lastError: string | null = null;
 
   constructor(opts: {
     sessionId: string;
     workTree?: string;
     enabled?: boolean;
     retention?: RetentionPolicy;
+    maxFileSizeMb?: number;
   }) {
     this.root = path.join(os.homedir(), ".localllm", "checkpoints");
     this.sessionId = opts.sessionId;
@@ -62,6 +82,26 @@ export class CheckpointManager {
     this.workTree = opts.workTree ?? process.cwd();
     this.enabled = opts.enabled ?? false;
     this.retention = opts.retention;
+    this.maxFileSizeBytes = Math.max(0, opts.maxFileSizeMb ?? 25) * 1024 * 1024;
+  }
+
+  /**
+   * 版管理スコープ (work-tree) を解決する (M3)。
+   * - 設定 `workTreeDir` があればそれ (cwd 相対 or 絶対)
+   * - 無ければ `<cwd>/sandbox/output` が存在すればそこ (開発時に src/ や機密を撮らない)
+   * - どちらも無ければ cwd (deploy exe を成果物フォルダで動かす実運用では cwd = 成果物)
+   */
+  static resolveWorkTree(cwd: string, configuredDir?: string): string {
+    if (configuredDir && configuredDir.trim()) {
+      return path.isAbsolute(configuredDir) ? configuredDir : path.resolve(cwd, configuredDir);
+    }
+    const artifact = path.join(cwd, "sandbox", "output");
+    try {
+      if (fs.statSync(artifact).isDirectory()) return artifact;
+    } catch {
+      /* 無ければ cwd */
+    }
+    return cwd;
   }
 
   isEnabled(): boolean {
@@ -70,6 +110,24 @@ export class CheckpointManager {
 
   setEnabled(v: boolean): void {
     this.enabled = v;
+  }
+
+  /** status 表示用 (有効状態 + 直近のコミット失敗) */
+  getStatus(): { enabled: boolean; lastError: string | null } {
+    return { enabled: this.enabled, lastError: this.lastError };
+  }
+
+  /**
+   * resume 時にチェックポイントの名前空間を載せ替える (H1)。
+   * 起動ごとに新規 ID で初期化された後、 復元するセッションの安定 ID に貼り替えることで、
+   * プロセスを跨いだチェックポイントの継承を成立させる。
+   */
+  rebind(sessionId: string): void {
+    if (!sessionId || sessionId === this.sessionId) return;
+    this.sessionId = sessionId;
+    this.gitDir = path.join(this.root, sessionId);
+    this.initialized = false;
+    this.commitCount = 0;
   }
 
   /** git コマンドが使えるか (初回だけ実測してキャッシュ) */
@@ -106,7 +164,7 @@ export class CheckpointManager {
         await this.git(["config", "user.name", "lllmAgents-checkpoint"]);
         await this.git(["config", "user.email", "checkpoint@localllm.local"]);
       }
-      // 巨大/不要ディレクトリを除外 (作業フォルダ内 .gitignore も併せて尊重される)
+      // 巨大/不要ディレクトリ・機密を除外 (作業フォルダ内 .gitignore も併せて尊重される)
       const exclude = [
         "node_modules/",
         ".git/",
@@ -115,6 +173,7 @@ export class CheckpointManager {
         ".localllm/",
         "*.log",
         ".DS_Store",
+        ...SECRET_EXCLUDES,
       ].join("\n");
       const infoDir = path.join(this.gitDir, "info");
       fs.mkdirSync(infoDir, { recursive: true });
@@ -150,9 +209,8 @@ export class CheckpointManager {
     await this.queue;
   }
 
-  /** 明示コミット (known-good タグ等)。 戻り値はコミットしたか否か */
+  /** 明示コミット (復元前スナップショット等)。 戻り値はコミットしたか否か */
   async commit(message: string): Promise<boolean> {
-    if (!(await this.ensureInit())) return false;
     let committed = false;
     this.queue = this.queue
       .then(async () => {
@@ -165,18 +223,23 @@ export class CheckpointManager {
     return committed;
   }
 
-  private async doCommit(message: string): Promise<boolean> {
+  private async doCommit(messageHint: string): Promise<boolean> {
     if (!(await this.ensureInit())) return false;
+    // add -A で作業ツリー全体をステージ → 各コミットが完全な復元可能スナップショットになる
     await this.git(["add", "-A"]);
-    // ステージに差分が無ければコミットしない
-    try {
-      await this.git(["diff", "--cached", "--quiet"]);
-      return false; // 差分なし
-    } catch {
-      // 差分あり → コミット
+    if (this.maxFileSizeBytes > 0) {
+      await this.unstageOversized();
     }
-    const msg = message.replace(/\s+/g, " ").slice(0, 200) || "checkpoint";
-    await this.git(["commit", "-q", "-m", msg]);
+    const staged = await this.stagedFiles();
+    if (staged.length === 0) return false; // 差分なし
+    const msg = this.buildMessage(messageHint, staged);
+    try {
+      await this.git(["commit", "-q", "-m", msg]);
+      this.lastError = null;
+    } catch (e) {
+      this.lastError = String(e).slice(0, 200);
+      throw e;
+    }
     // セッション内ストレージ圧縮: 50 コミットごとに git の自動 gc を促す (閾値未満なら no-op)
     if (++this.commitCount % 50 === 0) {
       await this.git(["gc", "--auto", "-q"]).catch(() => {});
@@ -184,12 +247,58 @@ export class CheckpointManager {
     return true;
   }
 
+  private async stagedFiles(): Promise<string[]> {
+    try {
+      const { stdout } = await this.git(["diff", "--cached", "--name-only"]);
+      return stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  /** メッセージを「変更ファイル群」 から生成 (同ターン複数ファイルでも実態を反映 / M1) */
+  private buildMessage(hint: string, staged: string[]): string {
+    const base = hint.replace(/\s+/g, " ").trim();
+    const names = staged
+      .map((p) => p.split("/").pop() || p)
+      .slice(0, 4)
+      .join(", ");
+    const more = staged.length > 4 ? ` 他${staged.length - 4}件` : "";
+    const filePart = names ? ` [${names}${more}]` : "";
+    return (base + filePart).slice(0, 200) || "checkpoint";
+  }
+
+  /** 巨大ファイルをステージから外し、 以後も拾わないよう exclude に追記 (M3) */
+  private async unstageOversized(): Promise<void> {
+    for (const rel of await this.stagedFiles()) {
+      try {
+        const abs = path.join(this.workTree, rel);
+        const st = fs.statSync(abs);
+        if (st.isFile() && st.size > this.maxFileSizeBytes) {
+          await this.git(["reset", "-q", "--", rel]);
+          this.appendExclude(rel);
+          logger.debug(`checkpoint: 巨大ファイルを除外 (${Math.round(st.size / 1048576)}MB): ${rel}`);
+        }
+      } catch {
+        /* 削除済み等は無視 */
+      }
+    }
+  }
+
+  private appendExclude(rel: string): void {
+    try {
+      fs.appendFileSync(path.join(this.gitDir, "info", "exclude"), rel + "\n");
+    } catch {
+      /* skip */
+    }
+  }
+
   async list(limit = 30): Promise<CheckpointEntry[]> {
     if (!(await this.ensureInit())) return [];
     try {
       const { stdout } = await this.git([
         "log",
-        `-n${limit}`,
+        `-n${Math.max(limit, 1)}`,
         "--pretty=format:%H%x1f%cI%x1f%s",
       ]);
       const lines = stdout.split("\n").filter((l) => l.trim());
@@ -208,14 +317,44 @@ export class CheckpointManager {
     }
   }
 
-  /** n 番目 (1=直近) のチェックポイントへ作業フォルダを復元 */
+  /**
+   * n 番目 (1=直近) のチェックポイントへ作業フォルダを「完全に」復元する (H2)。
+   * 単なる checkout では対象コミット以降に追加されたファイルが残り「戻したのに壊れたまま」に
+   * なるため、 追加分を削除して作業ツリーを当該コミットに一致させる。
+   * HEAD は進めない (= forward 履歴を温存し、 また前に進める)。
+   */
   async restore(n: number): Promise<{ ok: boolean; entry?: CheckpointEntry; error?: string }> {
-    const entries = await this.list(Math.max(n, 30));
+    await this.queue; // 進行中の自動コミットを待つ
+    const entries = await this.list(n);
     const entry = entries.find((e) => e.n === n);
     if (!entry) return { ok: false, error: `チェックポイント #${n} が見つかりません` };
     try {
-      // 対象コミットの内容で作業ツリーを上書き (追跡ファイルを復元)
+      // 1) 復元前に現状をスナップショット (戻しすぎても失わない / 追加ファイルを追跡下に置く)
+      await this.doCommit(`auto: #${n} 復元前のスナップショット`);
+      // 2) 対象コミット以降に「追加された」ファイル (HEAD にあって対象に無い) を洗い出す
+      let added: string[] = [];
+      try {
+        const { stdout } = await this.git([
+          "diff",
+          "--diff-filter=A",
+          "--name-only",
+          entry.hash,
+          "HEAD",
+        ]);
+        added = stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+      } catch {
+        /* 履歴が浅い等は空 */
+      }
+      // 3) 追跡ファイルを対象コミットの内容へ復元
       await this.git(["checkout", entry.hash, "--", "."]);
+      // 4) 対象時点に存在しなかったファイルを作業ツリーから除去 (= 完全一致)
+      for (const rel of added) {
+        try {
+          fs.rmSync(path.join(this.workTree, rel), { force: true });
+        } catch {
+          /* skip */
+        }
+      }
       return { ok: true, entry };
     } catch (e) {
       return { ok: false, entry, error: String(e) };
@@ -340,9 +479,9 @@ export class CheckpointManager {
     return latest;
   }
 
-  /** n 番目との差分サマリ */
+  /** n 番目と現在の作業ツリーの差分サマリ */
   async diffStat(n: number): Promise<string> {
-    const entries = await this.list(Math.max(n, 30));
+    const entries = await this.list(n);
     const entry = entries.find((e) => e.n === n);
     if (!entry) return `チェックポイント #${n} が見つかりません`;
     try {

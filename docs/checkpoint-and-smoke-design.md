@@ -13,7 +13,8 @@
 - **2026-06-02 (改訂4・実装)**: A・D とも実装完了。実装ファイルは §8 参照。tsc 通過。実証: (1) シャドウ Git の commit→list→restore→scope外skip を一時ディレクトリで確認、(2) `game_smoke` が good HTML=pass / bad HTML(=`THREE.MathUtils.lerpAngle` 例外)=fail を正しく判定（本事象の発端バグを実際に検知）。
 - **2026-06-02 (改訂5・活用導線)**: 「裏で撮るだけで活用されない」ギャップを是正。ユーザー判断: 回帰時は**モデルが提案・人間が `/checkpoint restore` で実行**（restore ツールは作らない）／build系タスクで**モデルが `/checkpoint on` を提案**（既定 OFF のまま）。§9 参照。
 - **2026-06-02 (改訂6・掃除)**: 溜め込み対策を実装。`/checkpoint clear [--all]` と、セッション開始時の保持ポリシー自動掃除（`retention.maxSessions`=既定20 / `maxAgeDays`=既定60、現在セッションは常に保持）＋50コミットごとの `git gc --auto`。実証: 100日超を年齢削除＋件数超過の最古を削除し現在セッションは保持。tsc 通過。
-- **2026-06-02 (本版・最終更新基準)**: 保持判定の「古さ」を**開始日ではなく最終更新日**に修正（ユーザー指摘）。当初はディレクトリ mtime を使用（git の index.lock→rename で結果的に追従していたが暗黙依存で脆い）。`logs/HEAD` の mtime（最終コミット時刻）を明示シグナルにし、フォールバック付き。実証: dir=100日前でも最終コミットが2日前なら保持、最終コミットが100日前なら削除。
+- **2026-06-02 (改訂7・最終更新基準)**: 保持判定の「古さ」を**開始日ではなく最終更新日**に修正（ユーザー指摘）。当初はディレクトリ mtime を使用（git の index.lock→rename で結果的に追従していたが暗黙依存で脆い）。`logs/HEAD` の mtime（最終コミット時刻）を明示シグナルにし、フォールバック付き。実証: dir=100日前でも最終コミットが2日前なら保持、最終コミットが100日前なら削除。
+- **2026-06-03 (本版・サブエージェントレビュー反映)**: 独立レビューで判明した重大欠陥を修正（詳細 §10）。H1 resume時にチェックポイントが継承されない（致命）、H2 restore が不完全（追加ファイルが残る）、M3 スコープが cwd 全体で機密混入リスク、H3/M5 スモークのフリーズ/blank 判定の誤検知。併せて設計書本文の未実装記述（Stop フック / known-good タグ）を実態へ整合。
 
 ---
 
@@ -106,9 +107,10 @@ ToDo 49 件と実メッセージから、挙動は典型的な **リグレッシ
 
 ### 4.5 スコープ・除外・保持（書き込みとサイズの制御）
 
-- **スコープ**：`sandbox/output/` など**成果物フォルダ配下のみ**有効。アプリ自身の `src/` 編集時は撮らない。
+- **スコープ（実装済み）**：work-tree は `config.checkpoints.workTreeDir` で指定可。未指定なら `<cwd>/sandbox/output` があればそこ、無ければ cwd（deploy exe を成果物フォルダで動かす実運用では cwd=成果物）。これにより開発時に `src/` や機密を巻き込まない。
+- **機密・巨大除外（実装済み）**：`.env*`/`*.pem`/`*.key`/`id_*`/`*.p12`/`*.pfx` を info/exclude で除外。`maxFileSizeMb`（既定 25）超のファイルはステージから外し以後 exclude に追記（Blender 書き出し等の肥大対策）。
 - **除外**：`node_modules/`・巨大バイナリディレクトリは内部除外リストで弾く。一方でユーザーの `.gitignore` に引きずられて歯抜けにならないよう、対象範囲内は `git add -A`（必要に応じ `-f`）で確実に拾う。
-- **粒度**：file_write/file_edit ごとにコミット（テキストは git が差分のみ格納するため軽量）。
+- **粒度（実装済み）**：file_write/file_edit 成功ごとに `git add -A` で**作業ツリー全体をステージしてコミット**（＝各コミットが完全な復元可能スナップショット。整合性 > メッセージ粒度）。同一ターンの複数変更は最初のコミットにまとまるため、メッセージは staged ファイル名一覧から生成して実態を反映。
 - **保持（実装済み）**：
   - **セッション横断の自動掃除**：セッション開始時に `pruneOldSessions()` が `~/.localllm/checkpoints/` を走査し、`maxAgeDays`（既定 60 日）より古い／`maxSessions`（既定 20）を超える古いセッションを削除。現在のセッションは常に残す。`config.checkpoints.retention.{maxSessions,maxAgeDays}` で調整可（0=無制限）。1 年前・100 セッション前のスナップショットを溜め込まない。
   - **「古さ」の基準＝最終更新日**：セッション開始日（ディレクトリ作成日）ではなく、**最後にチェックポイントした日**で判定する。コミットのたびに追記される `logs/HEAD` の mtime を最終活動時刻とし、無ければ HEAD/index/dir の最大 mtime にフォールバック。「ずっと前に作ったが昨日まで触っていたセッション」を誤って消さない。
@@ -117,7 +119,7 @@ ToDo 49 件と実メッセージから、挙動は典型的な **リグレッシ
 
 ### 4.6 コミットの引き金（D との連携）
 
-毎ターンの自動コミットに加え、**「ビルド＋スモーク（機能 D）が通った＝動く状態」を確認した時点に known-good タグ**を打つ。回帰時は直前タグへ戻してから差分を当て直せる。A（毎ターンの細かい網）と D（動く版の明示）が噛み合う。
+**※ known-good タグは未実装（将来案）。** 現状は全コミットが等価な復元点で、回帰時は `/checkpoint list` から動く版を選んで restore する運用。スモーク（D）合格時に自動タグを打つ連携は将来の拡張余地として残す（§10）。
 
 ### 4.7 復旧 UX
 
@@ -146,15 +148,17 @@ ToDo 49 件と実メッセージから、挙動は典型的な **リグレッシ
 
 ### 5.2 能力（Tool）
 
-`src/browser/playwright-manager.ts` を露出した **ビルトイン Tool**。最小手順：
+`src/browser/playwright-manager.ts` を露出した **ビルトイン Tool**。手順（実装済み）：
 
-1. headless でロード → console error / ページエラーを回収（0 件か）
-2. スクリーンショット①
-3. 合成キー入力で Start → 数フレーム待つ
-4. スクリーンショット②
-5. **①②のピクセル差分**：変化あり＝「何か動いている/反応している」、完全一致＝フリーズ疑い
+1. headless でロード → `networkidle` 待ち（best-effort）→ settle。console error / pageerror をロード前から回収
+2. **入力前ベースライン**：スクショ 2 枚で「自走アニメの有無（idleAnimated）」を測る
+3. canvas に focus → 合成入力（Enter/Space/中央クリック → 矢印/WASD）
+4. **入力後**：スクショ 2 枚で「入力反応（respondedToInput＝遷移 or 継続動作）」を測る
+5. **致命判定**：未捕捉例外/console error があれば FAIL。加えて **「自走アニメも無く入力反応も無い＝画面が死んでいる」場合のみフリーズ FAIL**
 
-ゲームの中身を理解せず「動いているか／即死していないか」だけを判定する。
+ゲームの中身を理解せず「即死していないか／画面が生きているか」だけを判定する。
+- **誤検知対策**：自走アニメがある場合は入力反応をピクセルで断定できないため FAIL にせず、その旨を報告（手応えは人間が試遊）。
+- **blank canvas 判定は情報のみ**（単独 FAIL にしない）：左上サンプル/単色フレームで誤検知しやすく、WebGL（three.js 等の主対象）は判定不能。WebGL の死活はフリーズ判定と console error で代替する。
 
 - **MCP 化の条件**：Claude Code や他エージェントからも同じスモークを使い回したい場合のみ。当面アプリ専用なら Tool で十分（MCP は IPC オーバーヘッド分の損）。
 
@@ -207,8 +211,9 @@ ToDo 49 件と実メッセージから、挙動は典型的な **リグレッシ
 - `src/checkpoint/checkpoint-manager.ts`：シャドウ Git 運用（`--git-dir=~/.localllm/checkpoints/<session-id>` / `--work-tree=cwd`）。init/commitForFile/commit/list/restore/diffStat、scope 判定、info/exclude、直列化キュー、clearCurrent/clearAll/pruneOldSessions、gc。
 - `src/config/types.ts`：`CheckpointConfig`（`checkpoints.enabled`=既定 false、`retention.{maxSessions,maxAgeDays}`）。
 - `src/tools/tool-executor.ts`：file_write/file_edit 成功後に `commitForFile` を呼ぶ（有効時のみ）。
-- `src/agent/agent-loop.ts`：`CheckpointManager` を生成し ToolExecutor へ注入、起動時 `pruneOldSessions()`、`getCheckpointManager()` を公開。
-- `src/cli/repl.ts`：`/checkpoint status|on|off|list|restore <n>|diff <n>`。
+- `src/agent/agent-loop.ts`：`CheckpointManager` を生成し ToolExecutor へ注入、resume 確定後に `runCheckpointMaintenance()`（prune）、restore 時 `rebind`、`getCheckpointManager()` を公開。
+- `src/index.ts`：resume 解決後に `agent.runCheckpointMaintenance()`。
+- `src/cli/repl.ts`：`/checkpoint status|on|off|list|restore <n>|diff <n>|clear [--all]`。
 - `src/cli/completer.ts`：`/checkpoint` 系の入力補完。
 
 **残作業**：手動 TTY で `/checkpoint` 系コマンドの対話表示と、実ゲーム作成フローでの `game_smoke` 呼出を確認（非TTYパイプでは対話品質を検証不可）。既定 OFF のため、有効化は `/checkpoint on`。
@@ -226,3 +231,27 @@ ToDo 49 件と実メッセージから、挙動は典型的な **リグレッシ
 3. **原則としての常識** → 同上 escalation rules が全 tier で常時提示される。
 
 実装ファイル（追加分）：`src/agent/shared-principles.ts`、`src/tools/definitions/game-smoke.ts`（FAIL ヒント）、`src/skills/builtin/game-development/SKILL.md`（版管理節）。
+
+## 10. サブエージェントレビュー反映（2026-06-03）
+
+独立レビュー（設計者・開発者目線）で判明した欠陥を修正。
+
+| # | 指摘 | 対応 |
+|---|---|---|
+| **H1** | resume 時にチェックポイントが継承されない（checkpoint用id=毎起動の timestamp、resume用id=session.meta.id で別名前空間。restoreSession も rebind せず）。**中断→再開という中心ユースケースで戻せない** | checkpoint を **session.meta.id で採番**（構築時 `rebind`）。`restoreSession` で resume 先 id へ `rebind`。prune は identity 確定後（`runCheckpointMaintenance`）に移し、復元対象の誤削除も防止 |
+| **H2** | `git checkout <hash> -- .` は対象コミット以降に**追加されたファイルを消さない**→「戻したのに壊れたまま」 | restore を「復元前に自動スナップショット → 追加ファイル（`diff --diff-filter=A <hash> HEAD`）を作業ツリーから削除 → checkout」で**完全一致**に。HEAD は進めず forward 履歴温存 |
+| **M3** | スコープが cwd 全体で `.env`/鍵まで平文シャドウGitに混入しうる（設計書「成果物フォルダ限定」と乖離） | work-tree を `workTreeDir` 設定で限定（既定 `sandbox/output` or cwd）。機密パターン＋`maxFileSizeMb`（既定25）超を除外 |
+| **H3/M5** | フリーズ判定がスクショ完全一致依存で誤検知両方。単色背景を blank 誤判定。WebGL で blank 不能 | 入力前ベースラインで自走アニメを測り、**自走も反応も無い時だけ**フリーズ FAIL。canvas focus・`networkidle` 待ち追加。blank は最終状態計測の**情報のみ**（単独 FAIL にしない） |
+| M1/M4 | 同ターン複数変更でメッセージが先頭1ファイルだけ／ensureInit 非対称 | `add -A` は維持（スナップショット整合）し、メッセージを staged ファイル群から生成。`commit()` の冗長 init を整理 |
+| L1/L2/L4 | `list(Math.max(n,30))` 直感に反する／数値検証緩い／コミット失敗が不可視 | `list(n)`、`/^\d+$/` 検証、`/checkpoint status` に直近コミット失敗を表示 |
+
+**未実装（将来案）**：Stop フックでの 1 ターン 1 コミット集約、スモーク合格時の known-good 自動タグ、回帰ループ自動検出。
+
+**実証（このコミットで確認）**：
+- H2: restore #2 で後から追加した `enemy.js` が消え `main.html` が旧版に戻る。
+- M3: `.env` と 2MB ファイル（cap 1MB）が除外、通常テキストは追跡。
+- H1: `rebind` 後のコミットが新名前空間へ、旧名前空間は空。
+- スモーク: 開始キーで動くゲーム=pass（誤検知解消）／完全静止=fail／例外=fail。
+- tsc 通過。
+
+**残作業**：手動 TTY で `/checkpoint` 系の対話表示、resume を跨いだ list/restore、実ゲーム作成フローでの `game_smoke` 呼出を確認。

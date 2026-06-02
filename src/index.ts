@@ -428,6 +428,10 @@ async function main(): Promise<void> {
     }
   }
 
+  // チェックポイントの古いセッション掃除は、 resume 解決後 (= 現在セッションが確定し
+  // 保護対象になった後) に実行する。 復元対象のチェックポイントを誤って消さないため。
+  agent.runCheckpointMaintenance();
+
   // Run session start hooks
   await hookManager.runSessionHooks("start");
 

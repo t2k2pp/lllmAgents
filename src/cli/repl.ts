@@ -3047,9 +3047,13 @@ export class REPL {
         const sub = args[0]?.trim() ?? "status";
         switch (sub) {
           case "status": {
+            const st = cp.getStatus();
             console.log(
-              chalk.dim(`  checkpoint: ${cp.isEnabled() ? chalk.green("ON") : chalk.yellow("OFF")}`),
+              chalk.dim(`  checkpoint: ${st.enabled ? chalk.green("ON") : chalk.yellow("OFF")}`),
             );
+            if (st.lastError) {
+              console.log(chalk.red(`  直近のコミット失敗: ${st.lastError}`));
+            }
             const recent = await cp.list(5);
             if (recent.length > 0) {
               console.log(chalk.dim(`  直近 ${recent.length} 件:`));
@@ -3086,11 +3090,12 @@ export class REPL {
             break;
           }
           case "restore": {
-            const n = parseInt(args[1]?.trim() ?? "", 10);
-            if (!Number.isFinite(n) || n < 1) {
+            const raw = args[1]?.trim() ?? "";
+            if (!/^\d+$/.test(raw) || parseInt(raw, 10) < 1) {
               console.log(chalk.yellow("  使用方法: /checkpoint restore <n> (n は /checkpoint list の番号)"));
               break;
             }
+            const n = parseInt(raw, 10);
             const r = await cp.restore(n);
             if (r.ok && r.entry) {
               console.log(chalk.green(`  #${n} (${r.entry.shortHash}) へ復元しました: ${r.entry.message}`));
@@ -3100,12 +3105,12 @@ export class REPL {
             break;
           }
           case "diff": {
-            const n = parseInt(args[1]?.trim() ?? "", 10);
-            if (!Number.isFinite(n) || n < 1) {
+            const raw = args[1]?.trim() ?? "";
+            if (!/^\d+$/.test(raw) || parseInt(raw, 10) < 1) {
               console.log(chalk.yellow("  使用方法: /checkpoint diff <n>"));
               break;
             }
-            console.log(chalk.dim(await cp.diffStat(n)));
+            console.log(chalk.dim(await cp.diffStat(parseInt(raw, 10))));
             break;
           }
           case "clear": {

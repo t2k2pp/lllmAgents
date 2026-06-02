@@ -99,7 +99,13 @@ export function createGameSmokeTool(manager: PlaywrightManager): ToolHandler {
         lines.push(
           `- canvas 空判定: ${r.blankCanvas === null ? "判定不能 (canvas無し/WebGL)" : r.blankCanvas ? "空" : "描画あり"}`,
         );
-        lines.push(`- 入力後の画面変化: ${r.changedAfterInput ? "あり" : "なし (フリーズ疑い)"}`);
+        lines.push(`- 自走アニメ: ${r.idleAnimated ? "あり" : "なし"}`);
+        lines.push(`- 入力への反応: ${r.respondedToInput ? "あり" : "なし"}`);
+        if (r.idleAnimated && !r.respondedToInput) {
+          lines.push(
+            "  ※ 自走アニメがあるため、 入力が効いているかはピクセルでは断定できません。 操作の手応えは人間の試遊で確認してください。",
+          );
+        }
 
         return { success: true, output: lines.join("\n") };
       } catch (e) {

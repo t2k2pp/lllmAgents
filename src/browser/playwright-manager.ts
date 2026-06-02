@@ -107,18 +107,24 @@ export class PlaywrightManager {
 
     const reasons: string[] = [];
     let blankCanvas: boolean | null = null;
-    let changedAfterInput = false;
+    let idleAnimated = false; // 入力なしでも自走でアニメーションするか
+    let respondedToInput = false; // 入力の前後/後で画面が変化したか
 
     try {
       await page.goto(url, { waitUntil: "load", timeout: 30000 });
+      // CDN 等の読み込み待ち (best-effort)。 取りこぼしても settle で吸収
+      await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
       const settle = opts?.settleMs ?? 1500;
       await page.waitForTimeout(settle);
 
-      const shot1 = await page.screenshot({ type: "png" });
-      blankCanvas = await this.detectBlankCanvas(page);
+      // 入力前のベースライン: 自走アニメの有無を測る (これが無いとフリーズ判定が誤検知する)
+      const b1 = await page.screenshot({ type: "png" });
+      await page.waitForTimeout(500);
+      const b2 = await page.screenshot({ type: "png" });
+      idleAnimated = !b1.equals(b2);
 
-      // 合成入力: Start 系 (Enter/Space/中央クリック) → 移動系 (矢印/WASD)。
-      // ゲームの中身を知らないので、 ありがちな開始・操作キーを順に試す。
+      // 入力を canvas に確実に届ける: focus → Start 系 (Enter/Space/中央クリック) → 移動系
+      await this.focusCanvas(page);
       await this.pressKeys(page, ["Enter", "Space"]);
       const vp = page.viewportSize();
       if (vp) {
@@ -129,11 +135,16 @@ export class PlaywrightManager {
         }
       }
       await page.waitForTimeout(300);
-      await this.pressKeys(page, ["ArrowUp", "ArrowLeft", "KeyW", "KeyA", "KeyD"]);
-      await page.waitForTimeout(900);
+      await this.pressKeys(page, ["ArrowUp", "ArrowLeft", "KeyW", "KeyA", "KeyD", "Space"]);
+      await page.waitForTimeout(700);
 
-      const shot2 = await page.screenshot({ type: "png" });
-      changedAfterInput = !shot1.equals(shot2);
+      const a1 = await page.screenshot({ type: "png" });
+      await page.waitForTimeout(400);
+      const a2 = await page.screenshot({ type: "png" });
+      // 入力で画面が遷移したか (b2→a1)、 または入力後も動き続けているか (a1→a2)
+      respondedToInput = !b2.equals(a1) || !a1.equals(a2);
+      // blank は「最終状態」で測る (タイトル背景の単色を誤判定しないため)。 情報用 (単独では FAIL にしない)
+      blankCanvas = await this.detectBlankCanvas(page);
     } catch (e) {
       pageErrors.push(`smoke navigation failed: ${String(e).slice(0, 300)}`);
     } finally {
@@ -143,11 +154,25 @@ export class PlaywrightManager {
 
     if (pageErrors.length > 0) reasons.push(`未捕捉例外 ${pageErrors.length} 件`);
     if (consoleErrors.length > 0) reasons.push(`console error ${consoleErrors.length} 件`);
-    if (blankCanvas === true) reasons.push("canvas が空 (真っ黒/単色)");
-    if (!changedAfterInput) reasons.push("入力後に画面が変化しない (フリーズ疑い)");
+    // 致命判定は「自走アニメも無く、 入力にも反応しない」 ときだけ (= 画面が死んでいる)。
+    // 自走アニメがある場合は入力反応をピクセルで断定できないため FAIL にしない (誤検知回避)。
+    // blankCanvas は左上サンプル/単色フレームで誤検知しやすいため単独 FAIL にせず情報のみ。
+    if (!idleAnimated && !respondedToInput) {
+      reasons.push("自走アニメも入力反応も画面変化が無い (フリーズ/未描画の疑い)");
+    }
 
     const verdict: "pass" | "fail" = reasons.length === 0 ? "pass" : "fail";
-    return { url, consoleErrors, pageErrors, blankCanvas, changedAfterInput, verdict, reasons };
+    return {
+      url,
+      consoleErrors,
+      pageErrors,
+      blankCanvas,
+      idleAnimated,
+      respondedToInput,
+      changedAfterInput: idleAnimated || respondedToInput,
+      verdict,
+      reasons,
+    };
   }
 
   private async pressKeys(page: Page, keys: string[]): Promise<void> {
@@ -158,6 +183,21 @@ export class PlaywrightManager {
       } catch {
         /* 個別キー失敗は無視 (フォーカス無し等) */
       }
+    }
+  }
+
+  /** 入力イベントが canvas / body に届くよう focus を当てる (tabindex 付与含む) */
+  private async focusCanvas(page: Page): Promise<void> {
+    try {
+      await page.evaluate(`
+        (function() {
+          var c = document.querySelector('canvas');
+          if (c) { try { c.setAttribute('tabindex', '0'); c.focus(); } catch (e) {} }
+          try { if (document.body && document.body.focus) document.body.focus(); } catch (e) {}
+        })()
+      `);
+    } catch {
+      /* focus 不可でも無視 */
     }
   }
 
@@ -209,7 +249,11 @@ export interface SmokeResult {
   pageErrors: string[];
   /** 2D canvas が空ならtrue。 canvas 無し/WebGL 等で判定不能なら null */
   blankCanvas: boolean | null;
-  /** 合成入力の前後でスクショに変化があったか (false=フリーズ疑い) */
+  /** 入力なしでも自走でアニメーションするか (true なら入力反応はピクセルで断定不能) */
+  idleAnimated: boolean;
+  /** 合成入力の前後/後で画面が変化したか */
+  respondedToInput: boolean;
+  /** idleAnimated || respondedToInput (後方互換用の総合フラグ) */
   changedAfterInput: boolean;
   verdict: "pass" | "fail";
   /** fail の理由 (日本語)。 pass なら空配列 */

@@ -292,19 +292,17 @@ export class AgentLoop {
       this.capability.keepRecentMessages,
     );
     // 自動チェックポイント (既定 OFF のオプトイン)。 main ループのみで版管理する。
+    // スコープは成果物フォルダ限定 (設計書 §4.5): 既定は <cwd>/sandbox/output、 無ければ cwd。
     const cpCfg = loadConfig().checkpoints;
     this.checkpointManager = new CheckpointManager({
       sessionId: sessionId ?? "default",
-      workTree: process.cwd(),
+      workTree: CheckpointManager.resolveWorkTree(process.cwd(), cpCfg?.workTreeDir),
       enabled: cpCfg?.enabled === true,
       retention: cpCfg?.retention,
+      maxFileSizeMb: cpCfg?.maxFileSizeMb,
     });
-    // 起動時に古いセッションのチェックポイントを掃除 (1 年前・100 セッション前を溜めない)
-    try {
-      this.checkpointManager.pruneOldSessions();
-    } catch {
-      /* 掃除失敗は無視 */
-    }
+    // ※ 古いセッションの掃除 (pruneOldSessions) は、 resume でセッション identity が
+    //    確定した後に runCheckpointMaintenance() で実行する (復元対象を誤って消さないため)。
     this.toolExecutor = new ToolExecutor(
       toolRegistry,
       permissions,
@@ -322,6 +320,8 @@ export class AgentLoop {
       bridgeable.attachToolBridge(toolRegistry, this.toolExecutor);
     }
     this.session = createSession(model);
+    // チェックポイントは resume を跨いで安定な session.meta.id で採番する (H1)
+    this.checkpointManager.rebind(this.session.meta.id);
     this.llmLogger = new LLMLogger(agentId, sessionId);
     this.intentClassifier = new IntentClassifier(provider, model);
     this.evaluator = new Evaluator(secondLLMManager, provider, model);
@@ -2076,6 +2076,9 @@ export class AgentLoop {
 
   restoreSession(sessionData: SessionData): void {
     this.session = sessionData;
+    // resume したセッションの安定 ID にチェックポイント名前空間を載せ替える (H1)。
+    // これでプロセスを跨いで前回のチェックポイントを list/restore できる。
+    this.checkpointManager.rebind(sessionData.meta.id);
     // docs/todo-goal-lifecycle.md §2.2 — session 境界の責任主体。
     // 別 session を載せ替える前に in-memory slot を一斉リセット
     // (同プロセス内 /resume での cross-contamination 阻止)。
@@ -2284,6 +2287,18 @@ export class AgentLoop {
   /** 自動チェックポイント管理を取得 (REPL の /checkpoint コマンド用) */
   getCheckpointManager(): CheckpointManager {
     return this.checkpointManager;
+  }
+
+  /**
+   * 古いチェックポイントセッションの掃除。 resume 解決後 (セッション identity 確定後) に
+   * 呼ぶこと。 現在セッションは保護されるため、 復元対象を誤って消さない (H1 関連)。
+   */
+  runCheckpointMaintenance(): void {
+    try {
+      this.checkpointManager.pruneOldSessions();
+    } catch {
+      /* 掃除失敗は無視 */
+    }
   }
 
   /**
