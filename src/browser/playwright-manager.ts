@@ -95,8 +95,15 @@ export class PlaywrightManager {
     const page = await this.ensureBrowser();
     const consoleErrors: string[] = [];
     const pageErrors: string[] = [];
+    // favicon/CORS/CDN 等のネットワーク系ノイズは FAIL 要因にしない (誤検知＝オオカミ少年化を防ぐ)。
+    // 本当に致命なら未捕捉例外 (pageerror) や "X is not defined" として現れる。
+    const NETWORK_NOISE =
+      /net::ERR_|ERR_(CONNECTION|FILE_NOT_FOUND|NAME_NOT_RESOLVED)|Failed to load resource|favicon|blocked by CORS|Cross-Origin|status of (4\d\d|5\d\d)/i;
     const onConsole = (msg: { type(): string; text(): string }) => {
-      if (msg.type() === "error") consoleErrors.push(msg.text().slice(0, 300));
+      if (msg.type() !== "error") return;
+      const text = msg.text().slice(0, 300);
+      if (NETWORK_NOISE.test(text)) return;
+      consoleErrors.push(text);
     };
     const onPageError = (err: Error) => {
       pageErrors.push(String(err.stack || err.message || err).slice(0, 300));

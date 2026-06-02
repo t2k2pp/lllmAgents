@@ -3051,6 +3051,7 @@ export class REPL {
             console.log(
               chalk.dim(`  checkpoint: ${st.enabled ? chalk.green("ON") : chalk.yellow("OFF")}`),
             );
+            console.log(chalk.dim(`  対象フォルダ: ${st.workTree}`));
             if (st.lastError) {
               console.log(chalk.red(`  直近のコミット失敗: ${st.lastError}`));
             }

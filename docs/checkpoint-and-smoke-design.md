@@ -109,7 +109,8 @@ ToDo 49 件と実メッセージから、挙動は典型的な **リグレッシ
 
 - **スコープ（実装済み）**：work-tree は `config.checkpoints.workTreeDir` で指定可。未指定なら `<cwd>/sandbox/output` があればそこ、無ければ cwd（deploy exe を成果物フォルダで動かす実運用では cwd=成果物）。これにより開発時に `src/` や機密を巻き込まない。
 - **機密・巨大除外（実装済み）**：`.env*`/`*.pem`/`*.key`/`id_*`/`*.p12`/`*.pfx` を info/exclude で除外。`maxFileSizeMb`（既定 25）超のファイルはステージから外し以後 exclude に追記（Blender 書き出し等の肥大対策）。
-- **除外**：`node_modules/`・巨大バイナリディレクトリは内部除外リストで弾く。一方でユーザーの `.gitignore` に引きずられて歯抜けにならないよう、対象範囲内は `git add -A`（必要に応じ `-f`）で確実に拾う。
+- **除外**：`node_modules/`・機密・巨大ファイルは内部除外リスト（info/exclude）＋サイズガードで弾く。
+- **.gitignore の扱い（確定・H-B）**：作業ツリー内のユーザー `.gitignore` は**意図的に尊重する**（`git add -A`、`-f` は使わない）。当初設計は「`-f` で確実に拾う」としていたが、`add -f` は info/exclude も貫通して**機密・`node_modules` まで取り込んでしまう**ため不採用。トレードオフとして、ユーザーが `.gitignore` した成果物（例: `*.html` を無視）はチェックポイント対象外になる。既定スコープ（`sandbox/output`）には通常 `.gitignore` が無いため実害は限定的。完全スナップショットが必要なら `.gitignore` を置かない運用とする。
 - **粒度（実装済み）**：file_write/file_edit 成功ごとに `git add -A` で**作業ツリー全体をステージしてコミット**（＝各コミットが完全な復元可能スナップショット。整合性 > メッセージ粒度）。同一ターンの複数変更は最初のコミットにまとまるため、メッセージは staged ファイル名一覧から生成して実態を反映。
 - **保持（実装済み）**：
   - **セッション横断の自動掃除**：セッション開始時に `pruneOldSessions()` が `~/.localllm/checkpoints/` を走査し、`maxAgeDays`（既定 60 日）より古い／`maxSessions`（既定 20）を超える古いセッションを削除。現在のセッションは常に残す。`config.checkpoints.retention.{maxSessions,maxAgeDays}` で調整可（0=無制限）。1 年前・100 セッション前のスナップショットを溜め込まない。
@@ -255,3 +256,20 @@ ToDo 49 件と実メッセージから、挙動は典型的な **リグレッシ
 - tsc 通過。
 
 **残作業**：手動 TTY で `/checkpoint` 系の対話表示、resume を跨いだ list/restore、実ゲーム作成フローでの `game_smoke` 呼出を確認。
+
+## 11. サブエージェント 2 巡目レビュー反映（2026-06-03）
+
+「最初の問題に気を取られ他を見落とす／改善後だから見える不具合」を狙い、先入観を与えない新規エージェントで再レビュー。1 巡目修正で新たに顕在化した欠陥を是正。
+
+| # | 指摘 | 対応 | 実証 |
+|---|---|---|---|
+| **H-A** | restore の追加ファイル算出が `--diff-filter=A` のみで、**rename 先（R 分類）を取りこぼし**、復元後に余分なファイルが残る（H2 修正が不十分） | `git diff --no-renames --diff-filter=AC` に変更（rename 先を A として検出） | rename 後 restore で `renamed.txt` が消え `old.txt` 復活 |
+| **H-B** | `git add -A` がユーザー `.gitignore` を尊重し成果物が歯抜けに（設計書は `-f` と記載＝乖離） | `-f` は info/exclude も貫通し機密混入するため不採用。`.gitignore` 尊重を**確定仕様**として設計書を訂正（§4.5） | — |
+| **M-A** | restore が直列化キューを迂回し index.lock 競合の恐れ | restore 本体をキューに載せて直列化 | tsc 通過・動作確認 |
+| **M-B** | restore で追加ファイル削除後に空ディレクトリが残る | 削除後、work-tree 内に限り空の親dirを掃除 | nested `sub/new.js` 削除＋空 `sub/` 除去 |
+| **M-D** | スモークの console error が favicon/CORS/`net::ERR` 等のネットワークノイズで誤 FAIL | ネットワーク系ノイズを除外（未捕捉例外は厳格維持） | favicon404＋無効画像のページが pass・consoleErrors 0 |
+| **L-A** | work-tree 外作業時に「ON なのに履歴空」に気づきにくい | `/checkpoint status` に対象フォルダパスを表示 | — |
+
+**1 巡目修正の妥当性（2 巡目で確認された点）**：`git checkout <hash> -- .` の pathspec `.` は **work-tree 基準**で解決され CWD≠work-tree でも正しい／`session.meta.id` 採番で `--resume`/`--continue` 双方が再接続／`/model` 切替は AgentLoop を再生成せず名前空間維持／prune は resume 確定後に実行。**退行なし。**
+
+**M-C（情報）**：2D canvas でも CDN 画像描画で `getImageData` が SecurityError → blank 判定が null（判定不能）に落ちることがある。blank は情報のみのため実害なし。

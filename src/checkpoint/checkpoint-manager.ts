@@ -112,9 +112,9 @@ export class CheckpointManager {
     this.enabled = v;
   }
 
-  /** status 表示用 (有効状態 + 直近のコミット失敗) */
-  getStatus(): { enabled: boolean; lastError: string | null } {
-    return { enabled: this.enabled, lastError: this.lastError };
+  /** status 表示用 (有効状態 + 版管理対象フォルダ + 直近のコミット失敗) */
+  getStatus(): { enabled: boolean; workTree: string; lastError: string | null } {
+    return { enabled: this.enabled, workTree: this.workTree, lastError: this.lastError };
   }
 
   /**
@@ -324,40 +324,64 @@ export class CheckpointManager {
    * HEAD は進めない (= forward 履歴を温存し、 また前に進める)。
    */
   async restore(n: number): Promise<{ ok: boolean; entry?: CheckpointEntry; error?: string }> {
-    await this.queue; // 進行中の自動コミットを待つ
     const entries = await this.list(n);
     const entry = entries.find((e) => e.n === n);
     if (!entry) return { ok: false, error: `チェックポイント #${n} が見つかりません` };
-    try {
-      // 1) 復元前に現状をスナップショット (戻しすぎても失わない / 追加ファイルを追跡下に置く)
-      await this.doCommit(`auto: #${n} 復元前のスナップショット`);
-      // 2) 対象コミット以降に「追加された」ファイル (HEAD にあって対象に無い) を洗い出す
-      let added: string[] = [];
-      try {
-        const { stdout } = await this.git([
-          "diff",
-          "--diff-filter=A",
-          "--name-only",
-          entry.hash,
-          "HEAD",
-        ]);
-        added = stdout.split("\n").map((s) => s.trim()).filter(Boolean);
-      } catch {
-        /* 履歴が浅い等は空 */
-      }
-      // 3) 追跡ファイルを対象コミットの内容へ復元
-      await this.git(["checkout", entry.hash, "--", "."]);
-      // 4) 対象時点に存在しなかったファイルを作業ツリーから除去 (= 完全一致)
-      for (const rel of added) {
+    // 自動コミットと index.lock を取り合わないよう、 復元全体をキューに載せて直列化する
+    let result: { ok: boolean; entry?: CheckpointEntry; error?: string } = { ok: false, entry };
+    this.queue = this.queue
+      .then(async () => {
+        // 1) 復元前に現状をスナップショット (戻しすぎても失わない / 追加ファイルを追跡下に置く)
+        await this.doCommit(`auto: #${n} 復元前のスナップショット`);
+        // 2) 対象コミット以降に「追加/コピーされた」ファイルを洗い出す。
+        //    --no-renames を付けないと rename 先が R 扱いになり取りこぼす (= 余分なファイルが残る)。
+        let added: string[] = [];
         try {
-          fs.rmSync(path.join(this.workTree, rel), { force: true });
+          const { stdout } = await this.git([
+            "diff",
+            "--no-renames",
+            "--diff-filter=AC",
+            "--name-only",
+            entry.hash,
+            "HEAD",
+          ]);
+          added = stdout.split("\n").map((s) => s.trim()).filter(Boolean);
         } catch {
-          /* skip */
+          /* 履歴が浅い等は空 */
         }
+        // 3) 追跡ファイルを対象コミットの内容へ復元
+        await this.git(["checkout", entry.hash, "--", "."]);
+        // 4) 対象時点に存在しなかったファイルを作業ツリーから除去 (= 完全一致)。 空になった親dirも掃除
+        for (const rel of added) {
+          try {
+            const abs = path.join(this.workTree, rel);
+            fs.rmSync(abs, { force: true });
+            this.removeEmptyParents(path.dirname(abs));
+          } catch {
+            /* skip */
+          }
+        }
+        result = { ok: true, entry };
+      })
+      .catch((e) => {
+        result = { ok: false, entry, error: String(e) };
+      });
+    await this.queue;
+    return result;
+  }
+
+  /** rel 削除後、 空になった親ディレクトリを work-tree 内に限り掃除する */
+  private removeEmptyParents(dir: string): void {
+    const root = path.resolve(this.workTree);
+    let cur = path.resolve(dir);
+    try {
+      while (cur.startsWith(root + path.sep) && cur !== root) {
+        if (fs.readdirSync(cur).length > 0) break;
+        fs.rmdirSync(cur);
+        cur = path.dirname(cur);
       }
-      return { ok: true, entry };
-    } catch (e) {
-      return { ok: false, entry, error: String(e) };
+    } catch {
+      /* skip */
     }
   }
 
