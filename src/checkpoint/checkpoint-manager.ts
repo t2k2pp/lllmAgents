@@ -274,7 +274,8 @@ export class CheckpointManager {
           try {
             const st = fs.statSync(p);
             if (!st.isDirectory()) return null;
-            return { d, p, mtime: st.mtimeMs };
+            // 「最終更新 (最後にチェックポイントした日)」 を基準にする。 開始日ではない。
+            return { d, p, mtime: this.sessionLastActivityMs(p) };
           } catch {
             return null;
           }
@@ -312,6 +313,31 @@ export class CheckpointManager {
     }
     if (removed > 0) logger.debug(`checkpoint: 古いセッションを ${removed} 件掃除`);
     return removed;
+  }
+
+  /**
+   * セッションの「最終更新時刻」(最後にコミットした時刻) を返す。
+   * commit のたびに reflog が追記される `logs/HEAD` の mtime が最も信頼できる。
+   * 取れなければ HEAD / index / ディレクトリ自身の mtime にフォールバックし、最大値を採る。
+   * ※ ディレクトリ作成日 (= セッション開始日) ではなく、最後の活動日を測るのが目的。
+   */
+  private sessionLastActivityMs(dir: string): number {
+    // logs/HEAD は commit/ref 更新のたびに追記される → mtime = 最終コミット時刻 (最も信頼できる)
+    try {
+      return fs.statSync(path.join(dir, "logs", "HEAD")).mtimeMs;
+    } catch {
+      /* reflog 無し (コミットが無い等) → フォールバック */
+    }
+    let latest = 0;
+    for (const c of [path.join(dir, "HEAD"), path.join(dir, "index"), dir]) {
+      try {
+        const m = fs.statSync(c).mtimeMs;
+        if (m > latest) latest = m;
+      } catch {
+        /* skip */
+      }
+    }
+    return latest;
   }
 
   /** n 番目との差分サマリ */
