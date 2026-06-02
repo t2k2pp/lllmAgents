@@ -130,6 +130,11 @@ export class CheckpointManager {
     this.commitCount = 0;
   }
 
+  /** git が利用可能か (公開・status/起動警告用)。 初回だけ実測しキャッシュ */
+  async isGitReady(): Promise<boolean> {
+    return this.ensureGit();
+  }
+
   /** git コマンドが使えるか (初回だけ実測してキャッシュ) */
   private async ensureGit(): Promise<boolean> {
     if (this.gitAvailable !== null) return this.gitAvailable;

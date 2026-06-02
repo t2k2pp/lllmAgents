@@ -431,6 +431,18 @@ async function main(): Promise<void> {
   // チェックポイントの古いセッション掃除は、 resume 解決後 (= 現在セッションが確定し
   // 保護対象になった後) に実行する。 復元対象のチェックポイントを誤って消さないため。
   agent.runCheckpointMaintenance();
+  // 有効なのに git が無いと「ON のつもりで実は記録ゼロ」 になる (見かけ倒し)。 起動時に一度警告。
+  {
+    const cp = agent.getCheckpointManager();
+    if (cp.getStatus().enabled && !(await cp.isGitReady())) {
+      console.log(
+        chalk.yellow(
+          "  ⚠ チェックポイントは有効ですが git が見つかりません。 スナップショットは記録されません。",
+        ),
+      );
+      console.log(chalk.dim("    git をインストールするか、 /checkpoint off で無効化してください。"));
+    }
+  }
 
   // Run session start hooks
   await hookManager.runSessionHooks("start");

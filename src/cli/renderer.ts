@@ -78,6 +78,8 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/plan")}           プランモードに入る
     ${chalk.cyan("/skills")}         利用可能なスキル一覧
     ${chalk.cyan("/status")}         全体ステータス
+    ${chalk.cyan("/checkpoint")}     自動チェックポイント (status/on/off/list/restore <n>/diff <n>/clear)
+    ${chalk.cyan("/cost")}           LLM 使用量・コストの可視化
     ${chalk.cyan("/search")}         Web検索プロバイダー設定 (SearXNG/DuckDuckGo)
     ${chalk.cyan("/discord")}        Discord通知の設定
     ${chalk.cyan("/knowledge")}      Obsidianナレッジベース (vault設定/検索/一覧)

@@ -323,7 +323,11 @@ export interface Config {
 }
 
 export interface CheckpointConfig {
-  /** true で file_write/file_edit 後にシャドウ Git へ自動コミット。 既定 false */
+  /**
+   * true で file_write/file_edit 後にシャドウ Git へ自動コミット。
+   * 未設定時の既定は「成果物フォルダ (sandbox/output 等) にスコープ解決できた時のみ ON」。
+   * cwd 全体 (開発リポジトリ等) になる場合は OFF。 明示設定すればその値が優先。
+   */
   enabled?: boolean;
   /**
    * 版管理する作業フォルダ (work-tree)。 cwd 相対 or 絶対。

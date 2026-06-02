@@ -291,13 +291,17 @@ export class AgentLoop {
       this.capability.compressionThreshold,
       this.capability.keepRecentMessages,
     );
-    // 自動チェックポイント (既定 OFF のオプトイン)。 main ループのみで版管理する。
+    // 自動チェックポイント。 main ループのみで版管理する。
     // スコープは成果物フォルダ限定 (設計書 §4.5): 既定は <cwd>/sandbox/output、 無ければ cwd。
+    // 既定の有効化: 明示設定があればそれ。 未設定なら「成果物フォルダに解決できた時のみ ON」
+    // (cwd 全体= 開発リポジトリ等になる時は OFF にして、 無関係なソースを勝手に撮らない)。
     const cpCfg = loadConfig().checkpoints;
+    const cpWorkTree = CheckpointManager.resolveWorkTree(process.cwd(), cpCfg?.workTreeDir);
+    const cpScopedToArtifact = cpCfg?.workTreeDir != null || cpWorkTree !== process.cwd();
     this.checkpointManager = new CheckpointManager({
       sessionId: sessionId ?? "default",
-      workTree: CheckpointManager.resolveWorkTree(process.cwd(), cpCfg?.workTreeDir),
-      enabled: cpCfg?.enabled === true,
+      workTree: cpWorkTree,
+      enabled: cpCfg?.enabled ?? cpScopedToArtifact,
       retention: cpCfg?.retention,
       maxFileSizeMb: cpCfg?.maxFileSizeMb,
     });

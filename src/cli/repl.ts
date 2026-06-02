@@ -3052,6 +3052,9 @@ export class REPL {
               chalk.dim(`  checkpoint: ${st.enabled ? chalk.green("ON") : chalk.yellow("OFF")}`),
             );
             console.log(chalk.dim(`  対象フォルダ: ${st.workTree}`));
+            if (st.enabled && !(await cp.isGitReady())) {
+              console.log(chalk.red("  ⚠ git が見つかりません → スナップショットは記録されていません (git 導入か /checkpoint off を)"));
+            }
             if (st.lastError) {
               console.log(chalk.red(`  直近のコミット失敗: ${st.lastError}`));
             }

@@ -273,3 +273,18 @@ ToDo 49 件と実メッセージから、挙動は典型的な **リグレッシ
 **1 巡目修正の妥当性（2 巡目で確認された点）**：`git checkout <hash> -- .` の pathspec `.` は **work-tree 基準**で解決され CWD≠work-tree でも正しい／`session.meta.id` 採番で `--resume`/`--continue` 双方が再接続／`/model` 切替は AgentLoop を再生成せず名前空間維持／prune は resume 確定後に実行。**退行なし。**
 
 **M-C（情報）**：2D canvas でも CDN 画像描画で `getImageData` が SecurityError → blank 判定が null（判定不能）に落ちることがある。blank は情報のみのため実害なし。
+
+## 12. 評価者レビュー反映（2026-06-03）
+
+QA/受け入れ評価者の視点（当初問題を本当に解決し実運用で価値が出るか）でのレビュー反映。判定は「条件付き Ship 可」だった。
+
+| # | 指摘 | 対応 |
+|---|---|---|
+| **H1** | 既定 OFF＋声がけ頼みでは「ただ作ってと言っただけのユーザー」を取りこぼす（声がけは best-effort・初手の破壊が提案前に起きる） | **既定を条件付き ON に変更**：未設定時は work-tree が成果物フォルダ（`sandbox/output` 等）に解決できた場合のみ ON、cwd 全体になる場合は OFF。明示 `enabled` 設定が優先。`config.checkpoints.enabled` の意味を更新 |
+| **git 無し** | 既定 ON だと git 未インストール時に「ON のつもりで実は記録ゼロ」（見かけ倒し） | 起動時に有効かつ git 未検出なら**可視警告**。`/checkpoint status` にも git 未検出を赤字表示。`isGitReady()` を追加 |
+| **H2** | `/checkpoint`（と `/cost`）が `/help` 未掲載で人間が復旧コマンドを発見できない | `displayHelp` に追記 |
+| **M1** | スモークの「自走アニメ→PASS」抜け穴（点滅タイトル等で Start が壊れていても PASS）が過信を生む | `game_smoke` PASS 出力と `game-development` スキルに「**PASS=完成ではない／開始遷移・操作は人間が必ず試遊**」を明記 |
+| **M2** | 自動テストが皆無（repo に vitest スイートがあるのに） | `tests/checkpoint/checkpoint-manager.test.ts` を追加（13 ケース：restore exact-match／追加・rename・空dir掃除／scope外no-op／無効時／機密・巨大除外／rebind／clear／メッセージ／resolveWorkTree）。HOME/USERPROFILE を一時dirへ隔離しクロスプラットフォーム動作 |
+| L1/L2/M3 | .gitignore 除外の不可視／scope 環境差／resume 時 enabled | `/checkpoint status` に対象フォルダ表示済み。残りは軽微で据え置き |
+
+**未実装（将来案・据え置き）**：DOM/console から「ゲーム状態が playing に遷移したか」を検出してスモークの false PASS を減らす案。known-good タグ。回帰ループ自動検出。
