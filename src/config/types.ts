@@ -315,6 +315,16 @@ export interface Config {
    * 将来的にグループ単位の指定も検討 (例: { groups: ["dev"], skills: ["foo"] })。
    */
   disabledSkills?: string[];
+  /**
+   * 自動チェックポイント (シャドウ Git)。 docs/checkpoint-and-smoke-design.md §4。
+   * 既定 OFF のオプトイン。 REPL `/checkpoint on|off` で切替し、 結果はここに永続化。
+   */
+  checkpoints?: CheckpointConfig;
+}
+
+export interface CheckpointConfig {
+  /** true で file_write/file_edit 後にシャドウ Git へ自動コミット。 既定 false */
+  enabled?: boolean;
 }
 
 // ヘルパー: セカンドLLMがクラウドかローカルかを判定

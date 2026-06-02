@@ -4,6 +4,7 @@ import type { ToolRegistry, ToolResult } from "./tool-registry.js";
 import type { PermissionManager, RequestSource } from "../security/permission-manager.js";
 import { formatToolSummary } from "../security/permission-manager.js";
 import type { HookManager } from "../hooks/hook-manager.js";
+import type { CheckpointManager } from "../checkpoint/checkpoint-manager.js";
 import { ROOT_ANCESTORS, type AncestorTypes } from "../agent/delegation-context.js";
 import { validateAgainstSchema, formatValidationError } from "./schema-validator.js";
 import { progressIndicator } from "../cli/progress-indicator.js";
@@ -22,6 +23,7 @@ export class ToolExecutor {
     private permissions: PermissionManager,
     private hookManager?: HookManager,
     ancestors: AncestorTypes = ROOT_ANCESTORS,
+    private checkpointManager?: CheckpointManager,
   ) {
     this.ancestors = ancestors;
   }
@@ -106,6 +108,15 @@ export class ToolExecutor {
       // Post-tool hooks
       if (this.hookManager) {
         await this.hookManager.runPostToolHooks(toolName, params, result);
+      }
+
+      // 自動チェックポイント: ファイル変更が成功したら裏でコミット (有効時のみ)。
+      // docs/checkpoint-and-smoke-design.md §4。 失敗しても本処理には影響させない。
+      if (this.checkpointManager && result.success && (toolName === "file_write" || toolName === "file_edit")) {
+        const fp = params.file_path ?? params.path;
+        if (typeof fp === "string") {
+          await this.checkpointManager.commitForFile(fp, `${toolName}: ${fp}`);
+        }
       }
 
       return result;

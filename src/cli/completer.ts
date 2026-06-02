@@ -79,6 +79,12 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/diff", description: "git diff" },
   { command: "/plan", description: "プランモード" },
   { command: "/skills", description: "スキル一覧" },
+  { command: "/checkpoint", description: "自動チェックポイント (シャドウGit) の状態/一覧" },
+  { command: "/checkpoint on", description: "自動チェックポイントを有効化 (ファイル変更を裏で版管理)" },
+  { command: "/checkpoint off", description: "自動チェックポイントを無効化" },
+  { command: "/checkpoint list", description: "チェックポイント一覧" },
+  { command: "/checkpoint restore", description: "指定番号のチェックポイントへ復元", needsArg: true },
+  { command: "/checkpoint diff", description: "指定番号との差分サマリ", needsArg: true },
   // /cost (詳細表示として復活、 2026-06-01): /status は要約のみ、 詳細は /cost 配下に集約。
   // 設計: docs/cost-token-command-design.md
   { command: "/cost", description: "LLM 使用量サマリ (計測窓 / 合計 / 上位モデル)。 既定は計測窓 (/cost reset で区切り)" },

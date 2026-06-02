@@ -1,0 +1,222 @@
+# リグレッション復旧設計：自動チェックポイント & ランタイムスモーク
+
+> **ステータス**: 実装済み（2026-06-02）。A=シャドウ Git オプトイン / D=スモーク Tool＋スキル強化。tsc 通過・ロジック実証済み（手動 TTY での REPL/対話品質確認は別途）
+> **起票日**: 2026-06-02
+> **関連**: ユーザールール「負債貯金はしない」「参考資料と成果物を区別」、`docs/workspace-separation.md`（sandbox 成果物の扱い）、`docs/harness-engineering.md`、`src/agent/hooks.ts`、`src/tools/tool-executor.ts`、`src/skills/builtin/game-development/SKILL.md`、`src/browser/playwright-manager.ts`
+> **メモリ**: [[feedback_review_focus_ux]]（固まる/中断不能/進捗不可視を最優先）、[[feedback_diagnose_before_speculate]]
+
+## 改訂履歴
+
+- **2026-06-02**: 初版。バーチャロン風ゲーム作成時の「復旧不能スパイラル」事象を起点に設計化。
+- **2026-06-02 (改訂2)**: D はスキル強化で実装と確定。A はシャドウ Git を一旦「過剰」として見送り、声がけ案に縮小。
+- **2026-06-02 (改訂3・確定)**: **A は シャドウ Git を「オプトイン機能」として採用**に再転換。見送り理由だった SSD 寿命懸念は過剰見積りと判明（コミットはテキストで数 KB/ターン、アプリ自身の session ログ 44MB/回の方が桁違いに大）。スキル/MCP 同様に簡単に ON/OFF できる前提で、ユーザーの「やりたい」意向を採用。**声がけ（本物 Git）は従の補助**に降格。**D はスキル強化で実装**で不変。
+- **2026-06-02 (改訂4・実装)**: A・D とも実装完了。実装ファイルは §8 参照。tsc 通過。実証: (1) シャドウ Git の commit→list→restore→scope外skip を一時ディレクトリで確認、(2) `game_smoke` が good HTML=pass / bad HTML(=`THREE.MathUtils.lerpAngle` 例外)=fail を正しく判定（本事象の発端バグを実際に検知）。
+- **2026-06-02 (本版・活用導線)**: 「裏で撮るだけで活用されない」ギャップを是正。ユーザー判断: 回帰時は**モデルが提案・人間が `/checkpoint restore` で実行**（restore ツールは作らない）／build系タスクで**モデルが `/checkpoint on` を提案**（既定 OFF のまま）。§9 参照。
+
+---
+
+## 1. 背景：何が起きたか（事実）
+
+`~/.localllm/sessions/mpv3cuiq-e86g.json`（main = `gpt-5.4`、Blender 併用で `sandbox/output/games/virtual-on-like/` に 3D Web ゲームを作成）で発生。
+
+ToDo 49 件と実メッセージから、挙動は典型的な **リグレッション・スパイラル**：
+
+```
+実装 → 不具合診断 → 修正 → 別の破綻 → 「差し戻す変更箇所を特定」
+→ 「変更前へ戻す」 → 「壊れ方を特定」 → 「遊べていた安定挙動へ手動復旧」
+→ 開始後動かない → 再診断 → また動かない → 再診断 → 回転エラー…
+```
+
+決定的なユーザー発言（復旧セッション冒頭, msg #5）：
+
+> **「戻せてませんよ。壊れたまま。ローカルリポジトリでも作ってくれてたら戻せたのにな。」**
+
+その後 `[file_edit] replaced 1 occurrence` が数十連発（＝前進パッチを当て続ける）、「まだ動きません」が反復、最後は `THREE.MathUtils.lerpAngle is not a function`（three.js に存在しない捏造 API）でランタイム例外ループ。作業フォルダに `.git` は無し。
+
+## 2. 問題分析
+
+### 2.1 これは「生成AIあるある」か、アプリ固有か
+
+- **挙動そのもの**（回帰スパイラル／存在しない API の捏造／実行確認せず「直りました」宣言／動いていた版を失う）は **生成 AI 共通**。
+- ただし **ハーネス設計が「ちょっと面倒」を「ほぼ復旧不能」に格上げ**していた。原因は 2 つ：
+  1. **編集前スナップショットが無い** → 「戻す」がモデルの記憶からの再構築（手動復旧）に依存し不確実。沼の入口。
+  2. **検証が build/構文止まり** → 実行・描画確認を人間に丸投げ。1 往復が遅く、モデルは盲目のまま次のパッチを当てる。
+
+### 2.2 根本原因の一言
+
+> 沼の原因は「AI が間違えること」ではなく、**間違えたときに戻れる地点をハーネスが残していなかったこと**。
+
+## 3. 設計原則（置き場所の判断軸）
+
+本件に限らず再利用する判断基準：
+
+> **「モデルが失敗しても動くべき」ものほど深く（core / Hook）、「モデルを導く」ものほど浅く（Skill）。MCP は “別ホストとも共有したい能力” のときだけ。**
+
+| 機能 | 置き場所 | 理由 |
+|---|---|---|
+| A 自動チェックポイント（シャドウ Git）（**確定**） | **Hook（PostToolUse/Stop）＋ シャドウ Git**、`config` フラグ＋`/checkpoint` で ON/OFF | モデル非依存の安全網。原則「失敗しても動くべきは深く」に合致。Claude Code の `file-history-snapshot` と同コンセプト |
+| A' 版管理の声がけ（**従・補助**） | ルール/スキル追記（任意） | ユーザー所有の見える Git を促す habit。安全網は A が担うため必須ではない |
+| D スモーク能力 | **ビルトイン Tool**（将来クロスホスト共有なら MCP） | 既存 Playwright を露出。モデルが呼ぶ「能力」 |
+| D スモーク運用 | **既存 `game-development` スキルに追記** | いつ走らせ結果をどう解釈するかの判断＝モデル向け |
+
+**設計原則との整合**：A は原則どおり「モデルが失敗しても動くべき＝深く（Hook＋裏 Git）」に置く。一度は声がけ案へ縮小したが、それは私の SSD 寿命懸念（過剰見積り）が前提を歪めていたため。前提が訂正され、かつ ON/OFF が容易（Hook の発火を gate するだけ）と判明したので、原則に沿った本来案へ戻した。**実証で確認した事実が判断を覆した**例（[[feedback_diagnose_before_speculate]]）。
+
+**Claude Code の先例**：本プロジェクトの Claude Code ログ 20 セッションに `file-history-snapshot`（`trackedFileBackups` + `timestamp` を messageId 単位で保持）が存在し、`/rewind` で復元できる。A はこれと同コンセプト（ハーネスが裏で・ユーザー Git とは別系統で・ターン単位の復元点を残す）を git で実装するもの。
+
+---
+
+## 4. 機能 A：自動チェックポイント（シャドウ Git・オプトイン）
+
+### 4.1 目的
+
+作業成果物を、モデルの協力なしにハーネスが版管理し、壊れても last-good に戻れる安全網を常時張る。**復旧にモデルを介在させない**（人間が `/checkpoint restore` で戻せれば、モデルが沼っても被害が確定しない）。Claude Code の `file-history-snapshot`／`/rewind` と同コンセプト。
+
+### 4.2 採用に至る判断（SSD 懸念の訂正）
+
+一度は「過剰」として見送ったが、見送り理由は**私の SSD 寿命懸念であり、それが過剰見積りだった**ため、訂正のうえ採用に戻す。
+
+- **書き込み実態**：git は変更ファイルのみを zlib 圧縮してオブジェクト化。テキスト/コードなら 1 ターンあたり数 KB〜十数 KB。1000 ターンでも合計 ~100MB 級。
+- **耐性との比**：消費者 SSD は 1TB あたり 300〜600 TBW クラス。コミットの寄与は実質ゼロの桁。
+- **比較対象**：本アプリ自身の 1 セッションログ（`logs/sessions/..._main.jsonl`）が 44MB あった実測。チェックポイントのコミットはこの隣では誤差。npm install / Playwright の Chromium DL（~150MB）の方が桁違いに書く。
+- **残る唯一の本物の懸念**＝バイナリ資産（Blender 書き出し等）の毎ターン丸ごと保存による書き込み増幅。これは 4.5 のスコープ/除外で潰す。
+
+### 4.3 配置と構成（シャドウリポジトリ）
+
+- 既存の `PostToolUse`（`file_write`/`file_edit` 後）または `Stop`（1 ターン 1 コミット）フックで起動。core 本体には埋め込まない（拡張点で表現可能・core を薄く保つ）。
+- **モデル負担：ほぼゼロ**（git をツールとして叩かせない。トークン増分・判断・プロンプト追記すべて不要）。
+- **シャドウリポジトリ**：`.git` 本体を作業フォルダの外に置く。
+  - 場所：`~/.localllm/checkpoints/<session-id>/`
+  - 運用：`git --git-dir=~/.localllm/checkpoints/<session-id> --work-tree=<作業フォルダ> ...`
+  - ユーザーが Git を使っていてもいなくても**常にシャドウで統一**（既存 Git への相乗りはしない）。
+
+**なぜ衝突しないか**：
+1. `--git-dir` が別 → index・ロック・HEAD・ブランチ・履歴がすべて独立。ユーザーの `.git` に一切触れず、`git status` にも現れない（不可視）。
+2. 作業フォルダに `.git` を作らない → 入れ子リポジトリ問題が起きない。
+3. ロック競合なし → index ロックは我々の git-dir 側。ユーザーの `git commit` と同時でも取り合わない。
+
+### 4.4 ON/OFF（スキル/MCP 並みに容易）
+
+実体は「Hook を発火させるか否か」だけなので、トグルは素直：
+
+- **設定フラグ** `checkpoints.enabled`（`config.json`）でグローバル ON/OFF。
+- **REPL コマンド**：`/checkpoint on|off`（ランタイム切替）、`/checkpoint list`、`/checkpoint restore <n>`、`/checkpoint diff <n>`。入力補完対象に含める。
+- 既定値（要確定）：ユーザーは賛成派のため **既定 ON**＋スコープ限定が候補。
+
+### 4.5 スコープ・除外・保持（書き込みとサイズの制御）
+
+- **スコープ**：`sandbox/output/` など**成果物フォルダ配下のみ**有効。アプリ自身の `src/` 編集時は撮らない。
+- **除外**：`node_modules/`・巨大バイナリディレクトリは内部除外リストで弾く。一方でユーザーの `.gitignore` に引きずられて歯抜けにならないよう、対象範囲内は `git add -A`（必要に応じ `-f`）で確実に拾う。
+- **粒度**：1 ターン 1 コミット（毎編集はノイジー）。コミットメッセージにそのターンの ToDo 文言／意図を入れる。
+- **保持**：定期 `git gc`＋保持件数/容量上限で頭打ちにする。
+
+### 4.6 コミットの引き金（D との連携）
+
+毎ターンの自動コミットに加え、**「ビルド＋スモーク（機能 D）が通った＝動く状態」を確認した時点に known-good タグ**を打つ。回帰時は直前タグへ戻してから差分を当て直せる。A（毎ターンの細かい網）と D（動く版の明示）が噛み合う。
+
+### 4.7 復旧 UX
+
+- **モデル/ユーザー**：`/checkpoint list` → `/checkpoint restore <n>` で任意ターンへ復元。
+- **アプリ外から**：`git --git-dir=~/.localllm/checkpoints/<session-id> --work-tree=… log/checkout` でも操作可能。
+
+### 4.8 補助（A'）：版管理の声がけ（任意）
+
+安全網は A が担うため必須ではないが、ユーザー所有の**見える Git** を促す habit として、`game-development`/`dev-workflow` スキルに「動く版ができたら本物の repo にコミットを提案」の一文を添えてよい。A（裏の網）と A'（表の履歴）は排他ではなく補完。
+
+### 4.9 オープン論点
+
+- 既定 ON/OFF とスコープの既定値（成果物フォルダ限定で既定 ON が有力）。
+- known-good タグの命名・保持件数。
+- 回帰ループ検出（同一領域の診断→修正が N 回連続で停止し「直前の動く版へ戻すか」を問う）を A の上に将来載せるか。ToDo にループ署名が明確に出るため技術的には可能。本設計では非対象（将来拡張）。
+
+---
+
+## 5. 機能 D：ランタイムスモーク
+
+### 5.1 線引き（過信しない）
+
+- **できないこと**：操作感・ゲームバランス・ロックオン挙動の良し悪し・「面白いか」。アクションゲームの本質は機械検証不能。
+- **できること（今回の沼はここ）**：未捕捉例外（`lerpAngle is not a function`）、console error、真っ黒/空 canvas、開始後フリーズ等の**破滅的・機械的失敗**。
+- **再定義**：D は「品質検証」ではなく **「破滅的失敗の早期検知」**。ゲーム性には踏み込まない。
+
+### 5.2 能力（Tool）
+
+`src/browser/playwright-manager.ts` を露出した **ビルトイン Tool**。最小手順：
+
+1. headless でロード → console error / ページエラーを回収（0 件か）
+2. スクリーンショット①
+3. 合成キー入力で Start → 数フレーム待つ
+4. スクリーンショット②
+5. **①②のピクセル差分**：変化あり＝「何か動いている/反応している」、完全一致＝フリーズ疑い
+
+ゲームの中身を理解せず「動いているか／即死していないか」だけを判定する。
+
+- **MCP 化の条件**：Claude Code や他エージェントからも同じスモークを使い回したい場合のみ。当面アプリ専用なら Tool で十分（MCP は IPC オーバーヘッド分の損）。
+
+### 5.3 運用（既存スキル更新）
+
+新規スキルは作らず **`src/skills/builtin/game-development/SKILL.md` に追記**。同スキルは既に「NaN 混入」「float 添字 → undefined → 描画停止」という失敗教訓を蓄積しており（＝今回の「動いて見えるのに壊れている」系）、検証が「ファイル冒頭コメント」止まりで機械チェックが無い。ここにスモークゲートを足すのが整合的。
+
+- 追記内容（Step 3〜完了条件）：「保存後、スモーク Tool を実行。console error 0 件 ＆ Start 前後で canvas が変化、を満たすまで `done` と宣言しない。ただしゲーム性は判定対象外」。
+- 依存：スモーク Tool（5.2）が存在すること。**Tool だけで Skill 未更新＝持っているが使わない／Skill だけで Tool 未実装＝指示はあるが手が無い**。両輪で初めて機能する。
+
+### 5.4 オープン論点
+
+- 対象判定：「ブラウザ成果物（index.html を持つ output）」に限定。CLI/ターン制（将棋・トランプ）には適用しない切り分けをスキル側でどう書くか。
+- Start の合成入力をどう汎用化するか（Enter / Space / クリック等の試行順）。flaky 化を避ける待ち時間設計。
+
+---
+
+## 6. 実装可否の判断材料
+
+| 観点 | A シャドウ Git（確定） | D スモーク（確定） |
+|---|---|---|
+| 効果 | 高（毎ターンの復元点で「復旧不能」を構造的に解消。モデル非依存） | 中（破滅的失敗の早期検知。往復削減） |
+| モデル負担 | ほぼゼロ（Hook が裏で実行） | 低（呼び出し判断のみ） |
+| 実装規模 | 小〜中（Hook＋シャドウ Git 運用＋`/checkpoint` コマンド） | 中（Playwright オーケストレーション＋スキル追記。flaky 対策あり） |
+| 主なリスク | バイナリ資産の書き込み増幅 → スコープ/除外/gc で制御。SSD 寿命懸念は誤りと判明 | flaky・ゲーム種別の切り分け過不足 |
+| ON/OFF | `config` フラグ＋`/checkpoint` で容易 | スキルが対象を判定（ブラウザ成果物のみ） |
+
+**実装方針（確定）**：A・D とも実装する。
+- **D**：スモーク Tool（Playwright 露出）＋`game-development` スキル追記。
+- **A**：Hook＋シャドウ Git＋`/checkpoint` コマンド。成果物フォルダ限定・トグル可能。
+- 順序：独立に着手可能。A のコミット引き金に D の合格を使うため、**D → A の順**だと known-good タグ連携を一度に組める。
+
+## 7. 非ゴール（やらないこと）
+
+- ゲーム性・面白さ・バランスの自動評価（D の対象外）。
+- ユーザーの既存 Git リポジトリへの無断コミット・相乗り（A は別系統のシャドウ repo で統一）。
+- アプリ自身の `src/` など成果物フォルダ外の自動スナップショット（スコープ外）。
+- 回帰ループ検出の実装（将来拡張。本設計では非対象）。
+- core 本体への直接埋め込み（Hook/Tool/Skill で表現可能なため）。
+
+## 8. 実装ファイル（2026-06-02）
+
+**D（スモーク）**
+- `src/browser/playwright-manager.ts`：`runSmoke()`／`SmokeResult`。console error・pageerror 回収、Start前後スクショ差分（buffer 比較）、2D canvas 空判定（WebGL は null）。
+- `src/tools/definitions/game-smoke.ts`：`game_smoke` ツール。path/url を受け file:// 変換し runSmoke 呼出、PASS/FAIL を整形。
+- `src/index.ts`：`createGameSmokeTool` を登録。
+- `src/skills/builtin/game-development/SKILL.md`：Step5 スモークゲート＋完了条件＋版管理の声がけを追記。
+
+**A（チェックポイント）**
+- `src/checkpoint/checkpoint-manager.ts`：シャドウ Git 運用（`--git-dir=~/.localllm/checkpoints/<session-id>` / `--work-tree=cwd`）。init/commitForFile/commit/list/restore/diffStat、scope 判定、info/exclude、直列化キュー。
+- `src/config/types.ts`：`CheckpointConfig`（`checkpoints.enabled`、既定 false）。
+- `src/tools/tool-executor.ts`：file_write/file_edit 成功後に `commitForFile` を呼ぶ（有効時のみ）。
+- `src/agent/agent-loop.ts`：`CheckpointManager` を生成し ToolExecutor へ注入、`getCheckpointManager()` を公開。
+- `src/cli/repl.ts`：`/checkpoint status|on|off|list|restore <n>|diff <n>`。
+- `src/cli/completer.ts`：`/checkpoint` 系の入力補完。
+
+**残作業**：手動 TTY で `/checkpoint` 系コマンドの対話表示と、実ゲーム作成フローでの `game_smoke` 呼出を確認（非TTYパイプでは対話品質を検証不可）。既定 OFF のため、有効化は `/checkpoint on`。
+
+## 9. 活用導線（モデルへの教え方）
+
+「裏で自動スナップショットするだけ」では沼脱出に使えない。モデルが**存在・使い所・復旧手段**を知る必要がある。ユーザー判断（2026-06-02）：
+
+- **復旧の主体 = モデルが提案・人間が実行**。restore ツールはモデルに渡さない（誤った版を選んで良い作業を失うリスク回避。「復旧に人間を残す」設計原則とも整合）。
+- **有効化 = build系タスクでモデルが `/checkpoint on` を提案**（既定 OFF を維持）。
+
+教える場所（3 touchpoint）：
+1. **着手時の提案** → `game-development` スキル「版管理」節：チェックポイントが無効なら作成開始時に `/checkpoint on` を提案。
+2. **回帰時の復元提案** → (a) `shared-principles.ts` の `buildEscalationRules`（壁ドンループ）に「回帰したら前進修正を重ねず `/checkpoint restore` を提案」を tier 別に追加。(b) `game_smoke` の FAIL 出力に同趣旨のヒントを同梱。
+3. **原則としての常識** → 同上 escalation rules が全 tier で常時提示される。
+
+実装ファイル（追加分）：`src/agent/shared-principles.ts`、`src/tools/definitions/game-smoke.ts`（FAIL ヒント）、`src/skills/builtin/game-development/SKILL.md`（版管理節）。

@@ -35,6 +35,7 @@ import {
 import { PlanManager } from "./plan-mode.js";
 import type { SamplingParams } from "../config/types.js";
 import { loadConfig } from "../config/config-manager.js";
+import { CheckpointManager } from "../checkpoint/checkpoint-manager.js";
 import * as logger from "../utils/logger.js";
 import { getOpsLogger } from "../utils/ops-logger.js";
 import { LLMLogger } from "./llm-logger.js";
@@ -238,6 +239,8 @@ export class AgentLoop {
   private evaluator: Evaluator;
   /** LLMプロファイル情報（システムプロンプト再構築用。/model description 等の更新時に差し替え可） */
   private llmProfiles?: LLMProfiles;
+  /** 自動チェックポイント (シャドウ Git)。 docs/checkpoint-and-smoke-design.md §4 */
+  private checkpointManager: CheckpointManager;
 
   constructor(
     private provider: LLMProvider,
@@ -288,7 +291,19 @@ export class AgentLoop {
       this.capability.compressionThreshold,
       this.capability.keepRecentMessages,
     );
-    this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager);
+    // 自動チェックポイント (既定 OFF のオプトイン)。 main ループのみで版管理する。
+    this.checkpointManager = new CheckpointManager({
+      sessionId: sessionId ?? "default",
+      workTree: process.cwd(),
+      enabled: loadConfig().checkpoints?.enabled === true,
+    });
+    this.toolExecutor = new ToolExecutor(
+      toolRegistry,
+      permissions,
+      hookManager,
+      undefined,
+      this.checkpointManager,
+    );
     // claude-agent-sdk プロバイダの場合、 lllmAgent ツールを in-process MCP として
     // SDK に公開する (docs/claude-agent-sdk-provider-design.md §3.3)。
     // duck typing で attach メソッドを持つプロバイダのみに適用。
@@ -2256,6 +2271,11 @@ export class AgentLoop {
   /** Phase A: 現在の能力プロファイルを取得 (REPL の /capability コマンド用) */
   getCapability(): CapabilityProfile {
     return { ...this.capability };
+  }
+
+  /** 自動チェックポイント管理を取得 (REPL の /checkpoint コマンド用) */
+  getCheckpointManager(): CheckpointManager {
+    return this.checkpointManager;
   }
 
   /**

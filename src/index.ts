@@ -28,6 +28,7 @@ import { sandboxInfoTool } from "./tools/definitions/sandbox-info.js";
 import { todoWriteTool, todoAppendTool, todoMarkTool, todoDeleteTool } from "./tools/definitions/todo-write.js";
 import { askUserTool } from "./tools/definitions/ask-user.js";
 import { createBrowserTools } from "./tools/definitions/browser.js";
+import { createGameSmokeTool } from "./tools/definitions/game-smoke.js";
 import { taskTool, taskOutputTool, setSubAgentManager } from "./tools/definitions/task.js";
 import { enterPlanModeTool, exitPlanModeTool, setPlanManager } from "./tools/definitions/plan-mode.js";
 import { skillTool, setSkillRegistry, setSkillPermissionManager, setSkillSubAgentManager } from "./tools/definitions/skill.js";
@@ -163,6 +164,8 @@ async function main(): Promise<void> {
   for (const tool of browserTools) {
     toolRegistry.register(tool);
   }
+  // ランタイムスモーク (ブラウザ成果物の破滅的失敗を検知)。 docs/checkpoint-and-smoke-design.md §5
+  toolRegistry.register(createGameSmokeTool(playwrightManager));
 
   // Vision tool
   const visionProvider = config.visionLLM

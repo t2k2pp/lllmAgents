@@ -161,7 +161,7 @@ export function buildVerificationRules(tier?: Tier): string {
 /** 同種失敗 2 回 → 別アプローチ */
 export function buildEscalationRules(tier?: Tier): string {
   if (tier === "T1") {
-    return `# 失敗時のエスカレーション — 同じ tool × 同じ args で 2 回失敗したら、 3 回目は試さず別アプローチへ。 エラー文の指示に従って引数を変えるか、 別ツールに切り替える。`;
+    return `# 失敗時のエスカレーション — 同じ tool × 同じ args で 2 回失敗したら、 3 回目は試さず別アプローチへ。 エラー文の指示に従って引数を変えるか、 別ツールに切り替える。 前に動いていた成果物が壊れたら前進修正を重ねず、 チェックポイントが有効なら \`/checkpoint restore\` で直前の動く版へ戻すようユーザーに提案する。`;
   }
   if (tier === "T3") {
     return `# 失敗の繰り返しを禁止 [必須]
@@ -170,7 +170,8 @@ export function buildEscalationRules(tier?: Tier): string {
 - file_edit エラー "not found" → file_write で書き直す
 - file_read エラー "not found" → 別パスを試す or glob でファイル名検索
 - bash エラー Exit 1 → エラー文を読み、 引数や前提を変える
-2 回連続で同じエラーが出たら、 ask_user で人間に状況を伝える。`;
+2 回連続で同じエラーが出たら、 ask_user で人間に状況を伝える。
+回帰 (前は動いていた成果物が壊れた) と判断したら、 前進修正を重ねる前に、 チェックポイントが有効なら \`/checkpoint list\` → \`/checkpoint restore <n>\` で直前の動く版へ戻すことをユーザーに提案する。`;
   }
   return `# 失敗時のエスカレーション [必須]
 同じツール × 同じ引数で 2 回失敗したら、 3 回目を試す前に **必ず** 別アプローチに切替える:
@@ -178,7 +179,10 @@ export function buildEscalationRules(tier?: Tier): string {
 - file_edit で old_string not found → エラーに同梱されたファイル現状を読み、 (a) 一意な部分文字列で再試行 / (b) 諦めて file_write で全体書き直し
 - glob で hit 0 → エラーに同梱の親dir / 拡張子ヒントから pattern を変える、 または bash の find に切替
 - bash で文字化け / 異常 exitCode → 別コマンドや別経路を試す。 同じコマンドを繰り返さない
-3 回連続で同種失敗が続いたら状況を整理 (壁ドンループの自覚)。 メイン側はユーザーに ask_user で共有、 サブ側は整理して return しメインに対話を委ねる。`;
+3 回連続で同種失敗が続いたら状況を整理 (壁ドンループの自覚)。 メイン側はユーザーに ask_user で共有、 サブ側は整理して return しメインに対話を委ねる。
+
+# 回帰したら「戻る」 を選択肢に [必須]
+前に動いていた成果物が壊れた / 同種の修正失敗が続く ときは、 闇雲に前進修正を重ねない (= 沼の入口)。 作業フォルダの版管理 (チェックポイント) が **有効** なら、 \`/checkpoint list\` で直前の動く版を確認し、 \`/checkpoint restore <n>\` で戻すことをユーザーに提案する (実際の復元はユーザーが実行)。 **無効** なら、 アプリ/ゲーム作成のような壊れやすいタスクの着手時に \`/checkpoint on\` を提案して安全網を張ってから進める。`;
 }
 
 /** 想定外信号 (ユーザー拒否 / 委任失敗 / 予期せぬ結果) への基本姿勢 */

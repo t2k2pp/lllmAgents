@@ -3041,6 +3041,79 @@ export class REPL {
         console.log(chalk.dim("  完了。"));
         break;
 
+      case "/checkpoint": {
+        // 自動チェックポイント (シャドウ Git)。 docs/checkpoint-and-smoke-design.md §4
+        const cp = this.agent.getCheckpointManager();
+        const sub = args[0]?.trim() ?? "status";
+        switch (sub) {
+          case "status": {
+            console.log(
+              chalk.dim(`  checkpoint: ${cp.isEnabled() ? chalk.green("ON") : chalk.yellow("OFF")}`),
+            );
+            const recent = await cp.list(5);
+            if (recent.length > 0) {
+              console.log(chalk.dim(`  直近 ${recent.length} 件:`));
+              for (const e of recent) {
+                console.log(chalk.dim(`    #${e.n} ${e.shortHash} ${e.date}  ${e.message}`));
+              }
+            }
+            console.log(chalk.dim("  使用例: /checkpoint on|off | list | restore <n> | diff <n>"));
+            break;
+          }
+          case "on": {
+            cp.setEnabled(true);
+            this.config.checkpoints = { ...(this.config.checkpoints ?? {}), enabled: true };
+            saveConfig(this.config);
+            console.log(chalk.dim("  checkpoint enabled (config に保存)。 以降のファイル変更を裏で自動コミットします。"));
+            break;
+          }
+          case "off": {
+            cp.setEnabled(false);
+            this.config.checkpoints = { ...(this.config.checkpoints ?? {}), enabled: false };
+            saveConfig(this.config);
+            console.log(chalk.dim("  checkpoint disabled (config に保存)。"));
+            break;
+          }
+          case "list": {
+            const entries = await cp.list(30);
+            if (entries.length === 0) {
+              console.log(chalk.dim("  チェックポイントはまだありません。"));
+            } else {
+              for (const e of entries) {
+                console.log(chalk.dim(`    #${e.n} ${e.shortHash} ${e.date}  ${e.message}`));
+              }
+            }
+            break;
+          }
+          case "restore": {
+            const n = parseInt(args[1]?.trim() ?? "", 10);
+            if (!Number.isFinite(n) || n < 1) {
+              console.log(chalk.yellow("  使用方法: /checkpoint restore <n> (n は /checkpoint list の番号)"));
+              break;
+            }
+            const r = await cp.restore(n);
+            if (r.ok && r.entry) {
+              console.log(chalk.green(`  #${n} (${r.entry.shortHash}) へ復元しました: ${r.entry.message}`));
+            } else {
+              console.log(chalk.yellow(`  復元失敗: ${r.error ?? "不明なエラー"}`));
+            }
+            break;
+          }
+          case "diff": {
+            const n = parseInt(args[1]?.trim() ?? "", 10);
+            if (!Number.isFinite(n) || n < 1) {
+              console.log(chalk.yellow("  使用方法: /checkpoint diff <n>"));
+              break;
+            }
+            console.log(chalk.dim(await cp.diffStat(n)));
+            break;
+          }
+          default:
+            console.log(chalk.dim("  使用方法: /checkpoint [status|on|off|list|restore <n>|diff <n>]"));
+        }
+        break;
+      }
+
       case "/mcp": {
         // Phase F-1: MCP server 状態管理 (status / reload / on / off / toggle)
         if (!this.mcpManager) {
