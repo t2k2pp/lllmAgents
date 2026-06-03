@@ -1,6 +1,6 @@
 # WSL連携サンドボックス設計
 
-> ステータス: **Phase 1 実装済み** / Phase 2・3 未着手 / 作成 2026-06-03
+> ステータス: **Phase 1 実装・実機検証済み（2026-06-04）** / Phase 2・3 未着手 / 作成 2026-06-03
 > 関連: `docs/checkpoint-and-smoke-design.md`（封じ込めと可逆性の設計原則）、`src/security/process-sandbox.ts`、`src/security/permission-manager.ts`
 
 ## §1 背景・動機
@@ -125,7 +125,7 @@ wsl?: {
 
 | Phase | 内容 | 完了条件 | 状態 |
 |---|---|---|---|
-| 1 | WSL 検出 + bash を WSL 経由で実行（隔離なし）+ パス変換 + 完全フォールバック | Windows+WSL で `bash` が WSL 内で動き、WSL 無し環境で従来通り動く | ✅ 実装済み（実機 Windows 検証は未） |
+| 1 | WSL 検出 + bash を WSL 経由で実行（隔離なし）+ パス変換 + 完全フォールバック | Windows+WSL で `bash` が WSL 内で動き、WSL 無し環境で従来通り動く | ✅ 実装・実機検証済み（2026-06-04: Win11+WSL2 Ubuntu で `uname -a` が `microsoft-standard-WSL2` を返すことを確認） |
 | 2 | WSL 内 `ProcessSandbox` 連携（unshare/bwrap）+ レベル自動降格 + 案内 | `sandbox_info` が WSL の実効隔離レベルを正しく表示 | 未着手 |
 | 3 | autorun 連動（封じ込め時のみ bash 確認を緩和）+ `/status` 可視化 | 封じ込め下で bash 確認が減り、非封じ込め時は信頼ベースと明示される | 未着手 |
 
@@ -136,7 +136,9 @@ wsl?: {
 - `src/config/types.ts`：`SecurityConfig.wsl?: WslConfig`（`enabled: boolean|"auto"`、`distro`、`sandboxLevel`）。既定 `"auto"`。
 - `src/tools/definitions/sandbox-info.ts`：Windows で WSL 検出状態・bash 実行先・封じ込め状態を表示（Phase 1 検証用）。
 - テスト `tests/security/wsl.test.ts`（24 件）：パス変換・distro 解析（NUL 残骸込み）・ルーティング判定・invocation 組み立てを純粋関数として検証（クロスプラットフォーム実行可）。
-- **未検証**：実 Windows+WSL での `wsl.exe` 起動・パス変換の実挙動・`bash -lc` の PATH 解決。CI が無いため手動 TTY 検証が必要。
+- **実機検証済み（2026-06-04, Win11 + WSL2 Ubuntu）**：`wsl.exe --status` / `-l -v` の起動・UTF-16LE デコード・distro 解析、ルーティング判定、`bash -lc` 経由実行、`/mnt/c` へのパス変換まで動作確認。bash で `uname -a` が `Linux … microsoft-standard-WSL2`、`$WSL_DISTRO_NAME` が `Ubuntu` を返すことを確認。
+  - 検証中の知見: 検証は当初 118 コミット遅れの旧チェックアウト（WSL コード未取り込み）を起動していて再現に手間取った。実機検証時は `npm run start`（src 直実行）か `npm run build:deploy`（exe 焼き直し）を使うこと。`sandbox/run.bat` は常に `deploy/localllm.exe` を起動するため、build:deploy を回さないと旧 exe を踏む。
+  - **体感の未確認軸（Phase 2/3 判断前に要確認）**: §6-2 の `/mnt/c` 越し性能（初回は WSL distro コールドスタートで数秒かかる）、§6-3 のツール環境分裂（WSL 側に node/python があるか）。
 
 各 Phase で：パス変換のユニットテスト（純粋関数）、検出の `wsl.exe` モックテスト。実 Windows+WSL の挙動は **手動 TTY 検証**（CI 無しのため）。
 
