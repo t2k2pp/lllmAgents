@@ -99,6 +99,24 @@ wsl?: {
   - checkpoint は「条件付き既定 ON」にしたが、WSL ルーティングは**それと判断が異なる**。理由：checkpoint は非破壊（裏でスナップショットを足すだけ）だが、WSL ルーティングは **bash の実行先＝使うツールチェーンを変える破壊的変更**で、Windows ネイティブの node/python で開発している人を黙って壊し得る（§6-3）。汎用アプリは「誰の環境でも安全な既定」で出荷し、望む人が設定で有効化するのが正しい。
   - 補強事例：WSL2 ディストロは **Docker Desktop を入れただけで自動生成される**（実機検証時も既定 distro Ubuntu とは別に `docker-desktop` が存在）。「WSL2 が在る＝ユーザーが bash を WSL で動かしたい」ではないため、検出ベースの自動 ON は不適切。
 
+## §4.6 操作 UI — `/sandbox` 統一コマンド（実装済み）
+
+config.json の手編集はハードルが高いため、REPL コマンドで切り替える。重要なのは **OS ごとに別コマンドを作らないこと**：機構は OS で違っても、ユーザーがやりたいことは「bash をハード封じ込めする」で同一。別名コマンドが乱立すると、クロスプラットフォーム利用者の学習コストが上がり、ユーザー同士の助け合い（Win↔Mac で同等操作を指示する）でも混乱する。
+
+そこで **単一の `/sandbox status|on|off`** を用意し、内部で OS ディスパッチする：
+
+| OS | `/sandbox on` の作用 | 設定キー |
+|---|---|---|
+| Windows | WSL ルーティング有効化（`enabled:"auto"`） | `security.wsl` |
+| Mac/Linux | processSandbox 有効化（`level` 既定 full、未導入なら自動降格） | `security.processSandbox` |
+
+- 動的適用：`loadConfig()` は都度ファイルを読むので **WSL 側は次の bash 実行から即反映**。processSandbox 側は `bash.ts` の `getProcessSandbox()` がインスタンスをキャッシュするため、`resetProcessSandboxCache()` を呼んで即反映させる（再起動不要）。
+- `status` は OS を問わず「方式／設定値／検出状況／実効状態」を統一フォーマットで表示。`sandbox_info`（モデル用ツール）と整合。
+- **OS で異なるリスクは警告で出し分ける**（コマンドと心象は共通、注意書きだけ平台依存）：
+  - Windows on：WSL 未検出/WSL1 の注意、ツールチェーン分裂（§6-3）の前提を表示。
+  - Mac/Linux on：**ネットワーク遮断**（processSandbox は network/full で network deny ＝ `npm install` 等が通らない）を明示警告。
+- 既知の課題（Phase 2/3 で要検討）：processSandbox には「FS 書込のみ制限・ネットワークは許可」レベルが無い。「のびのび開発（確認削減）」には FS スコープ封じ込め＋ネット許可が欲しい場面が多く、現状の network/full（ネット遮断）とは噛み合わない。§5 の autorun 連動を詰める前に、封じ込めレベルの再設計が要る可能性。
+
 ## §5 autorun との連動（目的の核心）
 
 封じ込めが裏打ちされて初めて、確認を安全に減らせる。
