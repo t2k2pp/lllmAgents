@@ -60,6 +60,9 @@ export const sandboxInfoTool: ToolHandler = {
         `\n## WSL 経由実行 (bash ツール / Windows)\n` +
         `- WSL 検出: ${det.available ? `あり (default distro: ${det.defaultDistro ?? "不明"}, ${det.wsl2 ? "WSL2" : "WSL1"})` : "なし"}\n` +
         `- bash の実行先: ${routing.use ? `WSL 経由${routing.distro ? ` (${routing.distro})` : ""}` : `従来経路 (git bash / cmd.exe)${routing.reason ? ` — ${routing.reason}` : ""}`}\n` +
+        (det.available && !routing.use
+          ? `  （有効化は opt-in: 設定 security.wsl.enabled を "auto" か true に。WSL 側に開発ツールがある前提）\n`
+          : "") +
         `- 封じ込め: ${routing.use ? "Phase 1 のため隔離は未適用（Phase 2 で WSL 内サンドボックス連携予定）" : "なし（信頼ベース）"}\n`;
     }
 

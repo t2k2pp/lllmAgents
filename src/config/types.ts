@@ -124,10 +124,12 @@ export interface ProcessSandboxConfig {
 
 export interface WslConfig {
   /**
-   * Windows で bash を WSL 経由で実行するか（docs/wsl-sandbox-design.md）。
-   * - false        : 常に従来経路（git bash → cmd.exe）
-   * - true         : WSL1 でも強制的に WSL 経路
-   * - "auto"/未指定 : Windows かつ WSL2 検出時のみ WSL 経路（既定）
+   * Windows で bash を WSL 経由で実行するか（docs/wsl-sandbox-design.md §4.5）。
+   * 既定は OFF（opt-in）。 bash を WSL に移すとツールチェーンが変わり環境を選ぶため、
+   * 汎用の安全側として既定は従来経路にし、 望む人だけが明示的に有効化する。
+   * - 未指定 / false : 従来経路（git bash → cmd.exe）。 汎用的な安全側の既定
+   * - "auto"         : Windows かつ WSL2 検出時のみ WSL 経路
+   * - true           : WSL 検出時は WSL1 でも強制的に WSL 経路
    */
   enabled?: boolean | "auto";
   /** -d に渡す distro 名。未指定なら WSL の既定 distro */

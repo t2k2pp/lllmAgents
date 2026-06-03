@@ -95,7 +95,9 @@ wsl?: {
 ```
 
 - `processSandbox`（Mac/Linux）とは**別立て**にする（プラットフォーム別の経路選択であり、混ぜると条件が読みにくい）。ただし WSL 内の隔離適用は `ProcessSandbox` を共用する。
-- 既定 `enabled: "auto"`：checkpoint の「条件付き既定 ON」と同じ思想。WSL があれば黙って恩恵、無ければ従来通り。
+- **既定は OFF（opt-in）**。`enabled` 未指定/`false` は従来経路、`"auto"` は WSL2 検出時のみ、`true` は WSL 検出時に強制。
+  - checkpoint は「条件付き既定 ON」にしたが、WSL ルーティングは**それと判断が異なる**。理由：checkpoint は非破壊（裏でスナップショットを足すだけ）だが、WSL ルーティングは **bash の実行先＝使うツールチェーンを変える破壊的変更**で、Windows ネイティブの node/python で開発している人を黙って壊し得る（§6-3）。汎用アプリは「誰の環境でも安全な既定」で出荷し、望む人が設定で有効化するのが正しい。
+  - 補強事例：WSL2 ディストロは **Docker Desktop を入れただけで自動生成される**（実機検証時も既定 distro Ubuntu とは別に `docker-desktop` が存在）。「WSL2 が在る＝ユーザーが bash を WSL で動かしたい」ではないため、検出ベースの自動 ON は不適切。
 
 ## §5 autorun との連動（目的の核心）
 

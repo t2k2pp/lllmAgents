@@ -109,10 +109,12 @@ export function parseWslList(out: string | null): {
  * 設定・検出結果・プラットフォームから、 bash を WSL 経由で実行すべきかを判定する。
  * 純粋関数（副作用なし）。 platform と detection を引数で受け取るためテスト容易。
  *
- * enabled の既定は "auto": Windows かつ WSL2 検出時のみ有効。
- *   - false       → 常に従来経路
- *   - true        → WSL1 でも強制的に WSL 経路（検出はする）
- *   - "auto"/未指定 → WSL2 検出時のみ
+ * 既定は OFF（opt-in）。 bash を WSL に移すと使うツールチェーンが変わり、 Windows
+ * ネイティブの node/python で開発している人を壊し得るため、 汎用の安全側として既定は
+ * 従来経路。 望む人だけが明示的に有効化する（docs/wsl-sandbox-design.md §4.5）。
+ *   - 未指定 / false → 従来経路（git bash → cmd.exe）
+ *   - "auto"         → WSL2 検出時のみ WSL 経路
+ *   - true           → WSL 検出時は WSL1 でも強制的に WSL 経路
  */
 export function resolveWslRouting(
   wslConfig: WslConfig | undefined,
@@ -121,8 +123,13 @@ export function resolveWslRouting(
 ): WslRouting {
   if (!isWin) return { use: false, reason: "not windows" };
 
-  const enabled = wslConfig?.enabled ?? "auto";
-  if (enabled === false) return { use: false, reason: "config で無効" };
+  const enabled = wslConfig?.enabled ?? false;
+  if (enabled === false) {
+    return {
+      use: false,
+      reason: wslConfig?.enabled === false ? "config で無効" : "未設定（既定 OFF / opt-in）",
+    };
+  }
 
   if (!detection.available) return { use: false, reason: "WSL 未検出" };
 
