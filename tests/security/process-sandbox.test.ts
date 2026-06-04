@@ -53,9 +53,11 @@ describe("buildSeatbeltProfile", () => {
       expect(p).toContain("(allow file-read*)");
     }
   });
-  it("fs + proxyPort はネットを 127.0.0.1:port のみに制限 (env と表記一致・allow network* 無し)", () => {
+  it("fs + proxyPort はネットを localhost:port のみに制限 (Seatbelt は数値IP不可・allow network* 無し)", () => {
     const p = buildSeatbeltProfile(["/work"], "fs", [], 54321);
-    expect(p).toContain(`(allow network-outbound (remote ip "127.0.0.1:54321"))`);
+    // Seatbelt の remote ip はホストに "localhost"/"*" のみ許可。数値 127.0.0.1 はロード不能(exit 65)。
+    expect(p).toContain(`(allow network-outbound (remote ip "localhost:54321"))`);
+    expect(p).not.toContain(`(remote ip "127.0.0.1`);
     expect(p).not.toContain("(allow network*)");
   });
   it("fs + proxyPort なしは fail-closed (ネット許可を一切出さない)", () => {

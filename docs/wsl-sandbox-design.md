@@ -123,18 +123,23 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 **2b-1 実装メモ（macOS）**：
 - `src/security/sandbox-proxy.ts`：在プロセス `http.Server`。CONNECT はホスト名で `authorize` → 許可ならトンネル（TLS 素通し）/ 拒否は 403。未許可は `onUnknownDomain` で対話確認、同一ホストの並行確認は集約、once はセッション許可・always は永続。`configureSandboxProxy`/`getSandboxProxy` シングルトン。
 - `bash.ts`：macOS かつ実効 `fs` かつプロキシ構成済みなら `ensureStarted()` でポート取得 →子プロセスへ `HTTP(S)_PROXY` 注入。
-- `process-sandbox.ts`：`buildSeatbeltProfile(..., proxyPort)` ＝ fs で proxyPort 指定時は `(allow network-outbound (remote ip "localhost:port"))` のみ許可し直接接続を遮断（proxyPort 無しは従来どおり `(allow network*)`）。
+- `process-sandbox.ts`：`buildSeatbeltProfile(..., proxyPort)` ＝ fs で proxyPort 指定時は `(allow network-outbound (remote ip "localhost:port"))` のみ許可し直接接続を遮断。proxyPort 無しの fs は **fail-closed でネット遮断**（`(allow network*)` 退避は撤去済み）。
 - `repl.ts`：`configureSandboxProxy` を構成（allowlist=config、確認=inquirer・非TTY は deny、always で config 保存）。`/sandbox allow|deny <domain>`、`status` に allowlist 表示。
-- テスト：`net-allowlist`（照合）、`sandbox-proxy`（authorize: allow/deny/once/always/並行集約/ワイルドカード）、`process-sandbox`（fs+proxyPort の Seatbelt）。
-- **未検証（手動 TTY / macOS 実機）**：実際のプロキシ通信・Seatbelt の 127.0.0.1 限定が効くか・対話確認 UX・spinner との競合。
+- テスト：`net-allowlist`（照合）、`sandbox-proxy`（authorize: allow/deny/once/always/並行集約/ワイルドカード）、`process-sandbox`（fs+proxyPort の Seatbelt 文字列）、`process-sandbox.seatbelt.integration`（**プロファイルを実際に sandbox-exec へロード**して受理・書込封じ込め・機密 deny を検証＝下記盲点の回帰防止／darwin 限定）。
 
 **セキュリティレビュー反映（サブエージェント指摘・cf12134 直後）**：
 - **fail-open 撲滅（最重要）**：macOS fs は「プロキシ経由 or ネット遮断」のみ。`buildSeatbeltProfile` から `(allow network*)` 退避を撤去し、proxyPort 無し fs は **fail-closed**（プロキシ起動失敗・未構成でもネット全開に落ちない）。
-- **表記一致**：Seatbelt 許可を `localhost:port` → `127.0.0.1:port` に（子 env の `HTTP(S)_PROXY=http://127.0.0.1:port` と一致）。
 - **HTTP Host 詐称対策**：プレーン HTTP 経路で認可対象と実接続先を `url.hostname` に統一（Host ヘッダとリクエストラインの不一致による迂回を防止）。
 - **CONNECT ポート制限**：443/80 以外の CONNECT を拒否（許可ドメインの任意ポートトンネル悪用を防止）。
 - **末尾ドット正規化**：`normalizeHost` が FQDN 末尾ドットを除去。
-- 残課題（要対応 or 明示）：macOS 実機で「allowlist 外ドメイン/IP 直/別ポートが実際に遮断されるか」の検証（H1 の核心）、Linux/WSL2 の fs はネット allowlist 未対応＝ネット許可のまま（2b-2 まで）、`network`/`full` は allowlist でなく全遮断（UX 上の注意）。
+- ⚠️ **表記一致は誤りだった（撤回）**：当時「Seatbelt 許可を `localhost:port`→`127.0.0.1:port` に統一」としたが、**Seatbelt の `remote ip` はホストに数値IPを受け付けず `localhost`/`*` のみ**。`127.0.0.1:port` を書くと sandbox-exec がプロファイルをロードできず exit 65 で **macOS fs が全滅**する。正しくは rule=`localhost:port`・env=`http://127.0.0.1:port`（数値IPへの接続も localhost ルールで許可されることを実機確認）。ユニットの `toContain` 文字列検査だけで実ロードしていなかった盲点。→ §7.1 実機検証で発覚し修正（rule を `localhost` へ・統合テスト追加）。
+
+**実機検証（macOS 26.3・sandbox-exec・2026-06-05、4観点サブエージェントレビュー後）**：
+生成プロファイルと同一物を sandbox-exec へ実ロードして測定。
+- ✅ **ネット封じ込めは堅牢**：直接 TCP（`curl --noproxy` / `/dev/tcp` / `nc` / python socket）・**DNS（getaddrinfo / `dig @8.8.8.8` / 生UDP sendto:53）**・ICMP は **すべて `deny default` が遮断**（EPERM）。許可は `localhost:proxyPort` の TCP のみ。env が数値 `127.0.0.1` でも `localhost` ルールで接続成立。→ レビューの最重大懸念 **C1（DNS/UDP exfil）・H-D（生TCP迂回）は macOS では不成立**と実証。
+- ✅ **FS**：writeDir 内のみ書込可・外（HOME 直下等）は EPERM、機密ディレクトリ（実パス）の read は `deny file-read*` が後勝ちで遮断。
+- ⚠️ **symlink 注意点（実コードにも該当）**：Seatbelt は**正規化後の実パス**で照合する。`/tmp`(→`/private/tmp`) や `/var`(→`/private/var`) のような symlink を writeDir/denyDir に渡すと allow/deny が一致しない。既定機密 `~/.ssh` 等や通常の `/Users` 配下 cwd は実パスなので問題ないが、symlink 経路は要注意。→ 対策として writeDirs/denyDirs を `realpathSync` で正規化してからプロファイルに載せるのが望ましい（要対応・低〜中）。
+- 残課題：在プロセスプロキシの**対話確認(live-prompt)の TTY 操作感**（非TTYでは品質検証不可）、Linux/WSL2 の fs はネット allowlist 未対応＝ネット許可のまま（2b-2 まで）かつ `status`/`sandbox_info` が macOS と同じ表示で誤認を招く、`network`/`full` は allowlist でなく全遮断、HTTP フォワード経路のポート無制限・内部IP/SSRF・IDN/ホモグラフ・NO_PROXY 非クリア等（4観点レビュー指摘、別途対応）。
 
 ## §8 既知の限界・トレードオフ
 
@@ -166,6 +171,6 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 | 〜 | route-to-WSL（実装→実機検証→退役） | 完了（タグ `wsl-phase1-routing` で保全） |
 | 1 | Windows 2種モデル＋`/sandbox` 統一コマンド（検出案内含む） | ✅ 実装済み（REPL UX は手動 TTY 検証要） |
 | 2a | レベル `"fs"`（FS 書込スコープ・ネット許可）追加。`/sandbox on` 既定を fs に＝§7 | ✅ 実装済み（純粋関数をユニットテスト） |
-| 2b-1 | macOS: 在プロセス CONNECT プロキシ＋Seatbelt＋対話確認＋`/sandbox allow\|deny`＝§7.1 | ✅ 実装済み（macOS 実機/TTY 検証要） |
+| 2b-1 | macOS: 在プロセス CONNECT プロキシ＋Seatbelt＋対話確認＋`/sandbox allow\|deny`＝§7.1 | ✅ 実装済み・**Seatbelt 封じ込めは実機検証済**（rule `localhost` バグ修正＋統合テスト追加）。対話 UX の TTY 手触りのみ残 |
 | 2b-2 | Linux/WSL2: socat ブリッジで bwrap 名前空間からプロキシへ＝§7.1 | 未着手 |
 | 3 | 封じ込め時のみ autorun が bash 確認を省く連動（確認削減の実体） | 未着手（Phase 2b 後） |

@@ -146,12 +146,17 @@ export function buildSeatbeltProfile(
   }
 
   // ネットワーク: fs のみ・かつ「プロキシ経由」のみ許可。 network/full は deny default のまま。
-  // proxyPort 指定時は 127.0.0.1:port（= 在プロセスプロキシ）への outbound だけ許可し直接接続を塞ぐ
-  //（子プロセスへの env も 127.0.0.1 なので表記を一致させる）。 プロキシがドメイン allowlist を強制。
+  // proxyPort 指定時は localhost:port（= 在プロセスプロキシ）への outbound だけ許可し直接接続を塞ぐ。
+  // 【重要】Seatbelt の remote ip はホストに数値IPを受け付けず "localhost" / "*" のみ
+  //   （数値 "127.0.0.1:port" を書くと sandbox-exec がプロファイルをロードせず exit 65 で全滅する）。
+  //   一方、子プロセスへ注入する env は http://127.0.0.1:port のままでよい
+  //   ―― rule="localhost" でも数値 127.0.0.1 への接続は許可されることを macOS 実機で確認済み
+  //   （docs/wsl-sandbox-design.md §7.1 実機検証）。
   // proxyPort が無い fs は **fail-closed でネット遮断**（旧来の (allow network*) には退避しない）。
   // ＝プロキシ起動失敗・未構成でも「ネット全開」に落ちない（fail-open 防止）。
+  // deny default が TCP 直結・UDP(DNS含む)・ICMP を全て覆うことも実機で確認済み（§7.1）。
   if (level === "fs" && proxyPort) {
-    lines.push(`(allow network-outbound (remote ip "127.0.0.1:${proxyPort}"))`);
+    lines.push(`(allow network-outbound (remote ip "localhost:${proxyPort}"))`);
   }
 
   return lines.join("\n") + "\n";
