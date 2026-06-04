@@ -3190,16 +3190,24 @@ export class REPL {
               }
             } else {
               const prev = this.config.security.processSandbox;
-              const level = prev?.level && prev.level !== "none" ? prev.level : "full";
+              const arg = args[1]?.trim();
+              const level: "fs" | "network" | "full" =
+                arg === "fs" || arg === "network" || arg === "full"
+                  ? arg
+                  : prev?.level && prev.level !== "none"
+                    ? (prev.level as "fs" | "network" | "full")
+                    : "fs"; // 既定は fs: 書込スコープのみ・ネットは許可（開発を止めない）
               this.config.security.processSandbox = { enabled: true, level };
               saveConfig(this.config);
               resetProcessSandboxCache();
               const eff = new ProcessSandbox(this.config.security.processSandbox).getAvailability().effectiveLevel;
-              console.log(chalk.dim(`  封じ込め ON (config 保存、 level=${level})。 bash を ${isMacOS ? "sandbox-exec" : "bwrap/unshare"} で隔離します (次の bash から即反映)。`));
+              console.log(chalk.dim(`  封じ込め ON (config 保存、 level=${level})。 ${isMacOS ? "sandbox-exec" : "bwrap/unshare"} で適用 (次の bash から即反映)。`));
               if (eff === "none") {
                 console.log(chalk.yellow("  ⚠ 隔離ツールが見つからず実効レベルは none です (Linux/WSL2: bwrap, macOS: sandbox-exec が必要)。"));
+              } else if (eff === "fs") {
+                console.log(chalk.dim("  書込は作業フォルダ等に限定、 ネットワークは許可 (npm install / pip 等は通ります)。"));
               } else {
-                console.log(chalk.yellow("  ⚠ 現状の実装ではネットワークが遮断されます。 npm install / pip / CDN 取得などは通りません (FS制限・ネット許可の2軸化は今後の課題)。"));
+                console.log(chalk.yellow(`  ⚠ level=${eff} はネットワークを遮断します。 npm install / pip / CDN 取得などは通りません (開発作業は level=fs 推奨: /sandbox on fs)。`));
               }
             }
             break;
@@ -3217,7 +3225,7 @@ export class REPL {
             break;
           }
           default:
-            console.log(chalk.dim("  使用方法: /sandbox [status|on|off]"));
+            console.log(chalk.dim("  使用方法: /sandbox [status | on [fs|network|full] | off]  (既定 on=fs: 書込制限・ネット許可)"));
         }
         break;
       }

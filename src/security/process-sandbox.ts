@@ -4,8 +4,15 @@
  * Claude Code と同等の仕組み:
  * - Linux: unshare(1) によるネットワーク名前空間隔離、bwrap(1) があればファイルシステム隔離も
  * - macOS: sandbox-exec(1) による sandbox-d プロファイル適用
- * - Windows: 未サポート（アプリケーションレベルの制限のみ）
+ * - Windows: 未サポート（ネイティブは封じ込め無し。封じ込めが要る場合は WSL2 内で起動 →
+ *   platform=linux となりこの Linux 経路が効く。docs/wsl-sandbox-design.md §3）
  * - フォールバック: ツール非存在時は設定に警告を出して no-op
+ *
+ * レベル設計は「FS 書込」と「ネットワーク」の2軸（docs/wsl-sandbox-design.md §7）:
+ * - "fs"   : FS 書込のみ隔離・ネットワークは許可。 開発作業 (npm/pip 等) を止めない "のびのび" 向け
+ * - "network": ネットワークのみ隔離
+ * - "full" : 両方隔離
+ * ネットワークの「ドメイン allowlist（プロキシ）」は未実装（§7 の今後の課題）。
  */
 
 import { existsSync, writeFileSync, unlinkSync } from "node:fs";
@@ -14,13 +21,14 @@ import { tmpdir, platform } from "node:os";
 
 export type ProcessSandboxLevel =
   | "none"        // OS-level sandboxing なし（アプリレベルのみ）
+  | "fs"          // ファイルシステム書込のみ隔離（ネットワークは許可）
   | "network"     // ネットワーク名前空間隔離のみ
   | "full";       // ネットワーク + ファイルシステム隔離（bwrap / sandbox-exec が必要）
 
 export interface ProcessSandboxConfig {
   enabled: boolean;
   level: ProcessSandboxLevel;
-  /** ネットワーク隔離でも許可するホスト（将来拡張用、現在は未使用） */
+  /** ネットワーク隔離でも許可するホスト（将来の allowlist 拡張用、現在は未使用） */
   allowedHosts?: string[];
 }
 
@@ -48,6 +56,69 @@ function findTool(...paths: string[]): string | null {
     if (existsSync(p)) return p;
   }
   return null;
+}
+
+/**
+ * bwrap 引数を組み立てる純粋関数（テスト容易化のため分離）。
+ * @param command    実行するシェルコマンド
+ * @param writeDirs  書込許可ディレクトリ（呼び出し側で存在チェック済みのものを渡す）
+ * @param unshareNet ネットワーク名前空間を分離するか（full=true / fs=false）
+ */
+export function buildBwrapArgs(command: string, writeDirs: string[], unshareNet: boolean): string[] {
+  const args: string[] = [
+    // Read-only bind mount of root filesystem
+    "--ro-bind", "/", "/",
+    // Essential virtual filesystems
+    "--dev", "/dev",
+    "--proc", "/proc",
+    "--tmpfs", "/tmp",
+    // New session (prevents ptrace from parent)
+    "--new-session",
+  ];
+  // ネットワーク隔離は full のみ。 fs はネットを通す（npm install 等を止めないため）
+  if (unshareNet) args.push("--unshare-net");
+  // Writable bind mounts for allowed directories
+  for (const dir of writeDirs) {
+    args.push("--bind", dir, dir);
+  }
+  args.push("--", "/bin/sh", "-c", command);
+  return args;
+}
+
+/**
+ * macOS sandbox-exec (Seatbelt) プロファイルを組み立てる純粋関数。
+ * "deny default" から必要な許可を足すホワイトリスト方式。
+ * - file-write は全レベルで writeDirs（+ /dev /tmp）に限定
+ * - network は "fs" のみ許可。 "network"/"full" は deny（既定 deny のまま）
+ */
+export function buildSeatbeltProfile(writeDirs: string[], level: ProcessSandboxLevel): string {
+  const lines: string[] = [
+    "(version 1)",
+    "(deny default)",
+    // プロセス実行は許可（シェル、コマンドを動かすために必要）
+    "(allow process*)",
+    // システムコール基盤
+    "(allow sysctl-read)",
+    "(allow signal (target self))",
+    // 読み取りは全ディレクトリで許可（write は下で制限）
+    "(allow file-read*)",
+    // /dev と /tmp は常に書き込み許可
+    `(allow file-write* (subpath "/dev"))`,
+    `(allow file-write* (subpath "/tmp"))`,
+    `(allow file-write* (subpath "/private/tmp"))`,
+  ];
+
+  // 書き込み許可ディレクトリ
+  for (const dir of writeDirs) {
+    lines.push(`(allow file-write* (subpath "${dir}"))`);
+  }
+
+  // ネットワーク: fs レベルのみ許可。 network/full は遮断（deny default のまま）
+  if (level === "fs") {
+    lines.push("(allow network*)");
+  }
+
+  return lines.join("\n") + "\n";
 }
 
 /**
@@ -79,19 +150,24 @@ export class ProcessSandbox {
     if (!this.config.enabled || this.config.level === "none") return "none";
 
     if (this.plat === "linux") {
-      if (this.config.level === "full" && this.bwrap) return "full";
-      if (this.unshare) return "network";
-      return "none";
+      // fs / full は FS 隔離に bwrap が必須
+      if (this.config.level === "fs") return this.bwrap ? "fs" : "none";
+      if (this.config.level === "full") {
+        if (this.bwrap) return "full";
+        return this.unshare ? "network" : "none"; // FS 隔離不可なら最低限ネット隔離へ降格
+      }
+      // network レベル
+      return this.unshare ? "network" : "none";
     }
 
     if (this.plat === "darwin") {
-      if (this.sandboxExec) {
-        return this.config.level === "full" ? "full" : "network";
-      }
-      return "none";
+      if (!this.sandboxExec) return "none";
+      if (this.config.level === "fs") return "fs";
+      if (this.config.level === "full") return "full";
+      return "network";
     }
 
-    return "none"; // Windows は未サポート
+    return "none"; // Windows ネイティブは未サポート
   }
 
   /** 利用可能ツールの状態を返す（sandbox_info ツール用） */
@@ -111,7 +187,7 @@ export class ProcessSandbox {
   /**
    * コマンドをサンドボックスでラップした spawn 引数を返す。
    * @param command  実行するシェルコマンド文字列
-   * @param allowedWriteDirs  書き込みを許可するディレクトリ（full レベルで使用）
+   * @param allowedWriteDirs  書き込みを許可するディレクトリ
    */
   wrapCommand(command: string, allowedWriteDirs: string[]): WrappedCommand {
     const effective = this.getEffectiveLevel();
@@ -138,46 +214,22 @@ export class ProcessSandbox {
     writeDirs: string[],
     level: ProcessSandboxLevel
   ): WrappedCommand {
-    if (level === "full" && this.bwrap) {
-      return this.wrapWithBwrap(command, writeDirs);
+    // fs / full は bwrap で FS 隔離（fs はネット許可・full はネット遮断）
+    if ((level === "fs" || level === "full") && this.bwrap) {
+      const existing = writeDirs.filter((d) => existsSync(d));
+      const args = buildBwrapArgs(command, existing, /* unshareNet */ level === "full");
+      return { shell: this.bwrap, args };
     }
-    // network レベル（または full でも bwrap なし）
+    // network レベル（または full でも bwrap なしの降格）
     return this.wrapWithUnshare(command);
   }
 
   private wrapWithUnshare(command: string): WrappedCommand {
     // --net: ネットワーク名前空間の新規作成（ループバックのみ）
-    // --fork: 子プロセスをフォークして実行
     return {
       shell: this.unshare!,
       args: ["--net", "--fork", "--", "/bin/sh", "-c", command],
     };
-  }
-
-  private wrapWithBwrap(command: string, writeDirs: string[]): WrappedCommand {
-    const args: string[] = [
-      // Read-only bind mount of root filesystem
-      "--ro-bind", "/", "/",
-      // Essential virtual filesystems
-      "--dev", "/dev",
-      "--proc", "/proc",
-      "--tmpfs", "/tmp",
-      // Network isolation
-      "--unshare-net",
-      // New session (prevents ptrace from parent)
-      "--new-session",
-    ];
-
-    // Writable bind mounts for allowed directories
-    for (const dir of writeDirs) {
-      if (existsSync(dir)) {
-        args.push("--bind", dir, dir);
-      }
-    }
-
-    args.push("--", "/bin/sh", "-c", command);
-
-    return { shell: this.bwrap!, args };
   }
 
   // ── macOS ────────────────────────────────────────────────────────────────
@@ -187,7 +239,7 @@ export class ProcessSandbox {
     writeDirs: string[],
     level: ProcessSandboxLevel
   ): WrappedCommand {
-    const profile = this.buildSandboxdProfile(writeDirs, level);
+    const profile = buildSeatbeltProfile(writeDirs, level);
 
     // 一時プロファイルファイルを作成
     const profilePath = join(tmpdir(), `lllm-sandbox-${process.pid}-${Date.now()}.sb`);
@@ -200,40 +252,5 @@ export class ProcessSandbox {
         try { unlinkSync(profilePath); } catch { /* ignore */ }
       },
     };
-  }
-
-  /**
-   * macOS sandbox-d プロファイルを生成。
-   * Claude Code と同様に "deny default" から始め必要な許可を追加するホワイトリスト方式。
-   */
-  private buildSandboxdProfile(writeDirs: string[], level: ProcessSandboxLevel): string {
-    const lines: string[] = [
-      "(version 1)",
-      "(deny default)",
-      // プロセス実行は許可（シェル、コマンドを動かすために必要）
-      "(allow process*)",
-      // システムコール基盤
-      "(allow sysctl-read)",
-      "(allow signal (target self))",
-      // 読み取りは全ディレクトリで許可（write は下で制限）
-      "(allow file-read*)",
-      // /dev と /tmp は常に書き込み許可
-      `(allow file-write* (subpath "/dev"))`,
-      `(allow file-write* (subpath "/tmp"))`,
-      `(allow file-write* (subpath "/private/tmp"))`,
-    ];
-
-    // 書き込み許可ディレクトリ
-    for (const dir of writeDirs) {
-      lines.push(`(allow file-write* (subpath "${dir}"))`);
-    }
-
-    // ネットワーク許可（network レベルは deny、full も network は deny）
-    if (level !== "full" && level !== "network") {
-      lines.push("(allow network*)");
-    }
-    // ネットワーク隔離: network / full レベルでは network を deny のまま（デフォルト deny）
-
-    return lines.join("\n") + "\n";
   }
 }

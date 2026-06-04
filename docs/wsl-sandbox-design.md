@@ -91,9 +91,13 @@ config.json の手編集はハードルが高いので REPL コマンド化。**
 
 Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経由のドメイン allowlist（既定は新ドメイン初回に確認）」**。これで FS を閉じつつ必要な通信だけ通す。
 
-→ 再設計の方向：`processSandbox` を **「FS 書込スコープ」と「ネット allowlist」の直交2軸**に作り直す（`allowedHosts` を `allowedDomains` 相当へ格上げ）。ただし allowlist にはプロキシ（Claude Code は `socat` リレー＋プロキシ）が要り工数大。Anthropic OSS の [`@anthropic-ai/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime) を参照/利用する手もある。段階を切る（まず FS 2軸＋ネット on/off → 後でプロキシ allowlist）。
+→ 再設計の方向：`processSandbox` を **「FS 書込スコープ」と「ネット」の直交2軸**にする。段階を切る（決定1=b）：
 
-これが固まって初めて「封じ込め時のみ autorun が bash 確認を省く」連動（確認削減の実体）に進める。
+- **Phase 2a（実装済み）**：レベル `"fs"`（FS 書込のみ隔離・ネットワークは許可）を追加。`/sandbox on` の既定を `fs` にし、`npm install`/`pip` 等が通る "のびのび dev" を成立させた。Linux は bwrap（`--unshare-net` なし）、macOS は Seatbelt（`(allow network*)`）。`buildBwrapArgs`/`buildSeatbeltProfile` を純粋関数に分離してテスト。
+  - 正直な穴：`"fs"` はネット全開なので、Claude Code が警告する「FS は閉じてもネット経由で SSH 鍵等を持ち出せる」リスクは Phase 2b まで残る。`full` を選べば従来どおりネット遮断。
+- **Phase 2b（未着手）**：ネットを「ドメイン allowlist（プロキシ）」化（`allowedHosts` を `allowedDomains` 相当へ格上げ）。プロキシ（Claude Code は `socat` リレー＋プロキシ）が要り工数大なので、Anthropic OSS の [`@anthropic-ai/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime) の採用を検討（決定2）。
+
+これ（特に 2b で「必要な通信だけ通す」）が固まって初めて「封じ込め時のみ autorun が bash 確認を省く」連動（確認削減の実体）に進める。
 
 ## §8 既知の限界・トレードオフ
 
@@ -124,5 +128,6 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 |---|---|---|
 | 〜 | route-to-WSL（実装→実機検証→退役） | 完了（タグ `wsl-phase1-routing` で保全） |
 | 1 | Windows 2種モデル＋`/sandbox` 統一コマンド（検出案内含む） | ✅ 実装済み（REPL UX は手動 TTY 検証要） |
-| 2 | 封じ込めの2軸再設計（FS スコープ / ネット allowlist）＝§7 | 未着手（要・方式決定） |
-| 3 | 封じ込め時のみ autorun が bash 確認を省く連動（確認削減の実体） | 未着手（Phase 2 後） |
+| 2a | レベル `"fs"`（FS 書込スコープ・ネット許可）追加。`/sandbox on` 既定を fs に＝§7 | ✅ 実装済み（純粋関数をユニットテスト） |
+| 2b | ネットを allowlist（プロキシ）化。`@anthropic-ai/sandbox-runtime` 採用検討＝§7 | 未着手 |
+| 3 | 封じ込め時のみ autorun が bash 確認を省く連動（確認削減の実体） | 未着手（Phase 2b 後） |

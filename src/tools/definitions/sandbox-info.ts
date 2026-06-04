@@ -34,6 +34,7 @@ export const sandboxInfoTool: ToolHandler = {
 
     const levelLabels: Record<string, string> = {
       none: "なし（アプリレベルのみ）",
+      fs: "ファイルシステム書込隔離（ネットワークは許可）",
       network: "ネットワーク隔離",
       full: "ネットワーク + ファイルシステム隔離",
     };

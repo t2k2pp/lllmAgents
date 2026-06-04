@@ -114,12 +114,13 @@ export interface ProcessSandboxConfig {
   /** OS-level サンドボックスを有効にするか（デフォルト: false） */
   enabled: boolean;
   /**
-   * サンドボックスレベル:
+   * サンドボックスレベル（FS書込とネットワークの2軸。docs/wsl-sandbox-design.md §7）:
    * - "none"    : OS-level 隔離なし（アプリレベルのみ）
-   * - "network" : ネットワーク名前空間隔離（Linux: unshare --net, macOS: sandbox-exec で network deny）
+   * - "fs"      : ファイルシステム書込のみ隔離・ネットワークは許可（npm/pip 等を止めない開発向け）
+   * - "network" : ネットワーク名前空間隔離のみ（Linux: unshare --net, macOS: sandbox-exec で network deny）
    * - "full"    : ネットワーク + ファイルシステム隔離（Linux: bwrap, macOS: sandbox-exec）
    */
-  level: "none" | "network" | "full";
+  level: "none" | "fs" | "network" | "full";
 }
 
 export interface SecurityConfig {
