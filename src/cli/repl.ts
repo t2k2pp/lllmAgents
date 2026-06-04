@@ -45,6 +45,9 @@ import { AzureClaudeProvider } from "../providers/azure-claude.js";
 import { saveConfig } from "../config/config-manager.js";
 import { isWindows, isMacOS } from "../utils/platform.js";
 import { detectWsl } from "../security/wsl.js";
+import { configureSandboxProxy } from "../security/sandbox-proxy.js";
+import { DEFAULT_ALLOWED_DOMAINS, addDomain } from "../security/net-allowlist.js";
+import inquirer from "inquirer";
 import { ProcessSandbox } from "../security/process-sandbox.js";
 import { resetProcessSandboxCache } from "../tools/definitions/bash.js";
 import { runLocalLLMSetup, connectAndListModels } from "../config/setup-wizard.js";
@@ -111,6 +114,55 @@ export class REPL {
     this.input = new InteractiveInput({
       commandProvider: createCommandMenuProvider(skillInfos, toolNames),
       filePathProvider: createFileMenuProvider(),
+    });
+
+    this.configureSandboxNetProxy();
+  }
+
+  /**
+   * Phase 2b-1: サンドボックスのネット allowlist プロキシを構成する。
+   * 未許可ドメインは対話確認（非TTY は fail-closed=deny）。 allowlist は config に保存。
+   */
+  private configureSandboxNetProxy(): void {
+    configureSandboxProxy({
+      getAllowedDomains: () =>
+        this.config.security.processSandbox?.allowedHosts ?? [...DEFAULT_ALLOWED_DOMAINS],
+      persistDomain: (domain) => {
+        const ps = this.config.security.processSandbox ?? { enabled: false, level: "none" as const };
+        const hosts = addDomain(ps.allowedHosts ?? [...DEFAULT_ALLOWED_DOMAINS], domain);
+        this.config.security.processSandbox = { ...ps, allowedHosts: hosts };
+        saveConfig(this.config);
+      },
+      onUnknownDomain: async (host) => {
+        console.log(
+          chalk.cyan(
+            `\n  [sandbox] サンドボックス内の bash が未許可ドメインへ接続しようとしています: ${chalk.bold(host)}`,
+          ),
+        );
+        if (!process.stdin.isTTY) {
+          console.log(
+            chalk.yellow(`  非対話モードのため拒否 (fail-closed)。 /sandbox allow ${host} で恒久許可可。`),
+          );
+          return "deny";
+        }
+        try {
+          const { action } = await inquirer.prompt<{ action: "once" | "always" | "deny" }>([
+            {
+              type: "list",
+              name: "action",
+              message: `${host} への接続を許可しますか？`,
+              choices: [
+                { name: "許可 (今回のセッションのみ)", value: "once" },
+                { name: "許可 (allowlist に保存して常に)", value: "always" },
+                { name: "拒否", value: "deny" },
+              ],
+            },
+          ]);
+          return action;
+        } catch {
+          return "deny";
+        }
+      },
     });
   }
 
@@ -3171,8 +3223,10 @@ export class REPL {
             } else {
               console.log(`  実効: ${chalk.yellow("OFF")}`);
             }
+            const allow = this.config.security.processSandbox?.allowedHosts ?? [...DEFAULT_ALLOWED_DOMAINS];
+            console.log(chalk.dim(`  ネット allowlist (${allow.length}件): ${allow.join(", ") || "(なし)"}`));
           }
-          console.log(chalk.dim("  使用例: /sandbox on | off | status"));
+          console.log(chalk.dim("  使用例: /sandbox on | off | allow <domain> | deny <domain> | status"));
         };
 
         switch (sub) {
@@ -3224,8 +3278,35 @@ export class REPL {
             }
             break;
           }
+          case "allow": {
+            const d = args[1]?.trim();
+            if (!d) {
+              console.log(chalk.yellow("  使用方法: /sandbox allow <domain>  (例: /sandbox allow example.com / *.example.com)"));
+              break;
+            }
+            const ps = this.config.security.processSandbox ?? { enabled: false, level: "none" as const };
+            const hosts = addDomain(ps.allowedHosts ?? [...DEFAULT_ALLOWED_DOMAINS], d);
+            this.config.security.processSandbox = { ...ps, allowedHosts: hosts };
+            saveConfig(this.config);
+            console.log(chalk.dim(`  ネット allowlist に追加: ${d} (計 ${hosts.length}件)`));
+            break;
+          }
+          case "deny": {
+            const d = args[1]?.trim();
+            if (!d) {
+              console.log(chalk.yellow("  使用方法: /sandbox deny <domain>"));
+              break;
+            }
+            const ps = this.config.security.processSandbox ?? { enabled: false, level: "none" as const };
+            const cur = ps.allowedHosts ?? [...DEFAULT_ALLOWED_DOMAINS];
+            const hosts = cur.filter((h) => h.trim().toLowerCase() !== d.toLowerCase());
+            this.config.security.processSandbox = { ...ps, allowedHosts: hosts };
+            saveConfig(this.config);
+            console.log(chalk.dim(`  ネット allowlist から削除: ${d} (残り ${hosts.length}件)`));
+            break;
+          }
           default:
-            console.log(chalk.dim("  使用方法: /sandbox [status | on [fs|network|full] | off]  (既定 on=fs: 書込制限・ネット許可)"));
+            console.log(chalk.dim("  使用方法: /sandbox [status | on [fs|network|full] | off | allow <domain> | deny <domain>]"));
         }
         break;
       }

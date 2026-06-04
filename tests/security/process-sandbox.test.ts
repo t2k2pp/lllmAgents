@@ -54,6 +54,14 @@ describe("buildSeatbeltProfile", () => {
       expect(p).toContain("(allow file-read*)");
     }
   });
+  it("fs + proxyPort はネットを localhost:port のみに制限 (allow network* を出さない)", () => {
+    const p = buildSeatbeltProfile(["/work"], "fs", [], 54321);
+    expect(p).toContain(`(allow network-outbound (remote ip "localhost:54321"))`);
+    expect(p).not.toContain("(allow network*)");
+  });
+  it("fs + proxyPort なしは従来どおり全ネット許可", () => {
+    expect(buildSeatbeltProfile(["/work"], "fs")).toContain("(allow network*)");
+  });
   it("機密ディレクトリは read を deny し、 allow file-read* より後に置く (last-match-wins)", () => {
     const p = buildSeatbeltProfile(["/work"], "fs", ["/home/u/.aws"]);
     expect(p).toContain(`(deny file-read* (subpath "/home/u/.aws"))`);

@@ -2,8 +2,9 @@ import { spawn, execFileSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { isWindows } from "../../utils/platform.js";
+import { isWindows, isMacOS } from "../../utils/platform.js";
 import { ProcessSandbox } from "../../security/process-sandbox.js";
+import { getSandboxProxy } from "../../security/sandbox-proxy.js";
 import { loadConfig } from "../../config/config-manager.js";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
 
@@ -179,6 +180,8 @@ export const bashTool: BashToolHandler = {
     let shell: string;
     let shellArgs: string[];
     let cleanup: (() => void) | undefined;
+    // Phase 2b-1: macOS + fs レベルで在プロセスプロキシ経由のネット allowlist を強制する際の port
+    let proxyPort: number | undefined;
 
     if (isWindows) {
       // Windows ネイティブ: git bash (無ければ cmd.exe)。 OS レベルの封じ込めは無し。
@@ -204,7 +207,17 @@ export const bashTool: BashToolHandler = {
           path.join(os.homedir(), ".localllm"),
           ...config.security.allowedDirectories,
         ];
-        const wrapped = sandbox.wrapCommand(command, allowedWriteDirs);
+        // Phase 2b-1: macOS + fs レベルなら在プロセスプロキシを起動し、 ネットを
+        // localhost:proxyPort 経由（= allowlist 強制）に閉じる。 Linux/WSL2 は 2b-2 で対応。
+        const proxy = getSandboxProxy();
+        if (isMacOS && proxy && sandbox.getEffectiveLevel() === "fs") {
+          try {
+            proxyPort = await proxy.ensureStarted();
+          } catch {
+            proxyPort = undefined; // 起動失敗時は従来の fs（ネット許可）にフォールバック
+          }
+        }
+        const wrapped = sandbox.wrapCommand(command, allowedWriteDirs, proxyPort);
         shell = wrapped.shell;
         shellArgs = wrapped.args;
         cleanup = wrapped.cleanup;
@@ -226,9 +239,18 @@ export const bashTool: BashToolHandler = {
       };
 
       const startMs = Date.now();
+      // Phase 2b-1: プロキシ経由にする場合は子プロセスへ HTTP(S)_PROXY を注入
+      const childEnv: NodeJS.ProcessEnv = { ...process.env };
+      if (proxyPort) {
+        const proxyUrl = `http://127.0.0.1:${proxyPort}`;
+        childEnv.HTTP_PROXY = proxyUrl;
+        childEnv.HTTPS_PROXY = proxyUrl;
+        childEnv.http_proxy = proxyUrl;
+        childEnv.https_proxy = proxyUrl;
+      }
       const proc = spawn(shell, shellArgs, {
         cwd: process.cwd(),
-        env: { ...process.env },
+        env: childEnv,
         stdio: ["ignore", "pipe", "pipe"],
       });
       currentProcess = proc;

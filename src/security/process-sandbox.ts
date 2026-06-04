@@ -116,6 +116,7 @@ export function buildSeatbeltProfile(
   writeDirs: string[],
   level: ProcessSandboxLevel,
   denyReadDirs: string[] = [],
+  proxyPort?: number,
 ): string {
   const lines: string[] = [
     "(version 1)",
@@ -144,9 +145,15 @@ export function buildSeatbeltProfile(
     lines.push(`(deny file-read* (subpath "${dir}"))`);
   }
 
-  // ネットワーク: fs レベルのみ許可。 network/full は遮断（deny default のまま）
+  // ネットワーク: fs レベルのみ許可。 network/full は遮断（deny default のまま）。
+  // proxyPort 指定時（Phase 2b）は localhost:port（= 在プロセスプロキシ）への outbound だけ許可し、
+  // 直接接続を塞ぐ。 プロキシがドメイン allowlist を強制する。
   if (level === "fs") {
-    lines.push("(allow network*)");
+    if (proxyPort) {
+      lines.push(`(allow network-outbound (remote ip "localhost:${proxyPort}"))`);
+    } else {
+      lines.push("(allow network*)");
+    }
   }
 
   return lines.join("\n") + "\n";
@@ -220,7 +227,7 @@ export class ProcessSandbox {
    * @param command  実行するシェルコマンド文字列
    * @param allowedWriteDirs  書き込みを許可するディレクトリ
    */
-  wrapCommand(command: string, allowedWriteDirs: string[]): WrappedCommand {
+  wrapCommand(command: string, allowedWriteDirs: string[], proxyPort?: number): WrappedCommand {
     const effective = this.getEffectiveLevel();
 
     if (effective === "none") {
@@ -232,7 +239,7 @@ export class ProcessSandbox {
     }
 
     if (this.plat === "darwin") {
-      return this.wrapMacOS(command, allowedWriteDirs, effective);
+      return this.wrapMacOS(command, allowedWriteDirs, effective, proxyPort);
     }
 
     return { shell: "/bin/sh", args: ["-c", command] };
@@ -269,10 +276,11 @@ export class ProcessSandbox {
   private wrapMacOS(
     command: string,
     writeDirs: string[],
-    level: ProcessSandboxLevel
+    level: ProcessSandboxLevel,
+    proxyPort?: number
   ): WrappedCommand {
     const masks = defaultSecretDenyDirs(homedir()).filter((d) => existsSync(d));
-    const profile = buildSeatbeltProfile(writeDirs, level, masks);
+    const profile = buildSeatbeltProfile(writeDirs, level, masks, proxyPort);
 
     // 一時プロファイルファイルを作成
     const profilePath = join(tmpdir(), `lllm-sandbox-${process.pid}-${Date.now()}.sb`);

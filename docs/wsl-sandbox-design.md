@@ -118,7 +118,15 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - **コマンド**：`/sandbox allow <domain>` / `/sandbox deny <domain>`、`status` で現在の allowlist 表示。
 - 非 TTY/パイプ：対話確認できないため「未許可はブロック（fail-closed）」にフォールバック。
 
-実装順：土台（allowlist 照合＋既定リスト＝実装済み）→ 2b-1（在プロセス CONNECT プロキシ＋macOS Seatbelt 配線＋対話確認＋`/sandbox allow`）→ 2b-2（Linux/WSL2 の socat ブリッジ）。
+実装順：土台（allowlist 照合＋既定リスト＝実装済み）→ **2b-1（実装済み）** → 2b-2（Linux/WSL2 の socat ブリッジ・未着手）。
+
+**2b-1 実装メモ（macOS）**：
+- `src/security/sandbox-proxy.ts`：在プロセス `http.Server`。CONNECT はホスト名で `authorize` → 許可ならトンネル（TLS 素通し）/ 拒否は 403。未許可は `onUnknownDomain` で対話確認、同一ホストの並行確認は集約、once はセッション許可・always は永続。`configureSandboxProxy`/`getSandboxProxy` シングルトン。
+- `bash.ts`：macOS かつ実効 `fs` かつプロキシ構成済みなら `ensureStarted()` でポート取得 →子プロセスへ `HTTP(S)_PROXY` 注入。
+- `process-sandbox.ts`：`buildSeatbeltProfile(..., proxyPort)` ＝ fs で proxyPort 指定時は `(allow network-outbound (remote ip "localhost:port"))` のみ許可し直接接続を遮断（proxyPort 無しは従来どおり `(allow network*)`）。
+- `repl.ts`：`configureSandboxProxy` を構成（allowlist=config、確認=inquirer・非TTY は deny、always で config 保存）。`/sandbox allow|deny <domain>`、`status` に allowlist 表示。
+- テスト：`net-allowlist`（照合）、`sandbox-proxy`（authorize: allow/deny/once/always/並行集約/ワイルドカード）、`process-sandbox`（fs+proxyPort の Seatbelt）。
+- **未検証（手動 TTY / macOS 実機）**：実際のプロキシ通信・Seatbelt の localhost 限定が効くか・対話確認 UX・spinner との競合。
 
 ## §8 既知の限界・トレードオフ
 
@@ -150,5 +158,6 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 | 〜 | route-to-WSL（実装→実機検証→退役） | 完了（タグ `wsl-phase1-routing` で保全） |
 | 1 | Windows 2種モデル＋`/sandbox` 統一コマンド（検出案内含む） | ✅ 実装済み（REPL UX は手動 TTY 検証要） |
 | 2a | レベル `"fs"`（FS 書込スコープ・ネット許可）追加。`/sandbox on` 既定を fs に＝§7 | ✅ 実装済み（純粋関数をユニットテスト） |
-| 2b | ネットを allowlist（プロキシ）化。`@anthropic-ai/sandbox-runtime` 採用検討＝§7 | 未着手 |
+| 2b-1 | macOS: 在プロセス CONNECT プロキシ＋Seatbelt＋対話確認＋`/sandbox allow\|deny`＝§7.1 | ✅ 実装済み（macOS 実機/TTY 検証要） |
+| 2b-2 | Linux/WSL2: socat ブリッジで bwrap 名前空間からプロキシへ＝§7.1 | 未着手 |
 | 3 | 封じ込め時のみ autorun が bash 確認を省く連動（確認削減の実体） | 未着手（Phase 2b 後） |

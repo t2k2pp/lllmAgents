@@ -121,6 +121,11 @@ export interface ProcessSandboxConfig {
    * - "full"    : ネットワーク + ファイルシステム隔離（Linux: bwrap, macOS: sandbox-exec）
    */
   level: "none" | "fs" | "network" | "full";
+  /**
+   * ネット allowlist（Phase 2b）。 fs レベルでプロキシ経由通信を許可するドメイン群。
+   * 未指定なら既定リスト（npm/pip/GitHub 等）。 `*.example.com` ワイルドカード可。
+   */
+  allowedHosts?: string[];
 }
 
 export interface SecurityConfig {
