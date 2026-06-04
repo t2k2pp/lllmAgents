@@ -46,7 +46,7 @@ import { saveConfig } from "../config/config-manager.js";
 import { isWindows, isMacOS } from "../utils/platform.js";
 import { detectWsl } from "../security/wsl.js";
 import { configureSandboxProxy, getSandboxProxy } from "../security/sandbox-proxy.js";
-import { addDomain, removeDomain, resolveAllowedDomains } from "../security/net-allowlist.js";
+import { addDomain, removeDomain, resolveAllowedDomains, domainAllowed } from "../security/net-allowlist.js";
 import inquirer from "inquirer";
 import { ProcessSandbox } from "../security/process-sandbox.js";
 import { resetProcessSandboxCache } from "../tools/definitions/bash.js";
@@ -3330,6 +3330,14 @@ export class REPL {
             saveConfig(this.config);
             getSandboxProxy()?.revoke(d); // セッション once 許可も取り消す（残存通過を防ぐ）
             console.log(chalk.dim(`  ネット allowlist から削除: ${d} (残り ${hosts.length}件)`));
+            // 完全一致を消しても残存ワイルドカード(例 *.githubusercontent.com)でまだ通る場合は誤認防止に警告
+            if (domainAllowed(d, hosts)) {
+              console.log(
+                chalk.yellow(
+                  `  ⚠ ${d} は残りの allowlist（ワイルドカード等）でまだ許可されています。 完全に塞ぐには該当のワイルドカード規則も /sandbox deny してください。`,
+                ),
+              );
+            }
             break;
           }
           default:

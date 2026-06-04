@@ -58,7 +58,7 @@ export function normalizeHost(hostport: string): string {
     if (colons === 1) h = h.replace(/:\d+$/, "");
     host = h;
   }
-  host = host.toLowerCase().replace(/\.$/, ""); // 末尾ドット(FQDN)を除去
+  host = host.toLowerCase().replace(/\.+$/, ""); // 末尾ドット(FQDN・複数も)を除去
 
   // 非ASCII を含むホスト名は punycode へ正規化（IP リテラルは除く）
   if (isIP(host) === 0 && hasNonAscii(host)) {

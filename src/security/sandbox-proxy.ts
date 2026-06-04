@@ -39,31 +39,78 @@ export function parseConnectPort(target: string): number {
   return 443; // host 単独 / 裸 IPv6（多コロン）は既定 443
 }
 
+/** IPv4 オクテットが内部/予約レンジか（CGNAT 100.64/10 含む）。 */
+function isBlockedV4(o: number[]): boolean {
+  if (o.length !== 4 || o.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return true;
+  const [a, b] = o;
+  if (a === 0 || a === 127) return true; // this-host / loopback
+  if (a === 10) return true; // RFC1918
+  if (a === 172 && b >= 16 && b <= 31) return true; // RFC1918
+  if (a === 192 && b === 168) return true; // RFC1918
+  if (a === 169 && b === 254) return true; // link-local + メタデータ 169.254.169.254
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64/10
+  if (a >= 224) return true; // multicast / reserved
+  return false;
+}
+
+/** IPv6 文字列を 128bit BigInt へ（:: 展開・末尾ドット v4 対応）。 不正は null。 */
+function ipv6ToBigInt(v: string): bigint | null {
+  let s = v;
+  let tailV4: bigint | null = null;
+  const lastColon = s.lastIndexOf(":");
+  if (lastColon >= 0 && s.slice(lastColon + 1).includes(".")) {
+    const o = s.slice(lastColon + 1).split(".").map(Number);
+    if (o.length !== 4 || o.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return null;
+    tailV4 = (BigInt(o[0]) << 24n) | (BigInt(o[1]) << 16n) | (BigInt(o[2]) << 8n) | BigInt(o[3]);
+    s = s.slice(0, lastColon + 1) + "0:0"; // 末尾2グループを 0 placeholder に（後で tailV4 を OR）
+  }
+  const dbl = s.split("::");
+  if (dbl.length > 2) return null;
+  const head = dbl[0] ? dbl[0].split(":").filter((x) => x !== "") : [];
+  const tail = dbl.length === 2 && dbl[1] ? dbl[1].split(":").filter((x) => x !== "") : [];
+  let groups: string[];
+  if (dbl.length === 2) {
+    const missing = 8 - head.length - tail.length;
+    if (missing < 0) return null;
+    groups = [...head, ...Array(missing).fill("0"), ...tail];
+  } else {
+    groups = head;
+  }
+  if (groups.length !== 8) return null;
+  let val = 0n;
+  for (const g of groups) {
+    const n = parseInt(g || "0", 16);
+    if (Number.isNaN(n) || n < 0 || n > 0xffff) return null;
+    val = (val << 16n) | BigInt(n);
+  }
+  if (tailV4 !== null) val |= tailV4; // 末尾32bit を v4 で上書き（placeholder は 0）
+  return val;
+}
+
 /**
- * 接続先IPが内部/予約レンジ（loopback・link-local(メタデータ 169.254.169.254 含む)・RFC1918・ULA）か。
- * プロキシが「許可ドメインに見せかけて内部サービスへ中継する」SSRF 踏み台になるのを防ぐ。
+ * 接続先IPが内部/予約レンジ（loopback・link-local＝メタデータ・RFC1918・CGNAT・ULA・site-local・
+ * NAT64・v4-mapped 内部）か。 プロキシが「許可ドメインに見せかけ内部サービスへ中継」する SSRF
+ * 踏み台になるのを防ぐ。 展開表記(0:0:..:1)・16進 v4-mapped・10進/8進/16進 IPv4 も漏らさない。
  */
 export function isBlockedAddress(ip: string): boolean {
-  const v = ip.replace(/%.*$/, ""); // zone id を除去
+  const v = ip.replace(/%.*$/, "").replace(/^\[|\]$/g, ""); // zone id・ブラケットを除去
   const kind = net.isIP(v);
-  if (kind === 4) {
-    const o = v.split(".").map(Number);
-    if (o.length !== 4 || o.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return true;
-    const [a, b] = o;
-    if (a === 0 || a === 127) return true; // this-host / loopback
-    if (a === 10) return true; // RFC1918
-    if (a === 172 && b >= 16 && b <= 31) return true; // RFC1918
-    if (a === 192 && b === 168) return true; // RFC1918
-    if (a === 169 && b === 254) return true; // link-local + メタデータ
-    if (a >= 224) return true; // multicast / reserved
-    return false;
-  }
+  if (kind === 4) return isBlockedV4(v.split(".").map(Number));
   if (kind === 6) {
-    const low = v.toLowerCase();
-    if (low === "::1" || low === "::") return true; // loopback / unspecified
-    if (low.startsWith("fe80")) return true; // link-local
-    if (low.startsWith("fc") || low.startsWith("fd")) return true; // ULA
-    if (low.startsWith("::ffff:")) return isBlockedAddress(low.slice(7)); // v4-mapped
+    const val = ipv6ToBigInt(v.toLowerCase());
+    if (val === null) return true; // パース不能は安全側で遮断
+    if (val === 0n || val === 1n) return true; // unspecified / loopback (展開表記も網羅)
+    const h = val >> 112n; // 先頭16bit
+    if ((h & 0xffc0n) === 0xfe80n) return true; // link-local fe80::/10
+    if ((h & 0xfe00n) === 0xfc00n) return true; // ULA fc00::/7
+    if ((h & 0xffc0n) === 0xfec0n) return true; // site-local(廃止) fec0::/10
+    const top96 = val >> 32n;
+    const toV4 = (): number[] => {
+      const lo = Number(val & 0xffffffffn);
+      return [(lo >>> 24) & 255, (lo >>> 16) & 255, (lo >>> 8) & 255, lo & 255];
+    };
+    if (top96 === 0xffffn) return isBlockedV4(toV4()); // ::ffff:0:0/96 v4-mapped
+    if (top96 === 0x0064ff9b0000000000000000n) return isBlockedV4(toV4()); // NAT64 64:ff9b::/96
     return false;
   }
   return true; // 解決不能な値は安全側で遮断
@@ -74,13 +121,31 @@ export function isBlockedAddress(ip: string): boolean {
  * ホスト名は解決済みIPを「ピン留め」して返すことで、 authorize 後に別IPへ向く DNS rebinding を防ぐ。
  */
 async function resolvePinnedIp(host: string): Promise<string> {
-  if (net.isIP(host)) {
-    if (isBlockedAddress(host)) throw new Error(`blocked internal address: ${host}`);
-    return host;
+  const h = host.replace(/^\[|\]$/g, ""); // IPv6 リテラルのブラケットを除去
+  if (net.isIP(h)) {
+    if (isBlockedAddress(h)) throw new Error(`blocked internal address: ${h}`);
+    return h;
   }
-  const { address } = await dns.lookup(host); // 先頭の解決結果を採用
-  if (isBlockedAddress(address)) throw new Error(`host resolves to internal address: ${host} -> ${address}`);
+  const { address } = await dns.lookup(h); // 先頭の解決結果を採用
+  if (isBlockedAddress(address)) throw new Error(`host resolves to internal address: ${h} -> ${address}`);
   return address;
+}
+
+/** プロキシ転送時に除去すべき hop-by-hop ヘッダ（RFC 7230 §6.1 + プロキシ固有）。 */
+const HOP_BY_HOP_HEADERS = [
+  "connection",
+  "proxy-connection",
+  "proxy-authorization",
+  "keep-alive",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+];
+function stripHopByHop(headers: http.IncomingHttpHeaders): http.IncomingHttpHeaders {
+  const out: http.IncomingHttpHeaders = { ...headers };
+  for (const k of HOP_BY_HOP_HEADERS) delete out[k];
+  return out;
 }
 
 /** トンネル確立前の上流エラー時にクライアントへ 502 を返して閉じる。 */
@@ -302,7 +367,8 @@ export class SandboxProxy {
             path: url.pathname + url.search,
             method: req.method,
             // Host は元のホスト名を維持（vhost 正配送）。 接続先IPはピン留め済み。
-            headers: { ...req.headers, host: url.host },
+            // hop-by-hop ヘッダ（Proxy-Authorization 等）は上流へ漏らさない。
+            headers: { ...stripHopByHop(req.headers), host: url.host },
             timeout: SOCKET_TIMEOUT_MS,
           },
           (pr) => {

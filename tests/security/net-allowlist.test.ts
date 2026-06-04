@@ -19,8 +19,9 @@ describe("normalizeHost", () => {
     expect(normalizeHost("evil.com@github.com")).toBe("github.com");
     expect(normalizeHost("http://user:pass@example.com:8080/x")).toBe("example.com");
   });
-  it("末尾ドット(FQDN)を除去", () => {
+  it("末尾ドット(FQDN・複数)を除去", () => {
     expect(normalizeHost("github.com.")).toBe("github.com");
+    expect(normalizeHost("github.com..")).toBe("github.com");
   });
   it("IPv6: ブラケットを剥がし、 裸の多コロン表記を壊さない", () => {
     expect(normalizeHost("[::1]:443")).toBe("::1");

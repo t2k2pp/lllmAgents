@@ -38,6 +38,27 @@ describe("isBlockedAddress (SSRF/内部レンジ遮断)", () => {
     expect(isBlockedAddress("::ffff:127.0.0.1")).toBe(true);
     expect(isBlockedAddress("2606:4700:4700::1111")).toBe(false);
   });
+  it("IPv6 展開表記の loopback/unspecified も遮断 (文字列一致でなく数値判定)", () => {
+    expect(isBlockedAddress("0:0:0:0:0:0:0:1")).toBe(true);
+    expect(isBlockedAddress("0000:0000:0000:0000:0000:0000:0000:0001")).toBe(true);
+    expect(isBlockedAddress("::")).toBe(true);
+    expect(isBlockedAddress("0:0:0:0:0:0:0:0")).toBe(true);
+  });
+  it("16進 v4-mapped・NAT64・site-local も内部なら遮断", () => {
+    expect(isBlockedAddress("::ffff:7f00:1")).toBe(true); // v4-mapped 127.0.0.1 (16進)
+    expect(isBlockedAddress("64:ff9b::7f00:1")).toBe(true); // NAT64 → 127.0.0.1
+    expect(isBlockedAddress("fec0::1")).toBe(true); // site-local
+  });
+  it("CGNAT 100.64/10 を遮断、 100.63/100.128 は許可", () => {
+    expect(isBlockedAddress("100.64.0.1")).toBe(true);
+    expect(isBlockedAddress("100.127.255.1")).toBe(true);
+    expect(isBlockedAddress("100.63.0.1")).toBe(false);
+    expect(isBlockedAddress("100.128.0.1")).toBe(false);
+  });
+  it("ブラケット付き IPv6 リテラルも判定できる", () => {
+    expect(isBlockedAddress("[::1]")).toBe(true);
+    expect(isBlockedAddress("[2606:4700:4700::1111]")).toBe(false);
+  });
   it("解決不能な値は安全側で遮断", () => {
     expect(isBlockedAddress("not-an-ip")).toBe(true);
   });
