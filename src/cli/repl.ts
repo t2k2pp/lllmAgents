@@ -44,7 +44,7 @@ import { AzureOpenAIProvider } from "../providers/azure-openai.js";
 import { AzureClaudeProvider } from "../providers/azure-claude.js";
 import { saveConfig } from "../config/config-manager.js";
 import { isWindows, isMacOS } from "../utils/platform.js";
-import { detectWsl, resolveWslRouting } from "../security/wsl.js";
+import { detectWsl } from "../security/wsl.js";
 import { ProcessSandbox } from "../security/process-sandbox.js";
 import { resetProcessSandboxCache } from "../tools/definitions/bash.js";
 import { runLocalLLMSetup, connectAndListModels } from "../config/setup-wizard.js";
@@ -3143,30 +3143,29 @@ export class REPL {
 
       case "/sandbox": {
         // bash の「ハード封じ込め」を OS 横断で操作する統一コマンド。
-        // 機構は OS で異なる (Windows→WSL ルーティング / Mac・Linux→processSandbox) が、
-        // ユーザーは OS を意識せず同じ /sandbox on|off|status で扱える。
-        // docs/wsl-sandbox-design.md §4.5・§5。
+        // Windows を 2 種に整理 (docs/wsl-sandbox-design.md §3・§4.6):
+        //   - ネイティブ Windows: OS 封じ込めは無し (git bash 実行)。封じ込めが欲しければ
+        //     WSL2 の中で本アプリを起動する → platform=linux となり下記 processSandbox が効く。
+        //   - Mac / Linux / WSL2 内: processSandbox (sandbox-exec / bwrap) を on/off。
         const sub = args[0]?.trim() ?? "status";
+        const insideWsl = !!process.env.WSL_DISTRO_NAME;
 
         const printStatus = () => {
-          console.log(chalk.dim(`  bash 封じ込め (sandbox)  —  プラットフォーム: ${process.platform}`));
+          console.log(chalk.dim(`  bash 封じ込め (sandbox)  —  プラットフォーム: ${process.platform}${insideWsl ? ` (WSL2: ${process.env.WSL_DISTRO_NAME})` : ""}`));
           if (isWindows) {
             const det = detectWsl();
-            const routing = resolveWslRouting(this.config.security.wsl, det, true);
-            const enabledVal = this.config.security.wsl?.enabled ?? "(未設定=OFF)";
-            console.log(chalk.dim(`  方式: WSL ルーティング  /  設定 enabled=${enabledVal}`));
-            console.log(chalk.dim(`  WSL 検出: ${det.available ? `あり (${det.defaultDistro ?? "?"}, ${det.wsl2 ? "WSL2" : "WSL1"})` : "なし"}`));
-            if (routing.use) {
-              console.log(`  実効: ${chalk.green("ON")} — bash は WSL 経由 (${routing.distro ?? "既定 distro"})`);
-              console.log(chalk.dim("  封じ込めレベル: Phase 1 のため隔離は未適用 (実行先を WSL に移すのみ)"));
+            console.log(chalk.dim("  方式: Windows ネイティブ (git bash) — OS レベルの封じ込めは非対応"));
+            console.log(`  実効: ${chalk.yellow("OFF")} — bash は git bash で実行 (封じ込め無し)`);
+            if (det.available) {
+              console.log(chalk.dim(`  💡 WSL2 検出 (${det.defaultDistro ?? "?"}${det.wsl2 ? "" : " / WSL1"})。 封じ込めには WSL2 の中で本アプリを起動 → /sandbox on で processSandbox(bwrap) が効きます。`));
             } else {
-              console.log(`  実効: ${chalk.yellow("OFF")} — 従来の git bash (${routing.reason ?? ""})`);
+              console.log(chalk.dim("  💡 封じ込めには WSL2 が必要です。 WSL2 を導入し、 その中で本アプリを起動してください。"));
             }
           } else {
             const cfg = this.config.security.processSandbox ?? { enabled: false, level: "none" as const };
             const sb = new ProcessSandbox(cfg);
             const eff = sb.getAvailability().effectiveLevel;
-            console.log(chalk.dim(`  方式: processSandbox (${isMacOS ? "sandbox-exec" : "bwrap/unshare"})  /  設定 enabled=${cfg.enabled}, level=${cfg.level}`));
+            console.log(chalk.dim(`  方式: processSandbox (${isMacOS ? "sandbox-exec" : insideWsl ? "bwrap (WSL2)" : "bwrap/unshare"})  /  設定 enabled=${cfg.enabled}, level=${cfg.level}`));
             if (sb.isActive()) {
               console.log(`  実効: ${chalk.green("ON")} — ${eff}${eff !== "none" ? " (ネットワーク遮断あり)" : ""}`);
             } else {
@@ -3182,16 +3181,12 @@ export class REPL {
             break;
           case "on": {
             if (isWindows) {
-              this.config.security.wsl = { ...(this.config.security.wsl ?? {}), enabled: "auto" };
-              saveConfig(this.config);
               const det = detectWsl();
-              console.log(chalk.dim("  封じ込め ON (config 保存)。 Windows: bash を WSL 経由で実行します (次の bash から即反映)。"));
-              if (!det.available) {
-                console.log(chalk.yellow("  ⚠ WSL が未検出のため、 実際には従来の git bash のままです。"));
-              } else if (!det.wsl2) {
-                console.log(chalk.yellow("  ⚠ 既定 distro が WSL1 のため auto では乗りません。 WSL2 化するか config で enabled:true に。"));
+              console.log(chalk.yellow("  Windows ネイティブには OS 封じ込めが無いため、 ここで ON にするものはありません (bash は git bash で実行)。"));
+              if (det.available) {
+                console.log(chalk.dim(`  封じ込めるには WSL2 (${det.defaultDistro ?? "検出済み"}) の中で本アプリを起動し、 そこで /sandbox on してください。`));
               } else {
-                console.log(chalk.yellow(`  ⚠ bash は WSL (${det.defaultDistro}) 側で動きます。 WSL 側に node/python 等の開発ツールがある前提です (無いと見つかりません)。`));
+                console.log(chalk.dim("  封じ込めるには WSL2 を導入し、 その中で本アプリを起動してください。"));
               }
             } else {
               const prev = this.config.security.processSandbox;
@@ -3202,18 +3197,16 @@ export class REPL {
               const eff = new ProcessSandbox(this.config.security.processSandbox).getAvailability().effectiveLevel;
               console.log(chalk.dim(`  封じ込め ON (config 保存、 level=${level})。 bash を ${isMacOS ? "sandbox-exec" : "bwrap/unshare"} で隔離します (次の bash から即反映)。`));
               if (eff === "none") {
-                console.log(chalk.yellow("  ⚠ 隔離ツールが見つからず実効レベルは none です (Linux: bwrap/unshare, macOS: sandbox-exec が必要)。"));
+                console.log(chalk.yellow("  ⚠ 隔離ツールが見つからず実効レベルは none です (Linux/WSL2: bwrap, macOS: sandbox-exec が必要)。"));
               } else {
-                console.log(chalk.yellow("  ⚠ ネットワークが遮断されます。 npm install / pip / CDN 取得などネットワークを使う作業は通らなくなります。"));
+                console.log(chalk.yellow("  ⚠ 現状の実装ではネットワークが遮断されます。 npm install / pip / CDN 取得などは通りません (FS制限・ネット許可の2軸化は今後の課題)。"));
               }
             }
             break;
           }
           case "off": {
             if (isWindows) {
-              this.config.security.wsl = { ...(this.config.security.wsl ?? {}), enabled: false };
-              saveConfig(this.config);
-              console.log(chalk.dim("  封じ込め OFF (config 保存)。 bash は従来の git bash で実行します。"));
+              console.log(chalk.dim("  Windows ネイティブでは封じ込めは元々動いていません (git bash 実行)。 WSL2 の中で起動している時のみ /sandbox off が有効です。"));
             } else {
               const lvl = this.config.security.processSandbox?.level ?? "none";
               this.config.security.processSandbox = { enabled: false, level: lvl };

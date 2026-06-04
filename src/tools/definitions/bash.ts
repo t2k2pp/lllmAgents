@@ -4,7 +4,6 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { isWindows } from "../../utils/platform.js";
 import { ProcessSandbox } from "../../security/process-sandbox.js";
-import { detectWsl, resolveWslRouting, buildWslInvocation } from "../../security/wsl.js";
 import { loadConfig } from "../../config/config-manager.js";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
 
@@ -182,26 +181,19 @@ export const bashTool: BashToolHandler = {
     let cleanup: (() => void) | undefined;
 
     if (isWindows) {
-      // WSL 経路（docs/wsl-sandbox-design.md Phase 1）: 有効かつ検出できれば WSL 内で実行。
-      // WSL の中は Linux なので、 将来 (Phase 2) はそこで既存 Linux サンドボックスを再利用する。
-      const wslConfig = loadConfig().security.wsl;
-      const routing = resolveWslRouting(wslConfig, detectWsl(), true);
-      if (routing.use) {
-        const inv = buildWslInvocation(routing, command, process.cwd());
-        shell = inv.shell;
-        shellArgs = inv.args;
+      // Windows ネイティブ: git bash (無ければ cmd.exe)。 OS レベルの封じ込めは無し。
+      // 封じ込めが必要な場合は WSL2 の中で本アプリを起動する。 その時は platform=linux と
+      // なり、 下の processSandbox 経路がそのまま効く (docs/wsl-sandbox-design.md §3・§4.6)。
+      const bash = getGitBash();
+      if (bash) {
+        // git bash を使用（Unix構文対応）
+        // Windowsパスのバックスラッシュをスラッシュに変換（bash のエスケープ解釈を防止）
+        shell = bash;
+        shellArgs = ["-c", convertWindowsPaths(command)];
       } else {
-        const bash = getGitBash();
-        if (bash) {
-          // git bash を使用（Unix構文対応）
-          // Windowsパスのバックスラッシュをスラッシュに変換（bash のエスケープ解釈を防止）
-          shell = bash;
-          shellArgs = ["-c", convertWindowsPaths(command)];
-        } else {
-          // git bash が見つからない場合は cmd.exe フォールバック
-          shell = "cmd.exe";
-          shellArgs = ["/c", command];
-        }
+        // git bash が見つからない場合は cmd.exe フォールバック
+        shell = "cmd.exe";
+        shellArgs = ["/c", command];
       }
     } else {
       const sandbox = getProcessSandbox();

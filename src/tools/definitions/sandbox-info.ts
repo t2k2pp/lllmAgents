@@ -4,7 +4,7 @@ import type { ToolHandler, ToolResult } from "../tool-registry.js";
 import { loadConfig } from "../../config/config-manager.js";
 import { ProcessSandbox } from "../../security/process-sandbox.js";
 import { isWindows } from "../../utils/platform.js";
-import { detectWsl, resolveWslRouting } from "../../security/wsl.js";
+import { detectWsl } from "../../security/wsl.js";
 
 export const sandboxInfoTool: ToolHandler = {
   name: "sandbox_info",
@@ -51,19 +51,19 @@ export const sandboxInfoTool: ToolHandler = {
       `- プラットフォーム: ${avail.platform}\n` +
       `- ツール状態: ${toolStatus}\n`;
 
-    // Windows: bash を WSL 経由で実行しているか（docs/wsl-sandbox-design.md Phase 1）
+    // Windows ネイティブ: OS 封じ込めは非対応。 封じ込めが必要なら WSL2 の中でアプリを
+    // 起動する (その時は platform=linux となり上記 processSandbox が効く)。
+    // docs/wsl-sandbox-design.md §3・§4.6。
     let wslSection = "";
     if (isWindows) {
       const det = detectWsl();
-      const routing = resolveWslRouting(config.security.wsl, det, true);
       wslSection =
-        `\n## WSL 経由実行 (bash ツール / Windows)\n` +
-        `- WSL 検出: ${det.available ? `あり (default distro: ${det.defaultDistro ?? "不明"}, ${det.wsl2 ? "WSL2" : "WSL1"})` : "なし"}\n` +
-        `- bash の実行先: ${routing.use ? `WSL 経由${routing.distro ? ` (${routing.distro})` : ""}` : `従来経路 (git bash / cmd.exe)${routing.reason ? ` — ${routing.reason}` : ""}`}\n` +
-        (det.available && !routing.use
-          ? `  （有効化は opt-in: 設定 security.wsl.enabled を "auto" か true に。WSL 側に開発ツールがある前提）\n`
-          : "") +
-        `- 封じ込め: ${routing.use ? "Phase 1 のため隔離は未適用（Phase 2 で WSL 内サンドボックス連携予定）" : "なし（信頼ベース）"}\n`;
+        `\n## Windows ネイティブの封じ込め (bash ツール)\n` +
+        `- OS レベルの封じ込め: 非対応 (bash は git bash で実行)\n` +
+        (det.available
+          ? `- WSL2 検出: あり (${det.defaultDistro ?? "不明"}${det.wsl2 ? "" : " / WSL1"})\n` +
+            `  → 封じ込めが必要なら WSL2 の中で本アプリを起動してください。 Linux として processSandbox (bwrap) が効きます。\n`
+          : `- WSL2 検出: なし\n  → 封じ込めには WSL2 を導入し、 その中で本アプリを起動してください。\n`);
     }
 
     const output =

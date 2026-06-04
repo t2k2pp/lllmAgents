@@ -86,8 +86,8 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/checkpoint restore", description: "指定番号のチェックポイントへ復元", needsArg: true },
   { command: "/checkpoint diff", description: "指定番号との差分サマリ", needsArg: true },
   { command: "/checkpoint clear", description: "今セッションのチェックポイント履歴を削除 (--all で全セッション)" },
-  { command: "/sandbox", description: "bash 封じ込めの状態 (OS 共通: Win→WSL / Mac・Linux→processSandbox)" },
-  { command: "/sandbox on", description: "bash 封じ込めを有効化 (OS に応じ WSL 経由 / OS サンドボックス)" },
+  { command: "/sandbox", description: "bash 封じ込めの状態 (Mac/Linux/WSL2内=processSandbox。Winネイティブは非対応→WSL2内起動を案内)" },
+  { command: "/sandbox on", description: "bash 封じ込めを有効化 (Mac/Linux/WSL2内のOSサンドボックス)" },
   { command: "/sandbox off", description: "bash 封じ込めを無効化" },
   // /cost (詳細表示として復活、 2026-06-01): /status は要約のみ、 詳細は /cost 配下に集約。
   // 設計: docs/cost-token-command-design.md

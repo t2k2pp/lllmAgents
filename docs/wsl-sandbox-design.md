@@ -1,175 +1,128 @@
-# WSL連携サンドボックス設計
+# bash 封じ込め設計（Windows 2種モデル）
 
-> ステータス: **Phase 1 実装・実機検証済み（2026-06-04）** / Phase 2・3 未着手 / 作成 2026-06-03
-> 関連: `docs/checkpoint-and-smoke-design.md`（封じ込めと可逆性の設計原則）、`src/security/process-sandbox.ts`、`src/security/permission-manager.ts`
+> ステータス: **設計確定（2026-06-04）** / `/sandbox` コマンド実装済み・route-to-WSL は退役
+> 復帰点タグ: `wsl-phase1-routing`（route-to-WSL が実機で動いた版。戻したくなったらここへ）
+> 関連: `src/security/process-sandbox.ts`、`src/security/wsl.ts`、`src/security/permission-manager.ts`、`docs/checkpoint-and-smoke-design.md`
 
 ## §1 背景・動機
 
-本質的な狙いは「仮想環境を作ること」ではなく、**エージェントにのびのび開発させたい＝許可確認を減らしたい**ことである。
+本質的な狙いは「仮想環境を作ること」ではなく、**エージェントにのびのび開発させたい＝許可確認を減らしたい**こと。確認を安全に減らす原理はひとつ：**封じ込めが強いほど、確認は安全に減らせる**（containment earns autonomy）。Claude Code のサンドボックスもこの設計（社内計測で確認プロンプト 84% 減）。
 
-確認を安全に減らす原理はひとつしかない：**封じ込めが強いほど、確認は安全に減らせる**（containment earns autonomy）。Claude Code のローカル CLI もこの設計で、サンドボックス内の bash は無確認・外に出ようとした時だけ確認する。
+封じ込めの土台（ハード層）の現状：
 
-現状を確認すると：
+| OS | ハード層の機構 | 現状 |
+|---|---|---|
+| Mac/Linux | `processSandbox`（sandbox-exec / bwrap） | 実装済み・既定 OFF |
+| Windows（ネイティブ） | — | **無い**（git bash 実行） |
 
-| 層 | 中身 | Mac/Linux | Windows |
-|---|---|---|---|
-| ソフト層 | autorun + パス・サンドボックス（`Sandbox`）。宣言されたパスを許可ディレクトリに限定 | ✅ | ✅ |
-| ハード層 | `processSandbox`（bwrap / sandbox-exec）。bash が実際に何をしても書込先・ネットをカーネルで封じ込める | ✅（既定オフ） | ❌ **存在しない** |
-
-ソフト層は「モデルが宣言したパス」しか見ない。`bash` で `npm install` や `curl | sh` を打てば、その中で何が起きるかは素通りする。つまり **Windows で autorun を広げる＝封じ込めではなく「作業フォルダ内だろう」という信頼に乗るだけ**。
-
-Mac/Linux はハード層が既にあるので、autorun を広げても封じ込めで裏打ちできる。**穴は Windows だけ。** そこで本設計は、Windows ユーザーが多くの場合すでに有効化している **WSL の中で、既存の Linux サンドボックス（bwrap/unshare）をそのまま再利用**し、Windows にハード層を与える。新規のサンドボックス実装はほぼ不要で、「bash の実行先を WSL に向ける配線」が主な作業になる。
-
-クラウド/リモート VM は本設計の対象外（明示的に除外）。
+穴は Windows。これをどう塞ぐかが本設計の主題。
 
 ## §2 現状の事実（実装調査）
 
-- `src/tools/definitions/bash.ts`：Windows では **git bash（`findGitBash`）→ 無ければ cmd.exe**。WSL は一切経由しない（コード内に WSL/wslpath/`/mnt/c` 処理ゼロ）。非 Windows は `processSandbox.isActive()` の時だけ `wrapCommand` でラップ。
-- `src/security/process-sandbox.ts`：`platform()` が `linux`→bwrap/unshare、`darwin`→sandbox-exec、**`win32`→ `none`（no-op）**。
-- `src/security/sandbox.ts`：`Sandbox.isPathAllowed` が file_*/glob/grep を許可ディレクトリ（cwd, `~/.localllm`, config.allowedDirectories）に限定。全 OS で有効。
-- `src/security/permission-manager.ts`：`autorun` は作業フォルダ内の非破壊操作を自動承認。`AUTORUN_DESTRUCTIVE_PATTERNS`（rm/rmdir/del/dd/git reset --hard 等）と CWD 外参照・広域再帰スキャンは依然ブロック/確認。
-- 設定型：`SecurityConfig.processSandbox?: { enabled, level: none|network|full }`（`src/config/types.ts`）。
+- `src/tools/definitions/bash.ts`：Windows は git bash（無ければ cmd.exe）。非 Windows は `processSandbox.isActive()` 時に `wrapCommand` でラップ。
+- `src/security/process-sandbox.ts`：linux→bwrap/unshare、darwin→sandbox-exec、win32→none。`allowedHosts?: string[]`（未使用）あり。
+- `src/security/sandbox.ts`：`Sandbox` が file_*/glob/grep を許可ディレクトリに限定（全 OS・アプリレベルのソフト層）。
+- `src/security/permission-manager.ts`：`autorun` が作業フォルダ内の非破壊操作を自動承認。破壊・CWD 外・広域スキャンはブロック/確認。
 
-## §3 設計方針（配置）
+## §3 設計方針 — Windows は「2種」に整理する
 
-`docs/checkpoint-and-smoke-design.md` の原則「モデルが失敗しても効くべきものは深く（core/Hook）」に従う。封じ込めは bash ツール実行経路（core）に置く。
+**Windows での封じ込めは、機構を作り込むのではなく「動かす環境」を 2 種に分ける。** これは Claude Code と同じ整理（§6 裏取り参照）。
 
-1. **WSL 連携は `bash` ツール限定**。`file_write`/`file_edit` は今まで通り Node が Windows 側で直接実行し、**WSL を経由しない**。
-   - 理由：ファイルはどのみち `Sandbox`（パススコープ）で守られている。WSL 越し（`/mnt/c`）への書き込みは 9p 経由で遅く、整合性・実装複雑性の害が大きい。封じ込めたいのは「bash が実際に走らせる副作用」であって、宣言済みのファイル書き込みではない。
-2. **「封じ込めが効いている時だけ autorun が bash 確認を省く」連動**を入れる（= 本件の目的そのもの）。
-3. **WSL が無い／無効な環境では、従来の git bash 経路へ完全フォールバック**（機能劣化なし）。
+| 変種 | bash | OS 封じ込め | 向き |
+|---|---|---|---|
+| **1. ネイティブ Windows**（exe） | Git Bash（無ければ cmd/PowerShell） | **無し（正直にそう言う）** | カジュアル層（sandbox/ でゲーム作る等） |
+| **2. WSL2 の中でアプリごと起動** | Linux シェル | **既存 processSandbox（bwrap）がそのまま効く** | 封じ込めが欲しい上級者 |
+
+要点：**変種2 ではアプリは `process.platform === "linux"` になる**ため、Mac/Linux 用に既にある `processSandbox` / `/sandbox` の Linux 経路が**そのまま発火**する。Windows 専用の封じ込めコードは不要。
+
+### なぜ route-to-WSL（旧 Phase 1）を退役したか
+
+当初は「ネイティブのまま bash だけ `wsl.exe` 経由で WSL に流す」routing を実装し、実機（Win11+WSL2 Ubuntu）で動作確認した（タグ `wsl-phase1-routing`）。しかし Windows 2種モデルに整理する中で退役した。理由：
+
+- route-to-WSL は弱点が多い：`/mnt/c` 越しの I/O 遅延、Windows↔WSL のパス変換、**WSL サンドボックス内から `/mnt/c` の Windows バイナリを呼べない**、そして §7 のネット allowlist（プロキシ）を per-command の `wsl.exe` 呼び出しに被せるのが筋悪。
+- 「封じ込めが欲しい人＝WSL を理解している上級者」なので、**変種2（WSL 内起動）で用が足りる**。中間層（route-to-WSL）は説明コストの割に価値が薄い。
+- 変種2 は新規コードがほぼ不要（既存 Linux サンドボックスの再利用）で、Claude Code とも揃う。
+
+`src/security/wsl.ts` は **WSL 検出のみ**を残す（ネイティブ Windows で「WSL2 があるなら中で起動すれば封じ込められますよ」と案内するため）。
 
 ## §4 アーキテクチャ
 
-### 4.1 実行経路の分岐（bash ツール）
-
 ```
-isWindows?
- ├─ no  → 従来通り（processSandbox.wrapCommand or /bin/sh）          ← 変更なし
- └─ yes → WSL 有効 & 検出OK?
-          ├─ yes → wsl.exe -d <distro> --cd <winCwd> -- <wrapped>    ← 新規
-          │          wrapped = WSL内で ProcessSandbox.wrapLinux(...) 適用
-          └─ no  → 従来通り（git bash → cmd.exe）                     ← 変更なし
+process.platform?
+ ├─ darwin / linux  → processSandbox (sandbox-exec / bwrap)。/sandbox で on/off
+ │                     ※ WSL2 の中で起動した場合もここ（platform=linux）
+ └─ win32 (ネイティブ) → git bash → cmd.exe。OS 封じ込めは無し
+                          /sandbox は「WSL2 内起動で封じ込め可」と案内するだけ
 ```
 
-WSL の中は Linux なので、`ProcessSandbox` の Linux 経路（`wrapWithBwrap` / `wrapWithUnshare`）を**そのまま再利用**できる。
+- 封じ込めの実体は `processSandbox`（既存）に一本化。Windows ネイティブは封じ込め非対応と明示。
+- WSL 検出（`detectWsl`）はネイティブ Windows での案内専用。
 
-### 4.2 WSL 検出（`detectWsl()`、キャッシュ）
+## §5 操作 UI — `/sandbox` 統一コマンド（実装済み）
 
-- `wsl.exe --status` の exit code で存在確認。
-- `wsl.exe -l -q` で default distro 名を取得（config 未指定時）。
-- `wsl.exe -l -v` で WSL2 か確認（**WSL2 前提**。WSL1 は namespace 挙動が異なるため検出して従来経路を推奨）。
-- 結果はプロセス内キャッシュ（`getGitBash` と同じ遅延初期化パターン）。
+config.json の手編集はハードルが高いので REPL コマンド化。**OS ごとに別コマンドを作らない**（機構が違ってもユーザーの心象は「bash を封じ込める」で同一。別名乱立はクロスプラットフォーム利用者の学習コストと、ユーザー同士の助け合いを損なう）。
 
-### 4.3 パス変換（`toWslPath()`）
+- `/sandbox status|on|off` 単一コマンド。
+- Mac/Linux/**WSL2 内** → `processSandbox` を on/off（`resetProcessSandboxCache()` で再起動不要の即反映）。
+- ネイティブ Windows → トグル対象なし。「封じ込めには WSL2 の中で起動」と案内（WSL2 検出時は distro 名も表示）。
+- `status` は OS 共通フォーマットで方式・実効状態を表示。`WSL_DISTRO_NAME` で WSL2 内実行を判定して表示。
+- リスクは OS 別に警告を出し分け（コマンドと心象は共通）：Mac/Linux on 時は **ネットワーク遮断**（§7）を明示警告。
+- REPL 対話 UI のため、表示・操作感は手動 TTY 検証が必要（パイプでは未確認）。
 
-- cwd：`wsl.exe --cd <Windows パス>` は Windows パスを受理する（新しめの WSL）。保険として内部で `wslpath -u` 相当の変換も持つ。
-- コマンド文字列内の `C:\Users\...` → `/mnt/c/Users/...`。**既存の `convertWindowsPaths`（git bash 用、`\`→`/` のみ）とは別関数**。ドライブレター `X:` → `/mnt/x` のマッピングを行う。
-- 誤爆対策：正規表現中の `\`、URL、エスケープシーケンスを変換しない。git bash 版で得た教訓（ドライブレター起点のパスのみ対象）を流用。
-- ユニットテスト対象（純粋関数なのでクロスプラットフォームで実行可）。
+## §6 Claude Code との比較（裏取り 2026-06-04）
 
-### 4.4 WSL 内サンドボックスのレベル決定
+公式ドキュメントで方向性を確認した（出典は本節末）。**我々の整理は Claude Code と一致**：
 
-| WSL distro の状態 | 適用レベル | 隔離内容 |
-|---|---|---|
-| `bwrap` あり | full | ルート ro-bind + 許可ディレクトリのみ書込可 + ネット遮断 |
-| `bwrap` なし / `unshare` あり | network | ネットワーク名前空間隔離のみ |
-| どちらも無し | none | 隔離なし（ただし Windows 本体とは別の Linux 空間で実行＝弱い分離は残る） |
+- **FS とネットワークは独立した2軸**。「Effective sandboxing requires *both* filesystem and network isolation」。
+- **コマンド名も `/sandbox`**、OS プリミティブも **macOS=Seatbelt / Linux=bubblewrap**。
+- **既定 OFF・opt-in**（`sandbox.enabled`）。
+- **Windows は「ネイティブ or WSL2 内起動」の2種**。サンドボックスは「Native Windows is not supported. On Windows, run Claude Code inside a WSL2 distribution.」＝**route-to-WSL のような routing は作っていない**。我々が route-to-WSL を退役して2種に倒した判断はこれと一致。
+- Claude Code の Windows 対応の変遷：初期は WSL 必須 → 後にネイティブ Windows 対応（PowerShell/CMD、Git for Windows は任意で Git Bash 提供）→ **「WSL 必須」は“サンドボックスを使うなら”に縮小**。lllmAgents もネイティブ Windows＝git bash で同じ構図。
+- 我々の `ProcessSandboxConfig.allowedHosts`（未使用の伏線）は Claude Code の `allowedDomains` に対応。
 
-- 書込許可ディレクトリ（cwd, `~/.localllm`, allowedDirectories）は **`/mnt/c/...` 形式に変換**して bwrap `--bind` に渡す。
-- `bwrap` は WSL ディストロに標準では入っていないことが多い。**`sandbox_info` / `/status` で「bwrap 未導入のため network 隔離どまり。`sudo apt install bubblewrap` で full 隔離可」と案内**する（checkpoint の git 未検出警告と同じ手法）。
+出典:
+- [Configure the sandboxed Bash tool — Claude Code Docs](https://code.claude.com/docs/en/sandboxing)
+- [Making Claude Code more secure and autonomous with sandboxing — Anthropic](https://www.anthropic.com/engineering/claude-code-sandboxing)
+- [Advanced setup — Claude Code Docs（native Windows / WSL 両対応）](https://code.claude.com/docs/en/setup)
 
-### 4.5 設定（config）
+## §7 封じ込めの2軸再設計（今後の課題・未着手）
 
-`SecurityConfig` に追加：
+「のびのび開発（確認削減）」の核心はここ。現状の `processSandbox` は `network`/`full` のどちらも**ネット遮断**で、`npm install`・`pip`・CDN 取得が通らない。FS は閉じたいがネットは使いたい、という用途と噛み合わない。
 
-```ts
-wsl?: {
-  /** 既定: auto（Windows かつ WSL2 検出時のみ有効）。明示 true/false で上書き */
-  enabled?: boolean | "auto";
-  /** 既定: WSL の default distro */
-  distro?: string;
-  /** WSL 内で適用する隔離レベル。既定: full（bwrap 無ければ自動降格） */
-  sandboxLevel?: "none" | "network" | "full";
-};
-```
+Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経由のドメイン allowlist（既定は新ドメイン初回に確認）」**。これで FS を閉じつつ必要な通信だけ通す。
 
-- `processSandbox`（Mac/Linux）とは**別立て**にする（プラットフォーム別の経路選択であり、混ぜると条件が読みにくい）。ただし WSL 内の隔離適用は `ProcessSandbox` を共用する。
-- **既定は OFF（opt-in）**。`enabled` 未指定/`false` は従来経路、`"auto"` は WSL2 検出時のみ、`true` は WSL 検出時に強制。
-  - checkpoint は「条件付き既定 ON」にしたが、WSL ルーティングは**それと判断が異なる**。理由：checkpoint は非破壊（裏でスナップショットを足すだけ）だが、WSL ルーティングは **bash の実行先＝使うツールチェーンを変える破壊的変更**で、Windows ネイティブの node/python で開発している人を黙って壊し得る（§6-3）。汎用アプリは「誰の環境でも安全な既定」で出荷し、望む人が設定で有効化するのが正しい。
-  - 補強事例：WSL2 ディストロは **Docker Desktop を入れただけで自動生成される**（実機検証時も既定 distro Ubuntu とは別に `docker-desktop` が存在）。「WSL2 が在る＝ユーザーが bash を WSL で動かしたい」ではないため、検出ベースの自動 ON は不適切。
+→ 再設計の方向：`processSandbox` を **「FS 書込スコープ」と「ネット allowlist」の直交2軸**に作り直す（`allowedHosts` を `allowedDomains` 相当へ格上げ）。ただし allowlist にはプロキシ（Claude Code は `socat` リレー＋プロキシ）が要り工数大。Anthropic OSS の [`@anthropic-ai/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime) を参照/利用する手もある。段階を切る（まず FS 2軸＋ネット on/off → 後でプロキシ allowlist）。
 
-## §4.6 操作 UI — `/sandbox` 統一コマンド（実装済み）
+これが固まって初めて「封じ込め時のみ autorun が bash 確認を省く」連動（確認削減の実体）に進める。
 
-config.json の手編集はハードルが高いため、REPL コマンドで切り替える。重要なのは **OS ごとに別コマンドを作らないこと**：機構は OS で違っても、ユーザーがやりたいことは「bash をハード封じ込めする」で同一。別名コマンドが乱立すると、クロスプラットフォーム利用者の学習コストが上がり、ユーザー同士の助け合い（Win↔Mac で同等操作を指示する）でも混乱する。
+## §8 既知の限界・トレードオフ
 
-そこで **単一の `/sandbox status|on|off`** を用意し、内部で OS ディスパッチする：
+1. ネイティブ Windows は封じ込め非対応（git bash 実行）。封じ込めは WSL2 内起動が前提。
+2. 変種2（WSL2 内）で `/mnt/c` を触ると I/O が遅い。成果物を WSL ネイティブ FS に置けば速い。
+3. 現状の processSandbox はネット遮断（§7 で2軸化予定）。
+4. bwrap/sandbox-exec が無い環境では実効レベル none（警告表示）。
+5. 配布：変種2 用に WSL 内で動かす手段（WSL 内で `npm run start`、または Linux ビルド提供）の案内が必要。
 
-| OS | `/sandbox on` の作用 | 設定キー |
-|---|---|---|
-| Windows | WSL ルーティング有効化（`enabled:"auto"`） | `security.wsl` |
-| Mac/Linux | processSandbox 有効化（`level` 既定 full、未導入なら自動降格） | `security.processSandbox` |
-
-- 動的適用：`loadConfig()` は都度ファイルを読むので **WSL 側は次の bash 実行から即反映**。processSandbox 側は `bash.ts` の `getProcessSandbox()` がインスタンスをキャッシュするため、`resetProcessSandboxCache()` を呼んで即反映させる（再起動不要）。
-- `status` は OS を問わず「方式／設定値／検出状況／実効状態」を統一フォーマットで表示。`sandbox_info`（モデル用ツール）と整合。
-- **OS で異なるリスクは警告で出し分ける**（コマンドと心象は共通、注意書きだけ平台依存）：
-  - Windows on：WSL 未検出/WSL1 の注意、ツールチェーン分裂（§6-3）の前提を表示。
-  - Mac/Linux on：**ネットワーク遮断**（processSandbox は network/full で network deny ＝ `npm install` 等が通らない）を明示警告。
-- 既知の課題（Phase 2/3 で要検討）：processSandbox には「FS 書込のみ制限・ネットワークは許可」レベルが無い。「のびのび開発（確認削減）」には FS スコープ封じ込め＋ネット許可が欲しい場面が多く、現状の network/full（ネット遮断）とは噛み合わない。§5 の autorun 連動を詰める前に、封じ込めレベルの再設計が要る可能性。
-
-## §5 autorun との連動（目的の核心）
-
-封じ込めが裏打ちされて初めて、確認を安全に減らせる。
-
-- **bash が封じ込め下（WSL full/network、または Mac/Linux で processSandbox active）にある時のみ**、autorun での bash 自動承認を広げる。
-- ただし `AUTORUN_DESTRUCTIVE_PATTERNS`（削除・`git reset --hard` 等）は封じ込め下でも**ブロックを維持**する。封じ込めは「ホストを守る」だけで、「作業フォルダ内の破壊」は人の意思で行うべきだから（checkpoint と役割分担）。
-- 封じ込めが効いていない（none / WSL 無し）時の Windows autorun は、**従来どおり「信頼ベース」であることを明示**する。`/status` と `sandbox_info` に「封じ込め: なし（信頼ベース）／WSL full（封じ込めあり）」を出し、ユーザーが現在地を把握できるようにする。パリティを偽らない。
-
-## §6 既知の限界・トレードオフ（正直に）
-
-1. **file_write/edit は WSL を経由しない** → 封じ込められるのは bash のみ。これは意図的な割り切り（§3-1）。
-2. **`/mnt/c` 越しの性能劣化** → WSL2 から Windows FS への I/O は遅い。`npm install` 等を WSL 側で回すと体感で重くなる。
-3. **ツール環境の分裂** → WSL の node/python と Windows 側は別物。成果物が web（HTML/JS）なら影響小だが、native binding を含むと「WSL でビルド→Windows で実行」が壊れ得る。利用者がこの分裂を理解している必要がある。
-4. **bwrap 不在時は network 隔離どまり** → full 隔離には WSL ディストロへの `bubblewrap` 導入が必要。
-5. **WSL 無しユーザー** → 従来の git bash 経路へフォールバック（劣化なし、ハード層は得られない）。
-6. **WSL1** → 非対象。検出して従来経路を推奨。
-
-## §7 非目標
+## §9 非目標
 
 - クラウド / リモート VM（明示的に除外）。
-- Windows ネイティブの AppContainer / Job Object / 制限トークンによる隔離（Node から扱えず複雑。別案件）。
-- file 操作の WSL 経由化（§3-1 の理由により行わない）。
-- gameplay 品質の検証（それは `game_smoke` の役割）。
+- Windows ネイティブの AppContainer / Job Object 隔離（Node から扱えず複雑）。
+- file_write/edit の隔離化（パススコープ `Sandbox` で別途担保。サンドボックスは bash サブプロセス対象）。
 
-## §8 段階実装計画
+## §10 決定の経緯（履歴）
 
-| Phase | 内容 | 完了条件 | 状態 |
-|---|---|---|---|
-| 1 | WSL 検出 + bash を WSL 経由で実行（隔離なし）+ パス変換 + 完全フォールバック | Windows+WSL で `bash` が WSL 内で動き、WSL 無し環境で従来通り動く | ✅ 実装・実機検証済み（2026-06-04: Win11+WSL2 Ubuntu で `uname -a` が `microsoft-standard-WSL2` を返すことを確認） |
-| 2 | WSL 内 `ProcessSandbox` 連携（unshare/bwrap）+ レベル自動降格 + 案内 | `sandbox_info` が WSL の実効隔離レベルを正しく表示 | 未着手 |
-| 3 | autorun 連動（封じ込め時のみ bash 確認を緩和）+ `/status` 可視化 | 封じ込め下で bash 確認が減り、非封じ込め時は信頼ベースと明示される | 未着手 |
+1. Windows に欠けるハード層を埋めるため、まず **route-to-WSL**（bash だけ `wsl.exe` 経由で WSL に流す）を実装。
+2. 実機（Win11+WSL2 Ubuntu）で動作確認（`uname` が `microsoft-standard-WSL2` を返すことを確認）。検証中、118 コミット遅れの旧チェックアウト起動で再現に手間取った教訓あり。
+3. 既定を `"auto"` → OFF（opt-in）に修正（汎用環境の安全側）。
+4. config 手編集回避のため `/sandbox` 統一コマンドを追加。
+5. Claude Code の裏取りで「FS/ネット2軸」「Windows は2種（ネイティブ/WSL内起動）で routing は作らない」が判明。
+6. **route-to-WSL を退役**し、Windows 2種モデルへ整理（本設計）。退役前の版をタグ `wsl-phase1-routing` で保全。
 
-### Phase 1 実装メモ
+## §11 段階計画
 
-- 新規 `src/security/wsl.ts`：`detectWsl()`（`wsl.exe --status` / `-l -v`、UTF-16LE デコード、キャッシュ）、`resolveWslRouting()`（純粋関数。platform/検出/設定から経路判定）、`toWslPath()` / `convertWindowsPathsToWsl()`（パス変換）、`buildWslInvocation()`（`--cd` 非依存。`cd '<wslパス>' 2>/dev/null; <変換後コマンド>` を `bash -lc` で実行）。
-- `src/tools/definitions/bash.ts`：Windows 分岐で WSL ルーティングを最優先し、無効・未検出時のみ従来の git bash → cmd.exe へフォールバック。
-- `src/config/types.ts`：`SecurityConfig.wsl?: WslConfig`（`enabled: boolean|"auto"`、`distro`、`sandboxLevel`）。既定 `"auto"`。
-- `src/tools/definitions/sandbox-info.ts`：Windows で WSL 検出状態・bash 実行先・封じ込め状態を表示（Phase 1 検証用）。
-- テスト `tests/security/wsl.test.ts`（24 件）：パス変換・distro 解析（NUL 残骸込み）・ルーティング判定・invocation 組み立てを純粋関数として検証（クロスプラットフォーム実行可）。
-- **実機検証済み（2026-06-04, Win11 + WSL2 Ubuntu）**：`wsl.exe --status` / `-l -v` の起動・UTF-16LE デコード・distro 解析、ルーティング判定、`bash -lc` 経由実行、`/mnt/c` へのパス変換まで動作確認。bash で `uname -a` が `Linux … microsoft-standard-WSL2`、`$WSL_DISTRO_NAME` が `Ubuntu` を返すことを確認。
-  - 検証中の知見: 検証は当初 118 コミット遅れの旧チェックアウト（WSL コード未取り込み）を起動していて再現に手間取った。実機検証時は `npm run start`（src 直実行）か `npm run build:deploy`（exe 焼き直し）を使うこと。`sandbox/run.bat` は常に `deploy/localllm.exe` を起動するため、build:deploy を回さないと旧 exe を踏む。
-  - **体感の未確認軸（Phase 2/3 判断前に要確認）**: §6-2 の `/mnt/c` 越し性能（初回は WSL distro コールドスタートで数秒かかる）、§6-3 のツール環境分裂（WSL 側に node/python があるか）。
-
-各 Phase で：パス変換のユニットテスト（純粋関数）、検出の `wsl.exe` モックテスト。実 Windows+WSL の挙動は **手動 TTY 検証**（CI 無しのため）。
-
-## §9 代替案と却下理由
-
-- **A. Windows は trust ベース autorun のまま（ハード層なし）** — ユーザーが封じ込めを望むため不採用。ただし WSL 無し環境では事実上これが挙動になる（フォールバック）。
-- **B. Docker Desktop on Windows** — 重く前提が大きい。WSL が「すでに有効」なユーザーには WSL の方が軽い。Docker 自体 WSL2 バックエンドに乗るため、素の WSL で十分。
-- **C. Windows ネイティブ隔離（AppContainer 等）** — Node から扱えず実装複雑度が跳ね上がる。費用対効果が悪い。
-
-## §10 推奨
-
-Phase 1〜2（WSL 経由実行＋既存サンドボックス再利用）は、**新規サンドボックス実装ゼロで Windows にハード層を与えられる**ため費用対効果が高い。Phase 3（autorun 連動）が本件の目的（確認削減）を実際に達成する部分。
-
-一方、§6 の限界（特に 2・3 のツール環境分裂と性能）は実利用の満足度を左右するため、**まず Phase 1 を実装して実機の体感を確かめてから Phase 2/3 を判断する**のが安全。いきなり全部作らない。
+| Phase | 内容 | 状態 |
+|---|---|---|
+| 〜 | route-to-WSL（実装→実機検証→退役） | 完了（タグ `wsl-phase1-routing` で保全） |
+| 1 | Windows 2種モデル＋`/sandbox` 統一コマンド（検出案内含む） | ✅ 実装済み（REPL UX は手動 TTY 検証要） |
+| 2 | 封じ込めの2軸再設計（FS スコープ / ネット allowlist）＝§7 | 未着手（要・方式決定） |
+| 3 | 封じ込め時のみ autorun が bash 確認を省く連動（確認削減の実体） | 未着手（Phase 2 後） |
