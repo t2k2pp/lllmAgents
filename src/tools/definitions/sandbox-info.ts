@@ -34,10 +34,23 @@ export const sandboxInfoTool: ToolHandler = {
 
     const levelLabels: Record<string, string> = {
       none: "なし（アプリレベルのみ）",
-      fs: "ファイルシステム書込隔離（ネットワークは許可）",
+      fs: "ファイルシステム書込隔離",
       network: "ネットワーク隔離",
       full: "ネットワーク + ファイルシステム隔離",
     };
+
+    // ネットの実態を OS/レベル別に正直に出す（LLM が「fs だから安全」と誤認しないため）。
+    const netNote = (() => {
+      if (avail.effectiveLevel === "fs") {
+        return avail.platform === "darwin"
+          ? "allowlist 経由のみ許可（未許可ドメインは要承認）"
+          : "全開（allowlist は未強制。 Linux/WSL2 のネット制御は未実装＝外部送信は防げない）";
+      }
+      if (avail.effectiveLevel === "network" || avail.effectiveLevel === "full") {
+        return "全遮断（allowlist 非適用）";
+      }
+      return "制限なし";
+    })();
 
     const toolStatus = [
       `bwrap: ${avail.tools.bwrap ? "利用可能" : "未インストール"}`,
@@ -49,6 +62,7 @@ export const sandboxInfoTool: ToolHandler = {
       `\n## OS-level プロセスサンドボックス (bash ツール)\n` +
       `- 設定: ${sbConfig.enabled ? "有効" : "無効"} / レベル: ${sbConfig.level}\n` +
       `- 実効レベル: ${levelLabels[avail.effectiveLevel] ?? avail.effectiveLevel}\n` +
+      `- ネットワーク: ${netNote}\n` +
       `- プラットフォーム: ${avail.platform}\n` +
       `- ツール状態: ${toolStatus}\n` +
       ((avail.effectiveLevel === "fs" || avail.effectiveLevel === "full")

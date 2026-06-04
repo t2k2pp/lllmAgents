@@ -4,6 +4,8 @@ import {
   normalizeHost,
   domainAllowed,
   addDomain,
+  removeDomain,
+  resolveAllowedDomains,
 } from "../../src/security/net-allowlist.js";
 
 describe("normalizeHost", () => {
@@ -11,6 +13,25 @@ describe("normalizeHost", () => {
     expect(normalizeHost("https://Registry.NPMjs.org:443/foo")).toBe("registry.npmjs.org");
     expect(normalizeHost("github.com:443")).toBe("github.com");
     expect(normalizeHost("PyPI.org")).toBe("pypi.org");
+  });
+  it("userinfo (user@) を除去して迂回を防ぐ", () => {
+    // evil.com@github.com は「github.com への接続」と解釈されねばならない
+    expect(normalizeHost("evil.com@github.com")).toBe("github.com");
+    expect(normalizeHost("http://user:pass@example.com:8080/x")).toBe("example.com");
+  });
+  it("末尾ドット(FQDN)を除去", () => {
+    expect(normalizeHost("github.com.")).toBe("github.com");
+  });
+  it("IPv6: ブラケットを剥がし、 裸の多コロン表記を壊さない", () => {
+    expect(normalizeHost("[::1]:443")).toBe("::1");
+    expect(normalizeHost("2001:db8::1")).toBe("2001:db8::1");
+  });
+  it("IDN(非ASCII) は punycode へ正規化（ホモグラフ対策）", () => {
+    // 日本語ドメイン例: そのまま xn-- へ
+    expect(normalizeHost("日本語.jp")).toMatch(/^xn--/);
+    // キリル 'а' を含む偽 github は ASCII の github.com と一致しない
+    expect(normalizeHost("gаithub.com")).not.toBe("github.com");
+    expect(normalizeHost("gаithub.com")).toMatch(/^xn--/);
   });
 });
 
@@ -51,5 +72,29 @@ describe("addDomain", () => {
   });
   it("ワイルドカードはそのまま保持", () => {
     expect(addDomain([], "*.example.com")).toEqual(["*.example.com"]);
+  });
+});
+
+describe("removeDomain", () => {
+  it("正規化して一致するものを除去", () => {
+    expect(removeDomain(["example.com", "github.com"], "https://Example.com:443")).toEqual(["github.com"]);
+  });
+  it("ワイルドカードも除去できる", () => {
+    expect(removeDomain(["*.example.com", "github.com"], "*.example.com")).toEqual(["github.com"]);
+  });
+  it("無い物を消そうとしても不変", () => {
+    expect(removeDomain(["github.com"], "absent.com")).toEqual(["github.com"]);
+  });
+});
+
+describe("resolveAllowedDomains", () => {
+  it("undefined(未設定) は既定プリセットへ", () => {
+    expect(resolveAllowedDomains(undefined)).toEqual(DEFAULT_ALLOWED_DOMAINS);
+  });
+  it("[](明示的な空) は空のまま（既定に戻さない）", () => {
+    expect(resolveAllowedDomains([])).toEqual([]);
+  });
+  it("設定値はそのまま", () => {
+    expect(resolveAllowedDomains(["a.com"])).toEqual(["a.com"]);
   });
 });

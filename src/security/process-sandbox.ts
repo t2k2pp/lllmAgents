@@ -15,9 +15,22 @@
  * ネットワークの「ドメイン allowlist（プロキシ）」は未実装（§7 の今後の課題）。
  */
 
-import { existsSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, writeFileSync, unlinkSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir, platform } from "node:os";
+
+/**
+ * パスを実体パスへ正規化する（symlink 解決）。 macOS/Linux のサンドボックスは正規化後の
+ * 実パスで照合するため、 /tmp(→/private/tmp) 等の symlink を渡すと allow/deny が一致しない。
+ * 存在しない/解決不能なパスは元の文字列を返す。
+ */
+function realpathSafe(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
 
 export type ProcessSandboxLevel =
   | "none"        // OS-level sandboxing なし（アプリレベルのみ）
@@ -257,8 +270,8 @@ export class ProcessSandbox {
   ): WrappedCommand {
     // fs / full は bwrap で FS 隔離（fs はネット許可・full はネット遮断）
     if ((level === "fs" || level === "full") && this.bwrap) {
-      const existing = writeDirs.filter((d) => existsSync(d));
-      const masks = defaultSecretDenyDirs(homedir()).filter((d) => existsSync(d));
+      const existing = writeDirs.filter((d) => existsSync(d)).map(realpathSafe);
+      const masks = defaultSecretDenyDirs(homedir()).filter((d) => existsSync(d)).map(realpathSafe);
       const args = buildBwrapArgs(command, existing, /* unshareNet */ level === "full", masks);
       return { shell: this.bwrap, args };
     }
@@ -282,8 +295,9 @@ export class ProcessSandbox {
     level: ProcessSandboxLevel,
     proxyPort?: number
   ): WrappedCommand {
-    const masks = defaultSecretDenyDirs(homedir()).filter((d) => existsSync(d));
-    const profile = buildSeatbeltProfile(writeDirs, level, masks, proxyPort);
+    const realWrite = writeDirs.map(realpathSafe);
+    const masks = defaultSecretDenyDirs(homedir()).filter((d) => existsSync(d)).map(realpathSafe);
+    const profile = buildSeatbeltProfile(realWrite, level, masks, proxyPort);
 
     // 一時プロファイルファイルを作成
     const profilePath = join(tmpdir(), `lllm-sandbox-${process.pid}-${Date.now()}.sb`);

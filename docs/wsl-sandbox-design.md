@@ -139,7 +139,21 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - ✅ **ネット封じ込めは堅牢**：直接 TCP（`curl --noproxy` / `/dev/tcp` / `nc` / python socket）・**DNS（getaddrinfo / `dig @8.8.8.8` / 生UDP sendto:53）**・ICMP は **すべて `deny default` が遮断**（EPERM）。許可は `localhost:proxyPort` の TCP のみ。env が数値 `127.0.0.1` でも `localhost` ルールで接続成立。→ レビューの最重大懸念 **C1（DNS/UDP exfil）・H-D（生TCP迂回）は macOS では不成立**と実証。
 - ✅ **FS**：writeDir 内のみ書込可・外（HOME 直下等）は EPERM、機密ディレクトリ（実パス）の read は `deny file-read*` が後勝ちで遮断。
 - ⚠️ **symlink 注意点（実コードにも該当）**：Seatbelt は**正規化後の実パス**で照合する。`/tmp`(→`/private/tmp`) や `/var`(→`/private/var`) のような symlink を writeDir/denyDir に渡すと allow/deny が一致しない。既定機密 `~/.ssh` 等や通常の `/Users` 配下 cwd は実パスなので問題ないが、symlink 経路は要注意。→ 対策として writeDirs/denyDirs を `realpathSync` で正規化してからプロファイルに載せるのが望ましい（要対応・低〜中）。
-- 残課題：在プロセスプロキシの**対話確認(live-prompt)の TTY 操作感**（非TTYでは品質検証不可）、Linux/WSL2 の fs はネット allowlist 未対応＝ネット許可のまま（2b-2 まで）かつ `status`/`sandbox_info` が macOS と同じ表示で誤認を招く、`network`/`full` は allowlist でなく全遮断、HTTP フォワード経路のポート無制限・内部IP/SSRF・IDN/ホモグラフ・NO_PROXY 非クリア等（4観点レビュー指摘、別途対応）。
+- 残課題（当時）：在プロセスプロキシの**対話確認(live-prompt)の TTY 操作感**（非TTYでは品質検証不可）、ほか下記の堅牢化バッチで対応。
+
+**堅牢化バッチ（4観点レビュー＋実機検証の反映・2026-06-05）**：4観点（設計者/実装者/評価者/セキュリティ）のサブエージェントレビュー指摘のうち、正解が明確なものを修正。
+- **HTTP フォワードのポート制限**：CONNECT と同じく 80/443 のみ（許可ドメインの任意ポートへの平文中継を防止）。`sandbox-proxy.integration.test` で 403 を確認。
+- **内部IP/SSRF 遮断＋DNS ピン留め**：`isBlockedAddress`（loopback/link-local＝メタデータ 169.254.169.254/RFC1918/ULA/v4-mapped）で、許可ドメインでも内部レンジへは中継しない。ホスト名は解決IPをピン留めして接続し authorize 後の DNS rebinding を防ぐ。
+- **IDN/ホモグラフ対策**：`normalizeHost` を userinfo(`user@`)除去・IPv6 ブラケット処理・**punycode 正規化**に強化。対話確認で punycode ドメインには警告表示。
+- **NO_PROXY 非クリア是正**：プロキシ注入時に子 env の `NO_PROXY`/`no_proxy`/`ALL_PROXY` を削除（残存でプロキシをバイパスし allowlist 無効化されるのを防止）。
+- **socket 堅牢化**：トンネルの相互クローズ・アイドルタイムアウト(30s)・接続前ハング防止・確立前後のエラー切り分け（502/403）。
+- **proxy ライフサイクル**：`/sandbox off` と非fsレベルへの切替で `proxy.stop()`、`/sandbox deny` で `proxy.revoke()`（セッション once 許可の残存通過を防止）。
+- **fail-open コメント是正＋可視化**：proxy 起動失敗時はコメント通り fail-closed で全遮断し、bash 結果に「プロキシ起動失敗で全遮断中」の注記を出す（沈黙で詰まらせない）。
+- **status/sandbox_info の誠実化**：`fs` でも macOS=allowlist 経由のみ／Linux=全開（allowlist 未強制）／network・full=全遮断、を OS・レベル別に正直表示。allowlist は「macOS の fs でのみ適用」を明記。
+- **allowlist ポリシー一元化**：`resolveAllowedDomains`（undefined→既定プリセット、`[]`→空のまま）に集約。`removeDomain` 追加。
+- **realpath 正規化**：writeDirs/denyDirs を `realpathSync` で実体パス化（symlink 経由で allow/deny が一致しない問題の恒久対策）。
+- 追加テスト：net-allowlist（userinfo/IPv6/IDN/removeDomain/resolve）、sandbox-proxy（isBlockedAddress/parseConnectPort IPv6/revoke）、sandbox-proxy.integration（CONNECT・HTTP の拒否パス）。計 576 tests green。
+- **なお残る（設計の岐路・別途相談）**：`level` enum を真の2軸(FS×ネット)へ作り直すか（アーキ指摘 H-1。`network`/`full` で allowlist が死ぬ根本原因）、既定 allowlist の拡充（prebuilt binary を S3/CDN から取る npm/pip が既定で通らない＝QA H1/H2）、Linux/WSL2 のネット allowlist 実装（2b-2）。ドメインフロンティング（CONNECT は SNI を見ない）と許可ドメイン自体への exfil は脅威モデル上の残存リスクとして明記（TLS 終端しない割り切り）。
 
 ## §8 既知の限界・トレードオフ
 

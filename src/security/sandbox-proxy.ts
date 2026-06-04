@@ -13,15 +13,84 @@
 
 import * as http from "node:http";
 import * as net from "node:net";
+import * as dns from "node:dns/promises";
 import type { Socket } from "node:net";
 import { domainAllowed, normalizeHost } from "./net-allowlist.js";
 
 export type DomainDecision = "once" | "always" | "deny";
 
+/** トンネル/上流接続のアイドルタイムアウト（ハング・FD リーク防止）。 */
+const SOCKET_TIMEOUT_MS = 30_000;
+/** プロキシが中継を許すポート（CONNECT/HTTP 共通）。 */
+const ALLOWED_PORTS = new Set([80, 443]);
+
 /** CONNECT ターゲット "host:port" / "[ipv6]:port" から port を取り出す（既定 443）。 */
 export function parseConnectPort(target: string): number {
-  const m = /:(\d+)$/.exec(target.trim());
-  return m ? parseInt(m[1], 10) : 443;
+  const t = target.trim();
+  // [ipv6]:port を優先的に処理（裸 IPv6 の末尾コロンを port と誤認しない）
+  const br = /^\[[^\]]+\]:(\d+)$/.exec(t);
+  if (br) return parseInt(br[1], 10);
+  if (t.startsWith("[")) return 443; // [ipv6]（port 無し）
+  const colons = (t.match(/:/g) ?? []).length;
+  if (colons === 1) {
+    const m = /:(\d+)$/.exec(t);
+    if (m) return parseInt(m[1], 10);
+  }
+  return 443; // host 単独 / 裸 IPv6（多コロン）は既定 443
+}
+
+/**
+ * 接続先IPが内部/予約レンジ（loopback・link-local(メタデータ 169.254.169.254 含む)・RFC1918・ULA）か。
+ * プロキシが「許可ドメインに見せかけて内部サービスへ中継する」SSRF 踏み台になるのを防ぐ。
+ */
+export function isBlockedAddress(ip: string): boolean {
+  const v = ip.replace(/%.*$/, ""); // zone id を除去
+  const kind = net.isIP(v);
+  if (kind === 4) {
+    const o = v.split(".").map(Number);
+    if (o.length !== 4 || o.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return true;
+    const [a, b] = o;
+    if (a === 0 || a === 127) return true; // this-host / loopback
+    if (a === 10) return true; // RFC1918
+    if (a === 172 && b >= 16 && b <= 31) return true; // RFC1918
+    if (a === 192 && b === 168) return true; // RFC1918
+    if (a === 169 && b === 254) return true; // link-local + メタデータ
+    if (a >= 224) return true; // multicast / reserved
+    return false;
+  }
+  if (kind === 6) {
+    const low = v.toLowerCase();
+    if (low === "::1" || low === "::") return true; // loopback / unspecified
+    if (low.startsWith("fe80")) return true; // link-local
+    if (low.startsWith("fc") || low.startsWith("fd")) return true; // ULA
+    if (low.startsWith("::ffff:")) return isBlockedAddress(low.slice(7)); // v4-mapped
+    return false;
+  }
+  return true; // 解決不能な値は安全側で遮断
+}
+
+/**
+ * ホスト名/IP を解決し、 接続先として安全な実IPを1つ返す（内部レンジは拒否＝例外）。
+ * ホスト名は解決済みIPを「ピン留め」して返すことで、 authorize 後に別IPへ向く DNS rebinding を防ぐ。
+ */
+async function resolvePinnedIp(host: string): Promise<string> {
+  if (net.isIP(host)) {
+    if (isBlockedAddress(host)) throw new Error(`blocked internal address: ${host}`);
+    return host;
+  }
+  const { address } = await dns.lookup(host); // 先頭の解決結果を採用
+  if (isBlockedAddress(address)) throw new Error(`host resolves to internal address: ${host} -> ${address}`);
+  return address;
+}
+
+/** トンネル確立前の上流エラー時にクライアントへ 502 を返して閉じる。 */
+function reject502(sock: Socket): void {
+  try {
+    sock.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+    sock.end();
+  } catch {
+    /* ignore */
+  }
 }
 
 export interface SandboxProxyDeps {
@@ -121,63 +190,78 @@ export class SandboxProxy {
     return p;
   }
 
+  /** セッション once 許可を取り消す（`/sandbox deny` 時に呼ぶ。 永続 allowlist 側は config で別途除去）。 */
+  revoke(host: string): void {
+    this.sessionAllowed.delete(normalizeHost(host));
+  }
+
   // ── ハンドラ ──────────────────────────────────────────────────────────────
+
+  /** 両ソケットを相互に確実に閉じ、 アイドルタイムアウトを張る（FD リーク・ハング防止）。 */
+  private wireTunnel(a: Socket, b: Socket): void {
+    const closeBoth = () => {
+      a.destroy();
+      b.destroy();
+    };
+    for (const s of [a, b]) {
+      s.setTimeout(SOCKET_TIMEOUT_MS, closeBoth);
+      s.on("error", closeBoth);
+      s.on("close", () => {
+        // 片側が閉じたら相手も閉じる（半開き放置を防ぐ）
+        if (!b.destroyed) b.destroy();
+        if (!a.destroyed) a.destroy();
+      });
+    }
+  }
 
   /** HTTPS の CONNECT: ホスト名で許可判定し、 許可ならトンネル（TLS は素通し） */
   private handleConnect(req: http.IncomingMessage, clientSocket: Socket, head: Buffer): void {
     const target = req.url ?? ""; // "host:port"
     const host = normalizeHost(target);
     const port = parseConnectPort(target);
-
-    // 許可ポートは 443/80 のみ（許可ドメインの任意ポートへのトンネル悪用を防ぐ）
-    if (port !== 443 && port !== 80) {
+    const reject = () => {
       try {
         clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
         clientSocket.end();
       } catch {
         /* ignore */
       }
+    };
+
+    // 許可ポートは 443/80 のみ（許可ドメインの任意ポートへのトンネル悪用を防ぐ）
+    if (!ALLOWED_PORTS.has(port)) {
+      reject();
       return;
     }
 
     this.authorize(host)
-      .then((ok) => {
+      .then(async (ok) => {
         if (!ok) {
-          try {
-            clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-            clientSocket.end();
-          } catch {
-            /* ignore */
-          }
+          reject();
           return;
         }
-        const upstream = net.connect(port, host, () => {
+        // 内部レンジ遮断＋IPピン留め（authorize 後の DNS rebinding を防ぐ）
+        const ip = await resolvePinnedIp(host);
+        let established = false;
+        const upstream = net.connect(port, ip, () => {
+          established = true;
           clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
           if (head && head.length) upstream.write(head);
+          this.wireTunnel(clientSocket, upstream); // 確立後の相互クローズ・アイドルTO
           upstream.pipe(clientSocket);
           clientSocket.pipe(upstream);
         });
+        upstream.setTimeout(SOCKET_TIMEOUT_MS, () => upstream.destroy()); // 接続前ハング防止
         upstream.on("error", () => {
-          try {
-            clientSocket.end();
-          } catch {
-            /* ignore */
-          }
+          if (!established) reject502(clientSocket); // 確立後は wireTunnel が処理
         });
         clientSocket.on("error", () => {
-          try {
-            upstream.destroy();
-          } catch {
-            /* ignore */
-          }
+          if (!established) upstream.destroy();
         });
       })
       .catch(() => {
-        try {
-          clientSocket.destroy();
-        } catch {
-          /* ignore */
-        }
+        // 認可拒否でないエラー（内部IP・解決失敗等）はトンネル前なので 403 で塞ぐ
+        reject();
       });
   }
 
@@ -195,26 +279,38 @@ export class SandboxProxy {
       res.end();
       return;
     }
+    // ポートは 80/443 のみ（CONNECT と同じ制限。 許可ドメインの任意ポートへの平文中継を防ぐ）。
+    const reqPort = url.port ? parseInt(url.port, 10) : 80;
+    if (!ALLOWED_PORTS.has(reqPort)) {
+      res.writeHead(403);
+      res.end("blocked by sandbox (port not allowed)");
+      return;
+    }
     this.authorize(url.hostname)
-      .then((ok) => {
+      .then(async (ok) => {
         if (!ok) {
           res.writeHead(403);
           res.end("blocked by sandbox allowlist");
           return;
         }
+        // 内部レンジ遮断＋IPピン留め（SSRF・DNS rebinding 防止）
+        const ip = await resolvePinnedIp(url.hostname);
         const proxyReq = http.request(
           {
-            host: url.hostname,
-            port: url.port || 80,
+            host: ip,
+            port: reqPort,
             path: url.pathname + url.search,
             method: req.method,
-            headers: req.headers,
+            // Host は元のホスト名を維持（vhost 正配送）。 接続先IPはピン留め済み。
+            headers: { ...req.headers, host: url.host },
+            timeout: SOCKET_TIMEOUT_MS,
           },
           (pr) => {
             res.writeHead(pr.statusCode ?? 502, pr.headers);
             pr.pipe(res);
           },
         );
+        proxyReq.on("timeout", () => proxyReq.destroy());
         proxyReq.on("error", () => {
           if (!res.headersSent) res.writeHead(502);
           res.end();
@@ -222,10 +318,12 @@ export class SandboxProxy {
         req.pipe(proxyReq);
       })
       .catch(() => {
-        try {
-          res.destroy();
-        } catch {
-          /* ignore */
+        // 認可拒否でないエラー（内部IP・解決失敗）は 403
+        if (!res.headersSent) {
+          res.writeHead(403);
+          res.end("blocked by sandbox (resolve/internal)");
+        } else {
+          res.end();
         }
       });
   }

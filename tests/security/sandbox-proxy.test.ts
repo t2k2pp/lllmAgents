@@ -1,12 +1,45 @@
 import { describe, it, expect, vi } from "vitest";
-import { SandboxProxy, parseConnectPort, type DomainDecision } from "../../src/security/sandbox-proxy.js";
+import { SandboxProxy, parseConnectPort, isBlockedAddress, type DomainDecision } from "../../src/security/sandbox-proxy.js";
 
 describe("parseConnectPort", () => {
   it("host:port から port、 無指定は 443", () => {
     expect(parseConnectPort("example.com:443")).toBe(443);
     expect(parseConnectPort("example.com:8443")).toBe(8443);
     expect(parseConnectPort("example.com")).toBe(443);
+  });
+  it("IPv6 を誤解しない（[..]:port と裸 IPv6）", () => {
     expect(parseConnectPort("[::1]:443")).toBe(443);
+    expect(parseConnectPort("[2001:db8::1]:8443")).toBe(8443);
+    expect(parseConnectPort("[::1]")).toBe(443);
+    // 裸 IPv6（多コロン）は末尾 :1 を port と誤認せず既定 443
+    expect(parseConnectPort("2001:db8::1")).toBe(443);
+  });
+});
+
+describe("isBlockedAddress (SSRF/内部レンジ遮断)", () => {
+  it("loopback / link-local(メタデータ) / RFC1918 を遮断", () => {
+    for (const ip of ["127.0.0.1", "169.254.169.254", "10.0.0.5", "172.16.0.1", "172.31.255.1", "192.168.1.1", "0.0.0.0"]) {
+      expect(isBlockedAddress(ip)).toBe(true);
+    }
+  });
+  it("グローバル IPv4 は許可", () => {
+    for (const ip of ["1.1.1.1", "8.8.8.8", "140.82.121.3"]) {
+      expect(isBlockedAddress(ip)).toBe(false);
+    }
+  });
+  it("172.15/172.32 は RFC1918 外なので許可", () => {
+    expect(isBlockedAddress("172.15.0.1")).toBe(false);
+    expect(isBlockedAddress("172.32.0.1")).toBe(false);
+  });
+  it("IPv6: ::1 / fe80 / ULA / v4-mapped 内部 を遮断、 グローバルは許可", () => {
+    expect(isBlockedAddress("::1")).toBe(true);
+    expect(isBlockedAddress("fe80::1")).toBe(true);
+    expect(isBlockedAddress("fd00::1")).toBe(true);
+    expect(isBlockedAddress("::ffff:127.0.0.1")).toBe(true);
+    expect(isBlockedAddress("2606:4700:4700::1111")).toBe(false);
+  });
+  it("解決不能な値は安全側で遮断", () => {
+    expect(isBlockedAddress("not-an-ip")).toBe(true);
   });
 });
 
@@ -59,5 +92,14 @@ describe("SandboxProxy.authorize", () => {
     const { proxy, onUnknownDomain } = mk({ allowed: ["*.example.com"] });
     expect(await proxy.authorize("api.example.com:443")).toBe(true);
     expect(onUnknownDomain).not.toHaveBeenCalled();
+  });
+
+  it("revoke で once 許可を取り消すと再度確認される", async () => {
+    const { proxy, onUnknownDomain } = mk({ decision: "once" });
+    expect(await proxy.authorize("new.com")).toBe(true);
+    expect(onUnknownDomain).toHaveBeenCalledTimes(1);
+    proxy.revoke("new.com"); // /sandbox deny 相当
+    expect(await proxy.authorize("new.com")).toBe(true);
+    expect(onUnknownDomain).toHaveBeenCalledTimes(2); // 取り消し後は再確認
   });
 });

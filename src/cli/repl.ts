@@ -45,8 +45,8 @@ import { AzureClaudeProvider } from "../providers/azure-claude.js";
 import { saveConfig } from "../config/config-manager.js";
 import { isWindows, isMacOS } from "../utils/platform.js";
 import { detectWsl } from "../security/wsl.js";
-import { configureSandboxProxy } from "../security/sandbox-proxy.js";
-import { DEFAULT_ALLOWED_DOMAINS, addDomain } from "../security/net-allowlist.js";
+import { configureSandboxProxy, getSandboxProxy } from "../security/sandbox-proxy.js";
+import { addDomain, removeDomain, resolveAllowedDomains } from "../security/net-allowlist.js";
 import inquirer from "inquirer";
 import { ProcessSandbox } from "../security/process-sandbox.js";
 import { resetProcessSandboxCache } from "../tools/definitions/bash.js";
@@ -125,11 +125,10 @@ export class REPL {
    */
   private configureSandboxNetProxy(): void {
     configureSandboxProxy({
-      getAllowedDomains: () =>
-        this.config.security.processSandbox?.allowedHosts ?? [...DEFAULT_ALLOWED_DOMAINS],
+      getAllowedDomains: () => resolveAllowedDomains(this.config.security.processSandbox?.allowedHosts),
       persistDomain: (domain) => {
         const ps = this.config.security.processSandbox ?? { enabled: false, level: "none" as const };
-        const hosts = addDomain(ps.allowedHosts ?? [...DEFAULT_ALLOWED_DOMAINS], domain);
+        const hosts = addDomain(resolveAllowedDomains(ps.allowedHosts), domain);
         this.config.security.processSandbox = { ...ps, allowedHosts: hosts };
         saveConfig(this.config);
       },
@@ -139,6 +138,14 @@ export class REPL {
             `\n  [sandbox] サンドボックス内の bash が未許可ドメインへ接続しようとしています: ${chalk.bold(host)}`,
           ),
         );
+        // 国際化ドメイン(punycode)はホモグラフ詐称の恐れがあるため明示警告
+        if (host.startsWith("xn--") || host.includes(".xn--")) {
+          console.log(
+            chalk.yellow(
+              `  ⚠ これは国際化ドメイン(punycode)です。 見た目が既知サイトに酷似する偽装の可能性に注意してください。`,
+            ),
+          );
+        }
         if (!process.stdin.isTTY) {
           console.log(
             chalk.yellow(`  非対話モードのため拒否 (fail-closed)。 /sandbox allow ${host} で恒久許可可。`),
@@ -3218,13 +3225,31 @@ export class REPL {
             const sb = new ProcessSandbox(cfg);
             const eff = sb.getAvailability().effectiveLevel;
             console.log(chalk.dim(`  方式: processSandbox (${isMacOS ? "sandbox-exec" : insideWsl ? "bwrap (WSL2)" : "bwrap/unshare"})  /  設定 enabled=${cfg.enabled}, level=${cfg.level}`));
+            // ネットの実態を OS/レベル別に正直に出す（誤認防止）:
+            //   fs + macOS → allowlist 経由のみ許可（プロキシ強制）
+            //   fs + Linux/WSL2 → 全開（allowlist 未強制。 2b-2 未実装）
+            //   network/full → 全遮断（allowlist 非適用）
+            let netDesc = "";
+            if (eff === "fs") {
+              netDesc = isMacOS
+                ? " — ネット: allowlist 経由のみ許可"
+                : " — ネット: 全開 (allowlist は未強制。 Linux/WSL2 の制御は 2b-2 未実装)";
+            } else if (eff === "network" || eff === "full") {
+              netDesc = " — ネット: 全遮断 (allowlist 非適用)";
+            }
             if (sb.isActive()) {
-              console.log(`  実効: ${chalk.green("ON")} — ${eff}${eff !== "none" ? " (ネットワーク遮断あり)" : ""}`);
+              console.log(`  実効: ${chalk.green("ON")} — ${eff}${netDesc}`);
             } else {
               console.log(`  実効: ${chalk.yellow("OFF")}`);
             }
-            const allow = this.config.security.processSandbox?.allowedHosts ?? [...DEFAULT_ALLOWED_DOMAINS];
-            console.log(chalk.dim(`  ネット allowlist (${allow.length}件): ${allow.join(", ") || "(なし)"}`));
+            // allowlist が実際に効くのは macOS の fs のみ。 それ以外は参考表示と明記。
+            const allow = resolveAllowedDomains(this.config.security.processSandbox?.allowedHosts);
+            const enforced = isMacOS && eff === "fs";
+            console.log(
+              chalk.dim(
+                `  ネット allowlist (${allow.length}件${enforced ? "" : "・現在のレベル/OSでは未適用"}): ${allow.join(", ") || "(なし)"}`,
+              ),
+            );
           }
           console.log(chalk.dim("  使用例: /sandbox on | off | allow <domain> | deny <domain> | status"));
         };
@@ -3254,6 +3279,7 @@ export class REPL {
               this.config.security.processSandbox = { enabled: true, level };
               saveConfig(this.config);
               resetProcessSandboxCache();
+              if (level !== "fs") getSandboxProxy()?.stop(); // fs 以外は proxy 不要なので止める
               const eff = new ProcessSandbox(this.config.security.processSandbox).getAvailability().effectiveLevel;
               console.log(chalk.dim(`  封じ込め ON (config 保存、 level=${level})。 ${isMacOS ? "sandbox-exec" : "bwrap/unshare"} で適用 (次の bash から即反映)。`));
               if (eff === "none") {
@@ -3274,6 +3300,7 @@ export class REPL {
               this.config.security.processSandbox = { enabled: false, level: lvl };
               saveConfig(this.config);
               resetProcessSandboxCache();
+              getSandboxProxy()?.stop(); // 封じ込め解除時はネット allowlist プロキシも停止
               console.log(chalk.dim("  封じ込め OFF (config 保存)。 bash は隔離なしで実行します。"));
             }
             break;
@@ -3285,7 +3312,7 @@ export class REPL {
               break;
             }
             const ps = this.config.security.processSandbox ?? { enabled: false, level: "none" as const };
-            const hosts = addDomain(ps.allowedHosts ?? [...DEFAULT_ALLOWED_DOMAINS], d);
+            const hosts = addDomain(resolveAllowedDomains(ps.allowedHosts), d);
             this.config.security.processSandbox = { ...ps, allowedHosts: hosts };
             saveConfig(this.config);
             console.log(chalk.dim(`  ネット allowlist に追加: ${d} (計 ${hosts.length}件)`));
@@ -3298,10 +3325,10 @@ export class REPL {
               break;
             }
             const ps = this.config.security.processSandbox ?? { enabled: false, level: "none" as const };
-            const cur = ps.allowedHosts ?? [...DEFAULT_ALLOWED_DOMAINS];
-            const hosts = cur.filter((h) => h.trim().toLowerCase() !== d.toLowerCase());
+            const hosts = removeDomain(resolveAllowedDomains(ps.allowedHosts), d);
             this.config.security.processSandbox = { ...ps, allowedHosts: hosts };
             saveConfig(this.config);
+            getSandboxProxy()?.revoke(d); // セッション once 許可も取り消す（残存通過を防ぐ）
             console.log(chalk.dim(`  ネット allowlist から削除: ${d} (残り ${hosts.length}件)`));
             break;
           }

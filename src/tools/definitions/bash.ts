@@ -182,6 +182,7 @@ export const bashTool: BashToolHandler = {
     let cleanup: (() => void) | undefined;
     // Phase 2b-1: macOS + fs レベルで在プロセスプロキシ経由のネット allowlist を強制する際の port
     let proxyPort: number | undefined;
+    let proxyStartError: string | undefined;
 
     if (isWindows) {
       // Windows ネイティブ: git bash (無ければ cmd.exe)。 OS レベルの封じ込めは無し。
@@ -213,8 +214,11 @@ export const bashTool: BashToolHandler = {
         if (isMacOS && proxy && sandbox.getEffectiveLevel() === "fs") {
           try {
             proxyPort = await proxy.ensureStarted();
-          } catch {
-            proxyPort = undefined; // 起動失敗時は従来の fs（ネット許可）にフォールバック
+          } catch (e) {
+            // 起動失敗でも「ネット全開」には落ちない（fail-closed）。proxyPort 未設定 →
+            // Seatbelt は localhost:port 許可を出さず全ネット遮断になる。沈黙で詰まらせない。
+            proxyPort = undefined;
+            proxyStartError = e instanceof Error ? e.message : String(e);
           }
         }
         const wrapped = sandbox.wrapCommand(command, allowedWriteDirs, proxyPort);
@@ -247,6 +251,11 @@ export const bashTool: BashToolHandler = {
         childEnv.HTTPS_PROXY = proxyUrl;
         childEnv.http_proxy = proxyUrl;
         childEnv.https_proxy = proxyUrl;
+        // 親シェルの NO_PROXY が残るとプロキシをバイパスし allowlist が無効化されるため必ず除去。
+        delete childEnv.NO_PROXY;
+        delete childEnv.no_proxy;
+        delete childEnv.ALL_PROXY;
+        delete childEnv.all_proxy;
       }
       const proc = spawn(shell, shellArgs, {
         cwd: process.cwd(),
@@ -297,6 +306,13 @@ export const bashTool: BashToolHandler = {
             ? `[P3-B] 破壊的コマンド検出。 実行前の git status:\n${preflightStatus}\n[ハーネス] ` +
               `この破壊操作で巻き込まれた可能性のあるファイルが上記です。 必要なら別途 stash で退避してから再実行を検討。\n---\n`
             : `[P3-B] 破壊的コマンド検出 (git リポジトリ外、 または git 未インストール)。 ロールバック失敗時の復旧手段を確保していますか?\n---\n`;
+        }
+        if (proxyStartError) {
+          prefix =
+            `[sandbox] ネット allowlist プロキシの起動に失敗したため、 fs サンドボックスは` +
+            `フェイルクローズで全ネットワークを遮断しています (原因: ${proxyStartError})。` +
+            `通信が必要な場合は /sandbox off で一時解除するか、 プロキシ起動エラーを解消してください。\n---\n` +
+            prefix;
         }
         if (code === 0) {
           return { success: true, output: prefix + truncated + meta };
