@@ -50,7 +50,10 @@ export const sandboxInfoTool: ToolHandler = {
       `- 設定: ${sbConfig.enabled ? "有効" : "無効"} / レベル: ${sbConfig.level}\n` +
       `- 実効レベル: ${levelLabels[avail.effectiveLevel] ?? avail.effectiveLevel}\n` +
       `- プラットフォーム: ${avail.platform}\n` +
-      `- ツール状態: ${toolStatus}\n`;
+      `- ツール状態: ${toolStatus}\n` +
+      ((avail.effectiveLevel === "fs" || avail.effectiveLevel === "full")
+        ? `- 機密読取ブロック: ~/.ssh, ~/.aws, ~/.gnupg, ~/.kube, ~/.docker, ~/.config/gcloud は読み取り不可\n`
+        : "");
 
     // Windows ネイティブ: OS 封じ込めは非対応。 封じ込めが必要なら WSL2 の中でアプリを
     // 起動する (その時は platform=linux となり上記 processSandbox が効く)。

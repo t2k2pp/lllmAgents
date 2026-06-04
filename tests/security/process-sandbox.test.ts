@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildBwrapArgs, buildSeatbeltProfile } from "../../src/security/process-sandbox.js";
+import {
+  buildBwrapArgs,
+  buildSeatbeltProfile,
+  defaultSecretDenyDirs,
+} from "../../src/security/process-sandbox.js";
 
 // セキュリティ上重要な「どのレベルで FS/ネットをどう開閉するか」を純粋関数として検証する
 // (docs/wsl-sandbox-design.md §7: FS書込・ネットワークの2軸)。
@@ -23,6 +27,13 @@ describe("buildBwrapArgs", () => {
     // コマンドは /bin/sh -c で末尾に
     expect(args.slice(-3)).toEqual(["/bin/sh", "-c", "echo hi"]);
   });
+  it("機密ディレクトリは空 tmpfs で覆う (decision 3)、 かつ書込 bind より後に置く", () => {
+    const args = buildBwrapArgs("echo", ["/work"], false, ["/home/u/.ssh"]);
+    const joined = args.join(" ");
+    expect(joined).toContain("--tmpfs /home/u/.ssh");
+    // writeDirs の --bind は mask の --tmpfs より前（後勝ちで確実に隠すため）
+    expect(joined.indexOf("--bind /work /work")).toBeLessThan(joined.indexOf("--tmpfs /home/u/.ssh"));
+  });
 });
 
 describe("buildSeatbeltProfile", () => {
@@ -42,5 +53,26 @@ describe("buildSeatbeltProfile", () => {
       // 読み取りは全許可
       expect(p).toContain("(allow file-read*)");
     }
+  });
+  it("機密ディレクトリは read を deny し、 allow file-read* より後に置く (last-match-wins)", () => {
+    const p = buildSeatbeltProfile(["/work"], "fs", ["/home/u/.aws"]);
+    expect(p).toContain(`(deny file-read* (subpath "/home/u/.aws"))`);
+    expect(p.indexOf("(allow file-read*)")).toBeLessThan(
+      p.indexOf(`(deny file-read* (subpath "/home/u/.aws"))`),
+    );
+  });
+});
+
+describe("defaultSecretDenyDirs", () => {
+  it("ssh/aws/gnupg/kube/docker/gcloud を home 相対の絶対パスで返す", () => {
+    const dirs = defaultSecretDenyDirs("/home/u");
+    expect(dirs).toContain("/home/u/.ssh");
+    expect(dirs).toContain("/home/u/.aws");
+    expect(dirs).toContain("/home/u/.config/gcloud");
+  });
+  it("npm/pip 認証 (.npmrc/.pypirc) は塞がない (開発を止めない方針)", () => {
+    const dirs = defaultSecretDenyDirs("/home/u");
+    expect(dirs.some((d) => d.endsWith(".npmrc"))).toBe(false);
+    expect(dirs.some((d) => d.endsWith(".pypirc"))).toBe(false);
   });
 });

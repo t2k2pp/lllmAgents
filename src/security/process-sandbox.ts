@@ -17,7 +17,7 @@
 
 import { existsSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir, platform } from "node:os";
+import { homedir, tmpdir, platform } from "node:os";
 
 export type ProcessSandboxLevel =
   | "none"        // OS-level sandboxing なし（アプリレベルのみ）
@@ -59,12 +59,29 @@ function findTool(...paths: string[]): string | null {
 }
 
 /**
+ * 既定で読み取りを塞ぐ機密ディレクトリ（decision 3: 厳しめ）。 home 相対の絶対パスを返す。
+ * 全てディレクトリ（ファイル単体は含めない）。 .npmrc/.pypirc は npm/pip 認証を壊し得るので
+ * あえて含めない（fs レベルは開発を止めない方針）。
+ */
+export function defaultSecretDenyDirs(home: string): string[] {
+  return [".ssh", ".aws", ".gnupg", ".kube", ".docker", join(".config", "gcloud")].map((p) =>
+    join(home, p),
+  );
+}
+
+/**
  * bwrap 引数を組み立てる純粋関数（テスト容易化のため分離）。
  * @param command    実行するシェルコマンド
  * @param writeDirs  書込許可ディレクトリ（呼び出し側で存在チェック済みのものを渡す）
  * @param unshareNet ネットワーク名前空間を分離するか（full=true / fs=false）
+ * @param maskDirs   空 tmpfs で覆って読めなくする機密ディレクトリ（呼び出し側で存在チェック済み）
  */
-export function buildBwrapArgs(command: string, writeDirs: string[], unshareNet: boolean): string[] {
+export function buildBwrapArgs(
+  command: string,
+  writeDirs: string[],
+  unshareNet: boolean,
+  maskDirs: string[] = [],
+): string[] {
   const args: string[] = [
     // Read-only bind mount of root filesystem
     "--ro-bind", "/", "/",
@@ -81,6 +98,10 @@ export function buildBwrapArgs(command: string, writeDirs: string[], unshareNet:
   for (const dir of writeDirs) {
     args.push("--bind", dir, dir);
   }
+  // 機密ディレクトリを空 tmpfs で覆う（writeDirs の後に置くことで、 親が書込 bind されても確実に隠す）
+  for (const dir of maskDirs) {
+    args.push("--tmpfs", dir);
+  }
   args.push("--", "/bin/sh", "-c", command);
   return args;
 }
@@ -91,7 +112,11 @@ export function buildBwrapArgs(command: string, writeDirs: string[], unshareNet:
  * - file-write は全レベルで writeDirs（+ /dev /tmp）に限定
  * - network は "fs" のみ許可。 "network"/"full" は deny（既定 deny のまま）
  */
-export function buildSeatbeltProfile(writeDirs: string[], level: ProcessSandboxLevel): string {
+export function buildSeatbeltProfile(
+  writeDirs: string[],
+  level: ProcessSandboxLevel,
+  denyReadDirs: string[] = [],
+): string {
   const lines: string[] = [
     "(version 1)",
     "(deny default)",
@@ -100,7 +125,7 @@ export function buildSeatbeltProfile(writeDirs: string[], level: ProcessSandboxL
     // システムコール基盤
     "(allow sysctl-read)",
     "(allow signal (target self))",
-    // 読み取りは全ディレクトリで許可（write は下で制限）
+    // 読み取りは全ディレクトリで許可（write は下で制限、 機密は後段で deny override）
     "(allow file-read*)",
     // /dev と /tmp は常に書き込み許可
     `(allow file-write* (subpath "/dev"))`,
@@ -111,6 +136,12 @@ export function buildSeatbeltProfile(writeDirs: string[], level: ProcessSandboxL
   // 書き込み許可ディレクトリ
   for (const dir of writeDirs) {
     lines.push(`(allow file-write* (subpath "${dir}"))`);
+  }
+
+  // 機密ディレクトリは読み取りも禁止（decision 3）。 allow file-read* の後に置くことで
+  // Seatbelt の last-match-wins で当該 subpath だけ deny に上書きされる。
+  for (const dir of denyReadDirs) {
+    lines.push(`(deny file-read* (subpath "${dir}"))`);
   }
 
   // ネットワーク: fs レベルのみ許可。 network/full は遮断（deny default のまま）
@@ -217,7 +248,8 @@ export class ProcessSandbox {
     // fs / full は bwrap で FS 隔離（fs はネット許可・full はネット遮断）
     if ((level === "fs" || level === "full") && this.bwrap) {
       const existing = writeDirs.filter((d) => existsSync(d));
-      const args = buildBwrapArgs(command, existing, /* unshareNet */ level === "full");
+      const masks = defaultSecretDenyDirs(homedir()).filter((d) => existsSync(d));
+      const args = buildBwrapArgs(command, existing, /* unshareNet */ level === "full", masks);
       return { shell: this.bwrap, args };
     }
     // network レベル（または full でも bwrap なしの降格）
@@ -239,7 +271,8 @@ export class ProcessSandbox {
     writeDirs: string[],
     level: ProcessSandboxLevel
   ): WrappedCommand {
-    const profile = buildSeatbeltProfile(writeDirs, level);
+    const masks = defaultSecretDenyDirs(homedir()).filter((d) => existsSync(d));
+    const profile = buildSeatbeltProfile(writeDirs, level, masks);
 
     // 一時プロファイルファイルを作成
     const profilePath = join(tmpdir(), `lllm-sandbox-${process.pid}-${Date.now()}.sb`);

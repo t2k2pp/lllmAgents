@@ -94,8 +94,9 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 → 再設計の方向：`processSandbox` を **「FS 書込スコープ」と「ネット」の直交2軸**にする。段階を切る（決定1=b）：
 
 - **Phase 2a（実装済み）**：レベル `"fs"`（FS 書込のみ隔離・ネットワークは許可）を追加。`/sandbox on` の既定を `fs` にし、`npm install`/`pip` 等が通る "のびのび dev" を成立させた。Linux は bwrap（`--unshare-net` なし）、macOS は Seatbelt（`(allow network*)`）。`buildBwrapArgs`/`buildSeatbeltProfile` を純粋関数に分離してテスト。
+  - **決定3（厳しめ・実装済み）**：封じ込め有効時（fs/full）は `~/.ssh` `~/.aws` `~/.gnupg` `~/.kube` `~/.docker` `~/.config/gcloud` の**読み取りを既定でブロック**（Linux=空 tmpfs で覆う / macOS=Seatbelt deny）。Claude Code は既定で読める（denyRead 必須）が、我々は塞ぐ方針。`.npmrc`/`.pypirc` は npm/pip 認証を壊さぬよう**あえて含めない**。`defaultSecretDenyDirs` を純粋関数化してテスト。
   - 正直な穴：`"fs"` はネット全開なので、Claude Code が警告する「FS は閉じてもネット経由で SSH 鍵等を持ち出せる」リスクは Phase 2b まで残る。`full` を選べば従来どおりネット遮断。
-- **Phase 2b（未着手）**：ネットを「ドメイン allowlist（プロキシ）」化（`allowedHosts` を `allowedDomains` 相当へ格上げ）。プロキシ（Claude Code は `socat` リレー＋プロキシ）が要り工数大なので、Anthropic OSS の [`@anthropic-ai/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime) の採用を検討（決定2）。
+- **Phase 2b（未着手）**：ネットを「ドメイン allowlist（プロキシ）」化（`allowedHosts` を `allowedDomains` 相当へ格上げ）。**決定2＝自前実装**（`@anthropic-ai/sandbox-runtime` は採用せず、自前のプロキシ＋allowlist を構築する）。Claude Code の `socat` リレー＋プロキシ方式を参考に設計する。工数大のため着手は別途・要設計。
 
 これ（特に 2b で「必要な通信だけ通す」）が固まって初めて「封じ込め時のみ autorun が bash 確認を省く」連動（確認削減の実体）に進める。
 
