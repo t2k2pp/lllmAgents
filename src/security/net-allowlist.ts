@@ -32,6 +32,7 @@ export function normalizeHost(hostport: string): string {
   h = h.replace(/^[a-z][a-z0-9+.-]*:\/\//, ""); // scheme:// を除去
   h = h.split("/")[0]; // path を除去
   h = h.replace(/:\d+$/, ""); // :port を除去
+  h = h.replace(/\.$/, ""); // 末尾ドット(FQDN)を除去し allowlist と一致させる
   // IPv6 ブラケットは今回対象外（[::1] 等はそのまま返す）
   return h;
 }

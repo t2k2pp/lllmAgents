@@ -37,9 +37,8 @@ describe("buildBwrapArgs", () => {
 });
 
 describe("buildSeatbeltProfile", () => {
-  it("fs はネットワークを許可する", () => {
-    const p = buildSeatbeltProfile(["/work"], "fs");
-    expect(p).toContain("(allow network*)");
+  it("fs はネット全開にしない (proxyPort 無しは fail-closed、 全開 allow network* は決して出さない)", () => {
+    expect(buildSeatbeltProfile(["/work"], "fs")).not.toContain("(allow network*)");
   });
   it("full / network はネットワークを許可しない", () => {
     expect(buildSeatbeltProfile(["/work"], "full")).not.toContain("(allow network*)");
@@ -54,13 +53,19 @@ describe("buildSeatbeltProfile", () => {
       expect(p).toContain("(allow file-read*)");
     }
   });
-  it("fs + proxyPort はネットを localhost:port のみに制限 (allow network* を出さない)", () => {
+  it("fs + proxyPort はネットを 127.0.0.1:port のみに制限 (env と表記一致・allow network* 無し)", () => {
     const p = buildSeatbeltProfile(["/work"], "fs", [], 54321);
-    expect(p).toContain(`(allow network-outbound (remote ip "localhost:54321"))`);
+    expect(p).toContain(`(allow network-outbound (remote ip "127.0.0.1:54321"))`);
     expect(p).not.toContain("(allow network*)");
   });
-  it("fs + proxyPort なしは従来どおり全ネット許可", () => {
-    expect(buildSeatbeltProfile(["/work"], "fs")).toContain("(allow network*)");
+  it("fs + proxyPort なしは fail-closed (ネット許可を一切出さない)", () => {
+    const p = buildSeatbeltProfile(["/work"], "fs");
+    expect(p).not.toContain("(allow network*)");
+    expect(p).not.toContain("network-outbound");
+  });
+  it("full はネット許可を出さない (deny default)", () => {
+    const p = buildSeatbeltProfile(["/work"], "full");
+    expect(p).not.toContain("(allow network");
   });
   it("機密ディレクトリは read を deny し、 allow file-read* より後に置く (last-match-wins)", () => {
     const p = buildSeatbeltProfile(["/work"], "fs", ["/home/u/.aws"]);

@@ -145,15 +145,13 @@ export function buildSeatbeltProfile(
     lines.push(`(deny file-read* (subpath "${dir}"))`);
   }
 
-  // ネットワーク: fs レベルのみ許可。 network/full は遮断（deny default のまま）。
-  // proxyPort 指定時（Phase 2b）は localhost:port（= 在プロセスプロキシ）への outbound だけ許可し、
-  // 直接接続を塞ぐ。 プロキシがドメイン allowlist を強制する。
-  if (level === "fs") {
-    if (proxyPort) {
-      lines.push(`(allow network-outbound (remote ip "localhost:${proxyPort}"))`);
-    } else {
-      lines.push("(allow network*)");
-    }
+  // ネットワーク: fs のみ・かつ「プロキシ経由」のみ許可。 network/full は deny default のまま。
+  // proxyPort 指定時は 127.0.0.1:port（= 在プロセスプロキシ）への outbound だけ許可し直接接続を塞ぐ
+  //（子プロセスへの env も 127.0.0.1 なので表記を一致させる）。 プロキシがドメイン allowlist を強制。
+  // proxyPort が無い fs は **fail-closed でネット遮断**（旧来の (allow network*) には退避しない）。
+  // ＝プロキシ起動失敗・未構成でも「ネット全開」に落ちない（fail-open 防止）。
+  if (level === "fs" && proxyPort) {
+    lines.push(`(allow network-outbound (remote ip "127.0.0.1:${proxyPort}"))`);
   }
 
   return lines.join("\n") + "\n";

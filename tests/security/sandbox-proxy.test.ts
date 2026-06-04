@@ -1,5 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
-import { SandboxProxy, type DomainDecision } from "../../src/security/sandbox-proxy.js";
+import { SandboxProxy, parseConnectPort, type DomainDecision } from "../../src/security/sandbox-proxy.js";
+
+describe("parseConnectPort", () => {
+  it("host:port から port、 無指定は 443", () => {
+    expect(parseConnectPort("example.com:443")).toBe(443);
+    expect(parseConnectPort("example.com:8443")).toBe(8443);
+    expect(parseConnectPort("example.com")).toBe(443);
+    expect(parseConnectPort("[::1]:443")).toBe(443);
+  });
+});
 
 function mk(opts: { allowed?: string[]; decision?: DomainDecision }) {
   const persistDomain = vi.fn();

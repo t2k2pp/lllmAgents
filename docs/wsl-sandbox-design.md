@@ -126,7 +126,15 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - `process-sandbox.ts`：`buildSeatbeltProfile(..., proxyPort)` ＝ fs で proxyPort 指定時は `(allow network-outbound (remote ip "localhost:port"))` のみ許可し直接接続を遮断（proxyPort 無しは従来どおり `(allow network*)`）。
 - `repl.ts`：`configureSandboxProxy` を構成（allowlist=config、確認=inquirer・非TTY は deny、always で config 保存）。`/sandbox allow|deny <domain>`、`status` に allowlist 表示。
 - テスト：`net-allowlist`（照合）、`sandbox-proxy`（authorize: allow/deny/once/always/並行集約/ワイルドカード）、`process-sandbox`（fs+proxyPort の Seatbelt）。
-- **未検証（手動 TTY / macOS 実機）**：実際のプロキシ通信・Seatbelt の localhost 限定が効くか・対話確認 UX・spinner との競合。
+- **未検証（手動 TTY / macOS 実機）**：実際のプロキシ通信・Seatbelt の 127.0.0.1 限定が効くか・対話確認 UX・spinner との競合。
+
+**セキュリティレビュー反映（サブエージェント指摘・cf12134 直後）**：
+- **fail-open 撲滅（最重要）**：macOS fs は「プロキシ経由 or ネット遮断」のみ。`buildSeatbeltProfile` から `(allow network*)` 退避を撤去し、proxyPort 無し fs は **fail-closed**（プロキシ起動失敗・未構成でもネット全開に落ちない）。
+- **表記一致**：Seatbelt 許可を `localhost:port` → `127.0.0.1:port` に（子 env の `HTTP(S)_PROXY=http://127.0.0.1:port` と一致）。
+- **HTTP Host 詐称対策**：プレーン HTTP 経路で認可対象と実接続先を `url.hostname` に統一（Host ヘッダとリクエストラインの不一致による迂回を防止）。
+- **CONNECT ポート制限**：443/80 以外の CONNECT を拒否（許可ドメインの任意ポートトンネル悪用を防止）。
+- **末尾ドット正規化**：`normalizeHost` が FQDN 末尾ドットを除去。
+- 残課題（要対応 or 明示）：macOS 実機で「allowlist 外ドメイン/IP 直/別ポートが実際に遮断されるか」の検証（H1 の核心）、Linux/WSL2 の fs はネット allowlist 未対応＝ネット許可のまま（2b-2 まで）、`network`/`full` は allowlist でなく全遮断（UX 上の注意）。
 
 ## §8 既知の限界・トレードオフ
 

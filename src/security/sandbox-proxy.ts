@@ -18,6 +18,12 @@ import { domainAllowed, normalizeHost } from "./net-allowlist.js";
 
 export type DomainDecision = "once" | "always" | "deny";
 
+/** CONNECT ターゲット "host:port" / "[ipv6]:port" から port を取り出す（既定 443）。 */
+export function parseConnectPort(target: string): number {
+  const m = /:(\d+)$/.exec(target.trim());
+  return m ? parseInt(m[1], 10) : 443;
+}
+
 export interface SandboxProxyDeps {
   /** 永続 allowlist（config 由来。 既定リストを含めた最終形を返す） */
   getAllowedDomains(): string[];
@@ -121,7 +127,18 @@ export class SandboxProxy {
   private handleConnect(req: http.IncomingMessage, clientSocket: Socket, head: Buffer): void {
     const target = req.url ?? ""; // "host:port"
     const host = normalizeHost(target);
-    const portStr = target.split(":")[1] ?? "443";
+    const port = parseConnectPort(target);
+
+    // 許可ポートは 443/80 のみ（許可ドメインの任意ポートへのトンネル悪用を防ぐ）
+    if (port !== 443 && port !== 80) {
+      try {
+        clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+        clientSocket.end();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
 
     this.authorize(host)
       .then((ok) => {
@@ -134,7 +151,7 @@ export class SandboxProxy {
           }
           return;
         }
-        const upstream = net.connect(parseInt(portStr, 10) || 443, host, () => {
+        const upstream = net.connect(port, host, () => {
           clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
           if (head && head.length) upstream.write(head);
           upstream.pipe(clientSocket);
@@ -166,22 +183,23 @@ export class SandboxProxy {
 
   /** プレーン HTTP のフォワード */
   private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
-    const host = normalizeHost(req.headers.host ?? req.url ?? "");
-    this.authorize(host)
+    // 認可対象と実接続先を必ず同一の url.hostname に統一する
+    // （Host ヘッダとリクエストラインのドメイン不一致による allowlist 迂回を防ぐ）。
+    let url: URL;
+    try {
+      url = new URL(
+        (req.url ?? "").startsWith("http") ? req.url! : `http://${req.headers.host ?? ""}${req.url ?? ""}`,
+      );
+    } catch {
+      res.writeHead(400);
+      res.end();
+      return;
+    }
+    this.authorize(url.hostname)
       .then((ok) => {
         if (!ok) {
           res.writeHead(403);
           res.end("blocked by sandbox allowlist");
-          return;
-        }
-        let url: URL;
-        try {
-          url = new URL(
-            (req.url ?? "").startsWith("http") ? req.url! : `http://${req.headers.host}${req.url}`,
-          );
-        } catch {
-          res.writeHead(400);
-          res.end();
           return;
         }
         const proxyReq = http.request(
