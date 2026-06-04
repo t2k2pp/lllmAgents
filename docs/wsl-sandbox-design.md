@@ -100,6 +100,26 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 
 これ（特に 2b で「必要な通信だけ通す」）が固まって初めて「封じ込め時のみ autorun が bash 確認を省く」連動（確認削減の実体）に進める。
 
+### §7.1 Phase 2b 詳細設計（ネット allowlist・対話確認）
+
+決定（user）: **未許可ドメインは初回に対話確認（Claude Code 流）** / **既定 allowlist は開発定番プリセット** / **自前実装**（`@anthropic-ai/sandbox-runtime` 不採用）。
+
+**Claude Code の方式**：サンドボックスは直接ネット不可。unix domain socket 経由で「外のプロキシ」へ繋ぎ、プロキシが SNI/Host でドメイン allowlist を強制（TLS 終端なし）。`socat` がリレー。
+
+**我々（自前）の方式** ―― 1点だけ単純化できる：
+- **プロキシ＝エージェント本体プロセス内の HTTP CONNECT サーバ**にする。bash 子プロセスに `HTTP(S)_PROXY=localhost:PORT` を注入。Node の event loop は子プロセス待機中もプロキシ接続を捌ける。
+- 未許可ドメインへの CONNECT → ハンドラが **REPL の確認（既存の権限プロンプト直列化を再利用）** を await → 許可なら allowlist 追加＋トンネル、拒否なら 502。**同一プロセスなので IPC 不要**（Claude Code の別プロセス＋socat より単純）。
+- 直接接続の遮断（プロキシ迂回防止）：
+  - **macOS（2b-1・先行）**：Seatbelt で `network-outbound` を `localhost:PORT` のみ許可（他は deny）。在プロセスのプロキシがそのまま効く＝tractable。
+  - **Linux/WSL2（2b-2・後追い）**：bwrap `--unshare-net` で直接ネット遮断＋unix socket をサンドボックスへ bind＋内部 `socat` で `localhost:PORT`→unix socket→外のプロキシ、というブリッジ（Claude Code 同型）。工数大。
+- **TLS は終端しない（ホスト名ベース）**。ドメインフロンティングの注意点は Claude Code と同じ割り切り。
+- **allowlist の保存**：`config.security.processSandbox.allowedHosts`（既存フィールドを流用）。既定 = `DEFAULT_ALLOWED_DOMAINS`（npm/yarn/pip/GitHub）。
+- **照合**：完全一致 ＋ `*.example.com` ワイルドカード（サブドメインのみ）。`src/security/net-allowlist.ts`（純粋関数・テスト済み）。
+- **コマンド**：`/sandbox allow <domain>` / `/sandbox deny <domain>`、`status` で現在の allowlist 表示。
+- 非 TTY/パイプ：対話確認できないため「未許可はブロック（fail-closed）」にフォールバック。
+
+実装順：土台（allowlist 照合＋既定リスト＝実装済み）→ 2b-1（在プロセス CONNECT プロキシ＋macOS Seatbelt 配線＋対話確認＋`/sandbox allow`）→ 2b-2（Linux/WSL2 の socat ブリッジ）。
+
 ## §8 既知の限界・トレードオフ
 
 1. ネイティブ Windows は封じ込め非対応（git bash 実行）。封じ込めは WSL2 内起動が前提。
