@@ -9,10 +9,13 @@
  * - フォールバック: ツール非存在時は設定に警告を出して no-op
  *
  * レベル設計は「FS 書込」と「ネットワーク」の2軸（docs/wsl-sandbox-design.md §7）:
- * - "fs"   : FS 書込のみ隔離・ネットワークは許可。 開発作業 (npm/pip 等) を止めない "のびのび" 向け
- * - "network": ネットワークのみ隔離
+ * - "fs"   : FS 書込のみ隔離・ネットワークは allowlist 経由のみ（macOS / Linux は socat+ip 時）。
+ *            開発作業 (npm/pip 等) を止めない "のびのび" 向け
+ * - "network": ネットワーク隔離。 ※macOS は Seatbelt が deny-default のため FS 書込も
+ *            writeDirs に限定される（Linux の unshare --net は FS 開放）。OS 差あり（§7 H-1）
  * - "full" : 両方隔離
- * ネットワークの「ドメイン allowlist（プロキシ）」は未実装（§7 の今後の課題）。
+ * ネットワークの「ドメイン allowlist（プロキシ）」は Phase 2b で実装済み
+ *（macOS=Seatbelt+在プロセスproxy / Linux=bwrap+socat ブリッジ。docs §7.1/§7.2）。
  */
 
 import { existsSync, writeFileSync, unlinkSync, realpathSync } from "node:fs";
@@ -41,7 +44,7 @@ export type ProcessSandboxLevel =
 export interface ProcessSandboxConfig {
   enabled: boolean;
   level: ProcessSandboxLevel;
-  /** ネットワーク隔離でも許可するホスト（将来の allowlist 拡張用、現在は未使用） */
+  /** ネット allowlist（Phase 2b で使用中）。 fs レベルでプロキシ経由を許可するドメイン群。 */
   allowedHosts?: string[];
 }
 

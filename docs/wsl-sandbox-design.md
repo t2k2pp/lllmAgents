@@ -182,14 +182,15 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - 設定 `security.processSandbox.autoAllowBashWhenContained !== false`（既定 ON、 オプトアウト可）
 
 **維持する確認（自動許可しない）**：
-- **破壊的コマンド**（`AUTORUN_DESTRUCTIVE_PATTERNS`: rm -rf / 上書き / git reset --hard / ディスク操作等）→ 通常の確認フローへフォールバック。
+- **破壊的コマンド**（`destructive-commands.ts` の `isDestructiveCommand`: rm / 上書き / git reset --hard / git checkout -- / force push / chmod -R / 実デバイス書込 等）→ 通常の確認フローへフォールバック。
 - **危険コマンド**（既存 `checkCommand` の block ルール）→ 従来どおりブロック。
+- **明示 ask ルール**（`security.rules.ask` 等にマッチ）→ 自動許可せず確認（ゲート条件 `ruleResult !== "ask"`）。
 - **CWD 外参照・広域再帰スキャン**（`bashNeedsExplicitAsk`）→ 確認。
 - **allowlist 外ドメインへの通信** → 実行時にプロキシ（`onUnknownDomain`）が対話確認。封じ込めが「外部送信は必ず確認」を担保するので、bash 起動自体を自動許可しても exfil は無確認では起きない。
 
 **実装**：既存の autorun の bash 分岐（`checkAutorunPermission`）を再利用する。封じ込め条件成立時は autorun トグルが OFF でも同じ判定を通す。
 - `src/security/containment.ts`：`isBashNetworkContained()`（上記条件を判定。security レイヤ内で完結し循環依存なし）。
-- `permission-manager.checkCliPermission`：`(this._autorunMode || (toolName==="bash" && isBashNetworkContained()))` で autorun 判定へ。destructive は null 返し→通常 ask へ落ちる既存挙動をそのまま活用。
+- `permission-manager.checkCliPermission`：`(this._autorunMode || (toolName==="bash" && isBashNetworkContained())) && ruleResult !== "ask"` で autorun 判定へ。destructive は null 返し→通常 ask へ落ちる既存挙動をそのまま活用。`ruleResult !== "ask"` により明示 ask ルールは自動許可されない。
 - 透明性：封じ込め自動許可が初回発火した時に dim で一度通知。
 
 **エスケープハッチ / オプトアウト**：
@@ -210,9 +211,10 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 1. ネイティブ Windows は封じ込め非対応（git bash 実行）。封じ込めは WSL2 内起動が前提。
 2. 変種2（WSL2 内）で `/mnt/c` を触ると I/O が遅い。成果物を WSL ネイティブ FS に置けば速い。
 3. ネット allowlist の強制には OS 機能が要る：macOS=sandbox-exec、Linux=bwrap+socat+ip。不足時は fs でもネット全開（status で「未強制」と明示）。
-4. bwrap/sandbox-exec が無い環境では実効レベル none（警告表示）。
-6. ドメインフロンティング（CONNECT は SNI を見ない）・許可ドメイン自体への exfil（Gist 等）・インタプリタ難読化による破壊は脅威モデル上の残存リスク（TLS 非終端の割り切り・§7.1/§7.2）。
+4. bwrap/sandbox-exec が無い環境では実効レベル none（警告表示）。Linux `full` で bwrap 無し時は `unshare` があれば `network` へ降格（none ではない。`getEffectiveLevel`）。
 5. 配布：変種2 用に WSL 内で動かす手段（WSL 内で `npm run start`、または Linux ビルド提供）の案内が必要。
+6. ドメインフロンティング（CONNECT は SNI を見ない）・許可ドメイン自体への exfil（Gist 等）・インタプリタ難読化による破壊は脅威モデル上の残存リスク（TLS 非終端の割り切り・§7.1/§7.2）。
+7. **`network` レベルの FS 挙動に OS 差**：macOS は Seatbelt が deny-default のため `network` でも FS 書込が writeDirs に限定される（実質 full 相当の FS 隔離）。Linux の `network`（unshare --net）は FS 開放。2軸の理想（network=ネットのみ）からは macOS が乖離（要判断: コードを揃えるか本記述で許容するか・§7 H-1）。
 
 ## §9 非目標
 
