@@ -27,7 +27,9 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: RegExp[] = [
   /\bdd\s/,
   /\bmkfs\b/,
   /\bformat\s+[a-z]:/i,
-  />\s*\/dev\//,
+  // 実デバイス(ディスク等)への書込のみ破壊的扱い。 /dev/null,/dev/stdout 等の頻出リダイレクトは除外
+  // （これを広く `>\s*/dev/` にすると `2>/dev/null` を誤検知し Phase 3 が確認だらけになる）。
+  />\s*\/dev\/(sd|nvme|hd|vd|disk|mapper|loop|mmcblk)/,
   // 再帰パーミッション/所有者変更
   /\bchmod\s+-R\b/,
   /\bchown\s+-R\b/,

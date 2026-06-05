@@ -35,6 +35,14 @@ describe("isDestructiveCommand (正典リスト・自動許可から除外すべ
       expect(isDestructiveCommand(c), c).toBe(false);
     }
   });
+  it("頻出リダイレクト /dev/null 等は誤検知しない・実デバイス書込のみ破壊的", () => {
+    for (const c of ["cmd 2>/dev/null", "cmd >/dev/null 2>&1", "echo x > /dev/stdout", "cat /dev/urandom"]) {
+      expect(isDestructiveCommand(c), c).toBe(false);
+    }
+    for (const c of ["dd if=/dev/zero of=/dev/sda", "echo x > /dev/nvme0n1", "cat img > /dev/mmcblk0"]) {
+      expect(isDestructiveCommand(c), c).toBe(true);
+    }
+  });
 });
 
 describe("checkCommand (rules.ts 修正の回帰)", () => {
