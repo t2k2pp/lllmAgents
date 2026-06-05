@@ -23,7 +23,7 @@ export const DANGEROUS_COMMAND_PATTERNS: SecurityRule[] = [
   { pattern: /wget\s+.*\|\s*(bash|sh|zsh)/, action: "block", message: "ダウンロードしたスクリプトの直接実行は禁止されています" },
 
   // System
-  { pattern: /:()\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, action: "block", message: "フォーク爆弾は禁止されています" },
+  { pattern: /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&?\s*\}\s*;\s*:/, action: "block", message: "フォーク爆弾は禁止されています" },
   { pattern: /\b(shutdown|reboot|poweroff|halt)\b/, action: "block", message: "システムのシャットダウン/再起動は禁止されています" },
   { pattern: /\binit\s+0\b/, action: "block", message: "システム停止は禁止されています" },
 
@@ -34,7 +34,8 @@ export const DANGEROUS_COMMAND_PATTERNS: SecurityRule[] = [
   { pattern: /rd\s+\/s/i, action: "warn", message: "ディレクトリの再帰削除です" },
 
   // Git destructive
-  { pattern: /git\s+push\s+.*--force\s+.*(main|master)/, action: "block", message: "main/masterへのforce pushは禁止されています" },
+  // force push を main/master へ（語順非依存・-f / --force / --force-with-lease を網羅）
+  { pattern: /\bgit\s+push\b(?=[^\n]*(?:--force\b|--force-with-lease\b|\s-f\b))(?=[^\n]*\b(?:main|master)\b)/, action: "block", message: "main/masterへのforce pushは禁止されています" },
   { pattern: /git\s+reset\s+--hard/, action: "warn", message: "git reset --hardはコミットされていない変更を失います" },
   { pattern: /git\s+clean\s+-f/, action: "warn", message: "git cleanは追跡されていないファイルを削除します" },
 

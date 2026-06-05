@@ -5,6 +5,7 @@ import * as fs from "node:fs";
 import { isWindows, isMacOS } from "../../utils/platform.js";
 import { ProcessSandbox } from "../../security/process-sandbox.js";
 import { getSandboxProxy } from "../../security/sandbox-proxy.js";
+import { isDestructiveCommand } from "../../security/destructive-commands.js";
 import { loadConfig } from "../../config/config-manager.js";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
 
@@ -93,16 +94,8 @@ interface BashToolHandler extends ToolHandler {
  * 観測ログ (株アプリ実装、 2026-05-06 セッション T86) で、 git checkout が失敗し
  * 作業ツリーが意図せぬ状態で残り、 同じ編集を 6 回やり直す事象が発生した。
  */
-const DESTRUCTIVE_PATTERNS: RegExp[] = [
-  /\bgit\s+checkout\s+(--\s|\.\s|\.$|--$)/,
-  /\bgit\s+reset\s+--hard\b/,
-  /\bgit\s+clean\s+-[a-z]*[df][a-z]*\b/,
-  /\brm\s+-[rR][fF]?\s|\brm\s+-[fF][rR]?\s/,
-  /\bfind\b[^|;&]*-delete\b/,
-];
-function isDestructiveCommand(command: string): boolean {
-  return DESTRUCTIVE_PATTERNS.some((re) => re.test(command));
-}
+// 破壊的コマンド判定は src/security/destructive-commands.ts の正典リストに集約
+// （permission-manager の自動許可ゲートと同一ソース。 乖離防止＝Phase 3 レビュー対応）。
 function captureGitStatusSnapshot(): string {
   try {
     const out = execFileSync("git", ["status", "--short"], {

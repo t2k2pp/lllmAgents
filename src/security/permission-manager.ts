@@ -7,6 +7,7 @@ import { checkCommand } from "./rules.js";
 import { Sandbox } from "./sandbox.js";
 import { evaluateRules } from "./rule-engine.js";
 import { isBashNetworkContained } from "./containment.js";
+import { isDestructiveCommand } from "./destructive-commands.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 
 /** リクエストの発生元 */
@@ -31,17 +32,6 @@ const INHERENTLY_SAFE_TOOLS = new Set([
   "response_complete",
   "second_llm_consult",
 ]);
-
-/**
- * 自律実行モード (autorun): 作業フォルダ配下の操作を削除以外すべて自動承認。
- * bashの破壊的コマンド（rm, del, rmdir等）とサンドボックス外パスは引き続きブロック。
- */
-const AUTORUN_DESTRUCTIVE_PATTERNS = [
-  /\brm\s/, /\brmdir\b/, /\bdel\b/, /\brd\b/,
-  /\bunlink\b/, /\bshred\b/, /\btruncate\b/,
-  /\bmkfs\b/, /\bformat\b/, /\bdd\s/,
-  />\s*\/dev\//, /\bgit\s+clean\b/, /\bgit\s+reset\s+--hard\b/,
-];
 
 /**
  * bashコマンド文字列が CWD 外のパスを参照しているか判定。
@@ -423,8 +413,8 @@ export class PermissionManager {
     // bash: サンドボックス内 + 非破壊コマンドならOK
     if (toolName === "bash") {
       const command = (params.command as string) ?? "";
-      // 破壊的コマンドは通常の確認フローへ
-      if (AUTORUN_DESTRUCTIVE_PATTERNS.some((p) => p.test(command))) {
+      // 破壊的コマンドは通常の確認フローへ（force push・git checkout/clean 等も含む正典リスト）
+      if (isDestructiveCommand(command)) {
         return null; // 通常フローへフォールバック
       }
       // 危険コマンドチェック（既存ルール）

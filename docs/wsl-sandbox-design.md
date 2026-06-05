@@ -182,6 +182,13 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 
 **非対象（この段階では従来どおり確認）**：Linux/WSL2 の fs（ネット全開＝未実証。2b-2 後に拡張）、Windows ネイティブ（封じ込め無し）、`network`/`full`（ネット全遮断＝開発が進まないため auto-allow の意味が薄い）。
 
+**Phase 3 セキュリティレビュー反映（df52cbf 直後）**：基幹の fail-closed（proxy 失敗時ネット全遮断・非TTY deny・deny/ask 優先・オプトアウト・`enabled:false`→level none）は堅牢と確認。指摘で修正したもの:
+- **【Critical】force push のすり抜け**：`AUTORUN_DESTRUCTIVE_PATTERNS`(削除済) に force push が無く、 rules.ts の block も語順固定で `git push -f origin main` 等を取りこぼし、 さらに github.com は既定 allowlist のためドメイン確認も出ず、 remote 履歴を**無確認破壊**できた。→ 破壊判定を単一ソース `src/security/destructive-commands.ts` へ統合し force push（任意ターゲット）を確認へ。rules.ts の block 正規表現を語順非依存・`-f`/`--force-with-lease` 対応に修正。
+- **【High】破壊判定リストの分裂**：permission の自動許可ゲートが使うリストに `git checkout --|.`・`chmod -R`・`git clean` 等が無く、 bash.ts の別リストとも乖離していた。→ 正典リストに集約（両者が同一ソースを参照）。
+- **【Med】フォークボム正規表現の不発**：`/:()\s*\{/` は `()` がメタ文字で実物 `:(){ :|:& };:` に不一致だった。→ `\(`/`\)` をエスケープして修正。
+- **残存リスク（文字列ベース検出の本質的限界・明記）**：`node -e 'fs.rmSync(...)'` / `python3 -c 'shutil.rmtree(...)'` / `sed -i` / `base64 -d | sh` のような**インタプリタ経由・難読化された破壊や任意コード実行**は文字列検出では捕捉しきれない。ただし封じ込めにより FS 破壊は writeDir(cwd 等) 内に限定され、 ネット送信は proxy の allowlist 確認を経る。**封じ込めで守れない不可逆操作は git 履歴/作業ツリー破棄・remote force push・許可済みドメインからの取得→実行**であり、 前2者はパターンで確認へ落とす。これらインタプリタ難読化は完全防御不能と割り切り、 ここに記録する。
+- **L（軽微・据え置き）**：`getSandboxProxy()!=null` ガードは REPL では常に非null のため実質 level 判定が効いている（意図は将来 "proxy が fs 用に強制中" の明示 API 化で堅くする）。ゲートは `loadConfig`(毎回 disk) で都度 `ProcessSandbox` 生成、 bash.ts はキャッシュ instance のため、 config 外部編集時に理論上のずれ窓がある（`/sandbox` 操作経由なら両更新）。
+
 ## §8 既知の限界・トレードオフ
 
 1. ネイティブ Windows は封じ込め非対応（git bash 実行）。封じ込めは WSL2 内起動が前提。
