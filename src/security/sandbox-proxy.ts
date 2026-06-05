@@ -179,8 +179,15 @@ export class SandboxProxy {
   private sessionAllowed = new Set<string>();
   /** 同一ホストの確認が並行多発しないよう進行中の確認を集約 */
   private pending = new Map<string, Promise<boolean>>();
+  /** 当該セッションで実際に中継（許可・接続）した宛先ホスト（exfil 監査用・B-3）。 */
+  private relayedHosts = new Set<string>();
 
   constructor(private readonly deps: SandboxProxyDeps) {}
+
+  /** 今セッションで bash が実際に通信した宛先ホスト一覧（昇順）。 */
+  getRelayedHosts(): string[] {
+    return [...this.relayedHosts].sort();
+  }
 
   getPort(): number {
     return this.port;
@@ -370,6 +377,7 @@ export class SandboxProxy {
         }
         // 内部レンジ遮断＋IPピン留め（authorize 後の DNS rebinding を防ぐ）
         const ip = await resolvePinnedIp(host);
+        this.relayedHosts.add(host); // 監査: 実際に中継する宛先を記録（内部IP遮断を通過した後・B-3）
         let established = false;
         const upstream = net.connect(port, ip, () => {
           established = true;
@@ -423,6 +431,7 @@ export class SandboxProxy {
         }
         // 内部レンジ遮断＋IPピン留め（SSRF・DNS rebinding 防止）
         const ip = await resolvePinnedIp(url.hostname);
+        this.relayedHosts.add(normalizeHost(url.hostname)); // 監査: 中継先を記録（遮断通過後・B-3）
         const proxyReq = http.request(
           {
             host: ip,

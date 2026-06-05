@@ -3259,6 +3259,11 @@ export class REPL {
               const why = !isMacOS ? "macOS のみ対応" : eff !== "fs" ? "fs レベルのみ" : "封じ込め未成立";
               console.log(chalk.dim(`  bash 確認自動許可: 無効（${why}）`));
             }
+            // B-3 監査: 今セッションで bash が実際に通信した宛先（exfil 検知の手がかり）
+            const relayed = getSandboxProxy()?.getRelayedHosts() ?? [];
+            if (relayed.length) {
+              console.log(chalk.dim(`  中継した宛先 (今セッション・${relayed.length}件): ${relayed.join(", ")}`));
+            }
           }
           console.log(chalk.dim("  使用例: /sandbox on | off | allow <domain> | deny <domain> | status"));
         };

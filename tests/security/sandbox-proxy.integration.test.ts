@@ -60,11 +60,13 @@ describe("SandboxProxy 拒否パス (integration)", () => {
     expect(line).toContain("403");
   });
 
-  it("許可ドメインでも内部IP(loopback)へは SSRF 遮断で 403", async () => {
+  it("許可ドメインでも内部IP(loopback)へは SSRF 遮断で 403、 中継記録にも残らない", async () => {
     proxy = mkProxy(["127.0.0.1"]); // authorize は通るが resolvePinnedIp で弾く
     const port = await proxy.ensureStarted();
     const line = await sendRaw(port, "GET http://127.0.0.1:80/ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
     expect(line).toContain("403");
+    // 遮断された接続は「中継した宛先」に記録しない（B-3 監査の正確性）
+    expect(proxy.getRelayedHosts()).toEqual([]);
   });
 
   it("CONNECT で内部IP(メタデータ)へは SSRF 遮断で 403", async () => {

@@ -134,7 +134,10 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - **【High→明記】許可ドメイン経由 exfil**：設計書 §7.2 の「外部送信は必ず確認」を「**未許可ドメインのみ確認・許可ドメイン経由 exfil は残存リスク**」へ正確化（上記 §7.2 参照）。
 - **【Med】download-exec 回避**：`curl | sudo sh` / `bash <(curl …)`（プロセス置換）/ 他インタプリタへのパイプを `rules.ts` の block に追加。
 - **【Med】Phase 3 副作用の可視化**：`/sandbox on`(fs) 時に「bash 確認が自動許可される」旨を警告表示（W-3）。
-- 受容（明記済の残存）：インタプリタ経由の cwd 内破壊（`node -e` 等）、許可ドメイン自体への持出。可観測性（中継先ログ・auto-allow 履歴）と非TTY での Phase 3 無効化は今後の検討。
+- **【Med】可観測性（B-3）実装**：proxy が今セッションで実際に中継した宛先ホストを記録（`getRelayedHosts`・内部IP遮断を通過した接続のみ）し `/sandbox status`・`sandbox_info` に表示。exfil 先の事後監査が可能に。**非TTY でも出力に残るため B-2（パイプ実行時の不可視）も同時に解消**。
+- **【B-2 判断】非TTY での Phase 3**：自動許可を非TTY で無効化すると、 逆にパイプ/委任実行で全 bash が確認待ち→停止し自動化が壊れる。封じ込め自体は同等に効く（機密 deny 強化済）ため**挙動は変えず**、 上記 B-3 監査で観測可能にする方針。厳格にしたいユーザーは `autoAllowBashWhenContained: false`。
+- **【R-4 不可】大容量 exfil のヒューリスティック確認**：HTTPS は CONNECT トンネル＝TLS 非終端で body も byte 数も観測不能。サイズ閾値確認は技術的に不可。B-3 の「中継先可視化」で代替（どこへ出たかは把握できる）。
+- 受容（明記済の残存）：インタプリタ経由の cwd 内破壊（`node -e` 等）、許可ドメイン自体への持出（中身は見えないが宛先は B-3 で記録）。
 
 **2b-2 レビュー反映（06a2840 直後・Linux 知見の机上レビュー）**：骨格（unshare-net + ソケット bind + socat + fail-closed）は正しいと確認。修正したもの:
 - **【Critical】socat readiness レース**：socat が listen する前に最初のリクエストが走ると `ECONNREFUSED` で非決定的に失敗するため、 bridge に「socat へ接続確認できるまで最大 ~5s 待つ」ループを追加。
