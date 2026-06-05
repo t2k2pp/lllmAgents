@@ -126,6 +126,12 @@ export interface ProcessSandboxConfig {
    * 未指定なら既定リスト（npm/pip/GitHub 等）。 `*.example.com` ワイルドカード可。
    */
   allowedHosts?: string[];
+  /**
+   * Phase 3: 封じ込め（macOS fs + proxy 強制）時に bash 実行確認を自動許可するか（既定 ON）。
+   * 破壊的コマンド・CWD 外参照・allowlist 外通信は引き続き確認する。false で封じ込めは
+   * 維持しつつ自動許可だけ無効化（docs/wsl-sandbox-design.md §7.2）。
+   */
+  autoAllowBashWhenContained?: boolean;
 }
 
 export interface SecurityConfig {

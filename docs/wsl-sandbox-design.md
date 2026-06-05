@@ -155,6 +155,33 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - 追加テスト：net-allowlist（userinfo/IPv6/IDN/removeDomain/resolve）、sandbox-proxy（isBlockedAddress/parseConnectPort IPv6/revoke）、sandbox-proxy.integration（CONNECT・HTTP の拒否パス）。計 576 tests green。
 - **なお残る（設計の岐路・別途相談）**：`level` enum を真の2軸(FS×ネット)へ作り直すか（アーキ指摘 H-1。`network`/`full` で allowlist が死ぬ根本原因）、既定 allowlist の拡充（prebuilt binary を S3/CDN から取る npm/pip が既定で通らない＝QA H1/H2）、Linux/WSL2 のネット allowlist 実装（2b-2）。ドメインフロンティング（CONNECT は SNI を見ない）と許可ドメイン自体への exfil は脅威モデル上の残存リスクとして明記（TLS 終端しない割り切り）。
 
+## §7.2 Phase 3 — 封じ込め連動の bash 確認自動許可（確認削減＝本機能の原点）
+
+**目的**：当初ゴール「エージェントにのびのび開発させるため許可確認を減らす」を、**封じ込めという安全保証付き**で実現する。Claude Code も同様（封じ込め時は auto-allow＋エスケープハッチ、機密や外部送信は別途確認）。
+
+**発動条件（macOS 先行）**：以下を全て満たす時のみ bash 実行確認を自動許可する。
+- `process.platform === "darwin"`（Seatbelt 封じ込めを実機検証済みなのは macOS のみ。§7.1）
+- 実効レベルが `fs`（FS 書込スコープ＋ネット allowlist 経由のみ）
+- 在プロセスプロキシが構成済み（= ネット allowlist が強制される）
+- 設定 `security.processSandbox.autoAllowBashWhenContained !== false`（既定 ON、 オプトアウト可）
+
+**維持する確認（自動許可しない）**：
+- **破壊的コマンド**（`AUTORUN_DESTRUCTIVE_PATTERNS`: rm -rf / 上書き / git reset --hard / ディスク操作等）→ 通常の確認フローへフォールバック。
+- **危険コマンド**（既存 `checkCommand` の block ルール）→ 従来どおりブロック。
+- **CWD 外参照・広域再帰スキャン**（`bashNeedsExplicitAsk`）→ 確認。
+- **allowlist 外ドメインへの通信** → 実行時にプロキシ（`onUnknownDomain`）が対話確認。封じ込めが「外部送信は必ず確認」を担保するので、bash 起動自体を自動許可しても exfil は無確認では起きない。
+
+**実装**：既存の autorun の bash 分岐（`checkAutorunPermission`）を再利用する。封じ込め条件成立時は autorun トグルが OFF でも同じ判定を通す。
+- `src/security/containment.ts`：`isBashNetworkContained()`（上記条件を判定。security レイヤ内で完結し循環依存なし）。
+- `permission-manager.checkCliPermission`：`(this._autorunMode || (toolName==="bash" && isBashNetworkContained()))` で autorun 判定へ。destructive は null 返し→通常 ask へ落ちる既存挙動をそのまま活用。
+- 透明性：封じ込め自動許可が初回発火した時に dim で一度通知。
+
+**エスケープハッチ / オプトアウト**：
+- `/sandbox off` で封じ込め解除 → 自動許可も止まり通常確認へ戻る。
+- 封じ込めは維持しつつ自動許可だけ切りたい場合は `autoAllowBashWhenContained: false`。
+
+**非対象（この段階では従来どおり確認）**：Linux/WSL2 の fs（ネット全開＝未実証。2b-2 後に拡張）、Windows ネイティブ（封じ込め無し）、`network`/`full`（ネット全遮断＝開発が進まないため auto-allow の意味が薄い）。
+
 ## §8 既知の限界・トレードオフ
 
 1. ネイティブ Windows は封じ込め非対応（git bash 実行）。封じ込めは WSL2 内起動が前提。
@@ -187,4 +214,4 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 | 2a | レベル `"fs"`（FS 書込スコープ・ネット許可）追加。`/sandbox on` 既定を fs に＝§7 | ✅ 実装済み（純粋関数をユニットテスト） |
 | 2b-1 | macOS: 在プロセス CONNECT プロキシ＋Seatbelt＋対話確認＋`/sandbox allow\|deny`＝§7.1 | ✅ 実装済み・**Seatbelt 封じ込めは実機検証済**（rule `localhost` バグ修正＋統合テスト追加）。対話 UX の TTY 手触りのみ残 |
 | 2b-2 | Linux/WSL2: socat ブリッジで bwrap 名前空間からプロキシへ＝§7.1 | 未着手 |
-| 3 | 封じ込め時のみ autorun が bash 確認を省く連動（確認削減の実体） | 未着手（Phase 2b 後） |
+| 3 | 封じ込め時のみ bash 確認を自動許可（確認削減の実体）＝§7.2 | ✅ 実装済み（macOS 先行。破壊的/CWD外/allowlist外は確認維持・オプトアウト可）。TTY 手触り検証のみ残 |

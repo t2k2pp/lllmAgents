@@ -6,6 +6,7 @@ import type { PermissionLevel } from "./rules.js";
 import { checkCommand } from "./rules.js";
 import { Sandbox } from "./sandbox.js";
 import { evaluateRules } from "./rule-engine.js";
+import { isBashNetworkContained } from "./containment.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 
 /** リクエストの発生元 */
@@ -103,6 +104,8 @@ export class PermissionManager {
   private _permissionQueue: Promise<void> = Promise.resolve();
   // 自律実行モード: 作業フォルダ内の非破壊操作を自動承認
   private _autorunMode = false;
+  // Phase 3: 封じ込め自動許可の初回通知済みフラグ（毎回出すとうるさいので一度だけ）
+  private _containmentAutoAllowNotified = false;
 
   constructor(
     securityConfig: SecurityConfig,
@@ -313,11 +316,23 @@ export class PermissionManager {
     // ruleResult === "ask" の場合はそのまま確認ダイアログへ進む
     // ruleResult === null の場合はツール名リストで判定
 
-    // --- 自律実行モード (autorun) ---
-    if (this._autorunMode && ruleResult !== "ask") {
+    // --- 封じ込め連動の bash 自動許可 (Phase 3) / 自律実行モード (autorun) ---
+    // 封じ込め(macOS fs + proxy 強制)時は autorun トグル OFF でも bash を自動許可する。
+    // checkAutorunPermission の bash 分岐がそのまま「破壊的→通常確認・危険→block・他→許可」を担う。
+    // allowlist 外通信は実行時にプロキシが別途確認する（§7.2）。
+    const containedBash = toolName === "bash" && isBashNetworkContained();
+    if ((this._autorunMode || containedBash) && ruleResult !== "ask") {
       const autorunResult = this.checkAutorunPermission(toolName, params);
-      if (autorunResult !== null) return autorunResult;
-      // null → autorun では判定不能 → 通常フローへ
+      if (autorunResult !== null) {
+        if (containedBash && !this._autorunMode && !this._containmentAutoAllowNotified) {
+          this._containmentAutoAllowNotified = true;
+          console.log(
+            chalk.dim("  [sandbox] 封じ込め有効のため bash を自動許可します（破壊的操作・allowlist 外通信は確認）。"),
+          );
+        }
+        return autorunResult;
+      }
+      // null → 判定不能（破壊的等）→ 通常フローへ
     }
 
     const level = ruleResult === "ask" ? "ask" : this.getPermissionLevel(toolName);
