@@ -11,14 +11,14 @@
  * レベル設計は「FS 書込」と「ネットワーク」の2軸（docs/wsl-sandbox-design.md §7）:
  * - "fs"   : FS 書込のみ隔離・ネットワークは allowlist 経由のみ（macOS / Linux は socat+ip 時）。
  *            開発作業 (npm/pip 等) を止めない "のびのび" 向け
- * - "network": ネットワーク隔離。 ※macOS は Seatbelt が deny-default のため FS 書込も
- *            writeDirs に限定される（Linux の unshare --net は FS 開放）。OS 差あり（§7 H-1）
+ * - "network": ネットワークのみ隔離・FS は開放（macOS=Seatbelt で file-write 全許可＋network deny、
+ *            Linux=unshare --net）。 FS とネットを直交軸として揃えた（§7）
  * - "full" : 両方隔離
  * ネットワークの「ドメイン allowlist（プロキシ）」は Phase 2b で実装済み
  *（macOS=Seatbelt+在プロセスproxy / Linux=bwrap+socat ブリッジ。docs §7.1/§7.2）。
  */
 
-import { existsSync, writeFileSync, unlinkSync, realpathSync } from "node:fs";
+import { existsSync, writeFileSync, realpathSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir, platform } from "node:os";
 
@@ -41,12 +41,9 @@ export type ProcessSandboxLevel =
   | "network"     // ネットワーク名前空間隔離のみ
   | "full";       // ネットワーク + ファイルシステム隔離（bwrap / sandbox-exec が必要）
 
-export interface ProcessSandboxConfig {
-  enabled: boolean;
-  level: ProcessSandboxLevel;
-  /** ネット allowlist（Phase 2b で使用中）。 fs レベルでプロキシ経由を許可するドメイン群。 */
-  allowedHosts?: string[];
-}
+// ProcessSandboxConfig は config/types.ts を正典とする（型の二重定義による drift を防止）。
+export type { ProcessSandboxConfig } from "../config/types.js";
+import type { ProcessSandboxConfig } from "../config/types.js";
 
 export interface WrappedCommand {
   shell: string;
@@ -180,8 +177,10 @@ export function buildBwrapAllowlistArgs(
 /**
  * macOS sandbox-exec (Seatbelt) プロファイルを組み立てる純粋関数。
  * "deny default" から必要な許可を足すホワイトリスト方式。
- * - file-write は全レベルで writeDirs（+ /dev /tmp）に限定
- * - network は "fs" のみ許可。 "network"/"full" は deny（既定 deny のまま）
+ * FS とネットを独立2軸として扱う（docs/wsl-sandbox-design.md §7）:
+ * - FS 隔離は "fs"/"full" のみ（file-write を writeDirs に限定＋機密 read 遮断）。
+ *   "network" は FS 非隔離＝file-write 全許可（ネットだけ閉じる。 Linux の unshare --net と挙動を揃える）。
+ * - network は "fs"(+proxyPort) のみ proxy 経由許可。 "network"/"full" は deny default のまま。
  */
 export function buildSeatbeltProfile(
   writeDirs: string[],
@@ -189,6 +188,7 @@ export function buildSeatbeltProfile(
   denyReadDirs: string[] = [],
   proxyPort?: number,
 ): string {
+  const fsIsolated = level === "fs" || level === "full";
   const lines: string[] = [
     "(version 1)",
     "(deny default)",
@@ -197,23 +197,26 @@ export function buildSeatbeltProfile(
     // システムコール基盤
     "(allow sysctl-read)",
     "(allow signal (target self))",
-    // 読み取りは全ディレクトリで許可（write は下で制限、 機密は後段で deny override）
+    // 読み取りは全ディレクトリで許可（FS 隔離レベルでは機密のみ後段で deny override）
     "(allow file-read*)",
-    // /dev と /tmp は常に書き込み許可
-    `(allow file-write* (subpath "/dev"))`,
-    `(allow file-write* (subpath "/tmp"))`,
-    `(allow file-write* (subpath "/private/tmp"))`,
   ];
 
-  // 書き込み許可ディレクトリ
-  for (const dir of writeDirs) {
-    lines.push(`(allow file-write* (subpath "${dir}"))`);
-  }
-
-  // 機密ディレクトリは読み取りも禁止（decision 3）。 allow file-read* の後に置くことで
-  // Seatbelt の last-match-wins で当該 subpath だけ deny に上書きされる。
-  for (const dir of denyReadDirs) {
-    lines.push(`(deny file-read* (subpath "${dir}"))`);
+  if (!fsIsolated) {
+    // network レベル: FS は隔離しない（ネットだけ閉じる）。 書込を全許可。
+    lines.push("(allow file-write*)");
+  } else {
+    // fs / full: 書込を /dev /tmp と writeDirs に限定
+    lines.push(`(allow file-write* (subpath "/dev"))`);
+    lines.push(`(allow file-write* (subpath "/tmp"))`);
+    lines.push(`(allow file-write* (subpath "/private/tmp"))`);
+    for (const dir of writeDirs) {
+      lines.push(`(allow file-write* (subpath "${dir}"))`);
+    }
+    // 機密ディレクトリは読み取りも禁止（decision 3）。 allow file-read* の後に置くことで
+    // Seatbelt の last-match-wins で当該 subpath だけ deny に上書きされる。
+    for (const dir of denyReadDirs) {
+      lines.push(`(deny file-read* (subpath "${dir}"))`);
+    }
   }
 
   // ネットワーク: fs のみ・かつ「プロキシ経由」のみ許可。 network/full は deny default のまま。
@@ -389,15 +392,16 @@ export class ProcessSandbox {
     const masks = defaultSecretDenyDirs(homedir()).filter((d) => existsSync(d)).map(realpathSafe);
     const profile = buildSeatbeltProfile(realWrite, level, masks, proxyPort);
 
-    // 一時プロファイルファイルを作成
-    const profilePath = join(tmpdir(), `lllm-sandbox-${process.pid}-${Date.now()}.sb`);
-    writeFileSync(profilePath, profile, "utf-8");
+    // 一時プロファイルは 0700 のディレクトリ内に作成（共有 /tmp に推測可能名で晒さない）。
+    const dir = mkdtempSync(join(tmpdir(), "lllm-sandbox-"));
+    const profilePath = join(dir, "profile.sb");
+    writeFileSync(profilePath, profile, { encoding: "utf-8", mode: 0o600 });
 
     return {
       shell: this.sandboxExec!,
       args: ["-f", profilePath, "/bin/sh", "-c", command],
       cleanup: () => {
-        try { unlinkSync(profilePath); } catch { /* ignore */ }
+        try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
       },
     };
   }

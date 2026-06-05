@@ -214,7 +214,7 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 4. bwrap/sandbox-exec が無い環境では実効レベル none（警告表示）。Linux `full` で bwrap 無し時は `unshare` があれば `network` へ降格（none ではない。`getEffectiveLevel`）。
 5. 配布：変種2 用に WSL 内で動かす手段（WSL 内で `npm run start`、または Linux ビルド提供）の案内が必要。
 6. ドメインフロンティング（CONNECT は SNI を見ない）・許可ドメイン自体への exfil（Gist 等）・インタプリタ難読化による破壊は脅威モデル上の残存リスク（TLS 非終端の割り切り・§7.1/§7.2）。
-7. **`network` レベルの FS 挙動に OS 差**：macOS は Seatbelt が deny-default のため `network` でも FS 書込が writeDirs に限定される（実質 full 相当の FS 隔離）。Linux の `network`（unshare --net）は FS 開放。2軸の理想（network=ネットのみ）からは macOS が乖離（要判断: コードを揃えるか本記述で許容するか・§7 H-1）。
+7. ~~`network` レベルの FS 挙動に OS 差~~ → **解消済み**：`buildSeatbeltProfile` を修正し、 FS 隔離は `fs`/`full` のみ・`network` は file-write 全許可（FS 開放）に。macOS/Linux とも `network`=ネットのみ隔離で揃えた（あるべき論＋Claude Code の独立2軸に一致）。
 
 ## §9 非目標
 

@@ -5,6 +5,7 @@ import { loadConfig } from "../../config/config-manager.js";
 import { ProcessSandbox } from "../../security/process-sandbox.js";
 import { isWindows } from "../../utils/platform.js";
 import { detectWsl } from "../../security/wsl.js";
+import { isBashNetworkContained } from "../../security/containment.js";
 
 export const sandboxInfoTool: ToolHandler = {
   name: "sandbox_info",
@@ -67,7 +68,8 @@ export const sandboxInfoTool: ToolHandler = {
       `- ツール状態: ${toolStatus}\n` +
       ((avail.effectiveLevel === "fs" || avail.effectiveLevel === "full")
         ? `- 機密読取ブロック: ~/.ssh, ~/.aws, ~/.gnupg, ~/.kube, ~/.docker, ~/.config/gcloud は読み取り不可\n`
-        : "");
+        : "") +
+      `- bash 確認自動許可: ${isBashNetworkContained() ? "有効（封じ込め下。 破壊的操作・allowlist 外通信は確認）" : "無効"}\n`;
 
     // Windows ネイティブ: OS 封じ込めは非対応。 封じ込めが必要なら WSL2 の中でアプリを
     // 起動する (その時は platform=linux となり上記 processSandbox が効く)。

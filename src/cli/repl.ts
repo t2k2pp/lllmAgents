@@ -49,7 +49,8 @@ import { configureSandboxProxy, getSandboxProxy } from "../security/sandbox-prox
 import { addDomain, removeDomain, resolveAllowedDomains, domainAllowed } from "../security/net-allowlist.js";
 import inquirer from "inquirer";
 import { ProcessSandbox } from "../security/process-sandbox.js";
-import { resetProcessSandboxCache } from "../tools/definitions/bash.js";
+import { resetActiveProcessSandbox } from "../security/active-sandbox.js";
+import { isBashNetworkContained } from "../security/containment.js";
 import { runLocalLLMSetup, connectAndListModels } from "../config/setup-wizard.js";
 import {
   recordLLMProfile,
@@ -3251,6 +3252,13 @@ export class REPL {
                 `  ネット allowlist (${allow.length}件${enforced ? "" : "・現在のレベル/OSでは未適用"}): ${allow.join(", ") || "(なし)"}`,
               ),
             );
+            // Phase 3: bash 確認自動許可が今この状態で効いているか（誠実な可視化）
+            if (isBashNetworkContained()) {
+              console.log(chalk.dim("  bash 確認自動許可: 有効（封じ込め下。 破壊的操作・allowlist 外通信は確認）"));
+            } else {
+              const why = !isMacOS ? "macOS のみ対応" : eff !== "fs" ? "fs レベルのみ" : "封じ込め未成立";
+              console.log(chalk.dim(`  bash 確認自動許可: 無効（${why}）`));
+            }
           }
           console.log(chalk.dim("  使用例: /sandbox on | off | allow <domain> | deny <domain> | status"));
         };
@@ -3279,7 +3287,7 @@ export class REPL {
                     : "fs"; // 既定は fs: 書込スコープのみ・ネットは許可（開発を止めない）
               this.config.security.processSandbox = { enabled: true, level };
               saveConfig(this.config);
-              resetProcessSandboxCache();
+              resetActiveProcessSandbox();
               if (level !== "fs") getSandboxProxy()?.stop(); // fs 以外は proxy 不要なので止める
               const eff = new ProcessSandbox(this.config.security.processSandbox).getAvailability().effectiveLevel;
               console.log(chalk.dim(`  封じ込め ON (config 保存、 level=${level})。 ${isMacOS ? "sandbox-exec" : "bwrap/unshare"} で適用 (次の bash から即反映)。`));
@@ -3300,7 +3308,7 @@ export class REPL {
               const lvl = this.config.security.processSandbox?.level ?? "none";
               this.config.security.processSandbox = { enabled: false, level: lvl };
               saveConfig(this.config);
-              resetProcessSandboxCache();
+              resetActiveProcessSandbox();
               getSandboxProxy()?.stop(); // 封じ込め解除時はネット allowlist プロキシも停止
               console.log(chalk.dim("  封じ込め OFF (config 保存)。 bash は隔離なしで実行します。"));
             }

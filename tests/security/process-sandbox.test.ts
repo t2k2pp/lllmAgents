@@ -84,14 +84,20 @@ describe("buildSeatbeltProfile", () => {
     expect(buildSeatbeltProfile(["/work"], "full")).not.toContain("(allow network*)");
     expect(buildSeatbeltProfile(["/work"], "network")).not.toContain("(allow network*)");
   });
-  it("どのレベルでも書込は writeDirs に限定 (deny default + allow file-write* writeDirs)", () => {
-    for (const level of ["fs", "network", "full"] as const) {
+  it("fs/full は書込を writeDirs に限定 (FS 隔離)", () => {
+    for (const level of ["fs", "full"] as const) {
       const p = buildSeatbeltProfile(["/work"], level);
       expect(p).toContain("(deny default)");
       expect(p).toContain(`(allow file-write* (subpath "/work"))`);
-      // 読み取りは全許可
+      expect(p).not.toContain("(allow file-write*)\n"); // 全許可ではない
       expect(p).toContain("(allow file-read*)");
     }
+  });
+  it("network は FS を隔離しない (file-write 全許可・ネットだけ閉じる＝2軸の直交)", () => {
+    const p = buildSeatbeltProfile(["/work"], "network");
+    expect(p).toContain("(allow file-write*)"); // FS 開放
+    expect(p).not.toContain(`(allow file-write* (subpath "/work"))`); // writeDir 限定はしない
+    expect(p).not.toContain("(allow network"); // ネットは遮断のまま
   });
   it("fs + proxyPort はネットを localhost:port のみに制限 (Seatbelt は数値IP不可・allow network* 無し)", () => {
     const p = buildSeatbeltProfile(["/work"], "fs", [], 54321);

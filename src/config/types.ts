@@ -123,7 +123,10 @@ export interface ProcessSandboxConfig {
   level: "none" | "fs" | "network" | "full";
   /**
    * ネット allowlist（Phase 2b）。 fs レベルでプロキシ経由通信を許可するドメイン群。
-   * 未指定なら既定リスト（npm/pip/GitHub 等）。 `*.example.com` ワイルドカード可。
+   * `*.example.com` ワイルドカード可。 三状態に注意（resolveAllowedDomains）:
+   *   - 省略(undefined) → 既定プリセット（npm/pip/GitHub 等）を使う
+   *   - [](空配列)      → 全ドメイン不許可（既定に戻さない。 意図的な全閉じ）
+   *   - 指定           → その配列のみ
    */
   allowedHosts?: string[];
   /**

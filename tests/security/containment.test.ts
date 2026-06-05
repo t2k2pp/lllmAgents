@@ -30,6 +30,7 @@ vi.mock("../../src/config/config-manager.js", () => ({
 }));
 
 import { isBashNetworkContained } from "../../src/security/containment.js";
+import { resetActiveProcessSandbox } from "../../src/security/active-sandbox.js";
 
 describe("isBashNetworkContained (Phase 3 ゲート)", () => {
   beforeEach(() => {
@@ -37,6 +38,7 @@ describe("isBashNetworkContained (Phase 3 ゲート)", () => {
     h.proxy = {};
     h.level = "fs";
     h.autoAllow = undefined;
+    resetActiveProcessSandbox(); // config キャッシュを破棄して各ケースの h を反映させる
   });
 
   it("macOS + proxy + fs + 既定 → true", () => {

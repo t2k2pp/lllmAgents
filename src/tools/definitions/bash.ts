@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { isWindows, isMacOS } from "../../utils/platform.js";
-import { ProcessSandbox } from "../../security/process-sandbox.js";
+import { getActiveProcessSandbox } from "../../security/active-sandbox.js";
 import { getSandboxProxy } from "../../security/sandbox-proxy.js";
 import { isDestructiveCommand } from "../../security/destructive-commands.js";
 import { loadConfig } from "../../config/config-manager.js";
@@ -57,22 +57,8 @@ function convertWindowsPaths(command: string): string {
 
 let streamOutputEnabled = false;
 
-/** bash ツール用のプロセスサンドボックスインスタンス（初回 execute 時に遅延初期化） */
-let processSandbox: ProcessSandbox | null = null;
-
-function getProcessSandbox(): ProcessSandbox {
-  if (!processSandbox) {
-    const config = loadConfig();
-    const sbConfig = config.security.processSandbox ?? { enabled: false, level: "none" };
-    processSandbox = new ProcessSandbox(sbConfig);
-  }
-  return processSandbox;
-}
-
-/** config 変更時にサンドボックスインスタンスをリセットする（テスト・ウィザード用） */
-export function resetProcessSandboxCache(): void {
-  processSandbox = null;
-}
+// プロセスサンドボックスは src/security/active-sandbox.ts の単一ソースを参照する
+// （確認自動許可の判定 containment.ts と同一インスタンス・同一設定を見るため）。
 
 interface BashToolHandler extends ToolHandler {
   setStreamOutput(enabled: boolean): void;
@@ -195,7 +181,7 @@ export const bashTool: BashToolHandler = {
         shellArgs = ["/c", command];
       }
     } else {
-      const sandbox = getProcessSandbox();
+      const sandbox = getActiveProcessSandbox();
       if (sandbox.isActive()) {
         const config = loadConfig();
         const allowedWriteDirs = [
