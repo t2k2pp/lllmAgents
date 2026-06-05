@@ -3229,11 +3229,12 @@ export class REPL {
             //   fs + macOS → allowlist 経由のみ許可（プロキシ強制）
             //   fs + Linux/WSL2 → 全開（allowlist 未強制。 2b-2 未実装）
             //   network/full → 全遮断（allowlist 非適用）
+            const enforceable = sb.getAvailability().netAllowlistEnforceable;
             let netDesc = "";
             if (eff === "fs") {
-              netDesc = isMacOS
+              netDesc = enforceable
                 ? " — ネット: allowlist 経由のみ許可"
-                : " — ネット: 全開 (allowlist は未強制。 Linux/WSL2 の制御は 2b-2 未実装)";
+                : " — ネット: 全開 (allowlist 未強制。 Linux は socat と ip が必要)";
             } else if (eff === "network" || eff === "full") {
               netDesc = " — ネット: 全遮断 (allowlist 非適用)";
             }
@@ -3242,9 +3243,9 @@ export class REPL {
             } else {
               console.log(`  実効: ${chalk.yellow("OFF")}`);
             }
-            // allowlist が実際に効くのは macOS の fs のみ。 それ以外は参考表示と明記。
+            // allowlist が実際に効くのは fs かつ強制可能な環境のみ。 それ以外は参考表示。
             const allow = resolveAllowedDomains(this.config.security.processSandbox?.allowedHosts);
-            const enforced = isMacOS && eff === "fs";
+            const enforced = eff === "fs" && enforceable;
             console.log(
               chalk.dim(
                 `  ネット allowlist (${allow.length}件${enforced ? "" : "・現在のレベル/OSでは未適用"}): ${allow.join(", ") || "(なし)"}`,

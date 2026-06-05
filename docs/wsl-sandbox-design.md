@@ -118,7 +118,17 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - **コマンド**：`/sandbox allow <domain>` / `/sandbox deny <domain>`、`status` で現在の allowlist 表示。
 - 非 TTY/パイプ：対話確認できないため「未許可はブロック（fail-closed）」にフォールバック。
 
-実装順：土台（allowlist 照合＋既定リスト＝実装済み）→ **2b-1（実装済み）** → 2b-2（Linux/WSL2 の socat ブリッジ・未着手）。
+実装順：土台（allowlist 照合＋既定リスト＝実装済み）→ **2b-1（実装済み）** → **2b-2（実装済み・WSL2 実機検証要）**。
+
+**2b-2 実装メモ（Linux/WSL2）**：
+- proxy は TCP(127.0.0.1)に加え **unix ソケット**でも待ち受ける（`ensureUnixSocket`）。bwrap の `--unshare-net` 名前空間からはホスト TCP loopback に届かないため、 ソケットを名前空間内へ bind-mount して橋渡しする。**unix ソケット経路の allowlist 判定は macOS 実機でテスト済み**（`sandbox-proxy.integration`）。
+- `buildBwrapAllowlistArgs`（純粋・単体テスト済み）：`--unshare-net` ＋ writeDir bind ＋ 機密 tmpfs ＋ ソケット bind（/tmp マスク回避のため tmpfs の後に配置）＋ 名前空間内ラッパ `ip link set lo up; socat TCP-LISTEN:port,...,bind=127.0.0.1 UNIX-CONNECT:socket & <cmd>; 後始末`。子の `HTTP(S)_PROXY=127.0.0.1:port`（bash.ts 注入）で proxy 経由を強制。
+- 必要ツール：`socat` と `ip`。無い環境（`canEnforceLinuxNetAllowlist()` が false）では従来どおり fs=ネット許可とし、 `/sandbox status`・`sandbox_info` が「allowlist 未強制（socat と ip が必要）」と明示。
+- **fail-closed**：ブリッジ構築に失敗した場合は fs でも `--unshare-net` で**ネット全遮断**に倒す（全開に落とさない）。
+- **未検証**：bwrap/`--unshare-net`/lo 起動/socat の実ランタイム挙動は macOS では確認不能。WSL2(Ubuntu) 実機での疎通確認が必要（`npm install` が allowlist 経由で通り、 `curl --noproxy https://1.1.1.1` が遮断されること等）。route-to-WSL と同じく実装→実機検証の順で進める。
+- **Phase 3 連動は当面 macOS 限定**（`isBashNetworkContained` は macOS のみ true）。Linux の allowlist 強制が WSL2 実機で確認できたら Linux にも自動許可を拡張する。
+
+**既定 allowlist の現実性（QA 指摘 H1/H2 反映）**：既定を `*.npmjs.org`/`*.yarnpkg.com`/`*.pythonhosted.org`/`pypi.org`/`*.pypi.org`/`github.com`/`codeload.github.com`/`*.githubusercontent.com`/`nodejs.org` に拡張し、 registry リダイレクト・CDN・git submodule・node prebuilt を既定でカバー。ただし prebuilt バイナリを S3/Azure 等の**ベンダー固有 CDN**から取るもの（playwright/electron/esbuild 等）は無数にあり既定化しない方針＝**初回に対話確認（TTY）/ `/sandbox allow`（非TTY）** で都度許可する。これは「のびのび」と最小権限の妥協点。
 
 **2b-1 実装メモ（macOS）**：
 - `src/security/sandbox-proxy.ts`：在プロセス `http.Server`。CONNECT はホスト名で `authorize` → 許可ならトンネル（TLS 素通し）/ 拒否は 403。未許可は `onUnknownDomain` で対話確認、同一ホストの並行確認は集約、once はセッション許可・always は永続。`configureSandboxProxy`/`getSandboxProxy` シングルトン。
@@ -193,8 +203,9 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 
 1. ネイティブ Windows は封じ込め非対応（git bash 実行）。封じ込めは WSL2 内起動が前提。
 2. 変種2（WSL2 内）で `/mnt/c` を触ると I/O が遅い。成果物を WSL ネイティブ FS に置けば速い。
-3. 現状の processSandbox はネット遮断（§7 で2軸化予定）。
+3. ネット allowlist の強制には OS 機能が要る：macOS=sandbox-exec、Linux=bwrap+socat+ip。不足時は fs でもネット全開（status で「未強制」と明示）。
 4. bwrap/sandbox-exec が無い環境では実効レベル none（警告表示）。
+6. ドメインフロンティング（CONNECT は SNI を見ない）・許可ドメイン自体への exfil（Gist 等）・インタプリタ難読化による破壊は脅威モデル上の残存リスク（TLS 非終端の割り切り・§7.1/§7.2）。
 5. 配布：変種2 用に WSL 内で動かす手段（WSL 内で `npm run start`、または Linux ビルド提供）の案内が必要。
 
 ## §9 非目標
@@ -220,5 +231,5 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 | 1 | Windows 2種モデル＋`/sandbox` 統一コマンド（検出案内含む） | ✅ 実装済み（REPL UX は手動 TTY 検証要） |
 | 2a | レベル `"fs"`（FS 書込スコープ・ネット許可）追加。`/sandbox on` 既定を fs に＝§7 | ✅ 実装済み（純粋関数をユニットテスト） |
 | 2b-1 | macOS: 在プロセス CONNECT プロキシ＋Seatbelt＋対話確認＋`/sandbox allow\|deny`＝§7.1 | ✅ 実装済み・**Seatbelt 封じ込めは実機検証済**（rule `localhost` バグ修正＋統合テスト追加）。対話 UX の TTY 手触りのみ残 |
-| 2b-2 | Linux/WSL2: socat ブリッジで bwrap 名前空間からプロキシへ＝§7.1 | 未着手 |
+| 2b-2 | Linux/WSL2: socat ブリッジで bwrap 名前空間からプロキシへ＝§7.1 | ✅ 実装済み（proxy unix socket は macOS で検証。bwrap/socat ランタイムは **WSL2 実機検証要**。socat/ip 不足時は fs=全開で警告・構築失敗時は fail-closed 全遮断） |
 | 3 | 封じ込め時のみ bash 確認を自動許可（確認削減の実体）＝§7.2 | ✅ 実装済み（macOS 先行。破壊的/CWD外/allowlist外は確認維持・オプトアウト可）。TTY 手触り検証のみ残 |

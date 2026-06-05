@@ -14,6 +14,7 @@
 import * as http from "node:http";
 import * as net from "node:net";
 import * as dns from "node:dns/promises";
+import { existsSync, unlinkSync } from "node:fs";
 import type { Socket } from "node:net";
 import { domainAllowed, normalizeHost } from "./net-allowlist.js";
 
@@ -171,6 +172,9 @@ export class SandboxProxy {
   private server: http.Server | null = null;
   private port = 0;
   private starting: Promise<number> | null = null;
+  /** Linux/WSL2 ブリッジ用の unix ソケットサーバ（bwrap 名前空間から socat 経由で届く） */
+  private unixServer: http.Server | null = null;
+  private unixPath: string | null = null;
   /** "once" で当該セッション中だけ許可されたドメイン */
   private sessionAllowed = new Set<string>();
   /** 同一ホストの確認が並行多発しないよう進行中の確認を集約 */
@@ -185,20 +189,26 @@ export class SandboxProxy {
     return this.server !== null;
   }
 
+  /** CONNECT/HTTP ハンドラを配線した http.Server を生成する（TCP/unix で共用）。 */
+  private createServer(): http.Server {
+    const server = http.createServer((req, res) => this.handleRequest(req, res));
+    server.on("connect", (req, socket, head) => this.handleConnect(req, socket as Socket, head));
+    server.on("clientError", (_e, socket) => {
+      try {
+        socket.destroy();
+      } catch {
+        /* ignore */
+      }
+    });
+    return server;
+  }
+
   /** プロキシを起動して listen ポートを返す（冪等）。 */
   async ensureStarted(): Promise<number> {
     if (this.server) return this.port;
     if (this.starting) return this.starting;
     this.starting = new Promise<number>((resolve, reject) => {
-      const server = http.createServer((req, res) => this.handleRequest(req, res));
-      server.on("connect", (req, socket, head) => this.handleConnect(req, socket as Socket, head));
-      server.on("clientError", (_e, socket) => {
-        try {
-          socket.destroy();
-        } catch {
-          /* ignore */
-        }
-      });
+      const server = this.createServer();
       server.on("error", (e) => {
         this.starting = null;
         reject(e);
@@ -214,6 +224,37 @@ export class SandboxProxy {
     return this.starting;
   }
 
+  /**
+   * Linux/WSL2 用に unix ドメインソケットでも待ち受ける（冪等）。
+   * bwrap の net 名前空間からはホストの TCP loopback に到達できないため、 ソケットを
+   * 名前空間内へ bind-mount し socat で 127.0.0.1:port→このソケットへ中継する（§7.1 2b-2）。
+   */
+  async ensureUnixSocket(socketPath: string): Promise<void> {
+    if (this.unixServer && this.unixPath === socketPath) return;
+    if (this.unixServer) {
+      try {
+        this.unixServer.close();
+      } catch {
+        /* ignore */
+      }
+      this.unixServer = null;
+    }
+    await new Promise<void>((resolve, reject) => {
+      try {
+        if (existsSync(socketPath)) unlinkSync(socketPath); // 古いソケットを除去
+      } catch {
+        /* ignore */
+      }
+      const server = this.createServer();
+      server.on("error", (e) => reject(e));
+      server.listen(socketPath, () => {
+        this.unixServer = server;
+        this.unixPath = socketPath;
+        resolve();
+      });
+    });
+  }
+
   stop(): void {
     if (this.server) {
       try {
@@ -224,6 +265,22 @@ export class SandboxProxy {
       this.server = null;
       this.port = 0;
       this.starting = null;
+    }
+    if (this.unixServer) {
+      try {
+        this.unixServer.close();
+      } catch {
+        /* ignore */
+      }
+      this.unixServer = null;
+    }
+    if (this.unixPath) {
+      try {
+        if (existsSync(this.unixPath)) unlinkSync(this.unixPath);
+      } catch {
+        /* ignore */
+      }
+      this.unixPath = null;
     }
   }
 

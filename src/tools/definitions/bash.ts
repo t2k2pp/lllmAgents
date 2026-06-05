@@ -175,6 +175,8 @@ export const bashTool: BashToolHandler = {
     let cleanup: (() => void) | undefined;
     // Phase 2b-1: macOS + fs レベルで在プロセスプロキシ経由のネット allowlist を強制する際の port
     let proxyPort: number | undefined;
+    let socketPath: string | undefined;
+    let failClosedNet = false;
     let proxyStartError: string | undefined;
 
     if (isWindows) {
@@ -201,10 +203,12 @@ export const bashTool: BashToolHandler = {
           path.join(os.homedir(), ".localllm"),
           ...config.security.allowedDirectories,
         ];
-        // Phase 2b-1: macOS + fs レベルなら在プロセスプロキシを起動し、 ネットを
-        // localhost:proxyPort 経由（= allowlist 強制）に閉じる。 Linux/WSL2 は 2b-2 で対応。
+        // fs レベルなら在プロセスプロキシを起動し、 ネットを allowlist 経由に閉じる。
+        //  - macOS (2b-1): Seatbelt が 127.0.0.1:proxyPort のみ許可。直結は遮断。
+        //  - Linux/WSL2 (2b-2): bwrap --unshare-net + unix ソケット + socat ブリッジ。
         const proxy = getSandboxProxy();
-        if (isMacOS && proxy && sandbox.getEffectiveLevel() === "fs") {
+        const effLevel = sandbox.getEffectiveLevel();
+        if (isMacOS && proxy && effLevel === "fs") {
           try {
             proxyPort = await proxy.ensureStarted();
           } catch (e) {
@@ -213,8 +217,20 @@ export const bashTool: BashToolHandler = {
             proxyPort = undefined;
             proxyStartError = e instanceof Error ? e.message : String(e);
           }
+        } else if (!isWindows && !isMacOS && proxy && effLevel === "fs" && sandbox.canEnforceLinuxNetAllowlist()) {
+          try {
+            proxyPort = await proxy.ensureStarted(); // socat が名前空間内で使うポート番号
+            socketPath = path.join(os.tmpdir(), `lllm-proxy-${process.pid}.sock`);
+            await proxy.ensureUnixSocket(socketPath);
+          } catch (e) {
+            // ブリッジ構築失敗時は fail-closed（ネット全遮断）に倒す。全開に落とさない。
+            proxyPort = undefined;
+            socketPath = undefined;
+            failClosedNet = true;
+            proxyStartError = e instanceof Error ? e.message : String(e);
+          }
         }
-        const wrapped = sandbox.wrapCommand(command, allowedWriteDirs, proxyPort);
+        const wrapped = sandbox.wrapCommand(command, allowedWriteDirs, proxyPort, socketPath, failClosedNet);
         shell = wrapped.shell;
         shellArgs = wrapped.args;
         cleanup = wrapped.cleanup;

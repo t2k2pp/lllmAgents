@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildBwrapArgs,
+  buildBwrapAllowlistArgs,
   buildSeatbeltProfile,
   defaultSecretDenyDirs,
 } from "../../src/security/process-sandbox.js";
@@ -33,6 +34,37 @@ describe("buildBwrapArgs", () => {
     expect(joined).toContain("--tmpfs /home/u/.ssh");
     // writeDirs の --bind は mask の --tmpfs より前（後勝ちで確実に隠すため）
     expect(joined.indexOf("--bind /work /work")).toBeLessThan(joined.indexOf("--tmpfs /home/u/.ssh"));
+  });
+});
+
+describe("buildBwrapAllowlistArgs (Linux ネット allowlist ブリッジ・2b-2)", () => {
+  const args = buildBwrapAllowlistArgs(
+    "npm install",
+    ["/work"],
+    ["/home/u/.ssh"],
+    "/tmp/lllm.sock",
+    8118,
+    "/usr/bin/socat",
+    "/sbin/ip",
+  );
+  const joined = args.join(" ");
+  it("ネットを隔離する (--unshare-net) ＝直結遮断", () => {
+    expect(args).toContain("--unshare-net");
+  });
+  it("unix ソケットを名前空間内へ bind し、 機密 tmpfs より後に置く(/tmp マスク回避)", () => {
+    expect(joined).toContain("--bind /tmp/lllm.sock /tmp/lllm.sock");
+    expect(joined.indexOf("--tmpfs /home/u/.ssh")).toBeLessThan(joined.indexOf("--bind /tmp/lllm.sock"));
+  });
+  it("名前空間内で lo を起こし socat で TCP→unix を中継し、 ユーザーコマンドを実行", () => {
+    const inner = args[args.length - 1];
+    expect(inner).toContain("/sbin/ip link set lo up");
+    expect(inner).toContain("/usr/bin/socat TCP-LISTEN:8118");
+    expect(inner).toContain("UNIX-CONNECT:/tmp/lllm.sock");
+    expect(inner).toContain("npm install");
+    expect(inner).toContain("kill $__lllm_socat"); // 後始末
+  });
+  it("書込は writeDir に bind", () => {
+    expect(joined).toContain("--bind /work /work");
   });
 });
 

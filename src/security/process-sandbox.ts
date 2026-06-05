@@ -59,7 +59,11 @@ export interface SandboxAvailability {
     bwrap: boolean;
     unshare: boolean;
     sandboxExec: boolean;
+    socat: boolean;
+    ip: boolean;
   };
+  /** fs レベルでネット allowlist を強制できるか（macOS=常に, Linux=socat+ip 必要） */
+  netAllowlistEnforceable: boolean;
   effectiveLevel: ProcessSandboxLevel;
 }
 
@@ -116,6 +120,51 @@ export function buildBwrapArgs(
     args.push("--tmpfs", dir);
   }
   args.push("--", "/bin/sh", "-c", command);
+  return args;
+}
+
+/**
+ * Linux/WSL2 で「FS 書込スコープ + ネット allowlist 強制」の bwrap 引数を組み立てる純粋関数（2b-2）。
+ * docs/wsl-sandbox-design.md §7.1。
+ *
+ * 方式: `--unshare-net` でネット名前空間を隔離（直接外部到達を遮断）し、 ホストの在プロセス
+ * プロキシが待ち受ける unix ソケットを名前空間内へ bind-mount。 名前空間内で
+ *   - `ip link set lo up`（loopback を起こす。 socat の 127.0.0.1 bind に必要）
+ *   - `socat TCP-LISTEN:port,...,bind=127.0.0.1 UNIX-CONNECT:socket`（127.0.0.1:port → ソケット中継）
+ * を起動し、 子の HTTP(S)_PROXY=127.0.0.1:port（bash.ts が注入）でプロキシ経由を強制する。
+ * macOS の Seatbelt と同等の「proxy 経由のみ・直結遮断」を Linux でも実現する。
+ *
+ * @param port socat が名前空間内で待ち受ける TCP ポート（= 子 env の HTTP_PROXY ポート）
+ * @param socketPath ホスト側プロキシの unix ソケット（名前空間内へ同一パスで bind 済み前提）
+ * @param socatPath / ipPath 実バイナリパス
+ */
+export function buildBwrapAllowlistArgs(
+  command: string,
+  writeDirs: string[],
+  maskDirs: string[],
+  socketPath: string,
+  port: number,
+  socatPath: string,
+  ipPath: string,
+): string[] {
+  const args: string[] = [
+    "--ro-bind", "/", "/",
+    "--dev", "/dev",
+    "--proc", "/proc",
+    "--tmpfs", "/tmp",
+    "--new-session",
+    "--unshare-net", // ネット隔離（直結遮断）。 通信は socat→unix ソケット→ホストproxy のみ
+  ];
+  for (const dir of writeDirs) args.push("--bind", dir, dir);
+  for (const dir of maskDirs) args.push("--tmpfs", dir);
+  // unix ソケットを名前空間内へ（--tmpfs /tmp の後に置き、 /tmp 配下でもマスクされず露出させる）
+  args.push("--bind", socketPath, socketPath);
+  // 名前空間内: lo を起こし、 socat を background 起動してからユーザーコマンドを実行・終了時に後始末
+  const bridge =
+    `${ipPath} link set lo up 2>/dev/null; ` +
+    `${socatPath} TCP-LISTEN:${port},fork,reuseaddr,bind=127.0.0.1 UNIX-CONNECT:${socketPath} >/dev/null 2>&1 & ` +
+    `__lllm_socat=$!; { ${command}; }; __lllm_rc=$?; kill $__lllm_socat 2>/dev/null; exit $__lllm_rc`;
+  args.push("--", "/bin/sh", "-c", bridge);
   return args;
 }
 
@@ -185,12 +234,22 @@ export class ProcessSandbox {
   private readonly bwrap: string | null;
   private readonly unshare: string | null;
   private readonly sandboxExec: string | null;
+  /** Linux ネット allowlist ブリッジ用（2b-2）: socat / ip が無いと fs のネット強制不可 */
+  private readonly socat: string | null;
+  private readonly ip: string | null;
 
   constructor(private readonly config: ProcessSandboxConfig) {
     this.plat = platform();
     this.bwrap = findTool("/usr/bin/bwrap", "/bin/bwrap", "/usr/local/bin/bwrap");
     this.unshare = findTool("/usr/bin/unshare", "/bin/unshare");
     this.sandboxExec = findTool("/usr/bin/sandbox-exec");
+    this.socat = findTool("/usr/bin/socat", "/bin/socat", "/usr/local/bin/socat");
+    this.ip = findTool("/usr/bin/ip", "/bin/ip", "/sbin/ip");
+  }
+
+  /** Linux で fs のネット allowlist を強制できるか（socat + ip が必要・2b-2）。 */
+  canEnforceLinuxNetAllowlist(): boolean {
+    return this.plat === "linux" && !!this.bwrap && !!this.socat && !!this.ip;
   }
 
   /** 有効化されているか、かつ利用可能なツールがあるか */
@@ -233,7 +292,10 @@ export class ProcessSandbox {
         bwrap: !!this.bwrap,
         unshare: !!this.unshare,
         sandboxExec: !!this.sandboxExec,
+        socat: !!this.socat,
+        ip: !!this.ip,
       },
+      netAllowlistEnforceable: this.plat === "darwin" ? !!this.sandboxExec : this.canEnforceLinuxNetAllowlist(),
       effectiveLevel: this.getEffectiveLevel(),
     };
   }
@@ -243,7 +305,13 @@ export class ProcessSandbox {
    * @param command  実行するシェルコマンド文字列
    * @param allowedWriteDirs  書き込みを許可するディレクトリ
    */
-  wrapCommand(command: string, allowedWriteDirs: string[], proxyPort?: number): WrappedCommand {
+  wrapCommand(
+    command: string,
+    allowedWriteDirs: string[],
+    proxyPort?: number,
+    socketPath?: string,
+    failClosedNet?: boolean,
+  ): WrappedCommand {
     const effective = this.getEffectiveLevel();
 
     if (effective === "none") {
@@ -251,7 +319,7 @@ export class ProcessSandbox {
     }
 
     if (this.plat === "linux") {
-      return this.wrapLinux(command, allowedWriteDirs, effective);
+      return this.wrapLinux(command, allowedWriteDirs, effective, proxyPort, socketPath, failClosedNet);
     }
 
     if (this.plat === "darwin") {
@@ -266,13 +334,26 @@ export class ProcessSandbox {
   private wrapLinux(
     command: string,
     writeDirs: string[],
-    level: ProcessSandboxLevel
+    level: ProcessSandboxLevel,
+    proxyPort?: number,
+    socketPath?: string,
+    failClosedNet?: boolean,
   ): WrappedCommand {
-    // fs / full は bwrap で FS 隔離（fs はネット許可・full はネット遮断）
+    // fs / full は bwrap で FS 隔離
     if ((level === "fs" || level === "full") && this.bwrap) {
       const existing = writeDirs.filter((d) => existsSync(d)).map(realpathSafe);
       const masks = defaultSecretDenyDirs(homedir()).filter((d) => existsSync(d)).map(realpathSafe);
-      const args = buildBwrapArgs(command, existing, /* unshareNet */ level === "full", masks);
+      // fs + プロキシ + socat/ip があれば「ネット allowlist 強制」経路（2b-2）。
+      if (level === "fs" && proxyPort && socketPath && this.socat && this.ip) {
+        const args = buildBwrapAllowlistArgs(
+          command, existing, masks, socketPath, proxyPort, this.socat, this.ip,
+        );
+        return { shell: this.bwrap, args };
+      }
+      // ブリッジ構築失敗時(failClosedNet)は fs でもネット全遮断に倒す（fail-closed）。
+      // それ以外は full=遮断 / fs=許可（allowlist 未強制。 /status が「未強制」と表示）。
+      const unshareNet = level === "full" || failClosedNet === true;
+      const args = buildBwrapArgs(command, existing, unshareNet, masks);
       return { shell: this.bwrap, args };
     }
     // network レベル（または full でも bwrap なしの降格）

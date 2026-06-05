@@ -16,13 +16,20 @@ import { isIP } from "node:net";
  * 余計なものは入れない最小セット。
  */
 export const DEFAULT_ALLOWED_DOMAINS: string[] = [
-  "registry.npmjs.org",
+  // npm / yarn / pnpm（registry + CDN リダイレクト先まで包含）
+  "*.npmjs.org", // registry.npmjs.org / CDN を包含
   "registry.yarnpkg.com",
+  "*.yarnpkg.com",
+  // Python（pip）
   "pypi.org",
-  "files.pythonhosted.org",
+  "*.pypi.org",
+  "*.pythonhosted.org", // files.pythonhosted.org / CDN を包含
+  // GitHub（git clone / submodule / raw / release tarball）
   "github.com",
   "codeload.github.com",
   "*.githubusercontent.com", // raw./objects./avatars. などを包含
+  // Node 本体・prebuilt（node-gyp 等が参照）
+  "nodejs.org",
 ];
 
 /** 文字列に非ASCII文字が含まれるか（IDN/ホモグラフ検出用。 制御文字正規表現を避ける）。 */

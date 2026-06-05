@@ -42,9 +42,9 @@ export const sandboxInfoTool: ToolHandler = {
     // ネットの実態を OS/レベル別に正直に出す（LLM が「fs だから安全」と誤認しないため）。
     const netNote = (() => {
       if (avail.effectiveLevel === "fs") {
-        return avail.platform === "darwin"
-          ? "allowlist 経由のみ許可（未許可ドメインは要承認）"
-          : "全開（allowlist は未強制。 Linux/WSL2 のネット制御は未実装＝外部送信は防げない）";
+        if (avail.netAllowlistEnforceable) return "allowlist 経由のみ許可（未許可ドメインは要承認）";
+        // Linux で socat/ip 不足 → 強制不可
+        return "全開（allowlist 未強制。 socat と ip が必要。 未導入のため外部送信を防げない）";
       }
       if (avail.effectiveLevel === "network" || avail.effectiveLevel === "full") {
         return "全遮断（allowlist 非適用）";
