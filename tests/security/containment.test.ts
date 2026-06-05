@@ -30,7 +30,7 @@ vi.mock("../../src/config/config-manager.js", () => ({
 }));
 
 import { isBashNetworkContained } from "../../src/security/containment.js";
-import { resetActiveProcessSandbox } from "../../src/security/active-sandbox.js";
+import { resetActiveProcessSandbox, reconcileSandboxProxy } from "../../src/security/active-sandbox.js";
 
 describe("isBashNetworkContained (Phase 3 ゲート)", () => {
   beforeEach(() => {
@@ -63,5 +63,36 @@ describe("isBashNetworkContained (Phase 3 ゲート)", () => {
   it("level=full（ネット全遮断）→ false（fs のみ対象）", () => {
     h.level = "full";
     expect(isBashNetworkContained()).toBe(false);
+  });
+});
+
+describe("reconcileSandboxProxy (D: proxy ライフサイクル単一窓口)", () => {
+  beforeEach(() => {
+    h.isMacOS = true;
+    resetActiveProcessSandbox();
+  });
+  it("fs + macOS は proxy を止めない（要るので維持）", () => {
+    const stop = vi.fn();
+    h.level = "fs";
+    h.proxy = { stop };
+    resetActiveProcessSandbox();
+    reconcileSandboxProxy();
+    expect(stop).not.toHaveBeenCalled();
+  });
+  it("full は proxy を止める（ネット全遮断＝proxy 不要）", () => {
+    const stop = vi.fn();
+    h.level = "full";
+    h.proxy = { stop };
+    resetActiveProcessSandbox();
+    reconcileSandboxProxy();
+    expect(stop).toHaveBeenCalled();
+  });
+  it("none（封じ込め OFF 相当）は proxy を止める", () => {
+    const stop = vi.fn();
+    h.level = "none";
+    h.proxy = { stop };
+    resetActiveProcessSandbox();
+    reconcileSandboxProxy();
+    expect(stop).toHaveBeenCalled();
   });
 });

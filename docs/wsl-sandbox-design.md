@@ -163,7 +163,7 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - **IDN/ホモグラフ対策**：`normalizeHost` を userinfo(`user@`)除去・IPv6 ブラケット処理・**punycode 正規化**に強化。対話確認で punycode ドメインには警告表示。
 - **NO_PROXY 非クリア是正**：プロキシ注入時に子 env の `NO_PROXY`/`no_proxy`/`ALL_PROXY` を削除（残存でプロキシをバイパスし allowlist 無効化されるのを防止）。
 - **socket 堅牢化**：トンネルの相互クローズ・アイドルタイムアウト(30s)・接続前ハング防止・確立前後のエラー切り分け（502/403）。
-- **proxy ライフサイクル**：`/sandbox off` と非fsレベルへの切替で `proxy.stop()`、`/sandbox deny` で `proxy.revoke()`（セッション once 許可の残存通過を防止）。
+- **proxy ライフサイクル**：実効レベルから停止/維持を判断する単一窓口 `reconcileSandboxProxy()`（active-sandbox.ts）に集約し、`/sandbox on|off|level 変更`の後に呼ぶ（fs かつ強制可能環境のみ proxy を維持、 それ以外は停止。 起動は bash 実行時の遅延起動）。`/sandbox deny` で `proxy.revoke()`（セッション once 許可の残存通過を防止）。
 - **fail-open コメント是正＋可視化**：proxy 起動失敗時はコメント通り fail-closed で全遮断し、bash 結果に「プロキシ起動失敗で全遮断中」の注記を出す（沈黙で詰まらせない）。
 - **status/sandbox_info の誠実化**：`fs` でも macOS=allowlist 経由のみ／Linux=全開（allowlist 未強制）／network・full=全遮断、を OS・レベル別に正直表示。allowlist は「macOS の fs でのみ適用」を明記。
 - **allowlist ポリシー一元化**：`resolveAllowedDomains`（undefined→既定プリセット、`[]`→空のまま）に集約。`removeDomain` 追加。

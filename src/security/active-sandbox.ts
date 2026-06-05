@@ -10,6 +10,8 @@
  */
 
 import { ProcessSandbox, type ProcessSandboxConfig } from "./process-sandbox.js";
+import { getSandboxProxy } from "./sandbox-proxy.js";
+import { isMacOS } from "../utils/platform.js";
 import { loadConfig } from "../config/config-manager.js";
 
 let cachedSandbox: ProcessSandbox | null = null;
@@ -37,4 +39,20 @@ export function getActiveSandboxConfig(): ProcessSandboxConfig {
 export function resetActiveProcessSandbox(): void {
   cachedSandbox = null;
   cachedConfig = null;
+}
+
+/**
+ * 現在の実効レベルに合わせて在プロセスプロキシのライフサイクルを整える（単一窓口）。
+ * fs かつネット allowlist を強制できる環境（macOS or Linux で socat/ip 有り）でのみ proxy が要る。
+ * それ以外（none/network/full、 封じ込め OFF）では停止する。
+ * 起動は port/socket が必要なため bash 実行時の遅延起動（ensureStarted/ensureUnixSocket）に委ねる。
+ * 設定変更（/sandbox on|off|level 変更）の後に呼ぶ。docs/wsl-sandbox-design.md §7.2。
+ */
+export function reconcileSandboxProxy(): void {
+  const proxy = getSandboxProxy();
+  if (!proxy) return;
+  const sb = getActiveProcessSandbox();
+  const needsProxy =
+    sb.getEffectiveLevel() === "fs" && (isMacOS || sb.canEnforceLinuxNetAllowlist());
+  if (!needsProxy) proxy.stop();
 }

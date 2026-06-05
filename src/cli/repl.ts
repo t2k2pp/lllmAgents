@@ -49,7 +49,7 @@ import { configureSandboxProxy, getSandboxProxy } from "../security/sandbox-prox
 import { addDomain, removeDomain, resolveAllowedDomains, domainAllowed } from "../security/net-allowlist.js";
 import inquirer from "inquirer";
 import { ProcessSandbox } from "../security/process-sandbox.js";
-import { resetActiveProcessSandbox } from "../security/active-sandbox.js";
+import { resetActiveProcessSandbox, reconcileSandboxProxy } from "../security/active-sandbox.js";
 import { isBashNetworkContained } from "../security/containment.js";
 import { runLocalLLMSetup, connectAndListModels } from "../config/setup-wizard.js";
 import {
@@ -3288,7 +3288,7 @@ export class REPL {
               this.config.security.processSandbox = { enabled: true, level };
               saveConfig(this.config);
               resetActiveProcessSandbox();
-              if (level !== "fs") getSandboxProxy()?.stop(); // fs 以外は proxy 不要なので止める
+              reconcileSandboxProxy(); // 実効レベルに合わせ proxy を停止/維持（単一窓口）
               const eff = new ProcessSandbox(this.config.security.processSandbox).getAvailability().effectiveLevel;
               console.log(chalk.dim(`  封じ込め ON (config 保存、 level=${level})。 ${isMacOS ? "sandbox-exec" : "bwrap/unshare"} で適用 (次の bash から即反映)。`));
               if (eff === "none") {
@@ -3309,7 +3309,7 @@ export class REPL {
               this.config.security.processSandbox = { enabled: false, level: lvl };
               saveConfig(this.config);
               resetActiveProcessSandbox();
-              getSandboxProxy()?.stop(); // 封じ込め解除時はネット allowlist プロキシも停止
+              reconcileSandboxProxy(); // 封じ込め解除 → proxy も停止（単一窓口）
               console.log(chalk.dim("  封じ込め OFF (config 保存)。 bash は隔離なしで実行します。"));
             }
             break;
