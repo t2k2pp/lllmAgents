@@ -19,10 +19,8 @@ export const DEFAULT_ALLOWED_DOMAINS: string[] = [
   // npm / yarn / pnpm（registry + CDN リダイレクト先まで包含）
   "*.npmjs.org", // registry.npmjs.org / CDN を包含
   "registry.yarnpkg.com",
-  "*.yarnpkg.com",
-  // Python（pip）
+  // Python（pip）。 pypi.org は完全一致、 ホイール CDN は *.pythonhosted.org で包含
   "pypi.org",
-  "*.pypi.org",
   "*.pythonhosted.org", // files.pythonhosted.org / CDN を包含
   // GitHub（git clone / submodule / raw / release tarball）
   "github.com",

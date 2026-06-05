@@ -14,7 +14,7 @@
 import * as http from "node:http";
 import * as net from "node:net";
 import * as dns from "node:dns/promises";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync, chmodSync } from "node:fs";
 import type { Socket } from "node:net";
 import { domainAllowed, normalizeHost } from "./net-allowlist.js";
 
@@ -248,6 +248,12 @@ export class SandboxProxy {
       const server = this.createServer();
       server.on("error", (e) => reject(e));
       server.listen(socketPath, () => {
+        // 同一ホストの他ユーザーが踏み台にできないよう所有者のみに制限（/tmp は全ユーザー書込可）
+        try {
+          chmodSync(socketPath, 0o600);
+        } catch {
+          /* ignore */
+        }
         this.unixServer = server;
         this.unixPath = socketPath;
         resolve();

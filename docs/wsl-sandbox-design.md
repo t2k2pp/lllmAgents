@@ -128,6 +128,12 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - **未検証**：bwrap/`--unshare-net`/lo 起動/socat の実ランタイム挙動は macOS では確認不能。WSL2(Ubuntu) 実機での疎通確認が必要（`npm install` が allowlist 経由で通り、 `curl --noproxy https://1.1.1.1` が遮断されること等）。route-to-WSL と同じく実装→実機検証の順で進める。
 - **Phase 3 連動は当面 macOS 限定**（`isBashNetworkContained` は macOS のみ true）。Linux の allowlist 強制が WSL2 実機で確認できたら Linux にも自動許可を拡張する。
 
+**2b-2 レビュー反映（06a2840 直後・Linux 知見の机上レビュー）**：骨格（unshare-net + ソケット bind + socat + fail-closed）は正しいと確認。修正したもの:
+- **【Critical】socat readiness レース**：socat が listen する前に最初のリクエストが走ると `ECONNREFUSED` で非決定的に失敗するため、 bridge に「socat へ接続確認できるまで最大 ~5s 待つ」ループを追加。
+- **【Med（共有機で High）】unix ソケット権限**：`/tmp` は全ユーザー書込可で他ユーザーの踏み台になりうるため、 listen 後に `chmod 600`。
+- **【Med】既定 allowlist の過剰ワイルドカード削減**：`*.pypi.org`・`*.yarnpkg.com` は不要（`pypi.org` 完全一致・`registry.yarnpkg.com` で足りる）ため削除。攻撃面を縮小。
+- **WSL2 実機で要確認（未検証）**：unprivileged userns 有効性／`ip link set lo up` が namespace 内で通るか／dash(`/bin/sh`)でユーザーコマンドの bash 固有構文が壊れないか／直結遮断（`curl --noproxy https://1.1.1.1` が失敗）／allowlist 経由疎通（`npm install` 成功）／未許可ドメイン 403。
+
 **既定 allowlist の現実性（QA 指摘 H1/H2 反映）**：既定を `*.npmjs.org`/`*.yarnpkg.com`/`*.pythonhosted.org`/`pypi.org`/`*.pypi.org`/`github.com`/`codeload.github.com`/`*.githubusercontent.com`/`nodejs.org` に拡張し、 registry リダイレクト・CDN・git submodule・node prebuilt を既定でカバー。ただし prebuilt バイナリを S3/Azure 等の**ベンダー固有 CDN**から取るもの（playwright/electron/esbuild 等）は無数にあり既定化しない方針＝**初回に対話確認（TTY）/ `/sandbox allow`（非TTY）** で都度許可する。これは「のびのび」と最小権限の妥協点。
 
 **2b-1 実装メモ（macOS）**：

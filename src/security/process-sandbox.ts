@@ -159,11 +159,17 @@ export function buildBwrapAllowlistArgs(
   for (const dir of maskDirs) args.push("--tmpfs", dir);
   // unix ソケットを名前空間内へ（--tmpfs /tmp の後に置き、 /tmp 配下でもマスクされず露出させる）
   args.push("--bind", socketPath, socketPath);
-  // 名前空間内: lo を起こし、 socat を background 起動してからユーザーコマンドを実行・終了時に後始末
+  // 名前空間内: lo を起こし socat を background 起動 → listen 確立を待ってからユーザーコマンド実行。
+  // readiness 待ちが無いと、 socat が listen する前に最初のリクエストが ECONNREFUSED で
+  // 非決定的に失敗する（レビュー C-1）。 socat 自身で接続確認し最大 ~5s 待つ。
   const bridge =
     `${ipPath} link set lo up 2>/dev/null; ` +
     `${socatPath} TCP-LISTEN:${port},fork,reuseaddr,bind=127.0.0.1 UNIX-CONNECT:${socketPath} >/dev/null 2>&1 & ` +
-    `__lllm_socat=$!; { ${command}; }; __lllm_rc=$?; kill $__lllm_socat 2>/dev/null; exit $__lllm_rc`;
+    `__lllm_socat=$!; __lllm_i=0; ` +
+    `while [ $__lllm_i -lt 100 ]; do ` +
+    `${socatPath} -u OPEN:/dev/null TCP:127.0.0.1:${port},connect-timeout=1 >/dev/null 2>&1 && break; ` +
+    `__lllm_i=$((__lllm_i+1)); sleep 0.05; done; ` +
+    `{ ${command}; }; __lllm_rc=$?; kill $__lllm_socat 2>/dev/null; exit $__lllm_rc`;
   args.push("--", "/bin/sh", "-c", bridge);
   return args;
 }

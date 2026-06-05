@@ -63,6 +63,14 @@ describe("buildBwrapAllowlistArgs (Linux ネット allowlist ブリッジ・2b-2
     expect(inner).toContain("npm install");
     expect(inner).toContain("kill $__lllm_socat"); // 後始末
   });
+  it("socat の listen 確立を待ってからコマンドを実行する (C-1 レース回避)", () => {
+    const inner = args[args.length - 1];
+    // readiness ループ: socat 接続確認が成功するまで待つ
+    expect(inner).toMatch(/while \[ \$__lllm_i -lt \d+ \]/);
+    expect(inner).toContain("connect-timeout=1");
+    // 待機ループはユーザーコマンドより前
+    expect(inner.indexOf("while [")).toBeLessThan(inner.indexOf("npm install"));
+  });
   it("書込は writeDir に bind", () => {
     expect(joined).toContain("--bind /work /work");
   });
