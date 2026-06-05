@@ -37,7 +37,8 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: RegExp[] = [
   /\bgit\s+checkout\s+(--\s|\.\s|\.$|--$)/,
   /\bgit\s+reset\s+--hard\b/,
   /\bgit\s+clean\s+-[a-z]*[df][a-z]*\b/,
-  /\bgit\s+push\b[^\n]*(?:--force\b|--force-with-lease\b|\s-f\b)/,
+  // force push: 語順非依存（git -c … push 等の挿入に耐える）＋ refspec の `+`(=force) も検出。
+  /\bgit\b[^\n]*\bpush\b[^\n]*(?:--force\b|--force-with-lease\b|\s-f\b|\s\+\S)/,
 ];
 
 /** コマンド文字列が破壊的パターンに該当するか。 */

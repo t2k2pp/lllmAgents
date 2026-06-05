@@ -3295,6 +3295,15 @@ export class REPL {
                 console.log(chalk.yellow("  ⚠ 隔離ツールが見つからず実効レベルは none です (Linux/WSL2: bwrap, macOS: sandbox-exec が必要)。"));
               } else if (eff === "fs") {
                 console.log(chalk.dim("  書込は作業フォルダ等に限定、 ネットワークは許可 (npm install / pip 等は通ります)。"));
+                // Phase 3: fs 封じ込め下では bash 確認が自動許可される副作用を明示（macOS のみ発動）
+                if (isBashNetworkContained()) {
+                  console.log(
+                    chalk.yellow(
+                      "  ⚠ 封じ込め下では bash 実行確認が自動許可されます（破壊的操作・未許可ドメイン通信は確認）。" +
+                      " 切るには /sandbox off、 自動許可だけ無効化は config の autoAllowBashWhenContained: false。",
+                    ),
+                  );
+                }
               } else {
                 console.log(chalk.yellow(`  ⚠ level=${eff} はネットワークを遮断します。 npm install / pip / CDN 取得などは通りません (開発作業は level=fs 推奨: /sandbox on fs)。`));
               }

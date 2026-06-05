@@ -184,9 +184,10 @@ export const bashTool: BashToolHandler = {
       const sandbox = getActiveProcessSandbox();
       if (sandbox.isActive()) {
         const config = loadConfig();
+        // ~/.localllm は bash の書込許可に含めない（自アプリの config/API キー/セッションの
+        // 改ざんを防ぐ。 読取も機密として遮断＝process-sandbox の computeSecretProtection）。
         const allowedWriteDirs = [
           process.cwd(),
-          path.join(os.homedir(), ".localllm"),
           ...config.security.allowedDirectories,
         ];
         // fs レベルなら在プロセスプロキシを起動し、 ネットを allowlist 経由に閉じる。

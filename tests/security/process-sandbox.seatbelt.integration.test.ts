@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { writeFileSync, mkdtempSync, rmSync, existsSync, realpathSync } from "node:fs";
+import { writeFileSync, mkdtempSync, mkdirSync, rmSync, existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 
@@ -93,6 +93,29 @@ describe.skipIf(!canRun)("Seatbelt profile loads into sandbox-exec (integration)
       expect(r.out).toContain("Operation not permitted");
     } finally {
       rmSync(secret, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it("allowReadDirs で skills だけ読取を戻す（~/.localllm 親は遮断・skills は許可。 R-3）", () => {
+    const appDir = mkRealTemp("lllm-app-");
+    const work = mkRealTemp("lllm-work-");
+    writeFileSync(join(appDir, "config.json"), "APIKEY-SECRET", "utf-8");
+    const skillsDir = join(appDir, "skills");
+    mkdirSync(skillsDir);
+    writeFileSync(join(skillsDir, "s.txt"), "SKILLDATA", "utf-8");
+    try {
+      // ~/.localllm 相当を deny、 skills を allow-back
+      const profile = buildSeatbeltProfile([work], "fs", [appDir], 54999, [skillsDir]);
+      // 親(config.json=APIキー)は読めない
+      const rSecret = runUnderProfile(profile, `cat '${appDir}/config.json'`);
+      expect(rSecret.out).not.toContain("APIKEY-SECRET");
+      expect(rSecret.out).toContain("Operation not permitted");
+      // skills 配下は読める（allow-back が last-match-wins で効く）
+      const rSkill = runUnderProfile(profile, `cat '${skillsDir}/s.txt'`);
+      expect(rSkill.out).toContain("SKILLDATA");
+    } finally {
+      rmSync(appDir, { recursive: true, force: true });
       rmSync(work, { recursive: true, force: true });
     }
   });

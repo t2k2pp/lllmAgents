@@ -16,9 +16,20 @@ describe("isDestructiveCommand (正典リスト・自動許可から除外すべ
       expect(isDestructiveCommand(c), c).toBe(true);
     }
   });
+  it("refspec の + (=force) と git -c 挿入も force push として検出 (R-1/R-2)", () => {
+    for (const c of [
+      "git push origin +main",
+      "git push origin +HEAD:refs/heads/main",
+      "git -c http.sslVerify=false push --force origin main",
+      "git push origin +feature",
+    ]) {
+      expect(isDestructiveCommand(c), c).toBe(true);
+    }
+  });
   it("通常の push は破壊的でない", () => {
     expect(isDestructiveCommand("git push origin feature")).toBe(false);
     expect(isDestructiveCommand("git push")).toBe(false);
+    expect(isDestructiveCommand("git push origin main")).toBe(false);
   });
   it("git 作業ツリー破棄・履歴改変を判定", () => {
     for (const c of ["git checkout -- src/", "git checkout .", "git reset --hard HEAD~1", "git clean -fdx"]) {
@@ -50,10 +61,19 @@ describe("checkCommand (rules.ts 修正の回帰)", () => {
     expect(checkCommand(":(){ :|:& };:")?.action).toBe("block");
     expect(checkCommand(":(){ : | : & };:")?.action).toBe("block");
   });
-  it("main/master への force push を語順非依存で block", () => {
-    expect(checkCommand("git push -f origin main")?.action).toBe("block");
-    expect(checkCommand("git push origin master --force")?.action).toBe("block");
-    expect(checkCommand("git push --force origin main")?.action).toBe("block");
+  it("main/master への force push を語順非依存・-c挿入・refspec+ で block (R-1/R-2)", () => {
+    for (const c of [
+      "git push -f origin main",
+      "git push origin master --force",
+      "git push --force origin main",
+      "git push origin +main",
+      "git push origin +HEAD:refs/heads/master",
+      "git -c http.sslVerify=false push --force origin main",
+    ]) {
+      expect(checkCommand(c)?.action, c).toBe("block");
+    }
+    // 通常 push は block しない
+    expect(checkCommand("git push origin main")).toBeNull();
   });
   it("feature ブランチへの force push は main/master block には当たらない", () => {
     // rules.ts の block 対象は main/master のみ。 feature は null（ただし isDestructiveCommand 側で確認される）

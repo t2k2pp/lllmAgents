@@ -18,9 +18,9 @@ export const DANGEROUS_COMMAND_PATTERNS: SecurityRule[] = [
   { pattern: /chmod\s+777/, action: "warn", message: "777パーミッションはセキュリティリスクです" },
   { pattern: /chmod\s+-R\s+777/, action: "block", message: "再帰的な777パーミッション設定は禁止されています" },
 
-  // Download & execute
-  { pattern: /curl\s+.*\|\s*(bash|sh|zsh)/, action: "block", message: "ダウンロードしたスクリプトの直接実行は禁止されています" },
-  { pattern: /wget\s+.*\|\s*(bash|sh|zsh)/, action: "block", message: "ダウンロードしたスクリプトの直接実行は禁止されています" },
+  // Download & execute（| sh / | sudo sh / プロセス置換 bash <(curl …) を網羅）
+  { pattern: /(curl|wget)\s+.*\|\s*(sudo\s+)?(bash|sh|zsh|python3?|node|perl|ruby)\b/, action: "block", message: "ダウンロードしたスクリプトの直接実行は禁止されています" },
+  { pattern: /\b(bash|sh|zsh|python3?|node|perl|ruby)\b[^\n]*<\(\s*(curl|wget)\b/, action: "block", message: "プロセス置換によるダウンロードスクリプトの実行は禁止されています" },
 
   // System
   { pattern: /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&?\s*\}\s*;\s*:/, action: "block", message: "フォーク爆弾は禁止されています" },
@@ -34,8 +34,9 @@ export const DANGEROUS_COMMAND_PATTERNS: SecurityRule[] = [
   { pattern: /rd\s+\/s/i, action: "warn", message: "ディレクトリの再帰削除です" },
 
   // Git destructive
-  // force push を main/master へ（語順非依存・-f / --force / --force-with-lease を網羅）
-  { pattern: /\bgit\s+push\b(?=[^\n]*(?:--force\b|--force-with-lease\b|\s-f\b))(?=[^\n]*\b(?:main|master)\b)/, action: "block", message: "main/masterへのforce pushは禁止されています" },
+  // force push を main/master へ（語順非依存・git -c … 挿入耐性・-f/--force/--force-with-lease・
+  // refspec の `+`(=force) を網羅）。 lookahead で「git・push・force指標・main|master」を独立に要求。
+  { pattern: /\bgit\b(?=[^\n]*\bpush\b)(?=[^\n]*(?:--force\b|--force-with-lease\b|\s-f\b|\s\+\S))(?=[^\n]*\b(?:main|master)\b)/, action: "block", message: "main/masterへのforce pushは禁止されています" },
   { pattern: /git\s+reset\s+--hard/, action: "warn", message: "git reset --hardはコミットされていない変更を失います" },
   { pattern: /git\s+clean\s+-f/, action: "warn", message: "git cleanは追跡されていないファイルを削除します" },
 

@@ -128,6 +128,14 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - **未検証**：bwrap/`--unshare-net`/lo 起動/socat の実ランタイム挙動は macOS では確認不能。WSL2(Ubuntu) 実機での疎通確認が必要（`npm install` が allowlist 経由で通り、 `curl --noproxy https://1.1.1.1` が遮断されること等）。route-to-WSL と同じく実装→実機検証の順で進める。
 - **Phase 3 連動は当面 macOS 限定**（`isBashNetworkContained` は macOS のみ true）。Linux の allowlist 強制が WSL2 実機で確認できたら Linux にも自動許可を拡張する。
 
+**セキュリティ4役レビュー反映（レッド/ブルー/ホワイト/パープル）**：macOS のネット/FS 封じ込め（直結/DNS/UDP/ICMP/SSRF/rebinding/IDN/任意ポート遮断・writeDir 限定・symlink realpath・機密 deny）は実機で堅牢と再確認。是正:
+- **【Critical】force push 検出の追加回避**：`git push origin +main`（refspec の `+`＝force）と `git -c k=v push --force`（`-c` 挿入で `git`直後`push` 前提の正規表現を回避）がすり抜けていた。→ `destructive-commands.ts`/`rules.ts` を**語順非依存＋refspec `+` 対応**に修正。
+- **【High】自アプリ機密 `~/.localllm` が封じ込め対象外**：クラウド LLM の API キー(config.json)・会話履歴(sessions)・チェックポイントがサンドボックス内 bash から**読取可、 かつ writeDir で改ざん可**、 許可ドメイン(gist 等)へ exfil 可能だった。→ (1) `~/.localllm` を bash の writeDir から除外（改ざん防止）、(2) 読取遮断（`computeSecretProtection`）。ただし `skills/` は SKILL スクリプト実行のため **allow-back**（macOS=deny 後に allow file-read を last-match-wins、 Linux=tmpfs 後に ro-bind 戻し）。macOS 実機で「config.json は読めず skills は読める」を検証。**脅威モデルの機密資産に `~/.localllm`(+`.netrc`/`.config/git` 検討) を追加**。
+- **【High→明記】許可ドメイン経由 exfil**：設計書 §7.2 の「外部送信は必ず確認」を「**未許可ドメインのみ確認・許可ドメイン経由 exfil は残存リスク**」へ正確化（上記 §7.2 参照）。
+- **【Med】download-exec 回避**：`curl | sudo sh` / `bash <(curl …)`（プロセス置換）/ 他インタプリタへのパイプを `rules.ts` の block に追加。
+- **【Med】Phase 3 副作用の可視化**：`/sandbox on`(fs) 時に「bash 確認が自動許可される」旨を警告表示（W-3）。
+- 受容（明記済の残存）：インタプリタ経由の cwd 内破壊（`node -e` 等）、許可ドメイン自体への持出。可観測性（中継先ログ・auto-allow 履歴）と非TTY での Phase 3 無効化は今後の検討。
+
 **2b-2 レビュー反映（06a2840 直後・Linux 知見の机上レビュー）**：骨格（unshare-net + ソケット bind + socat + fail-closed）は正しいと確認。修正したもの:
 - **【Critical】socat readiness レース**：socat が listen する前に最初のリクエストが走ると `ECONNREFUSED` で非決定的に失敗するため、 bridge に「socat へ接続確認できるまで最大 ~5s 待つ」ループを追加。
 - **【Med（共有機で High）】unix ソケット権限**：`/tmp` は全ユーザー書込可で他ユーザーの踏み台になりうるため、 listen 後に `chmod 600`。
@@ -186,7 +194,8 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - **危険コマンド**（既存 `checkCommand` の block ルール）→ 従来どおりブロック。
 - **明示 ask ルール**（`security.rules.ask` 等にマッチ）→ 自動許可せず確認（ゲート条件 `ruleResult !== "ask"`）。
 - **CWD 外参照・広域再帰スキャン**（`bashNeedsExplicitAsk`）→ 確認。
-- **allowlist 外ドメインへの通信** → 実行時にプロキシ（`onUnknownDomain`）が対話確認。封じ込めが「外部送信は必ず確認」を担保するので、bash 起動自体を自動許可しても exfil は無確認では起きない。
+- **allowlist 外ドメインへの通信** → 実行時にプロキシ（`onUnknownDomain`）が対話確認。
+  ⚠️ ただし担保されるのは**未許可ドメインへの送信のみ**。**許可ドメイン（既定 gist/github/npm/pypi 等）経由の exfil は確認されない**（TLS 非終端＝中身は素通し・§6/§7.1 の残存リスク）。「外部送信は必ず確認」ではなく「未許可ドメインへの送信は確認」が正確。許可ドメインを踏み台にしたデータ持出は Phase 3 自動許可下では無確認で通りうる（脅威モデル上の受容リスク）。
 
 **実装**：既存の autorun の bash 分岐（`checkAutorunPermission`）を再利用する。封じ込め条件成立時は autorun トグルが OFF でも同じ判定を通す。
 - `src/security/containment.ts`：`isBashNetworkContained()`（上記条件を判定。security レイヤ内で完結し循環依存なし）。

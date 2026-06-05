@@ -87,6 +87,23 @@ export function defaultSecretDenyDirs(home: string): string[] {
 }
 
 /**
+ * アプリ自身の機密ディレクトリ（~/.localllm）。 クラウド LLM の API キー(config.json)・
+ * 会話履歴(sessions)・チェックポイント等を含むため、 サンドボックス内 bash からの
+ * 読取を遮断する（最も価値ある exfil 標的）。
+ */
+export function appSecretDir(home: string): string {
+  return join(home, ".localllm");
+}
+
+/**
+ * ~/.localllm のうち読取を戻す（allow-back）サブパス。 skills は SKILL スクリプト実行のため
+ * 読める必要がある。 遮断は config/sessions/checkpoints 等に効かせつつ skills だけ通す。
+ */
+export function appSecretReadBackDirs(home: string): string[] {
+  return [join(home, ".localllm", "skills")];
+}
+
+/**
  * bwrap 引数を組み立てる純粋関数（テスト容易化のため分離）。
  * @param command    実行するシェルコマンド
  * @param writeDirs  書込許可ディレクトリ（呼び出し側で存在チェック済みのものを渡す）
@@ -98,6 +115,7 @@ export function buildBwrapArgs(
   writeDirs: string[],
   unshareNet: boolean,
   maskDirs: string[] = [],
+  readBackDirs: string[] = [],
 ): string[] {
   const args: string[] = [
     // Read-only bind mount of root filesystem
@@ -118,6 +136,10 @@ export function buildBwrapArgs(
   // 機密ディレクトリを空 tmpfs で覆う（writeDirs の後に置くことで、 親が書込 bind されても確実に隠す）
   for (const dir of maskDirs) {
     args.push("--tmpfs", dir);
+  }
+  // tmpfs で覆った後に、 読取を戻すサブパスを ro-bind で再露出（例: ~/.localllm/skills）
+  for (const dir of readBackDirs) {
+    args.push("--ro-bind", dir, dir);
   }
   args.push("--", "/bin/sh", "-c", command);
   return args;
@@ -146,6 +168,7 @@ export function buildBwrapAllowlistArgs(
   port: number,
   socatPath: string,
   ipPath: string,
+  readBackDirs: string[] = [],
 ): string[] {
   const args: string[] = [
     "--ro-bind", "/", "/",
@@ -157,6 +180,8 @@ export function buildBwrapAllowlistArgs(
   ];
   for (const dir of writeDirs) args.push("--bind", dir, dir);
   for (const dir of maskDirs) args.push("--tmpfs", dir);
+  // tmpfs で覆った後に、 読取を戻すサブパスを ro-bind で再露出（例: ~/.localllm/skills）
+  for (const dir of readBackDirs) args.push("--ro-bind", dir, dir);
   // unix ソケットを名前空間内へ（--tmpfs /tmp の後に置き、 /tmp 配下でもマスクされず露出させる）
   args.push("--bind", socketPath, socketPath);
   // 名前空間内: lo を起こし socat を background 起動 → listen 確立を待ってからユーザーコマンド実行。
@@ -187,6 +212,7 @@ export function buildSeatbeltProfile(
   level: ProcessSandboxLevel,
   denyReadDirs: string[] = [],
   proxyPort?: number,
+  allowReadDirs: string[] = [],
 ): string {
   const fsIsolated = level === "fs" || level === "full";
   const lines: string[] = [
@@ -216,6 +242,10 @@ export function buildSeatbeltProfile(
     // Seatbelt の last-match-wins で当該 subpath だけ deny に上書きされる。
     for (const dir of denyReadDirs) {
       lines.push(`(deny file-read* (subpath "${dir}"))`);
+    }
+    // 読取を戻すサブパス（例: ~/.localllm/skills）。 deny の後に置き last-match-wins で再許可。
+    for (const dir of allowReadDirs) {
+      lines.push(`(allow file-read* (subpath "${dir}"))`);
     }
   }
 
@@ -341,6 +371,19 @@ export class ProcessSandbox {
     return { shell: "/bin/sh", args: ["-c", command] };
   }
 
+  /**
+   * 読取遮断する機密ディレクトリ（OS 機密 + 自アプリ ~/.localllm）と、 戻すサブパス(skills)。
+   * 存在するものだけを realpath 正規化して返す。
+   */
+  private computeSecretProtection(): { deny: string[]; allowBack: string[] } {
+    const home = homedir();
+    const deny = [...defaultSecretDenyDirs(home), appSecretDir(home)]
+      .filter((d) => existsSync(d))
+      .map(realpathSafe);
+    const allowBack = appSecretReadBackDirs(home).filter((d) => existsSync(d)).map(realpathSafe);
+    return { deny, allowBack };
+  }
+
   // ── Linux ────────────────────────────────────────────────────────────────
 
   private wrapLinux(
@@ -354,18 +397,18 @@ export class ProcessSandbox {
     // fs / full は bwrap で FS 隔離
     if ((level === "fs" || level === "full") && this.bwrap) {
       const existing = writeDirs.filter((d) => existsSync(d)).map(realpathSafe);
-      const masks = defaultSecretDenyDirs(homedir()).filter((d) => existsSync(d)).map(realpathSafe);
+      const { deny: masks, allowBack: readBack } = this.computeSecretProtection();
       // fs + プロキシ + socat/ip があれば「ネット allowlist 強制」経路（2b-2）。
       if (level === "fs" && proxyPort && socketPath && this.socat && this.ip) {
         const args = buildBwrapAllowlistArgs(
-          command, existing, masks, socketPath, proxyPort, this.socat, this.ip,
+          command, existing, masks, socketPath, proxyPort, this.socat, this.ip, readBack,
         );
         return { shell: this.bwrap, args };
       }
       // ブリッジ構築失敗時(failClosedNet)は fs でもネット全遮断に倒す（fail-closed）。
       // それ以外は full=遮断 / fs=許可（allowlist 未強制。 /status が「未強制」と表示）。
       const unshareNet = level === "full" || failClosedNet === true;
-      const args = buildBwrapArgs(command, existing, unshareNet, masks);
+      const args = buildBwrapArgs(command, existing, unshareNet, masks, readBack);
       return { shell: this.bwrap, args };
     }
     // network レベル（または full でも bwrap なしの降格）
@@ -389,8 +432,8 @@ export class ProcessSandbox {
     proxyPort?: number
   ): WrappedCommand {
     const realWrite = writeDirs.map(realpathSafe);
-    const masks = defaultSecretDenyDirs(homedir()).filter((d) => existsSync(d)).map(realpathSafe);
-    const profile = buildSeatbeltProfile(realWrite, level, masks, proxyPort);
+    const { deny: masks, allowBack } = this.computeSecretProtection();
+    const profile = buildSeatbeltProfile(realWrite, level, masks, proxyPort, allowBack);
 
     // 一時プロファイルは 0700 のディレクトリ内に作成（共有 /tmp に推測可能名で晒さない）。
     const dir = mkdtempSync(join(tmpdir(), "lllm-sandbox-"));
