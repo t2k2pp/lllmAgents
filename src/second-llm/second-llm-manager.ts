@@ -200,7 +200,13 @@ export class SecondLLMManager {
     void parentAncestors;
 
     const log = this.createLogger("second-llm-consult");
+    const startMs = Date.now();
+    const elapsed = () => Math.floor((Date.now() - startMs) / 1000);
     const spinner = ora(chalk.magenta("Consulting Second LLM...")).start();
+    // 経過秒を 1 秒ごとに更新表示 (ユーザーが進行中だと分かるように)
+    const timer = setInterval(() => {
+      spinner.text = chalk.magenta(`Consulting Second LLM... (${elapsed()}s)`);
+    }, 1000);
     try {
       // Phase 5 第2ラウンド: consult はツール無し単発質問。 戦略プロンプトはコンパクト版で十分。
       const systemPrompt =
@@ -235,7 +241,7 @@ export class SecondLLMManager {
       }
 
       log.logResponse({ model: this.endpoint.model, text: responseText });
-      spinner.succeed(chalk.magenta("Second LLM replied."));
+      spinner.succeed(chalk.magenta(`Second LLM replied. (${elapsed()}s)`));
       return responseText.trim();
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
@@ -245,8 +251,10 @@ export class SecondLLMManager {
         error: err.message,
         stack: err.stack,
       });
-      spinner.fail(chalk.red("Second LLM consultation failed."));
+      spinner.fail(chalk.red(`Second LLM consultation failed. (${elapsed()}s)`));
       throw e;
+    } finally {
+      clearInterval(timer);
     }
   }
 
@@ -264,7 +272,15 @@ export class SecondLLMManager {
     //     selfAncestors を ToolExecutor に渡す (= sub に伝播する祖先)
     const log = this.createLogger("second-llm-agent");
 
-    const spinner = ora(chalk.magenta("Second LLM working as Agent...")).start();
+    const startMs = Date.now();
+    const elapsed = () => Math.floor((Date.now() - startMs) / 1000);
+    let activity = "Second LLM working as Agent...";
+    const spinner = ora(chalk.magenta(activity)).start();
+    // 経過秒を 1 秒ごとに更新。 現在の activity (作業内容) に秒数を付けて表示する
+    // ことで、 実行中ツール名などの情報を消さずに進行時間も見せる。
+    const timer = setInterval(() => {
+      spinner.text = chalk.magenta(`${activity} (${elapsed()}s)`);
+    }, 1000);
     try {
       // Phase 5 第2ラウンド: メインLLMの system-prompt から戦略原則を継承する。
       // メインとセカンドで「同じ原則を共有する」 ことが目的 (非対称性の解消)。
@@ -341,7 +357,7 @@ export class SecondLLMManager {
         if (responseText) {
           messages.push({ role: "assistant", content: responseText });
           if (toolCalls.length === 0) {
-            spinner.succeed(chalk.magenta("Second LLM task completed."));
+            spinner.succeed(chalk.magenta(`Second LLM task completed. (${elapsed()}s)`));
             return responseText.trim();
           }
         }
@@ -355,7 +371,8 @@ export class SecondLLMManager {
 
           for (const tc of toolCalls) {
             const toolName = tc.function.name;
-            spinner.text = chalk.magenta(`Second LLM executing tool: ${toolName}`);
+            activity = `Second LLM executing tool: ${toolName}`;
+            spinner.text = chalk.magenta(`${activity} (${elapsed()}s)`);
 
             try {
               const res = await toolExecutor.execute(tc);
@@ -370,13 +387,14 @@ export class SecondLLMManager {
               messages.push({ role: "tool", content: `Error: ${String(e)}`, tool_call_id: tc.id });
             }
           }
-          spinner.text = chalk.magenta("Second LLM working as Agent...");
+          activity = "Second LLM working as Agent...";
+          spinner.text = chalk.magenta(`${activity} (${elapsed()}s)`);
         } else {
           break;
         }
       }
 
-      spinner.succeed(chalk.magenta("Second LLM task reached max iterations or completed."));
+      spinner.succeed(chalk.magenta(`Second LLM task reached max iterations or completed. (${elapsed()}s)`));
       return "Reached maximum iterations or completed.";
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
@@ -386,8 +404,10 @@ export class SecondLLMManager {
         error: err.message,
         stack: err.stack,
       });
-      spinner.fail(chalk.red("Second LLM agent run failed."));
+      spinner.fail(chalk.red(`Second LLM agent run failed. (${elapsed()}s)`));
       throw e;
+    } finally {
+      clearInterval(timer);
     }
   }
 

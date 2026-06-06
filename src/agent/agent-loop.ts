@@ -1827,10 +1827,18 @@ export class AgentLoop {
     // ツール内部で inquirer prompt を出すため同じく停止が必要。
     const toolName = toolCall.function.name;
     const isInteractiveTool = toolName === "ask_user" || toolName === "exit_plan_mode";
+    // 入れ子で独自スピナーを出すツール (second-llm-manager 等)。 外側スピナーと
+    // 二重アニメーションになり同じ行で点滅するため、 外側は静的行として残す。
+    const isNestedSpinnerTool = toolName === "second_llm_consult" || toolName === "second_llm_agent";
     const needsApproval = this.permissions.getPermissionLevel(toolName) === "ask"
       && this.currentSource === "cli";
+    let outerSpinnerPersisted = false;
     if (needsApproval || (isInteractiveTool && this.currentSource === "cli")) {
       spinner.stop();
+    } else if (isNestedSpinnerTool && this.currentSource === "cli") {
+      // 依頼内容 (summary) は静的行として出しっぱなしにし、 進捗アニメは入れ子スピナーに一本化。
+      spinner.stopAndPersist({ symbol: chalk.dim("↳"), text: chalk.dim(`  ${summary}`) });
+      outerSpinnerPersisted = true;
     }
     const toolStartMs = Date.now();
 
@@ -1850,11 +1858,14 @@ export class AgentLoop {
     this.maybeTriggerDialogueLock(toolName, result);
 
     if (result.success) {
-      spinner.succeed(chalk.dim(`  ${summary}`));
+      // outerSpinnerPersisted の場合は既に summary を静的表示済 → 二重表示しない
+      if (!outerSpinnerPersisted) spinner.succeed(chalk.dim(`  ${summary}`));
       // ファイル変更時はカラーdiffを表示
       if (result.userDisplay) {
         this.renderUserDisplay(result.userDisplay);
       }
+    } else if (outerSpinnerPersisted) {
+      console.log(chalk.dim(`  ${summary}: ${formatToolError(result.error, result.output)}`));
     } else {
       spinner.fail(chalk.dim(`  ${summary}: ${formatToolError(result.error, result.output)}`));
     }
