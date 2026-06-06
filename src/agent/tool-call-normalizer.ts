@@ -48,8 +48,9 @@ export function normalizeToolCalls(text: string): NormalizationResult {
   // Anthropic XML は <tool_call><function=...> の入れ子なので ChatML より特異 → 先に試す
   const tries: Array<(t: string) => NormalizationResult | null> = [
     extractMistralToolCalls,
-    // pipe-call は <|tool|> という極めて特異なマーカーを持つため誤検出しにくく、
-    // {...} を含むので plain-json より先に確定させたい → 早い位置に置く
+    // pipe-call の <|tool|> マーカーは他形式 (<tool_call> / [TOOL_CALLS] / 裸 JSON) と
+    // 字面が重複しないため順序自体は任意。 ただし {...} を含むので plain-json には
+    // 必ず先行させる (先に裸 JSON として食われないため)。 early-exit 効率も兼ねて早めに置く。
     extractPipeCallToolCalls,
     extractAnthropicXmlToolCalls,
     extractChatMLToolCalls,
@@ -217,23 +218,8 @@ function extractPlainJSONToolCall(text: string): NormalizationResult | null {
   // テキスト中の最初のトップレベル JSON オブジェクト 1 つだけ抽出。
   const startIdx = text.indexOf("{");
   if (startIdx < 0) return null;
-  // バランスの取れた括弧でカット
-  let depth = 0;
-  let endIdx = -1;
-  let inStr = false;
-  let escape = false;
-  for (let i = startIdx; i < text.length; i++) {
-    const ch = text[i];
-    if (escape) { escape = false; continue; }
-    if (ch === "\\") { escape = true; continue; }
-    if (ch === '"') { inStr = !inStr; continue; }
-    if (inStr) continue;
-    if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) { endIdx = i; break; }
-    }
-  }
+  // バランスの取れた括弧でカット (extractPipeCallToolCalls と共通の走査を使う)
+  const endIdx = scanBalancedBrace(text, startIdx);
   if (endIdx < 0) return null;
   const jsonSlice = text.slice(startIdx, endIdx + 1);
   try {
@@ -284,7 +270,8 @@ function extractPipeCallToolCalls(text: string): NormalizationResult | null {
       function: { name, arguments: JSON.stringify(args) },
     });
     removeRanges.push([m.index, braceEnd + 1]);
-    // headRe.lastIndex を本文末尾以降へ進め、 body 内の誤マッチを防ぐ
+    // body 内にネストした <|tool|>call: があっても誤マッチしないよう、
+    // 次の探索開始位置 (lastIndex) を本文 {...} の末尾以降へ手動で進める。
     headRe.lastIndex = braceEnd + 1;
   }
   if (toolCalls.length === 0) return null;
@@ -323,7 +310,8 @@ function scanBalancedBrace(text: string, start: number): number {
 /**
  * 緩い JSON を寛容にパースして object を返す。 復元不能なら null。
  *   1. そのまま JSON.parse
- *   2. シングルクオート→ダブルクオート、 未クオートキーをクオート化して再 parse
+ *   2. coerceLooseJson で「シングルクオート→ダブルクオート」「未クオートキーのクオート化」を
+ *      適用してから再 parse
  * モデルが吐く `{prompt: "..."}` (キー未クオート) や `{'a': 1}` を救う。
  */
 function lenientJsonParse(s: string): Record<string, unknown> | null {
@@ -339,11 +327,78 @@ function lenientJsonParse(s: string): Record<string, unknown> | null {
   };
   const direct = tryParse(s);
   if (direct) return direct;
-  // シングルクオート文字列 → ダブルクオート、 未クオートキー → クオート化
-  const coerced = s
-    .replace(/'([^'\\]*)'/g, '"$1"')
-    .replace(/([{,]\s*)([A-Za-z_]\w*)\s*:/g, '$1"$2":');
-  return tryParse(coerced);
+  return tryParse(coerceLooseJson(s));
+}
+
+/**
+ * 緩い JSON を文字列リテラルを保護しながら正規 JSON に寄せる (単一構造走査)。
+ *
+ * naive な正規表現 (`/([{,]\s*)(\w+)\s*:/g` 等) は、 文字列値の中に `, key:` のような
+ * パターンが含まれると値の途中を誤ってキー扱いして JSON を壊す (= fail-closed で救済を
+ * 取りこぼす)。 これを避けるため、 文字列の内外を追跡して **構造的位置でのみ** 変換する:
+ *   - シングルクオート文字列 → ダブルクオート (内部の `"` はエスケープ)
+ *   - `{` または `,` の直後に来る未クオートキー → クオート化 (直後が `:` のときだけ)
+ */
+function coerceLooseJson(s: string): string {
+  let out = "";
+  let inStr = false;
+  let escape = false;
+  let prevStruct = ""; // 文字列外で最後に出力した非空白の構造文字
+  let i = 0;
+  const isWs = (c: string) => c === " " || c === "\t" || c === "\n" || c === "\r";
+  const isKeyChar = (c: string) => /[A-Za-z0-9_]/.test(c);
+  while (i < s.length) {
+    const ch = s[i];
+    if (inStr) {
+      out += ch;
+      if (escape) escape = false;
+      else if (ch === "\\") escape = true;
+      else if (ch === '"') inStr = false;
+      i++;
+      continue;
+    }
+    if (ch === '"') { out += ch; inStr = true; prevStruct = '"'; i++; continue; }
+    if (ch === "'") {
+      // シングルクオート文字列を読み切ってダブルクオートで出力
+      let j = i + 1;
+      let val = "";
+      let esc = false;
+      while (j < s.length) {
+        const c = s[j];
+        if (esc) { val += c; esc = false; j++; continue; }
+        if (c === "\\") { val += c; esc = true; j++; continue; }
+        if (c === "'") break;
+        val += c; j++;
+      }
+      out += '"' + val.replace(/"/g, '\\"') + '"';
+      prevStruct = '"';
+      i = j + 1;
+      continue;
+    }
+    if (isWs(ch)) { out += ch; i++; continue; } // 空白は prevStruct を変えない
+    if ((prevStruct === "{" || prevStruct === ",") && /[A-Za-z_]/.test(ch)) {
+      // 未クオートキー候補: 直後 (空白スキップ後) が `:` のときだけクオート化
+      let j = i;
+      let key = "";
+      while (j < s.length && isKeyChar(s[j])) { key += s[j]; j++; }
+      let k = j;
+      while (k < s.length && isWs(s[k])) k++;
+      if (s[k] === ":") {
+        out += '"' + key + '"';
+        prevStruct = '"';
+        i = j;
+        continue;
+      }
+      out += key;
+      prevStruct = key[key.length - 1];
+      i = j;
+      continue;
+    }
+    out += ch;
+    prevStruct = ch;
+    i++;
+  }
+  return out;
 }
 
 /** OpenAI 互換 ID (call_xxxx)。 タイムスタンプ + 乱数で十分なユニーク性 */

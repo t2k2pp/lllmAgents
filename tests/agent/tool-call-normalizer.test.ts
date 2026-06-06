@@ -242,6 +242,39 @@ describe("normalizeToolCalls — Pipe-call 形式 (<|tool|>call:NAME{...})", () 
     expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({ question: "OK?" });
   });
 
+  it("シングルクオートのキー/値を復元する", () => {
+    const text = `<|tool|>call:bash{'command': 'ls -la'}`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).toBe("pipe-call");
+    expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({ command: "ls -la" });
+  });
+
+  it("値の中に , や : を含んでも文字列を壊さない (文字列認識コアース)", () => {
+    const text = `<|tool|>call:second_llm_consult{prompt: "選べ: グー, チョキ, パー"}`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).toBe("pipe-call");
+    expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({
+      prompt: "選べ: グー, チョキ, パー",
+    });
+  });
+
+  it("複数キーの未クオート引数も復元する", () => {
+    const text = `<|tool|>call:file_write{file_path: "/a.txt", content: "x, y: z"}`;
+    const r = normalizeToolCalls(text);
+    expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({
+      file_path: "/a.txt",
+      content: "x, y: z",
+    });
+  });
+
+  it("他の制御トークン (<|im_end|> 等) が混在しても cleanedText から除去される", () => {
+    const text = `本文<|im_start|>です<|tool|>call:bash{command: "ls"}<|im_end|>`;
+    const r = normalizeToolCalls(text);
+    expect(r.toolCalls).toHaveLength(1);
+    expect(r.cleanedText).not.toMatch(/<\|[a-zA-Z_]+\|>/);
+    expect(r.cleanedText).toContain("本文");
+  });
+
   it("誤検出ガード: マーカー無しの裸 call: は抽出しない", () => {
     const text = `関数を呼ぶには call:foo{x: 1} のように書きます、と説明した。`;
     const r = normalizeToolCalls(text);

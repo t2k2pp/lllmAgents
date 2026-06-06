@@ -199,7 +199,7 @@ tier テーブルが独自の数値を持つと矛盾と保守負担を生む。
 | Tool description verbose 版 | ❌短い | 🟡中 | ✅長 + 例 | description tier 切替 |
 | Few-shot 自動注入 (B-1) | ❌ | 🟡初回のみ | ✅初回 + 失敗時 | `~/.localllm/few-shots/` から |
 | Decision-tree mode (D-2) | ❌ | ❌ | ✅曖昧時 | binary 二択化 |
-| Tool-call format 正規化 (D-1) | ❌不要 | 🟡fallback | ✅必須 | regex 抽出 → 構造化 |
+| Tool-call format 正規化 (D-1) | 🟡fallback | 🟡fallback | ✅必須 | regex 抽出 → 構造化。 2026-05-13 に T1 でも有効化 (gpt-5.x reasoning が thinking に <tool_call> を吐く事例)。 `toolCalls.length===0` のときのみ発火し native function calling と非競合 |
 | Federated reasoning (E-2) | ✅監督役 | 中継 | ✅作業役 | T1 が T3 を率いる |
 | Auto model selection (E-3) | ✅ | ✅ | ✅ | タスクから tier を推定 |
 | Schema-strict tool I/O (E-4) | ❌不要 | 🟡 | ✅ | json-schema validation |
