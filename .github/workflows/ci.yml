@@ -28,6 +28,14 @@ jobs:
       - name: Install bubblewrap (Linux only)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y bubblewrap socat iproute2
+      # ubuntu-latest は Ubuntu 24.04 で kernel.apparmor_restrict_unprivileged_userns=1 が
+      # 既定。apt 版 bubblewrap は setuid なしで非特権 user namespace に依存するため、この
+      # 制限下では bwrap が起動できず統合テストが失敗する。CI でだけ制限を解除し、bwrap FS
+      # 隔離テストを skip（緑の嘘）にせず実ランタイムで走らせる。
+      - name: Allow unprivileged user namespaces (Linux only)
+        if: runner.os == 'Linux'
+        # キーが無い旧カーネル（＝制限自体が無い）では失敗扱いにしない
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - name: Type check
         run: npm run lint
       - name: Test
