@@ -139,7 +139,12 @@ export const todoAppendTool: ToolHandler = {
       name: "todo_append",
       description:
         "既存の ToDo リストに項目を追加する。 思考の deliberation 結果として戦略を commit する主経路。 " +
-        "リセットしたい場合は先に `todo_delete` で対象を削除してから append する (= 意図的な 2 段)。",
+        "リセットしたい場合は先に `todo_delete` で対象を削除してから append する (= 意図的な 2 段)。 " +
+        "\n\n[使わない場面 — これらに ToDo は過剰。 そのまま実行 / 即答する]\n" +
+        "- 1-2 ステップで終わる軽量タスク\n" +
+        "- 会話・遊び・一発回答 (じゃんけん / 占い / サイコロ / 雑談 / \"どう思う?\" / \"教えて\")\n" +
+        "- ファイルも検証も伴わないタスク\n" +
+        "= explore レジスター相当のものに todo_append を作るのは過剰。 1-3 文でそのまま答えること。",
       parameters: {
         type: "object",
         properties: {
