@@ -287,6 +287,55 @@ describe("normalizeToolCalls — Pipe-call 形式 (<|tool|>call:NAME{...})", () 
     expect(r.format).toBe("none");
     expect(r.toolCalls).toHaveLength(0);
   });
+
+  it("シングルクオート値に } を含んでも誤切断しない", () => {
+    const text = `<|tool|>call:bash{command: 'echo }'}`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).toBe("pipe-call");
+    expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({ command: "echo }" });
+  });
+
+  it("シングルクオート値内のエスケープ \\' を正しく復元する", () => {
+    const text = `<|tool|>call:bash{command: 'it\\'s alive'}`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).toBe("pipe-call");
+    expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({ command: "it's alive" });
+  });
+
+  it("シングルクオート値内の \" を二重エスケープせず復元する", () => {
+    const text = `<|tool|>call:bash{command: 'say "hello"'}`;
+    const r = normalizeToolCalls(text);
+    expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({ command: 'say "hello"' });
+  });
+
+  it("ネストした引数オブジェクトを復元する", () => {
+    const text = `<|tool|>call:foo{outer: {inner: "v"}}`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).toBe("pipe-call");
+    expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({ outer: { inner: "v" } });
+  });
+
+  it("空の引数オブジェクト {} を受け付ける", () => {
+    const text = `<|tool|>call:response_complete{}`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).toBe("pipe-call");
+    expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({});
+  });
+
+  it("複数マッチで先頭が未終端 { でも、後続の正常な呼び出しは抽出する", () => {
+    const text = `<|tool|>call:bash{command: "ls"<|tool|>call:glob{pattern: "*.ts"}`;
+    const r = normalizeToolCalls(text);
+    // 先頭 bash は閉じ } が無くバランスが取れない (scanBalancedBrace=-1) ため諦め、
+    // lastIndex 前進により後続の正常な glob は抽出される。 ループは確実に前進し停止する。
+    expect(r.toolCalls.length).toBeGreaterThanOrEqual(1);
+    expect(r.toolCalls.every((tc) => ["bash", "glob"].includes(tc.function.name))).toBe(true);
+  });
+
+  it("誤検出ガード: <|tool|> の後が call: でない (exec: 等) なら抽出しない", () => {
+    const text = `<|tool|>exec:foo{x: 1}`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).not.toBe("pipe-call");
+  });
 });
 
 describe("normalizeToolCalls — ToolCall id 生成", () => {

@@ -260,19 +260,19 @@ function extractPipeCallToolCalls(text: string): NormalizationResult | null {
     // m.index は <|tool|> の先頭、 開き { は m[0] の末尾文字
     const braceStart = m.index + m[0].length - 1;
     const braceEnd = scanBalancedBrace(text, braceStart);
-    if (braceEnd < 0) continue;
+    if (braceEnd < 0) continue; // 未終端の { → この match は諦める (lastIndex は exec が前進済)
+    // body 内にネストした <|tool|>call: や、 復元失敗時の再スキャンを避けるため、
+    // braceEnd が確定した時点で次の探索開始位置を本文 {...} の末尾以降へ進める。
+    headRe.lastIndex = braceEnd + 1;
     const body = text.slice(braceStart, braceEnd + 1);
     const args = lenientJsonParse(body);
-    if (args === null) continue; // 復元できない引数は諦める
+    if (args === null) continue; // 復元できない引数は諦める (壊れた引数で実行しない)
     toolCalls.push({
       id: generateCallId(),
       type: "function",
       function: { name, arguments: JSON.stringify(args) },
     });
     removeRanges.push([m.index, braceEnd + 1]);
-    // body 内にネストした <|tool|>call: があっても誤マッチしないよう、
-    // 次の探索開始位置 (lastIndex) を本文 {...} の末尾以降へ手動で進める。
-    headRe.lastIndex = braceEnd + 1;
   }
   if (toolCalls.length === 0) return null;
   // 抽出領域を後ろから除去し、 残った裸の制御トークン (<|thought|> 等) も掃除
@@ -286,18 +286,27 @@ function extractPipeCallToolCalls(text: string): NormalizationResult | null {
 
 /**
  * text[start] の `{` から対応する `}` の位置を返す (文字列リテラル内の括弧は無視)。
- * 見つからなければ -1。 extractPlainJSONToolCall と同方式。
+ * 見つからなければ -1。 extractPlainJSONToolCall と共用。
+ *
+ * ダブルクオート `"..."` とシングルクオート `'...'` の両方を文字列として認識する
+ * (アクティブなクオート種別を追跡)。 これにより `{command: 'echo }'}` のように
+ * シングルクオート値に `}` を含むケースも誤切断しない。 正規 JSON の二重引用値に
+ * `'` が含まれる場合 (`{"x":"it's"}`) も、 アクティブクオートが `"` のため誤動作しない。
  */
 function scanBalancedBrace(text: string, start: number): number {
   let depth = 0;
   let inStr = false;
+  let quote = ""; // アクティブな文字列のクオート種別 (" または ')
   let escape = false;
   for (let i = start; i < text.length; i++) {
     const ch = text[i];
     if (escape) { escape = false; continue; }
     if (ch === "\\") { escape = true; continue; }
-    if (ch === '"') { inStr = !inStr; continue; }
-    if (inStr) continue;
+    if (inStr) {
+      if (ch === quote) inStr = false;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { inStr = true; quote = ch; continue; }
     if (ch === "{") depth++;
     else if (ch === "}") {
       depth--;
@@ -336,8 +345,12 @@ function lenientJsonParse(s: string): Record<string, unknown> | null {
  * naive な正規表現 (`/([{,]\s*)(\w+)\s*:/g` 等) は、 文字列値の中に `, key:` のような
  * パターンが含まれると値の途中を誤ってキー扱いして JSON を壊す (= fail-closed で救済を
  * 取りこぼす)。 これを避けるため、 文字列の内外を追跡して **構造的位置でのみ** 変換する:
- *   - シングルクオート文字列 → ダブルクオート (内部の `"` はエスケープ)
+ *   - シングルクオート文字列 → ダブルクオート (内容をデコードして JSON.stringify で
+ *     再エスケープ。 `\'`→`'`, `\\`→`\` を解いてから安全な JSON 文字列にする)
  *   - `{` または `,` の直後に来る未クオートキー → クオート化 (直後が `:` のときだけ)
+ *
+ * 注: prevStruct は最初の `{` を処理した時点で `"{"` になり、 そこからキー候補判定が
+ * 始まる。 初期値 `""` のままキー候補にはならない (= 先頭にキーは来ない前提で安全)。
  */
 function coerceLooseJson(s: string): string {
   let out = "";
@@ -359,18 +372,22 @@ function coerceLooseJson(s: string): string {
     }
     if (ch === '"') { out += ch; inStr = true; prevStruct = '"'; i++; continue; }
     if (ch === "'") {
-      // シングルクオート文字列を読み切ってダブルクオートで出力
+      // シングルクオート文字列を読み切り、 デコードした実値を JSON.stringify で
+      // 安全な JSON 文字列に変換する。 \' と \\ は解き、 それ以外の \X は字面を保つ。
       let j = i + 1;
       let val = "";
-      let esc = false;
       while (j < s.length) {
         const c = s[j];
-        if (esc) { val += c; esc = false; j++; continue; }
-        if (c === "\\") { val += c; esc = true; j++; continue; }
+        if (c === "\\" && j + 1 < s.length) {
+          const next = s[j + 1];
+          if (next === "'") { val += "'"; j += 2; continue; }
+          if (next === "\\") { val += "\\"; j += 2; continue; }
+          val += c; j++; continue; // 他のエスケープ列は字面のまま (JSON.stringify が再エスケープ)
+        }
         if (c === "'") break;
         val += c; j++;
       }
-      out += '"' + val.replace(/"/g, '\\"') + '"';
+      out += JSON.stringify(val);
       prevStruct = '"';
       i = j + 1;
       continue;
