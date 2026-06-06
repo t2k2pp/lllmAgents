@@ -113,6 +113,39 @@ export function withSandboxState(
   return { ...base, enabled, ...(level ? { level } : {}) };
 }
 
+/**
+ * 設定とツール有無から実効レベルを決める純粋関数（platform 非依存にしテスト可能化）。
+ * Phase 3 自動許可・proxy 起動・status 表示が全てこの戻り値に乗るため、 全分岐をテストで固定する。
+ * - linux: fs/full は bwrap 必須（無ければ none / full は unshare あれば network へ降格）、 network は unshare 必須
+ * - darwin: sandbox-exec 必須。 fs/full/network はそのまま
+ * - その他(win32 等): 常に none
+ */
+export function resolveEffectiveLevel(
+  plat: string,
+  config: { enabled: boolean; level: ProcessSandboxLevel },
+  tools: { bwrap: boolean; unshare: boolean; sandboxExec: boolean },
+): ProcessSandboxLevel {
+  if (!config.enabled || config.level === "none") return "none";
+
+  if (plat === "linux") {
+    if (config.level === "fs") return tools.bwrap ? "fs" : "none";
+    if (config.level === "full") {
+      if (tools.bwrap) return "full";
+      return tools.unshare ? "network" : "none"; // FS 隔離不可なら最低限ネット隔離へ降格
+    }
+    return tools.unshare ? "network" : "none"; // network レベル
+  }
+
+  if (plat === "darwin") {
+    if (!tools.sandboxExec) return "none";
+    if (config.level === "fs") return "fs";
+    if (config.level === "full") return "full";
+    return "network";
+  }
+
+  return "none"; // Windows ネイティブは未サポート
+}
+
 /** ツール存在チェック（複数パスを試す） */
 function findTool(...paths: string[]): string | null {
   for (const p of paths) {
@@ -348,27 +381,11 @@ export class ProcessSandbox {
 
   /** 設定と利用可能ツールから実際に適用されるレベルを返す */
   getEffectiveLevel(): ProcessSandboxLevel {
-    if (!this.config.enabled || this.config.level === "none") return "none";
-
-    if (this.plat === "linux") {
-      // fs / full は FS 隔離に bwrap が必須
-      if (this.config.level === "fs") return this.bwrap ? "fs" : "none";
-      if (this.config.level === "full") {
-        if (this.bwrap) return "full";
-        return this.unshare ? "network" : "none"; // FS 隔離不可なら最低限ネット隔離へ降格
-      }
-      // network レベル
-      return this.unshare ? "network" : "none";
-    }
-
-    if (this.plat === "darwin") {
-      if (!this.sandboxExec) return "none";
-      if (this.config.level === "fs") return "fs";
-      if (this.config.level === "full") return "full";
-      return "network";
-    }
-
-    return "none"; // Windows ネイティブは未サポート
+    return resolveEffectiveLevel(this.plat, this.config, {
+      bwrap: !!this.bwrap,
+      unshare: !!this.unshare,
+      sandboxExec: !!this.sandboxExec,
+    });
   }
 
   /** 利用可能ツールの状態を返す（sandbox_info ツール用） */

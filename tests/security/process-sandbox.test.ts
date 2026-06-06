@@ -5,7 +5,39 @@ import {
   buildSeatbeltProfile,
   defaultSecretDenyDirs,
   withSandboxState,
+  resolveEffectiveLevel,
 } from "../../src/security/process-sandbox.js";
+
+describe("resolveEffectiveLevel (全 OS×ツール×レベルの分岐・#4)", () => {
+  const all = { bwrap: true, unshare: true, sandboxExec: true };
+  const none = { bwrap: false, unshare: false, sandboxExec: false };
+  it("無効/none は常に none", () => {
+    expect(resolveEffectiveLevel("darwin", { enabled: false, level: "fs" }, all)).toBe("none");
+    expect(resolveEffectiveLevel("linux", { enabled: true, level: "none" }, all)).toBe("none");
+  });
+  it("darwin: sandbox-exec あれば level そのまま、 無ければ none", () => {
+    expect(resolveEffectiveLevel("darwin", { enabled: true, level: "fs" }, all)).toBe("fs");
+    expect(resolveEffectiveLevel("darwin", { enabled: true, level: "full" }, all)).toBe("full");
+    expect(resolveEffectiveLevel("darwin", { enabled: true, level: "network" }, all)).toBe("network");
+    expect(resolveEffectiveLevel("darwin", { enabled: true, level: "fs" }, none)).toBe("none");
+  });
+  it("linux fs: bwrap 必須", () => {
+    expect(resolveEffectiveLevel("linux", { enabled: true, level: "fs" }, all)).toBe("fs");
+    expect(resolveEffectiveLevel("linux", { enabled: true, level: "fs" }, { ...none, unshare: true })).toBe("none");
+  });
+  it("linux full: bwrap→full / bwrap無し+unshare→network 降格 / 何も無し→none", () => {
+    expect(resolveEffectiveLevel("linux", { enabled: true, level: "full" }, all)).toBe("full");
+    expect(resolveEffectiveLevel("linux", { enabled: true, level: "full" }, { bwrap: false, unshare: true, sandboxExec: false })).toBe("network");
+    expect(resolveEffectiveLevel("linux", { enabled: true, level: "full" }, none)).toBe("none");
+  });
+  it("linux network: unshare 必須", () => {
+    expect(resolveEffectiveLevel("linux", { enabled: true, level: "network" }, { bwrap: false, unshare: true, sandboxExec: false })).toBe("network");
+    expect(resolveEffectiveLevel("linux", { enabled: true, level: "network" }, none)).toBe("none");
+  });
+  it("win32 等は常に none", () => {
+    expect(resolveEffectiveLevel("win32", { enabled: true, level: "fs" }, all)).toBe("none");
+  });
+});
 
 describe("withSandboxState (/sandbox on|off で allowlist/opt-out を消さない・P0回帰)", () => {
   const prev = {

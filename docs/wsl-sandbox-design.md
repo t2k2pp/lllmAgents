@@ -235,6 +235,34 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - **socat/ip 不足（Linux）**：`/sandbox on` 時にその場で黄色警告（allowlist 未強制＝ネット全開）。`sudo apt install socat iproute2` で解消。
 - **CI**：`.github/workflows/ci.yml` で ubuntu/macos の matrix。Linux runner は bwrap/socat/iproute2 を入れて bwrap FS 隔離の統合テストを実走（`process-sandbox.bwrap.integration.test`）、 macOS runner は Seatbelt 統合テストを実走。socat ネットブリッジ(2b-2)の実走検証は WSL2 実機が引き続き必要。
 
+## §7.4 検証手順・CI が保証する範囲（QA 引き継ぎ向け）
+
+### CI（`.github/workflows/ci.yml`）が保証する/しない範囲
+| 範囲 | 保証 | 手段 |
+|---|---|---|
+| 純粋関数（allowlist 照合・破壊判定・isBlockedAddress・resolveEffectiveLevel・withSandboxState 等） | ✅ ubuntu/macos 両方 | `tests/security/*.test.ts` |
+| macOS Seatbelt 実ロード＋FS 隔離＋機密 deny＋proxy 拒否/成功トンネル | ✅ macos runner | `process-sandbox.seatbelt.integration` / `sandbox-proxy.integration` |
+| Linux bwrap の FS 隔離ランタイム | ✅ ubuntu runner（bwrap 導入） | `process-sandbox.bwrap.integration` |
+| **Linux 2b-2 socat ネットブリッジ（unshare-net+lo up+socat 疎通）** | ❌ **未保証** | WSL2 実機手動（下記） |
+| REPL 対話 UX（`onUnknownDomain` の TTY 操作感） | ❌ 未保証 | macOS TTY 手動 |
+| Phase 3 自動許可↔破壊的フォールバック | ✅ | `phase3-permission`（readLine spy で ask 到達を検証） |
+
+### WSL2(Ubuntu) 実機 手動検証チェックリスト（2b-2＝🧪実験的の合否判定）
+WSL2 内で `npm run start` 後、各コマンドの**期待**に一致すれば 2b-2 は合格。`docs` のこの表が唯一の合否基準。
+```
+前提: sudo apt install -y bubblewrap socat iproute2
+1) 名前空間で lo を起こせるか:
+   bwrap --unshare-net --ro-bind / / --dev /dev -- /bin/sh -c 'ip link set lo up && ip addr show lo'
+   期待: lo が UP（失敗ならこの環境では 2b-2 不可→status が「未強制」表示になるはず）
+REPL 内（/sandbox on で fs・status が「ネット: allowlist 経由のみ」を表示することをまず確認）:
+2) 許可ドメイン疎通:   npm install <小pkg>            期待: 成功（allowlist 経由）
+3) 直結遮断:           curl --noproxy '*' https://1.1.1.1   期待: 失敗（--unshare-net で到達不能）
+4) 未許可ドメイン:     curl https://example.com        期待: 対話確認 or 403
+5) dash 互換:          [ -n x ] && echo ok             期待: ok（/bin/sh=dash でユーザーコマンドが壊れない）
+6) fail-closed:        （socat を一時 rename 等で壊し）/sandbox on fs → bash   期待: status で「未強制（socat/ip 必要）」警告
+```
+合否とログを記録し、 全 ✅ なら §11 の 2b-2 を「🧪実験的」から昇格してよい。
+
 ## §8 既知の限界・トレードオフ
 
 1. ネイティブ Windows は封じ込め非対応（git bash 実行）。封じ込めは WSL2 内起動が前提。

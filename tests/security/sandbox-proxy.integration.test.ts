@@ -80,6 +80,13 @@ describe("SandboxProxy 拒否パス (integration)", () => {
     expect(proxy.getRelayedHosts()).toEqual([]);
   });
 
+  it("許可ホスト名でも内部IPに解決される先(localhost→127.0.0.1)は resolvePinnedIp で 403", async () => {
+    proxy = mkProxy(["localhost"]); // authorize は通るが解決後 IP が内部レンジ
+    const port = await proxy.ensureStarted();
+    const line = await sendRaw(port, "GET http://localhost:80/ HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    expect(line).toContain("403"); // 解決後 IP 再判定で遮断（数値IPだけでなくホスト名経由も塞ぐ）
+  });
+
   it("CONNECT で内部IP(メタデータ)へは SSRF 遮断で 403", async () => {
     proxy = mkProxy(["169.254.169.254"]);
     const port = await proxy.ensureStarted();
