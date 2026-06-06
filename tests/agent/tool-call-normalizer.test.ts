@@ -326,15 +326,29 @@ describe("normalizeToolCalls — Pipe-call 形式 (<|tool|>call:NAME{...})", () 
     const text = `<|tool|>call:bash{command: "ls"<|tool|>call:glob{pattern: "*.ts"}`;
     const r = normalizeToolCalls(text);
     // 先頭 bash は閉じ } が無くバランスが取れない (scanBalancedBrace=-1) ため諦め、
-    // lastIndex 前進により後続の正常な glob は抽出される。 ループは確実に前進し停止する。
-    expect(r.toolCalls.length).toBeGreaterThanOrEqual(1);
-    expect(r.toolCalls.every((tc) => ["bash", "glob"].includes(tc.function.name))).toBe(true);
+    // lastIndex 前進により後続の正常な glob だけが抽出される。 ループは確実に前進し停止する。
+    expect(r.toolCalls).toHaveLength(1);
+    expect(r.toolCalls[0].function.name).toBe("glob");
+    expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({ pattern: "*.ts" });
   });
 
   it("誤検出ガード: <|tool|> の後が call: でない (exec: 等) なら抽出しない", () => {
     const text = `<|tool|>exec:foo{x: 1}`;
     const r = normalizeToolCalls(text);
     expect(r.format).not.toBe("pipe-call");
+  });
+
+  it("誤検出ガード: 類似マーカー (<|im_start|> 等) は pipe-call として誤マッチしない", () => {
+    expect(normalizeToolCalls(`<|im_start|>tool call:foo{x: 1}`).format).not.toBe("pipe-call");
+    expect(normalizeToolCalls(`<|think|>call:foo{x: 1}`).format).not.toBe("pipe-call");
+  });
+
+  it("既知の限界: ハイフン含みキーは未クオートでは復元できず fail-closed (snake_case 前提)", () => {
+    // ツール引数キーは snake_case (file_path 等) が前提。 ハイフンキーは復元対象外。
+    const text = `<|tool|>call:bash{file-path: "/a"}`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).toBe("none");
+    expect(r.toolCalls).toHaveLength(0);
   });
 });
 

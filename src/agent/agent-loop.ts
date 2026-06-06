@@ -1081,6 +1081,15 @@ export class AgentLoop {
           console.log(chalk.dim(
             `  [tool-format] ${normalized.format} 形式から ${normalized.toolCalls.length} 件の tool 呼び出しを抽出 (tier=${this.capability.tier})`,
           ));
+          // 非TTY / --background では console が見えないため、 ops-logger に構造化記録を残す
+          // (誤発火・発火頻度の事後調査用。 全形式共通)。
+          getOpsLogger().info("tool-format", "テキストから tool 呼び出しを正規化抽出", {
+            format: normalized.format,
+            toolCount: normalized.toolCalls.length,
+            toolNames: normalized.toolCalls.map((tc) => tc.function.name),
+            source: "text",
+            tier: this.capability.tier,
+          });
           // 既存の textContent / toolCalls を上書きして tool 実行ルートへ流す
           textContent = normalized.cleanedText;
           toolCalls.push(...normalized.toolCalls);
@@ -1101,6 +1110,13 @@ export class AgentLoop {
           console.log(chalk.dim(
             `  [tool-format] thinking 内 ${normalized.format} 形式から ${normalized.toolCalls.length} 件の tool 呼び出しを抽出 (tier=${this.capability.tier})`,
           ));
+          getOpsLogger().info("tool-format", "thinking から tool 呼び出しを正規化抽出", {
+            format: normalized.format,
+            toolCount: normalized.toolCalls.length,
+            toolNames: normalized.toolCalls.map((tc) => tc.function.name),
+            source: "thinking",
+            tier: this.capability.tier,
+          });
           // textContent は元から空 (このブロックの前提)。 toolCalls だけ追加して実行ルートへ。
           toolCalls.push(...normalized.toolCalls);
         }

@@ -359,6 +359,8 @@ function coerceLooseJson(s: string): string {
   let prevStruct = ""; // 文字列外で最後に出力した非空白の構造文字
   let i = 0;
   const isWs = (c: string) => c === " " || c === "\t" || c === "\n" || c === "\r";
+  // キー文字は snake_case 前提 (本プロジェクトのツール引数は file_path 等)。 ハイフン含み
+  // キーは対象外で、 その場合 JSON.parse が失敗し fail-closed (= 抽出を諦める)。
   const isKeyChar = (c: string) => /[A-Za-z0-9_]/.test(c);
   while (i < s.length) {
     const ch = s[i];

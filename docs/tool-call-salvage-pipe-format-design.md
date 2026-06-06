@@ -114,6 +114,28 @@ Gemma 12B でのじゃんけんが未完了になった。実ログ解析の結�
 3. **e2e（実モデル）**: gemma-4-12B でじゃんけんを再走 → `second_llm_consult` が発火し勝敗まで完了
 4. **非回帰（重要）**: ネイティブ `tool_calls` を正しく出すモデル（Qwen 等）で二重発火しない（`toolCalls.length === 0` ゲートで担保）
 
+### 4.1 検証ステータス（2026-06-07 時点・正直な記録）
+
+| 基準 | 状態 | 備考 |
+|---|---|---|
+| 1. 単体 | ✅ 完了 | normalizer 43/43 緑。実観測ログの生文字列と同等ケースを含む |
+| 2. 回帰 | ✅ 完了 | 他形式テスト全 pass、全体 649+ pass（環境依存 5 failed は無関係） |
+| 3. e2e（実モデル） | ⏳ **未実施（ユーザー環境で要実行）** | gemma-4-12B + vLLM 起動が必要で、Claude の手元では実行不可。下記手順参照 |
+| 4. 非回帰（二重発火） | 🟡 コード根拠で担保・実機未確認 | `toolCalls` は `agent-loop.ts:499` で `const toolCalls: ToolCall[] = []` のローカル配列、stream の `tool_call` チャンクで push のみ → undefined でゲートを突き抜ける経路は無い。native FC モデルでの実機確認は要 |
+
+**§4-3 e2e の実行手順（ユーザー向け）**: gemma-4-12B で「セカンドLLMとじゃんけんして勝敗を教えて」を再走し、(a) コンソールに `[tool-format] pipe-call 形式から 1 件…抽出`、(b) ops ログ（`tool-format` カテゴリ）に `format=pipe-call`、(c) `second_llm_consult` 発火と勝敗テキスト、を確認する。
+
+**ストリーミング境界の懸念について**: `normalizeToolCalls` は `textContent += chunk.text`（`agent-loop.ts:683`）でストリームを**全量組み立てた後**（`for await` ループ完了後、同 1079 行）に走る。`<|tool|>` が chunk 境界をまたいでも組み立て済み全文に対して照合するため、chunk 分割の影響は受けない。
+
+### 4.2 観測性
+
+`normalizeToolCalls` 発火時、コンソール（`chalk.dim`）に加え **ops-logger に構造化記録**（`tool-format` カテゴリ、`format` / `toolCount` / `toolNames` / `source` / `tier`）を残す。非TTY・`--background` でも JSONL で `jq` 可能。誤発火頻度・発火元の事後調査に使う（全形式共通）。
+
+### 4.3 フォローアップ（本変更の範囲外・将来）
+
+- **agent-loop 統合テスト**: `textContent = cleanedText; toolCalls.push(...)`（`agent-loop.ts:1084-1086`）経路の mock ベース統合テスト。現状 AgentLoop の test harness が無く新設コストが高いため見送り。該当コード自体は 2 行で、normalizer 単体＋ops ログで実質カバー
+- **unknownTool シグナル**: §2.3 の拡張点（拾えたが下流で未知ツール弾き、を normalizer に遡らせる）
+
 ---
 
 ## 5. 変更履歴
@@ -121,3 +143,4 @@ Gemma 12B でのじゃんけんが未完了になった。実ログ解析の結�
 | 日付 | 内容 |
 |---|---|
 | 2026-06-07 | 初版（Claude Opus 4.8 + user 議論）。既存 normalizeToolCalls への pipe-call 形式追加として設計 |
+| 2026-06-07 | 引き継ぎ三者レビュー（設計者／開発者／評価者の各サブエージェント、引き継ぎ拒否条件のヒアリング形式）を実施し採用分を反映。主な修正: 文字列認識コアース（値内 `,:` 誤変換バグ）、シングルクオートのエスケープ／`}` 誤切断バグ、scanBalancedBrace のクオート種別追跡、ops-logger 構造化ログ、検証ステータスの明文化（e2e はユーザー環境送り）、roadmap §4 の tier 乖離修正 |
