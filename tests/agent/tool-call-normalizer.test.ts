@@ -194,6 +194,68 @@ describe("normalizeToolCalls — 通常テキスト (false positive なし)", ()
   });
 });
 
+describe("normalizeToolCalls — Pipe-call 形式 (<|tool|>call:NAME{...})", () => {
+  it("gemma-4-12B 観測例: 未クオートキーの引数を復元して抽出", () => {
+    const text = `じゃんけんをしましょう。私はグーを出します。\n\n<|tool|>call:second_llm_consult{prompt: "私はグーを出しました。あなたは何を出しますか？"}<|thought|>`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).toBe("pipe-call");
+    expect(r.toolCalls).toHaveLength(1);
+    expect(r.toolCalls[0].function.name).toBe("second_llm_consult");
+    expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({
+      prompt: "私はグーを出しました。あなたは何を出しますか？",
+    });
+  });
+
+  it("cleanedText から <|tool|>...{...} と裸の制御トークン (<|thought|>) が消える", () => {
+    const text = `説明文です。<|tool|>call:bash{command: "ls"}<|thought|>`;
+    const r = normalizeToolCalls(text);
+    expect(r.cleanedText).toContain("説明文です。");
+    expect(r.cleanedText).not.toContain("<|tool|>");
+    expect(r.cleanedText).not.toContain("<|thought|>");
+    expect(r.cleanedText).not.toContain("call:");
+  });
+
+  it("複数の <|tool|>call: を全件抽出", () => {
+    const text = `<|tool|>call:file_read{file_path: "/a"}<|tool|>call:file_read{file_path: "/b"}`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).toBe("pipe-call");
+    expect(r.toolCalls).toHaveLength(2);
+    expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({ file_path: "/a" });
+    expect(JSON.parse(r.toolCalls[1].function.arguments)).toEqual({ file_path: "/b" });
+  });
+
+  it("変種マーカー <|tool_call|> / <|tool_code|> も受け付ける", () => {
+    expect(normalizeToolCalls(`<|tool_call|>call:glob{pattern: "**/*.ts"}`).format).toBe("pipe-call");
+    expect(normalizeToolCalls(`<|tool_code|>call:grep{pattern: "x"}`).format).toBe("pipe-call");
+  });
+
+  it("値に } を含む文字列でも誤切断しない (バランス括弧スキャン)", () => {
+    const text = `<|tool|>call:bash{command: "echo }"}`;
+    const r = normalizeToolCalls(text);
+    expect(r.toolCalls).toHaveLength(1);
+    expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({ command: "echo }" });
+  });
+
+  it("正常な JSON 引数 (クオート済) も当然受け付ける", () => {
+    const text = `<|tool|>call:ask_user{"question": "OK?"}`;
+    const r = normalizeToolCalls(text);
+    expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({ question: "OK?" });
+  });
+
+  it("誤検出ガード: マーカー無しの裸 call: は抽出しない", () => {
+    const text = `関数を呼ぶには call:foo{x: 1} のように書きます、と説明した。`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).not.toBe("pipe-call");
+  });
+
+  it("復元不能な引数 (壊れた JSON) はその抽出を諦める", () => {
+    const text = `<|tool|>call:bash{command: }`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).toBe("none");
+    expect(r.toolCalls).toHaveLength(0);
+  });
+});
+
 describe("normalizeToolCalls — ToolCall id 生成", () => {
   it("call_<ts><rnd> 形式", () => {
     const text = `<tool_call>{"name": "x", "arguments": {}}</tool_call>`;

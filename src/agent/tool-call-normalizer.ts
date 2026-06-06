@@ -10,6 +10,10 @@
  *   - Plain JSON: {"name": "foo", "arguments": {...}} ... (テキスト中に裸で)
  *   - Anthropic XML 形式: <tool_call><function=name><parameter=key>value</parameter>...</function></tool_call>
  *     (gpt-5.x reasoning モードが thinking/text に混ぜて出すパターン。 2026-05-12 観測)
+ *   - Pipe-call 形式: <|tool|>call:NAME{prompt: "..."}<|thought|>
+ *     (gemma-4-12B 等が native tool_calls の代わりに本文へ吐くパターン。 引数キーが
+ *      未クオートの緩い JSON のことが多い。 2026-06-06 観測。
+ *      docs/tool-call-salvage-pipe-format-design.md 参照)
  *
  * 既存の isGarbageResponse() はこれらを「ガベージ」 として捨ててしまっていた。
  * 本モジュールは fallback として上記形式を OpenAI 互換 ToolCall[] に変換する。
@@ -25,7 +29,7 @@ export interface NormalizationResult {
   /** ツール呼び出し部分を取り除いたテキスト (アシスタントの "考え" 等が残る場合) */
   cleanedText: string;
   /** どの形式で抽出したか (デバッグ・ログ用) */
-  format: "mistral" | "chatml" | "react" | "plain-json" | "anthropic-xml" | "none";
+  format: "mistral" | "chatml" | "react" | "plain-json" | "anthropic-xml" | "pipe-call" | "none";
 }
 
 /**
@@ -44,6 +48,9 @@ export function normalizeToolCalls(text: string): NormalizationResult {
   // Anthropic XML は <tool_call><function=...> の入れ子なので ChatML より特異 → 先に試す
   const tries: Array<(t: string) => NormalizationResult | null> = [
     extractMistralToolCalls,
+    // pipe-call は <|tool|> という極めて特異なマーカーを持つため誤検出しにくく、
+    // {...} を含むので plain-json より先に確定させたい → 早い位置に置く
+    extractPipeCallToolCalls,
     extractAnthropicXmlToolCalls,
     extractChatMLToolCalls,
     extractReActAction,
@@ -245,6 +252,98 @@ function extractPlainJSONToolCall(text: string): NormalizationResult | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Pipe-call 形式: `<|tool|>call:NAME{prompt: "..."}<|thought|>`
+ * gemma-4-12B 等が native tool_calls の代わりに本文へ吐く。 引数は未クオートキーの
+ * 緩い JSON のことが多いため lenientJsonParse で寛容に復元する。
+ *
+ * 誤検出ガード:
+ *   - `<|tool|>` 系マーカー必須 (裸の `call:foo{...}` は散文と紛れるため対象外)
+ *   - 引数が lenientJsonParse で復元できなければその抽出を諦める (壊れた引数で実行しない)
+ */
+function extractPipeCallToolCalls(text: string): NormalizationResult | null {
+  // <|tool|> / <|tool_call|> / <|tool_code|> の直後に call:NAME{ が来る位置を探す
+  const headRe = /<\|tool(?:_call|_code)?\|>\s*call:\s*([A-Za-z_]\w*)\s*\{/g;
+  const toolCalls: ToolCall[] = [];
+  const removeRanges: Array<[number, number]> = [];
+  let m: RegExpExecArray | null;
+  while ((m = headRe.exec(text)) !== null) {
+    const name = m[1];
+    // m.index は <|tool|> の先頭、 開き { は m[0] の末尾文字
+    const braceStart = m.index + m[0].length - 1;
+    const braceEnd = scanBalancedBrace(text, braceStart);
+    if (braceEnd < 0) continue;
+    const body = text.slice(braceStart, braceEnd + 1);
+    const args = lenientJsonParse(body);
+    if (args === null) continue; // 復元できない引数は諦める
+    toolCalls.push({
+      id: generateCallId(),
+      type: "function",
+      function: { name, arguments: JSON.stringify(args) },
+    });
+    removeRanges.push([m.index, braceEnd + 1]);
+    // headRe.lastIndex を本文末尾以降へ進め、 body 内の誤マッチを防ぐ
+    headRe.lastIndex = braceEnd + 1;
+  }
+  if (toolCalls.length === 0) return null;
+  // 抽出領域を後ろから除去し、 残った裸の制御トークン (<|thought|> 等) も掃除
+  let cleaned = text;
+  for (const [s, e] of removeRanges.sort((a, b) => b[0] - a[0])) {
+    cleaned = cleaned.slice(0, s) + cleaned.slice(e);
+  }
+  cleaned = cleaned.replace(/<\|[a-zA-Z_]+\|>/g, "").trim();
+  return { toolCalls, cleanedText: cleaned, format: "pipe-call" };
+}
+
+/**
+ * text[start] の `{` から対応する `}` の位置を返す (文字列リテラル内の括弧は無視)。
+ * 見つからなければ -1。 extractPlainJSONToolCall と同方式。
+ */
+function scanBalancedBrace(text: string, start: number): number {
+  let depth = 0;
+  let inStr = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * 緩い JSON を寛容にパースして object を返す。 復元不能なら null。
+ *   1. そのまま JSON.parse
+ *   2. シングルクオート→ダブルクオート、 未クオートキーをクオート化して再 parse
+ * モデルが吐く `{prompt: "..."}` (キー未クオート) や `{'a': 1}` を救う。
+ */
+function lenientJsonParse(s: string): Record<string, unknown> | null {
+  const tryParse = (str: string): Record<string, unknown> | null => {
+    try {
+      const v = JSON.parse(str);
+      return v !== null && typeof v === "object" && !Array.isArray(v)
+        ? (v as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  };
+  const direct = tryParse(s);
+  if (direct) return direct;
+  // シングルクオート文字列 → ダブルクオート、 未クオートキー → クオート化
+  const coerced = s
+    .replace(/'([^'\\]*)'/g, '"$1"')
+    .replace(/([{,]\s*)([A-Za-z_]\w*)\s*:/g, '$1"$2":');
+  return tryParse(coerced);
 }
 
 /** OpenAI 互換 ID (call_xxxx)。 タイムスタンプ + 乱数で十分なユニーク性 */
