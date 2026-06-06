@@ -45,6 +45,17 @@ function mkProxy(allowed: string[]): SandboxProxy {
   });
 }
 
+/** ループバック上流をテストするための寛容プロキシ（内部IP遮断とポート制限を無効化）。 */
+function mkPermissiveProxy(allowed: string[], upstreamPort: number): SandboxProxy {
+  return new SandboxProxy({
+    getAllowedDomains: () => allowed,
+    onUnknownDomain: async () => "deny",
+    persistDomain: () => {},
+    isAddressBlocked: () => false, // 127.0.0.1 上流を許可（テスト専用シーム）
+    allowedPorts: new Set([upstreamPort, 80, 443]),
+  });
+}
+
 describe("SandboxProxy 拒否パス (integration)", () => {
   it("CONNECT の 443/80 以外は 403", async () => {
     proxy = mkProxy(["example.com"]); // ドメインは許可済みでもポートで弾く
@@ -81,6 +92,68 @@ describe("SandboxProxy 拒否パス (integration)", () => {
     const port = await proxy.ensureStarted();
     const line = await sendRaw(port, "GET http://evil.example/ HTTP/1.1\r\nHost: evil.example\r\n\r\n");
     expect(line).toContain("403");
+  });
+
+  it("許可済み HTTP は上流へ転送され body が往復する（成功トンネル・転送）", async () => {
+    // ダミー上流（ローカル http.Server）
+    const upstream = http.createServer((req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("HELLO-FROM-UPSTREAM");
+    });
+    await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", () => r()));
+    const upPort = (upstream.address() as net.AddressInfo).port;
+    try {
+      proxy = mkPermissiveProxy(["127.0.0.1"], upPort);
+      const port = await proxy.ensureStarted();
+      const { status, body } = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = http.request(
+          { host: "127.0.0.1", port, path: `http://127.0.0.1:${upPort}/`, headers: { host: `127.0.0.1:${upPort}` } },
+          (res) => {
+            let b = "";
+            res.on("data", (d) => (b += d));
+            res.on("end", () => resolve({ status: res.statusCode ?? 0, body: b }));
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      });
+      expect(status).toBe(200);
+      expect(body).toBe("HELLO-FROM-UPSTREAM");
+      expect(proxy.getRelayedHosts()).toContain("127.0.0.1"); // 監査に記録される
+    } finally {
+      upstream.close();
+    }
+  });
+
+  it("許可済み CONNECT はトンネルが確立し双方向にバイトが流れる（成功トンネル・CONNECT）", async () => {
+    // ダミー上流（生 TCP エコー）
+    const echo = net.createServer((s) => s.pipe(s));
+    await new Promise<void>((r) => echo.listen(0, "127.0.0.1", () => r()));
+    const upPort = (echo.address() as net.AddressInfo).port;
+    try {
+      proxy = mkPermissiveProxy(["127.0.0.1"], upPort);
+      const port = await proxy.ensureStarted();
+      const echoed = await new Promise<string>((resolve, reject) => {
+        const req = http.request({ method: "CONNECT", host: "127.0.0.1", port, path: `127.0.0.1:${upPort}` });
+        req.on("connect", (_res, socket) => {
+          socket.write("PING");
+          let buf = "";
+          socket.on("data", (d) => {
+            buf += d.toString();
+            if (buf.length >= 4) {
+              resolve(buf);
+              socket.destroy();
+            }
+          });
+          socket.on("error", reject);
+        });
+        req.on("error", reject);
+        req.end();
+      });
+      expect(echoed).toBe("PING"); // トンネル経由で上流エコーが返る
+    } finally {
+      echo.close();
+    }
   });
 
   it("unix ソケット listen でも同じ allowlist 判定が効く (Linux ブリッジ土台)", async () => {

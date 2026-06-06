@@ -34,7 +34,9 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: RegExp[] = [
   /\bchmod\s+-R\b/,
   /\bchown\s+-R\b/,
   // git 破壊（作業ツリー破棄・履歴改変・force push。 force push は任意ターゲットで確認へ）
+  // checkout: `-- path` / `.` 直後、 および `<ref> -- path`（履歴からの worktree 破棄）も検出。
   /\bgit\s+checkout\s+(--\s|\.\s|\.$|--$)/,
+  /\bgit\s+checkout\b[^\n]*\s--\s/,
   /\bgit\s+reset\s+--hard\b/,
   /\bgit\s+clean\s+-[a-z]*[df][a-z]*\b/,
   // force push: 語順非依存（git -c … push 等の挿入に耐える）＋ refspec の `+`(=force) も検出。

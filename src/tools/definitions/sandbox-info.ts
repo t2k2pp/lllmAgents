@@ -2,7 +2,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
 import { loadConfig } from "../../config/config-manager.js";
-import { ProcessSandbox } from "../../security/process-sandbox.js";
+import { getActiveProcessSandbox } from "../../security/active-sandbox.js";
 import { isWindows } from "../../utils/platform.js";
 import { detectWsl } from "../../security/wsl.js";
 import { isBashNetworkContained } from "../../security/containment.js";
@@ -29,10 +29,9 @@ export const sandboxInfoTool: ToolHandler = {
       ...config.security.allowedDirectories,
     ];
 
-    // OS-level サンドボックス状態を取得
+    // OS-level サンドボックス状態を取得（bash 実行・確認自動許可と同一の単一ソースを参照）
     const sbConfig = config.security.processSandbox ?? { enabled: false, level: "none" };
-    const sandbox = new ProcessSandbox(sbConfig);
-    const avail = sandbox.getAvailability();
+    const avail = getActiveProcessSandbox().getAvailability();
 
     const levelLabels: Record<string, string> = {
       none: "なし（アプリレベルのみ）",

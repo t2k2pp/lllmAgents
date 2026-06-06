@@ -48,8 +48,8 @@ import { detectWsl } from "../security/wsl.js";
 import { configureSandboxProxy, getSandboxProxy } from "../security/sandbox-proxy.js";
 import { addDomain, removeDomain, resolveAllowedDomains, domainAllowed } from "../security/net-allowlist.js";
 import inquirer from "inquirer";
-import { ProcessSandbox } from "../security/process-sandbox.js";
-import { resetActiveProcessSandbox, reconcileSandboxProxy } from "../security/active-sandbox.js";
+import { ProcessSandbox, cleanupStaleSandboxArtifacts } from "../security/process-sandbox.js";
+import { resetActiveProcessSandbox, reconcileSandboxProxy, getActiveProcessSandbox } from "../security/active-sandbox.js";
 import { isBashNetworkContained } from "../security/containment.js";
 import { runLocalLLMSetup, connectAndListModels } from "../config/setup-wizard.js";
 import {
@@ -118,6 +118,7 @@ export class REPL {
     });
 
     this.configureSandboxNetProxy();
+    cleanupStaleSandboxArtifacts(); // 前回クラッシュ等で残った一時プロファイル/ソケットを掃除
   }
 
   /**
@@ -195,6 +196,12 @@ export class REPL {
         }
       } catch (e) {
         console.error(chalk.red(`  セッション保存に失敗: ${String(e).slice(0, 100)}`));
+      }
+      // 終了時にネット allowlist プロキシを停止（listen ソケット/unix ソケットを解放）。
+      try {
+        getSandboxProxy()?.stop();
+      } catch {
+        /* ignore */
       }
     };
     // 2026-05-17 修正: 1回押しでの即時 process.exit を廃止。
@@ -3299,7 +3306,13 @@ export class REPL {
               if (eff === "none") {
                 console.log(chalk.yellow("  ⚠ 隔離ツールが見つからず実効レベルは none です (Linux/WSL2: bwrap, macOS: sandbox-exec が必要)。"));
               } else if (eff === "fs") {
-                console.log(chalk.dim("  書込は作業フォルダ等に限定、 ネットワークは許可 (npm install / pip 等は通ります)。"));
+                const enforceable = getActiveProcessSandbox().getAvailability().netAllowlistEnforceable;
+                if (enforceable) {
+                  console.log(chalk.dim("  書込は作業フォルダ等に限定、 ネットは allowlist 経由のみ (npm install / pip 等は通ります)。"));
+                } else {
+                  // socat/ip 不足(Linux)等で allowlist を強制できない → ネット全開。 status 任せにせず即警告。
+                  console.log(chalk.yellow("  ⚠ ネット allowlist を強制できません (Linux は socat と ip が必要)。 現在 fs はネット全開で、 外部送信を防げません。 `sudo apt install socat iproute2` 等で導入してください。"));
+                }
                 // Phase 3: fs 封じ込め下では bash 確認が自動許可される副作用を明示（macOS のみ発動）
                 if (isBashNetworkContained()) {
                   console.log(

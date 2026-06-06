@@ -1,0 +1,34 @@
+name: CI
+
+# 引き継ぎレビュー指摘: 緑テストが「macOS 開発機ローカル」止まりで、 Linux 経路の実行系が
+# 未検証だった。 OS 別に型チェック＋テストを回し、 特に macOS=Seatbelt / Linux=bwrap の
+# 統合テスト（環境依存で skip される）を各 runner で走らせて回帰を検出する。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # Linux runner では bwrap を入れて Linux サンドボックスの統合テストを有効化する。
+      # （sandbox 統合テストは bwrap/sandbox-exec が無ければ skip される設計）
+      - name: Install bubblewrap (Linux only)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap socat iproute2
+      - name: Type check
+        run: npm run lint
+      - name: Test
+        run: npm test

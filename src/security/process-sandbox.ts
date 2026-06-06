@@ -18,7 +18,7 @@
  *（macOS=Seatbelt+在プロセスproxy / Linux=bwrap+socat ブリッジ。docs §7.1/§7.2）。
  */
 
-import { existsSync, writeFileSync, realpathSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, writeFileSync, realpathSync, mkdtempSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir, platform } from "node:os";
 
@@ -65,6 +65,38 @@ export interface SandboxAvailability {
   /** fs レベルでネット allowlist を強制できるか（macOS=常に, Linux=socat+ip 必要） */
   netAllowlistEnforceable: boolean;
   effectiveLevel: ProcessSandboxLevel;
+}
+
+/**
+ * 前回までの実行で残った一時成果物（Seatbelt プロファイル・proxy unix ソケット）を掃除する。
+ * 生きているプロセスのもの（pid 生存）と自プロセスのものは消さない（並行起動を壊さない）。
+ * 起動時に best-effort で1回呼ぶ。
+ */
+export function cleanupStaleSandboxArtifacts(): void {
+  const dir = tmpdir();
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of entries) {
+    const m = /^lllm-(?:sandbox|proxy)-(\d+)/.exec(name);
+    if (!m) continue;
+    const pid = parseInt(m[1], 10);
+    if (!Number.isInteger(pid) || pid === process.pid) continue;
+    try {
+      process.kill(pid, 0); // 生きていれば例外なし → 残骸ではないのでスキップ
+      continue;
+    } catch {
+      /* ESRCH 等 = プロセス不在 → 残骸として掃除 */
+    }
+    try {
+      rmSync(join(dir, name), { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 /** ツール存在チェック（複数パスを試す） */

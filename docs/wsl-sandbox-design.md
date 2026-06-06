@@ -118,7 +118,7 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - **コマンド**：`/sandbox allow <domain>` / `/sandbox deny <domain>`、`status` で現在の allowlist 表示。
 - 非 TTY/パイプ：対話確認できないため「未許可はブロック（fail-closed）」にフォールバック。
 
-実装順：土台（allowlist 照合＋既定リスト＝実装済み）→ **2b-1（実装済み）** → **2b-2（実装済み・WSL2 実機検証要）**。
+実装順：土台（allowlist 照合＋既定リスト＝実装済み）→ **2b-1（macOS・実機検証済み）** → **2b-2（Linux・🧪実験的/WSL2 実機未検証）**。
 
 **2b-2 実装メモ（Linux/WSL2）**：
 - proxy は TCP(127.0.0.1)に加え **unix ソケット**でも待ち受ける（`ensureUnixSocket`）。bwrap の `--unshare-net` 名前空間からはホスト TCP loopback に届かないため、 ソケットを名前空間内へ bind-mount して橋渡しする。**unix ソケット経路の allowlist 判定は macOS 実機でテスト済み**（`sandbox-proxy.integration`）。
@@ -192,6 +192,8 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - 在プロセスプロキシが構成済み（= ネット allowlist が強制される）
 - 設定 `security.processSandbox.autoAllowBashWhenContained !== false`（既定 ON、 オプトアウト可）
 
+⚠️ **TTY 非依存**：上記を満たせば**非TTY（パイプ/委任実行）でも bash は自動許可される**（`isBashNetworkContained` は TTY を見ない）。非TTY で自動許可を切ると全 bash が確認待ちで停止し自動化が壊れるため意図的。未許可ドメイン通信だけは非TTY で fail-closed deny。中継先は B-3 監査で出力に残る。厳格にするなら `autoAllowBashWhenContained: false`。
+
 **維持する確認（自動許可しない）**：
 - **破壊的コマンド**（`destructive-commands.ts` の `isDestructiveCommand`: rm / 上書き / git reset --hard / git checkout -- / force push / chmod -R / 実デバイス書込 等）→ 通常の確認フローへフォールバック。
 - **危険コマンド**（既存 `checkCommand` の block ルール）→ 従来どおりブロック。
@@ -217,6 +219,14 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - **【Med】フォークボム正規表現の不発**：`/:()\s*\{/` は `()` がメタ文字で実物 `:(){ :|:& };:` に不一致だった。→ `\(`/`\)` をエスケープして修正。
 - **残存リスク（文字列ベース検出の本質的限界・明記）**：`node -e 'fs.rmSync(...)'` / `python3 -c 'shutil.rmtree(...)'` / `sed -i` / `base64 -d | sh` のような**インタプリタ経由・難読化された破壊や任意コード実行**は文字列検出では捕捉しきれない。ただし封じ込めにより FS 破壊は writeDir(cwd 等) 内に限定され、 ネット送信は proxy の allowlist 確認を経る。**封じ込めで守れない不可逆操作は git 履歴/作業ツリー破棄・remote force push・許可済みドメインからの取得→実行**であり、 前2者はパターンで確認へ落とす。これらインタプリタ難読化は完全防御不能と割り切り、 ここに記録する。
 - **L（軽微・据え置き）**：`getSandboxProxy()!=null` ガードは REPL では常に非null のため実質 level 判定が効いている（意図は将来 "proxy が fs 用に強制中" の明示 API 化で堅くする）。ゲートは `loadConfig`(毎回 disk) で都度 `ProcessSandbox` 生成、 bash.ts はキャッシュ instance のため、 config 外部編集時に理論上のずれ窓がある（`/sandbox` 操作経由なら両更新）。
+
+## §7.3 運用・障害復旧（引き継ぎ向け）
+
+- **proxy がハング/応答しない**：在プロセス設計のため REPL の event loop に影響しうる。`/sandbox off` で `proxy.stop()`（listen 解放）→ 必要なら REPL 再起動。終了時は `saveBeforeExit` で `getSandboxProxy()?.stop()` を呼ぶ。
+- **socat 子プロセスの孤児（Linux）**：`socat ... fork` の子は親 kill で落ちないことがある。bwrap の `--new-session`＋namespace teardown で最終的に回収されるが、 残る場合は `pkill -f 'lllm-proxy'` 等。
+- **一時成果物の残骸**：`$TMPDIR/lllm-sandbox-*`（Seatbelt プロファイル）・`$TMPDIR/lllm-proxy-<pid>.sock`（unix ソケット）。**起動時に `cleanupStaleSandboxArtifacts()` が pid 生存チェック付きで掃除**（生きているプロセス・自プロセスのものは残す）。SIGKILL 時は cleanup callback が走らず残るが次回起動で回収。
+- **socat/ip 不足（Linux）**：`/sandbox on` 時にその場で黄色警告（allowlist 未強制＝ネット全開）。`sudo apt install socat iproute2` で解消。
+- **CI**：`.github/workflows/ci.yml` で ubuntu/macos の matrix。Linux runner は bwrap/socat/iproute2 を入れて bwrap FS 隔離の統合テストを実走（`process-sandbox.bwrap.integration.test`）、 macOS runner は Seatbelt 統合テストを実走。socat ネットブリッジ(2b-2)の実走検証は WSL2 実機が引き続き必要。
 
 ## §8 既知の限界・トレードオフ
 
@@ -251,5 +261,5 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 | 1 | Windows 2種モデル＋`/sandbox` 統一コマンド（検出案内含む） | ✅ 実装済み（REPL UX は手動 TTY 検証要） |
 | 2a | レベル `"fs"`（FS 書込スコープ・ネット許可）追加。`/sandbox on` 既定を fs に＝§7 | ✅ 実装済み（純粋関数をユニットテスト） |
 | 2b-1 | macOS: 在プロセス CONNECT プロキシ＋Seatbelt＋対話確認＋`/sandbox allow\|deny`＝§7.1 | ✅ 実装済み・**Seatbelt 封じ込めは実機検証済**（rule `localhost` バグ修正＋統合テスト追加）。対話 UX の TTY 手触りのみ残 |
-| 2b-2 | Linux/WSL2: socat ブリッジで bwrap 名前空間からプロキシへ＝§7.1 | ✅ 実装済み（proxy unix socket は macOS で検証。bwrap/socat ランタイムは **WSL2 実機検証要**。socat/ip 不足時は fs=全開で警告・構築失敗時は fail-closed 全遮断） |
+| 2b-2 | Linux/WSL2: socat ブリッジで bwrap 名前空間からプロキシへ＝§7.1 | 🧪 **実験的・未検証（実機検証前は信用しない）**。コードと純粋関数テストは有るが bwrap/socat/lo up/dash の実ランタイムは **WSL2 実機未検証**。proxy unix socket 部分のみ macOS で検証。socat/ip 不足時は fs=全開（警告表示）・構築失敗時は fail-closed 全遮断 |
 | 3 | 封じ込め時のみ bash 確認を自動許可（確認削減の実体）＝§7.2 | ✅ 実装済み（macOS 先行。破壊的/CWD外/allowlist外は確認維持・オプトアウト可）。TTY 手触り検証のみ残 |

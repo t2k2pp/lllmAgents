@@ -121,14 +121,17 @@ export function isBlockedAddress(ip: string): boolean {
  * ホスト名/IP を解決し、 接続先として安全な実IPを1つ返す（内部レンジは拒否＝例外）。
  * ホスト名は解決済みIPを「ピン留め」して返すことで、 authorize 後に別IPへ向く DNS rebinding を防ぐ。
  */
-async function resolvePinnedIp(host: string): Promise<string> {
+async function resolvePinnedIp(
+  host: string,
+  isBlocked: (ip: string) => boolean = isBlockedAddress,
+): Promise<string> {
   const h = host.replace(/^\[|\]$/g, ""); // IPv6 リテラルのブラケットを除去
   if (net.isIP(h)) {
-    if (isBlockedAddress(h)) throw new Error(`blocked internal address: ${h}`);
+    if (isBlocked(h)) throw new Error(`blocked internal address: ${h}`);
     return h;
   }
   const { address } = await dns.lookup(h); // 先頭の解決結果を採用
-  if (isBlockedAddress(address)) throw new Error(`host resolves to internal address: ${h} -> ${address}`);
+  if (isBlocked(address)) throw new Error(`host resolves to internal address: ${h} -> ${address}`);
   return address;
 }
 
@@ -166,6 +169,10 @@ export interface SandboxProxyDeps {
   onUnknownDomain(host: string): Promise<DomainDecision>;
   /** "always" 選択時に永続 allowlist へ保存する */
   persistDomain(domain: string): void;
+  /** 接続先IPの内部レンジ判定（省略時は既定 isBlockedAddress）。 テストでループバック上流を許す用途。 */
+  isAddressBlocked?(ip: string): boolean;
+  /** 中継を許すポート集合（省略時は既定 {80,443}）。 テストで任意ポートの上流を許す用途。 */
+  allowedPorts?: Set<number>;
 }
 
 export class SandboxProxy {
@@ -255,11 +262,18 @@ export class SandboxProxy {
       const server = this.createServer();
       server.on("error", (e) => reject(e));
       server.listen(socketPath, () => {
-        // 同一ホストの他ユーザーが踏み台にできないよう所有者のみに制限（/tmp は全ユーザー書込可）
+        // 同一ホストの他ユーザーが踏み台にできないよう所有者のみに制限（/tmp は全ユーザー書込可）。
+        // chmod に失敗したら fail-closed: ソケットを閉じて reject（権限を担保できないまま listen し続けない）。
         try {
           chmodSync(socketPath, 0o600);
-        } catch {
-          /* ignore */
+        } catch (e) {
+          try {
+            server.close();
+          } catch {
+            /* ignore */
+          }
+          reject(e instanceof Error ? e : new Error("chmod failed on proxy socket"));
+          return;
         }
         this.unixServer = server;
         this.unixPath = socketPath;
@@ -364,7 +378,7 @@ export class SandboxProxy {
     };
 
     // 許可ポートは 443/80 のみ（許可ドメインの任意ポートへのトンネル悪用を防ぐ）
-    if (!ALLOWED_PORTS.has(port)) {
+    if (!(this.deps.allowedPorts ?? ALLOWED_PORTS).has(port)) {
       reject();
       return;
     }
@@ -376,7 +390,7 @@ export class SandboxProxy {
           return;
         }
         // 内部レンジ遮断＋IPピン留め（authorize 後の DNS rebinding を防ぐ）
-        const ip = await resolvePinnedIp(host);
+        const ip = await resolvePinnedIp(host, this.deps.isAddressBlocked);
         this.relayedHosts.add(host); // 監査: 実際に中継する宛先を記録（内部IP遮断を通過した後・B-3）
         let established = false;
         const upstream = net.connect(port, ip, () => {
@@ -417,7 +431,7 @@ export class SandboxProxy {
     }
     // ポートは 80/443 のみ（CONNECT と同じ制限。 許可ドメインの任意ポートへの平文中継を防ぐ）。
     const reqPort = url.port ? parseInt(url.port, 10) : 80;
-    if (!ALLOWED_PORTS.has(reqPort)) {
+    if (!(this.deps.allowedPorts ?? ALLOWED_PORTS).has(reqPort)) {
       res.writeHead(403);
       res.end("blocked by sandbox (port not allowed)");
       return;
@@ -430,7 +444,7 @@ export class SandboxProxy {
           return;
         }
         // 内部レンジ遮断＋IPピン留め（SSRF・DNS rebinding 防止）
-        const ip = await resolvePinnedIp(url.hostname);
+        const ip = await resolvePinnedIp(url.hostname, this.deps.isAddressBlocked);
         this.relayedHosts.add(normalizeHost(url.hostname)); // 監査: 中継先を記録（遮断通過後・B-3）
         const proxyReq = http.request(
           {
