@@ -4,7 +4,34 @@ import {
   buildBwrapAllowlistArgs,
   buildSeatbeltProfile,
   defaultSecretDenyDirs,
+  withSandboxState,
 } from "../../src/security/process-sandbox.js";
+
+describe("withSandboxState (/sandbox on|off で allowlist/opt-out を消さない・P0回帰)", () => {
+  const prev = {
+    enabled: false,
+    level: "fs" as const,
+    allowedHosts: ["*.npmjs.org", "mycdn.example.com"],
+    autoAllowBashWhenContained: false,
+  };
+  it("on は allowedHosts と autoAllow を保持しつつ enabled/level を更新", () => {
+    const next = withSandboxState(prev, true, "fs");
+    expect(next.enabled).toBe(true);
+    expect(next.level).toBe("fs");
+    expect(next.allowedHosts).toEqual(["*.npmjs.org", "mycdn.example.com"]);
+    expect(next.autoAllowBashWhenContained).toBe(false); // opt-out が消えない
+  });
+  it("off は level/allowedHosts/opt-out を保持しつつ enabled だけ false に", () => {
+    const next = withSandboxState({ ...prev, enabled: true }, false);
+    expect(next.enabled).toBe(false);
+    expect(next.level).toBe("fs"); // level 保持
+    expect(next.allowedHosts).toEqual(["*.npmjs.org", "mycdn.example.com"]);
+    expect(next.autoAllowBashWhenContained).toBe(false);
+  });
+  it("prev 未設定でも安全な既定を返す", () => {
+    expect(withSandboxState(undefined, true, "fs")).toEqual({ enabled: true, level: "fs" });
+  });
+});
 
 // セキュリティ上重要な「どのレベルで FS/ネットをどう開閉するか」を純粋関数として検証する
 // (docs/wsl-sandbox-design.md §7: FS書込・ネットワークの2軸)。

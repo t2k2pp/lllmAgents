@@ -89,6 +89,9 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/sandbox", description: "bash 封じ込めの状態 (Mac/Linux/WSL2内=processSandbox。Winネイティブは非対応→WSL2内起動を案内)" },
   { command: "/sandbox on", description: "bash 封じ込めを有効化 (Mac/Linux/WSL2内のOSサンドボックス)" },
   { command: "/sandbox off", description: "bash 封じ込めを無効化" },
+  { command: "/sandbox status", description: "封じ込めレベル・ネット allowlist・自動許可・中継先を表示" },
+  { command: "/sandbox allow", description: "ネット allowlist にドメインを追加 (例: *.example.com)", needsArg: true },
+  { command: "/sandbox deny", description: "ネット allowlist からドメインを削除", needsArg: true },
   // /cost (詳細表示として復活、 2026-06-01): /status は要約のみ、 詳細は /cost 配下に集約。
   // 設計: docs/cost-token-command-design.md
   { command: "/cost", description: "LLM 使用量サマリ (計測窓 / 合計 / 上位モデル)。 既定は計測窓 (/cost reset で区切り)" },

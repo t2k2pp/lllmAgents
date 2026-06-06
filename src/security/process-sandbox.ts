@@ -99,6 +99,20 @@ export function cleanupStaleSandboxArtifacts(): void {
   }
 }
 
+/**
+ * processSandbox 設定の enabled / level を更新しつつ、 他フィールド（allowedHosts・
+ * autoAllowBashWhenContained 等）を保持する。 `/sandbox on|off` で全置換して allowlist や
+ * opt-out が無言で消える事故を防ぐ（単一窓口・テスト可能）。
+ */
+export function withSandboxState(
+  prev: ProcessSandboxConfig | undefined,
+  enabled: boolean,
+  level?: ProcessSandboxLevel,
+): ProcessSandboxConfig {
+  const base: ProcessSandboxConfig = prev ?? { enabled: false, level: "none" };
+  return { ...base, enabled, ...(level ? { level } : {}) };
+}
+
 /** ツール存在チェック（複数パスを試す） */
 function findTool(...paths: string[]): string | null {
   for (const p of paths) {

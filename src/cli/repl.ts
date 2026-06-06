@@ -48,7 +48,7 @@ import { detectWsl } from "../security/wsl.js";
 import { configureSandboxProxy, getSandboxProxy } from "../security/sandbox-proxy.js";
 import { addDomain, removeDomain, resolveAllowedDomains, domainAllowed } from "../security/net-allowlist.js";
 import inquirer from "inquirer";
-import { ProcessSandbox, cleanupStaleSandboxArtifacts } from "../security/process-sandbox.js";
+import { ProcessSandbox, cleanupStaleSandboxArtifacts, withSandboxState } from "../security/process-sandbox.js";
 import { resetActiveProcessSandbox, reconcileSandboxProxy, getActiveProcessSandbox } from "../security/active-sandbox.js";
 import { isBashNetworkContained } from "../security/containment.js";
 import { runLocalLLMSetup, connectAndListModels } from "../config/setup-wizard.js";
@@ -3297,7 +3297,9 @@ export class REPL {
                   : prev?.level && prev.level !== "none"
                     ? (prev.level as "fs" | "network" | "full")
                     : "fs"; // 既定は fs: 書込スコープのみ・ネットは許可（開発を止めない）
-              this.config.security.processSandbox = { enabled: true, level };
+              // allowedHosts / autoAllowBashWhenContained を保持（全置換で育てた allowlist と
+              // opt-out が無言で消える事故を防ぐ）。
+              this.config.security.processSandbox = withSandboxState(this.config.security.processSandbox, true, level);
               saveConfig(this.config);
               resetActiveProcessSandbox();
               reconcileSandboxProxy(); // 実効レベルに合わせ proxy を停止/維持（単一窓口）
@@ -3332,8 +3334,7 @@ export class REPL {
             if (isWindows) {
               console.log(chalk.dim("  Windows ネイティブでは封じ込めは元々動いていません (git bash 実行)。 WSL2 の中で起動している時のみ /sandbox off が有効です。"));
             } else {
-              const lvl = this.config.security.processSandbox?.level ?? "none";
-              this.config.security.processSandbox = { enabled: false, level: lvl };
+              this.config.security.processSandbox = withSandboxState(this.config.security.processSandbox, false); // level/allowedHosts/opt-out を保持
               saveConfig(this.config);
               resetActiveProcessSandbox();
               reconcileSandboxProxy(); // 封じ込め解除 → proxy も停止（単一窓口）

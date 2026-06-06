@@ -276,6 +276,23 @@ src/
 - シンボリックリンク解決による保護
 - Windows パス正規化（8.3形式・UNCパス対応）
 
+### OS レベル封じ込めで「安全に自走させる」 (`/sandbox`)
+
+bash の実行を OS 機能でカーネルレベルに封じ込め、 その安全性を根拠に**確認を減らしてエージェントを自走させる**仕組み（macOS=sandbox-exec / Linux・WSL2=bubblewrap）。
+
+```
+/sandbox on              # 封じ込め有効化 (既定 fs: 書込は作業フォルダ・ネットは allowlist 経由)
+/sandbox status          # レベル・ネット allowlist・自動許可・中継先を表示
+/sandbox allow <domain>  # 通信を許可するドメインを追加 (例: /sandbox allow *.example.com)
+/sandbox deny  <domain>  # allowlist から削除
+/sandbox off             # 封じ込め解除
+```
+
+- **fs レベル**: 書込は作業フォルダ等に限定、 ネットは allowlist 経由のみ（npm/pip/GitHub は既定で許可）。未許可ドメインは初回に対話確認。
+- **確認自動許可（macOS 先行）**: 封じ込め下では bash 実行確認を自動許可（破壊的コマンド・未許可ドメイン通信は引き続き確認）。`autoAllowBashWhenContained: false` でオプトアウト可。
+- **機密保護**: `~/.ssh` `~/.aws` 等と**自アプリの API キー(`~/.localllm`)** はサンドボックス内 bash から読めない。
+- 詳細・脅威モデルは [`docs/wsl-sandbox-design.md`](docs/wsl-sandbox-design.md)。Linux/WSL2 のネット allowlist 強制(2b-2)は実験的（WSL2 実機検証前）。
+
 ### 危険コマンド検出
 
 50以上のパターンで破壊的コマンドを自動検出:
