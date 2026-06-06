@@ -1,12 +1,71 @@
 import type { Browser, BrowserContext, Page } from "playwright";
+import { createRequire } from "node:module";
+import * as path from "node:path";
+import * as os from "node:os";
 import * as logger from "../utils/logger.js";
+
+/**
+ * exe(SEA) では playwright を同梱しない（リーン配布）。未導入時にこのエラーを投げ、
+ * 呼び出し側（game_smoke / browser_*）が ToolResult.error としてそのまま誘導文を返す。
+ * docs/exe-playwright-externalization.md §3.4
+ */
+export class PlaywrightNotInstalledError extends Error {
+  constructor() {
+    super(
+      "ブラウザ機能には Playwright のセットアップが必要です。" +
+        "`localllm --install-browser` を実行してください" +
+        "（状態確認は `localllm --check-browser`）。" +
+        "※ exe 版は playwright を同梱していません（リーン配布）。",
+    );
+    this.name = "PlaywrightNotInstalledError";
+  }
+}
+
+/**
+ * playwright を解決する純粋ロジック（テスト可能）。
+ * 1. 通常の import を試す（dev/tsx ＝ リポジトリ node_modules から解決。require.resolve も健全）。
+ * 2. 失敗時（exe/SEA・ラッパは playwright を同梱しないため import が失敗する）、
+ *    ディスク上の非バンドル playwright を createRequire で読む。解決順:
+ *    ~/.localllm/node_modules → 作業フォルダ node_modules。
+ * 3. いずれも無ければ null（呼び出し側で PlaywrightNotInstalledError 化）。
+ *
+ * import を先に試すことで SEA 判定に依存せず、実SEA・シェルラッパ・dev の全形態を統一的に扱う。
+ * docs/exe-playwright-externalization.md §3.2
+ */
+export async function resolvePlaywright(
+  importFn: () => Promise<typeof import("playwright")> = () => import("playwright"),
+  roots: string[] = [path.join(os.homedir(), ".localllm"), process.cwd()],
+  makeRequire: (from: string) => (id: string) => unknown = (from) => createRequire(from),
+): Promise<typeof import("playwright") | null> {
+  try {
+    const mod = await importFn();
+    if (mod && mod.chromium) return mod;
+  } catch {
+    /* バンドル/SEA では同梱していないので失敗する → ディスクから探す */
+  }
+
+  for (const root of roots) {
+    try {
+      const req = makeRequire(path.join(root, "noop.js"));
+      const mod = req("playwright") as typeof import("playwright");
+      if (mod && mod.chromium) {
+        logger.info(`Loaded playwright from ${root}/node_modules`);
+        return mod;
+      }
+    } catch {
+      /* 次の root を試す */
+    }
+  }
+  return null;
+}
 
 let playwrightModule: typeof import("playwright") | null = null;
 
-async function getPlaywright() {
-  if (!playwrightModule) {
-    playwrightModule = await import("playwright");
-  }
+async function getPlaywright(): Promise<typeof import("playwright")> {
+  if (playwrightModule) return playwrightModule;
+  const mod = await resolvePlaywright();
+  if (!mod) throw new PlaywrightNotInstalledError();
+  playwrightModule = mod;
   return playwrightModule;
 }
 

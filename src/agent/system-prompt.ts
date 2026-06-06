@@ -2,6 +2,7 @@ import * as os from "node:os";
 import { loadMemory } from "./memory.js";
 import { loadProjectInstructions, getGitInfo } from "./project-context.js";
 import { isWindows } from "../utils/platform.js";
+import { getBrowserCapability } from "../browser/browser-capability.js";
 import { RuleLoader } from "../rules/rule-loader.js";
 import type { Tier } from "./capability-tier.js";
 import {
@@ -194,6 +195,20 @@ ${buildUnexpectedSignalRules(tier)}
 - Node.js: ${process.version}
 - ホームディレクトリ: ${os.homedir()}
 - 現在日時: ${localDatetime}`);
+
+  // ブラウザ機能が無効な環境では、その事実をエージェントに知らせる。
+  // → 無いツールを試して失敗を繰り返さない / 検証できないのに「動く」と偽らない（緑の嘘防止）。
+  // docs/exe-playwright-externalization.md §B
+  const browserCap = getBrowserCapability();
+  if (!browserCap.ready) {
+    parts.push(
+      `\n# ブラウザ機能は無効\n` +
+        `この環境では browser_*/game_smoke は利用できません（理由: ${browserCap.reason}）。\n` +
+        `- ブラウザでの起動確認・スクショ・スモークテストは試みないこと（ツール自体が登録されていない）。\n` +
+        `- HTML/ゲーム等を作った場合、ブラウザ表示確認は「未実施」と正直に報告し、` +
+        `ユーザーに \`localllm --install-browser\` での有効化を案内すること（「動く」と断定しない）。`,
+    );
+  }
 
   // Project instructions (truncate at line boundary to avoid broken context)
   // Phase B-2: T3 は短 ctx なので積極的に切る

@@ -32,10 +32,17 @@ async function build() {
     platform: 'node',
     format: 'cjs',
     outfile: CJS_BUNDLE,
-    // Externalize problematic dynamic imports like chromium-bidi (used by playwright)
+    // playwright/playwright-core はバンドルしない（external）。
+    // 理由: playwright-core は起動時に require.resolve("../../../package.json") 等で
+    //       自分のパッケージ位置/ブラウザの場所を解決する。1ファイルに束ねると相対パスが
+    //       壊れ、SEA では require.resolve 自体が無く "require.resolve is not a function" になる。
+    //       → ディスク上の非バンドル playwright を実行時に createRequire で読む方式に切替
+    //         （docs/exe-playwright-externalization.md）。chromium-bidi も同様の理由で external。
     external: [
       'chromium-bidi',
-      'chromium-bidi/*'
+      'chromium-bidi/*',
+      'playwright',
+      'playwright-core'
     ],
     define: {
       'import.meta.url': 'import_meta_url'

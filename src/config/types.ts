@@ -274,6 +274,20 @@ export interface ModelRegistryStore {
   slots: LLMSlotAssignments;
 }
 
+/**
+ * 機能トグル。環境依存のケイパビリティを強制制御する。
+ * docs/exe-playwright-externalization.md §B（capability ゲート）
+ */
+export interface FeaturesConfig {
+  /**
+   * ブラウザ機能 (browser_* / game_smoke) の有効化方針。
+   * - "auto"(既定): 起動時プローブで playwright+chromium が揃っていれば有効。
+   * - "off": 常に無効（ツール非登録）。エージェントは試行しない。
+   * - "on": プローブ結果に関わらず登録（デバッグ用。未準備なら実行時に誘導エラー）。
+   */
+  browser?: "auto" | "on" | "off";
+}
+
 export interface Config {
   mainLLM: LLMEndpoint;
   visionLLM: LLMEndpoint | null;
@@ -286,6 +300,8 @@ export interface Config {
   search?: SearchConfig;
   /** Obsidian Vault 連携 (ナレッジベース) */
   obsidian?: ObsidianConfig;
+  /** 機能トグル (環境依存ケイパビリティの強制制御) */
+  features?: FeaturesConfig;
   /** true: テキストをリアルタイムにストリーミング表示。false(デフォルト): スピナー+完了後Markdownレンダリング */
   streamingDisplay?: boolean;
   /** ツールの最大並列実行数（デフォルト: 3）。vLLM KVキャッシュやリソースに合わせて調整 */

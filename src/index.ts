@@ -60,6 +60,28 @@ async function main(): Promise<void> {
   process.stdin.setMaxListeners(100);
   process.stdout.setMaxListeners(100);
 
+  // ブラウザ機能セットアップ (exe リーン配布向け)。モデル設定不要なので最初に処理。
+  // docs/exe-playwright-externalization.md §3.3
+  if (args.includes("--install-browser")) {
+    const { installPlaywright } = await import("./browser/install-playwright.js");
+    process.exit(installPlaywright());
+  }
+
+  // ブラウザ機能の健全性チェック (実機検証 / ユーザーの自己診断)。
+  // playwright をロード→headless 起動→終了し、OK か誘導メッセージを表示。
+  if (args.includes("--check-browser")) {
+    try {
+      const pm = new PlaywrightManager();
+      await pm.ensureBrowser();
+      await pm.close();
+      console.log("[check-browser] OK — Playwright で Chromium を起動できました。");
+      process.exit(0);
+    } catch (e) {
+      console.error(`[check-browser] NG — ${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+  }
+
   // Setup wizard
   if (args.includes("--setup") || !configExists()) {
     await runSetupWizard();
@@ -158,14 +180,25 @@ async function main(): Promise<void> {
   // Skill tool
   toolRegistry.register(skillTool);
 
-  // Browser tools
-  const playwrightManager = new PlaywrightManager();
-  const browserTools = createBrowserTools(playwrightManager);
-  for (const tool of browserTools) {
-    toolRegistry.register(tool);
+  // Browser tools — capability ゲート (docs/exe-playwright-externalization.md §B)。
+  // playwright+chromium が準備済みのときだけ登録する。未準備ならツールを出さない＝
+  // エージェントが試行して失敗を繰り返すことを防ぐ。
+  const { probeBrowserCapability } = await import("./browser/browser-capability.js");
+  const browserCap = await probeBrowserCapability(config);
+  let playwrightManager: PlaywrightManager | null = null;
+  if (browserCap.ready) {
+    playwrightManager = new PlaywrightManager();
+    const browserTools = createBrowserTools(playwrightManager);
+    for (const tool of browserTools) {
+      toolRegistry.register(tool);
+    }
+    // ランタイムスモーク (ブラウザ成果物の破滅的失敗を検知)。 docs/checkpoint-and-smoke-design.md §5
+    toolRegistry.register(createGameSmokeTool(playwrightManager));
+  } else {
+    console.log(
+      chalk.dim(`ℹ ブラウザ機能 (browser_*/game_smoke) は無効: ${browserCap.reason}`),
+    );
   }
-  // ランタイムスモーク (ブラウザ成果物の破滅的失敗を検知)。 docs/checkpoint-and-smoke-design.md §5
-  toolRegistry.register(createGameSmokeTool(playwrightManager));
 
   // Vision tool
   const visionProvider = config.visionLLM
@@ -472,7 +505,7 @@ async function main(): Promise<void> {
       await hookManager.runSessionHooks("stop");
       agent.saveCurrentSession();
       await mcpManager.disconnectAll();
-      await playwrightManager.close();
+      await playwrightManager?.close();
       process.exit(0);
     });
     // プロセスを生かしておく (サーバーが listen しているので自動的に続く)
@@ -523,7 +556,7 @@ async function main(): Promise<void> {
       await hookManager.runSessionHooks("stop");
       agent.saveCurrentSession();
       await mcpManager.disconnectAll();
-      await playwrightManager.close();
+      await playwrightManager?.close();
       process.exit(0);
     });
 
@@ -554,7 +587,7 @@ async function main(): Promise<void> {
   await hookManager.runSessionHooks("stop");
   agent.saveCurrentSession();
   await mcpManager.disconnectAll();
-  await playwrightManager.close();
+  await playwrightManager?.close();
 }
 
 main().catch((e) => {

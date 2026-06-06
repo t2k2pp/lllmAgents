@@ -279,8 +279,12 @@ deploy/skills/, deploy/install.*, deploy/README.md はコミット対象。
    - Linux: `.bashrc` への追記は敬遠されやすい → 同上
 3. **exe の Git 管理**
    - 93MB。バージョンタグ付きリリース時だけ `git lfs` で管理する選択肢あり → 当面は完全 gitignore とし、GitHub Releases で配布する運用
-4. **Playwright 依存**
-   - exe には Chromium バイナリは入らない。初回使用時に `npx playwright install` が必要 → install.bat に案内
+4. **Playwright 依存**（詳細: docs/exe-playwright-externalization.md）
+   - exe は Playwright 本体も Chromium も同梱しない。`build-exe.js` で playwright/playwright-core を
+     external 化し、実行時に `~/.localllm/node_modules` の非バンドル playwright を createRequire で読む。
+   - 初回のみ `localllm --install-browser`（= ~/.localllm へ `npm i playwright` + `npx playwright install chromium`）。
+   - 注: かつて「`npx playwright install` で Chromium だけ入れる」案内だったが、それでは不十分
+     （バンドルされた playwright が require.resolve 破綻でロード不能だった）。本方式で是正。
 5. **セキュリティ警告**
    - SmartScreen / Gatekeeper の「未署名」警告は不可避。README に対処法を明記
 

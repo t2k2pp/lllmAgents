@@ -60,12 +60,20 @@ exe は署名されていないため、初回起動時に「Windows によっ�
 
 ### Playwright (ブラウザ自動化) を使う場合
 
-`localllm` は Playwright をバンドルしていません。ブラウザ自動化を使うスキル
-(`/project` など) を実行する前に、作業フォルダで以下を実行してください:
+`localllm` (exe) は Playwright を**同梱していません**（リーン配布）。
+ブラウザ系ツール (`browser_*` / `game_smoke` や `/project` などのスキル) を使う前に、
+**一度だけ**以下を実行してください:
 
 ```
-npx playwright install chromium
+localllm --install-browser
 ```
+
+これで `~/.localllm` に Playwright と Chromium が導入され、以降どの作業フォルダでも使えます。
+導入できているかは `localllm --check-browser` で確認できます。
+（手動でやる場合: `cd ~/.localllm && npm install playwright && npx playwright install chromium`）
+
+> 注: 単に `npx playwright install chromium` を実行するだけでは不十分です。
+> exe は Playwright 本体を持たないため、上記で **Playwright 本体ごと** `~/.localllm` に導入する必要があります。
 
 ### アンインストール
 
