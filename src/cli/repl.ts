@@ -2966,6 +2966,18 @@ export class REPL {
 
   // ─── プロンプトプレフィックス ────────────────────────
 
+  /** W2: 封じ込め状態の常時インジケータ（有効時のみ `🛡fs·auto ` 等）。 */
+  private sandboxHudTag(): string {
+    try {
+      const sb = getActiveProcessSandbox();
+      if (!sb.isActive()) return "";
+      const auto = isBashNetworkContained() ? "·auto" : "";
+      return chalk.cyan(`🛡${sb.getEffectiveLevel()}${auto} `);
+    } catch {
+      return "";
+    }
+  }
+
   private getPromptPrefix(): string {
     if (this.isMultiline) {
       this.lineNumber++;
@@ -2975,9 +2987,9 @@ export class REPL {
       return chalk.yellow("[plan] > ");
     }
     if (this.agent.getPermissions().isAutorunMode()) {
-      return chalk.magenta("[autorun] > ");
+      return this.sandboxHudTag() + chalk.magenta("[autorun] > ");
     }
-    return chalk.green("> ");
+    return this.sandboxHudTag() + chalk.green("> ");
   }
 
   // ─── 入力処理 ──────────────────────────────────────
@@ -3267,9 +3279,23 @@ export class REPL {
               console.log(chalk.dim(`  bash 確認自動許可: 無効（${why}）`));
             }
             // B-3 監査: 今セッションで bash が実際に通信した宛先（exfil 検知の手がかり）
-            const relayed = getSandboxProxy()?.getRelayedHosts() ?? [];
+            const proxyNow = getSandboxProxy();
+            const relayed = proxyNow?.getRelayedHosts() ?? [];
             if (relayed.length) {
               console.log(chalk.dim(`  中継した宛先 (今セッション・${relayed.length}件): ${relayed.join(", ")}`));
+            }
+            // W3: セッションサマリ（自動許可回数・遮断ドメイン）
+            const autoAllowN = this.agent.getPermissions().getContainmentAutoAllowCount();
+            const blocked = proxyNow?.getBlockedHosts() ?? [];
+            if (autoAllowN > 0 || blocked.length) {
+              console.log(
+                chalk.dim(`  今セッション: bash 自動許可 ${autoAllowN} 回` + (blocked.length ? ` / 遮断ドメイン ${blocked.length}件 (${blocked.join(", ")})` : "")),
+              );
+            }
+            // W1: 一時許可(once)した先を恒久化するナッジ（育てる allowlist）
+            const once = proxyNow?.getSessionAllowedHosts() ?? [];
+            if (once.length) {
+              console.log(chalk.cyan(`  💡 今セッションで一時許可: ${once.join(", ")} — 恒久化は /sandbox allow <domain>`));
             }
           }
           console.log(chalk.dim("  使用例: /sandbox on | off | allow <domain> | deny <domain> | status"));

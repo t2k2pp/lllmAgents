@@ -188,12 +188,26 @@ export class SandboxProxy {
   private pending = new Map<string, Promise<boolean>>();
   /** 当該セッションで実際に中継（許可・接続）した宛先ホスト（exfil 監査用・B-3）。 */
   private relayedHosts = new Set<string>();
+  /** 当該セッションで遮断した宛先ホスト（W3 サマリ用）。 */
+  private blockedHosts = new Set<string>();
 
   constructor(private readonly deps: SandboxProxyDeps) {}
 
   /** 今セッションで bash が実際に通信した宛先ホスト一覧（昇順）。 */
   getRelayedHosts(): string[] {
     return [...this.relayedHosts].sort();
+  }
+
+  /** 今セッションで一時許可(once)した先（恒久化ナッジ用・W1）。 永続 allowlist にある物は除く。 */
+  getSessionAllowedHosts(): string[] {
+    return [...this.sessionAllowed]
+      .filter((h) => !domainAllowed(h, this.deps.getAllowedDomains()))
+      .sort();
+  }
+
+  /** 今セッションで遮断した宛先ホスト一覧（W3）。 */
+  getBlockedHosts(): string[] {
+    return [...this.blockedHosts].sort();
   }
 
   getPort(): number {
@@ -386,6 +400,7 @@ export class SandboxProxy {
     this.authorize(host)
       .then(async (ok) => {
         if (!ok) {
+          this.blockedHosts.add(host); // W3 サマリ用に遮断先を記録
           reject();
           return;
         }
@@ -439,6 +454,7 @@ export class SandboxProxy {
     this.authorize(url.hostname)
       .then(async (ok) => {
         if (!ok) {
+          this.blockedHosts.add(normalizeHost(url.hostname)); // W3 サマリ用
           res.writeHead(403);
           res.end("blocked by sandbox allowlist");
           return;

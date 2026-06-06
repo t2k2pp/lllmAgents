@@ -96,6 +96,13 @@ export class PermissionManager {
   private _autorunMode = false;
   // Phase 3: 封じ込め自動許可の初回通知済みフラグ（毎回出すとうるさいので一度だけ）
   private _containmentAutoAllowNotified = false;
+  // W3: 封じ込め下で bash 確認を自動許可した回数（セッションサマリ用）
+  private _containmentAutoAllowCount = 0;
+
+  /** 封じ込め下で bash 確認を自動許可した回数（W3 サマリ）。 */
+  getContainmentAutoAllowCount(): number {
+    return this._containmentAutoAllowCount;
+  }
 
   constructor(
     securityConfig: SecurityConfig,
@@ -314,11 +321,14 @@ export class PermissionManager {
     if ((this._autorunMode || containedBash) && ruleResult !== "ask") {
       const autorunResult = this.checkAutorunPermission(toolName, params);
       if (autorunResult !== null) {
-        if (containedBash && !this._autorunMode && !this._containmentAutoAllowNotified) {
-          this._containmentAutoAllowNotified = true;
-          console.log(
-            chalk.dim("  [sandbox] 封じ込め有効のため bash を自動許可します（破壊的操作・allowlist 外通信は確認）。"),
-          );
+        if (containedBash && !this._autorunMode) {
+          if (autorunResult.allowed) this._containmentAutoAllowCount++; // W3 サマリ
+          if (!this._containmentAutoAllowNotified) {
+            this._containmentAutoAllowNotified = true;
+            console.log(
+              chalk.dim("  [sandbox] 封じ込め有効のため bash を自動許可します（破壊的操作・allowlist 外通信は確認）。"),
+            );
+          }
         }
         return autorunResult;
       }

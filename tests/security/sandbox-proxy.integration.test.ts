@@ -92,6 +92,7 @@ describe("SandboxProxy 拒否パス (integration)", () => {
     const port = await proxy.ensureStarted();
     const line = await sendRaw(port, "GET http://evil.example/ HTTP/1.1\r\nHost: evil.example\r\n\r\n");
     expect(line).toContain("403");
+    expect(proxy.getBlockedHosts()).toContain("evil.example"); // W3: 遮断先を記録
   });
 
   it("許可済み HTTP は上流へ転送され body が往復する（成功トンネル・転送）", async () => {

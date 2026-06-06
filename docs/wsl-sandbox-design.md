@@ -220,6 +220,13 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - **残存リスク（文字列ベース検出の本質的限界・明記）**：`node -e 'fs.rmSync(...)'` / `python3 -c 'shutil.rmtree(...)'` / `sed -i` / `base64 -d | sh` のような**インタプリタ経由・難読化された破壊や任意コード実行**は文字列検出では捕捉しきれない。ただし封じ込めにより FS 破壊は writeDir(cwd 等) 内に限定され、 ネット送信は proxy の allowlist 確認を経る。**封じ込めで守れない不可逆操作は git 履歴/作業ツリー破棄・remote force push・許可済みドメインからの取得→実行**であり、 前2者はパターンで確認へ落とす。これらインタプリタ難読化は完全防御不能と割り切り、 ここに記録する。
 - **L（軽微・据え置き）**：`getSandboxProxy()!=null` ガードは REPL では常に非null のため実質 level 判定が効いている（意図は将来 "proxy が fs 用に強制中" の明示 API 化で堅くする）。ゲートは `loadConfig`(毎回 disk) で都度 `ProcessSandbox` 生成、 bash.ts はキャッシュ instance のため、 config 外部編集時に理論上のずれ窓がある（`/sandbox` 操作経由なら両更新）。
 
+## §7.2.1 可視化・UX（W1/W2/W3 リーン実装）
+
+封じ込めを「安心して自走させる信頼の仕組み」にするための最小 UX。既存の状態を活かす:
+- **W1 育てる allowlist**：`/sandbox status`・`sandbox_info` に「今セッションで一時許可(once)した先」を出し `/sandbox allow <domain>` で恒久化を促す（`SandboxProxy.getSessionAllowedHosts`）。
+- **W2 封じ込め HUD**：プロンプト脇に常時インジケータ `🛡<level>·auto`（封じ込め有効時のみ・`sandboxHudTag`）。今 bash がどこまで自走してよいか一目で分かる。
+- **W3 セッションサマリ**：`/sandbox status` に「bash 自動許可 N 回 / 遮断ドメイン M件」（`PermissionManager.getContainmentAutoAllowCount`・`SandboxProxy.getBlockedHosts`）。封じ込めの実績を信頼の根拠に。
+
 ## §7.3 運用・障害復旧（引き継ぎ向け）
 
 - **proxy がハング/応答しない**：在プロセス設計のため REPL の event loop に影響しうる。`/sandbox off` で `proxy.stop()`（listen 解放）→ 必要なら REPL 再起動。終了時は `saveBeforeExit` で `getSandboxProxy()?.stop()` を呼ぶ。

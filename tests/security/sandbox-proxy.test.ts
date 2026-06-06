@@ -115,6 +115,13 @@ describe("SandboxProxy.authorize", () => {
     expect(onUnknownDomain).not.toHaveBeenCalled();
   });
 
+  it("getSessionAllowedHosts は once 許可した先を返す（永続 allowlist の物は除く・W1）", async () => {
+    const { proxy } = mk({ allowed: ["github.com"], decision: "once" });
+    await proxy.authorize("new.com"); // once
+    await proxy.authorize("github.com"); // 永続 allowlist（除外される）
+    expect(proxy.getSessionAllowedHosts()).toEqual(["new.com"]);
+  });
+
   it("revoke で once 許可を取り消すと再度確認される", async () => {
     const { proxy, onUnknownDomain } = mk({ decision: "once" });
     expect(await proxy.authorize("new.com")).toBe(true);

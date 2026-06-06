@@ -71,8 +71,16 @@ export const sandboxInfoTool: ToolHandler = {
         : "") +
       `- bash 確認自動許可: ${isBashNetworkContained() ? "有効（封じ込め下。 破壊的操作・allowlist 外通信は確認）" : "無効"}\n` +
       (() => {
-        const relayed = getSandboxProxy()?.getRelayedHosts() ?? [];
-        return relayed.length ? `- 中継した宛先(今セッション): ${relayed.join(", ")}\n` : "";
+        const p = getSandboxProxy();
+        if (!p) return "";
+        let s = "";
+        const relayed = p.getRelayedHosts();
+        if (relayed.length) s += `- 中継した宛先(今セッション): ${relayed.join(", ")}\n`;
+        const blocked = p.getBlockedHosts();
+        if (blocked.length) s += `- 遮断した宛先(今セッション): ${blocked.join(", ")}\n`;
+        const once = p.getSessionAllowedHosts();
+        if (once.length) s += `- 一時許可(once・恒久化は /sandbox allow): ${once.join(", ")}\n`;
+        return s;
       })();
 
     // Windows ネイティブ: OS 封じ込めは非対応。 封じ込めが必要なら WSL2 の中でアプリを
