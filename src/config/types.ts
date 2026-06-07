@@ -308,6 +308,12 @@ export interface Config {
   maxParallelTools?: number;
   /** 自律実行モード（再起動後も維持） */
   autorunMode?: boolean;
+  /**
+   * opt-in 入力圧縮モード（再起動後も維持。既定 false）。
+   * ON のとき、project指示/メモが tier別閾値を超えたら起動時に一度だけ意図保持圧縮しキャッシュ。
+   * 縮まなければ原文を使い、原文は常に保持する。詳細: docs/input-compression-design.md
+   */
+  inputCompression?: boolean;
   /** チャットログ保存設定（Obsidian Vault に会話ログを蓄積） */
   chatLog?: ChatLogConfig;
   /** ログ設定 (運用ログ等)。詳細: docs/llm-logging.md */

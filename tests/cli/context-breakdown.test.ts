@@ -45,6 +45,8 @@ function makeAgent(opts: {
     getContextWindow: () => opts.contextWindow ?? 100_000,
     getModel: () => opts.model ?? "test-model",
     getToolRegistry: () => toolRegistry,
+    getInputCompressionEnabled: () => false,
+    getCompressionState: () => [],
   } as unknown as AgentLoop;
 }
 
@@ -244,6 +246,23 @@ describe("formatContextDetail", () => {
     expect(out).toContain("Memory files");
     expect(out).toContain("プロジェクト固有のルール本文");
     expect(out).toContain("メモ1");
+    // 入力圧縮 OFF が明示される
+    expect(out).toContain("入力圧縮モード");
+    expect(out).toContain("OFF");
+  });
+
+  it("memory: 入力圧縮 ON 時は before/after と原文保持を可視化する", () => {
+    const agent = makeAgent({ systemPrompt: sys });
+    // 圧縮状態を返すよう差し替え
+    (agent as unknown as { getInputCompressionEnabled: () => boolean }).getInputCompressionEnabled = () => true;
+    (agent as unknown as { getCompressionState: () => unknown[] }).getCompressionState = () => [
+      { label: "メモ", original: "x".repeat(4000), beforeTokens: 2000, afterTokens: 800, applied: true },
+    ];
+    const out = formatContextDetail(agent, undefined, "memory");
+    expect(out).toContain("入力圧縮モード");
+    expect(out).toContain("ON");
+    expect(out).toContain("2000 → 800");
+    expect(out).toContain("原文"); // 原文保持が明示される
   });
 
   it("skills: registry の有効/無効状態が出る", () => {

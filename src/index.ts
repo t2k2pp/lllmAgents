@@ -424,6 +424,12 @@ async function main(): Promise<void> {
     llmProfiles,
   );
 
+  // opt-in 入力圧縮モード: 有効時のみ、起動時に一度だけ project指示/メモを圧縮 (閾値超過時)。
+  // docs/input-compression-design.md
+  if (config.inputCompression) {
+    await agent.applyInputCompression(true);
+  }
+
   // Plan manager
   const planManager = new PlanManager();
   agent.setPlanManager(planManager);

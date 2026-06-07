@@ -40,15 +40,26 @@ export interface LLMProfiles {
   parallelCapable?: boolean;
 }
 
+/**
+ * project指示/メモの差し替え。 opt-in 入力圧縮モードが圧縮済みテキストを注入するために使う。
+ * 文字列が与えられたら loadProjectInstructions()/loadMemory() の結果より優先する
+ * (空文字も「明示的に空」 として尊重する)。 docs/input-compression-design.md
+ */
+export interface SystemPromptOverrides {
+  projectInstructions?: string;
+  memory?: string;
+}
+
 export function buildSystemPrompt(
   skills?: SkillInfo[],
   hasSecondLLM?: boolean,
   hasObsidian?: boolean,
   llmProfiles?: LLMProfiles,
   tier?: Tier,
+  overrides?: SystemPromptOverrides,
 ): string {
-  const memory = loadMemory();
-  const projectInstructions = loadProjectInstructions();
+  const memory = overrides?.memory ?? loadMemory();
+  const projectInstructions = overrides?.projectInstructions ?? loadProjectInstructions();
   const gitInfo = getGitInfo();
 
   const parts: string[] = [];

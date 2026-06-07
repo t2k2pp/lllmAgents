@@ -5125,6 +5125,46 @@ export class REPL {
         break;
       }
 
+      case "/compress-input": {
+        // opt-in 入力圧縮モード。 docs/input-compression-design.md
+        const subArg = args[0];
+        const turnOn = async () => {
+          this.config.inputCompression = true;
+          saveConfig(this.config);
+          console.log(chalk.green("  入力圧縮モード ON (設定に保存)"));
+          console.log(chalk.dim("  project指示/メモが tier別閾値を超えたら、意図保持で圧縮します (縮まなければ原文)"));
+          console.log(chalk.dim("  圧縮中..."));
+          await this.agent.applyInputCompression(true);
+          const st = this.agent.getCompressionState();
+          if (st.length === 0) {
+            console.log(chalk.dim("  閾値超過なし: 圧縮対象はありませんでした (全量のまま)"));
+          } else {
+            for (const s of st) {
+              if (s.applied) {
+                console.log(chalk.dim(`  ✓ ${s.label}: ${s.beforeTokens} → ${s.afterTokens} tokens (原文は保持)`));
+              } else {
+                console.log(chalk.dim(`  - ${s.label}: 圧縮見送り (${s.note ?? "原文使用"})`));
+              }
+            }
+          }
+        };
+        const turnOff = async () => {
+          this.config.inputCompression = false;
+          saveConfig(this.config);
+          await this.agent.applyInputCompression(false);
+          console.log(chalk.yellow("  入力圧縮モード OFF (設定に保存・全量に復帰)"));
+        };
+        if (subArg === "on") {
+          await turnOn();
+        } else if (subArg === "off") {
+          await turnOff();
+        } else {
+          if (this.agent.getInputCompressionEnabled()) await turnOff();
+          else await turnOn();
+        }
+        break;
+      }
+
       case "/chatlog": {
         const subArg = args[0];
         if (!subArg || subArg === "status") {

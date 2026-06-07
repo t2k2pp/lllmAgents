@@ -518,6 +518,27 @@ function detailMemory(agent: AgentLoop, cwd: string): string {
   const memoryBody = findSection(sections, "# メモ");
   out.push("");
   out.push(chalk.bold("  Context detail: Memory files"));
+
+  // opt-in 入力圧縮の状態を可視化 (欠損を隠さない: 圧縮した塊は before/after と原文保持を明示)
+  if (agent.getInputCompressionEnabled()) {
+    out.push(chalk.dim("    入力圧縮モード: ") + chalk.green("ON"));
+    const st = agent.getCompressionState();
+    if (st.length === 0) {
+      out.push(chalk.dim("    └ 閾値超過なし (全量を注入中)"));
+    } else {
+      for (const s of st) {
+        if (s.applied) {
+          out.push(
+            chalk.dim(`    └ ${s.label}: ${s.beforeTokens} → ${s.afterTokens} tokens に圧縮 (原文 ${s.original.length} 字は保持)`),
+          );
+        } else {
+          out.push(chalk.dim(`    └ ${s.label}: 圧縮見送り=原文使用 (${s.note ?? "縮小せず"})`));
+        }
+      }
+    }
+  } else {
+    out.push(chalk.dim("    入力圧縮モード: ") + chalk.dim("OFF (全量注入・超過時はAPIエラーで顕在化)"));
+  }
   out.push("");
 
   out.push(

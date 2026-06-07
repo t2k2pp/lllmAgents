@@ -111,6 +111,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/cost export", description: "使用量を jsonl/csv で出力 (例: /cost export csv all)", needsArg: true },
   { command: "/token", description: "/cost の alias (token / コスト可視化)" },
   { command: "/autorun", description: "Autorunモード切り替え（非破壊操作の自動許可）" },
+  { command: "/compress-input", description: "入力圧縮モード切替（project指示/メモが閾値超過時に意図保持圧縮、既定OFF）" },
   { command: "/parallel", description: "並列ツール実行数の確認・変更", needsArg: true },
   { command: "/status", description: "セッション状態を 1 画面で表示 (slot / context / capability / metrics / cost / tasks)" },
   // /second は /model second の alias として動作 (Phase 4)。 補完には alias のみ残す。

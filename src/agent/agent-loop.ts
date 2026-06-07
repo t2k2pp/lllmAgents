@@ -26,7 +26,10 @@ import {
   recommendTier,
   explainRecommendation,
 } from "./task-complexity.js";
-import { buildSystemPrompt, type SkillInfo, type LLMProfiles } from "./system-prompt.js";
+import { buildSystemPrompt, type SkillInfo, type LLMProfiles, type SystemPromptOverrides } from "./system-prompt.js";
+import { compressText } from "./compress-text.js";
+import { loadMemory } from "./memory.js";
+import { loadProjectInstructions } from "./project-context.js";
 import {
   createSession,
   saveSession,
@@ -239,6 +242,23 @@ export class AgentLoop {
   private evaluator: Evaluator;
   /** LLMプロファイル情報（システムプロンプト再構築用。/model description 等の更新時に差し替え可） */
   private llmProfiles?: LLMProfiles;
+  /** システムプロンプト再構築に必要な構築時パラメータ (opt-in 入力圧縮の再ビルド用に保持) */
+  private builtSkills?: SkillInfo[];
+  private builtHasSecondLLM = false;
+  private builtHasObsidian = false;
+  /** opt-in 入力圧縮モードの有効状態。 docs/input-compression-design.md */
+  private inputCompressionEnabled = false;
+  /** 直近の圧縮結果 (/context 可視化用)。 原文と圧縮済みテキストの両方を保持する */
+  private compressionState: Array<{
+    label: string;
+    original: string;
+    /** 圧縮済みテキスト (applied=true のときのみ)。 再ビルド時に LLM 再呼出なしで overrides を復元するため保持 */
+    compressedText?: string;
+    beforeTokens: number;
+    afterTokens: number;
+    applied: boolean;
+    note?: string;
+  }> = [];
   /** 自動チェックポイント (シャドウ Git)。 docs/checkpoint-and-smoke-design.md §4 */
   private checkpointManager: CheckpointManager;
 
@@ -266,6 +286,9 @@ export class AgentLoop {
     this.contextWindow = contextWindow;
     this.samplingParams = samplingParams;
     this.llmProfiles = llmProfiles;
+    this.builtSkills = skills;
+    this.builtHasSecondLLM = hasSecondLLM;
+    this.builtHasObsidian = hasObsidian;
     // Phase A-3 + A-5: 能力ティア解決 (model + ctx 窓 + config の override)
     this.capability = resolveCapability(model, contextWindow, this.getCapabilityOverride(model));
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, model)} (${this.capability.reason})`);
@@ -2126,9 +2149,107 @@ export class AgentLoop {
    */
   updateLLMProfiles(profiles: LLMProfiles, skills?: SkillInfo[], hasSecondLLM?: boolean, hasObsidian?: boolean): void {
     this.llmProfiles = profiles;
-    // Phase B-2: tier 反映。 base のみ更新、 動的部分は composer が次回 getMessages() で合成
-    const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian, profiles, this.capability.tier);
+    // 再ビルド用パラメータも更新 (圧縮 OFF 復帰や再圧縮で最新の skills/flags を使うため)
+    if (skills !== undefined) this.builtSkills = skills;
+    if (hasSecondLLM !== undefined) this.builtHasSecondLLM = hasSecondLLM;
+    if (hasObsidian !== undefined) this.builtHasObsidian = hasObsidian;
+    // Phase B-2: tier 反映。 base のみ更新、 動的部分は composer が次回 getMessages() で合成。
+    // 入力圧縮 ON 中はキャッシュ済みの圧縮済みテキストを overrides として渡し、 圧縮が裏で
+    // 解除される silent な不整合を防ぐ (project/メモは不変なので LLM 再呼出は不要)。
+    const systemPrompt = buildSystemPrompt(
+      skills, hasSecondLLM, hasObsidian, profiles, this.capability.tier, this.currentCompressionOverrides(),
+    );
     this.history.updateSystemPrompt(systemPrompt);
+  }
+
+  /** tier 別の圧縮発動閾値 (文字数)。 旧 truncate 値を踏襲。 docs/input-compression-design.md */
+  private inputCompressionLimits(): { project: number; memory: number } {
+    const t = this.capability.tier;
+    return {
+      project: t === "T3" ? 1500 : t === "T1" ? 4000 : 3000,
+      memory: t === "T3" ? 1000 : t === "T1" ? 3000 : 2000,
+    };
+  }
+
+  getInputCompressionEnabled(): boolean {
+    return this.inputCompressionEnabled;
+  }
+
+  /** /context 可視化用: 直近の圧縮結果 (原文込み)。 */
+  getCompressionState(): ReadonlyArray<{
+    label: string;
+    original: string;
+    beforeTokens: number;
+    afterTokens: number;
+    applied: boolean;
+    note?: string;
+  }> {
+    return this.compressionState;
+  }
+
+  /**
+   * opt-in 入力圧縮の適用/解除。 docs/input-compression-design.md
+   *
+   * enabled=true: project指示/メモが tier別閾値を超えていれば、 履歴を含まないクリーンな
+   *   単発呼び出しで意図保持圧縮し、 圧縮済みテキストで system prompt を再ビルドする。
+   *   サイズガードで縮まなければ原文を使う。 原文は compressionState に常に保持。
+   * enabled=false: 圧縮を解除し、 full な system prompt に戻す。
+   *
+   * 圧縮は LLM 呼び出しを伴うため非同期。 起動時/モデル切替時/トグル時に一度だけ呼ぶ
+   * (毎ターンは呼ばない — project/メモは不変)。
+   */
+  async applyInputCompression(enabled: boolean): Promise<void> {
+    this.inputCompressionEnabled = enabled;
+    this.compressionState = [];
+
+    if (!enabled) {
+      // 実行時に OFF へ切替えた場合は full に戻す
+      const full = buildSystemPrompt(
+        this.builtSkills, this.builtHasSecondLLM, this.builtHasObsidian, this.llmProfiles, this.capability.tier,
+      );
+      this.history.updateSystemPrompt(full);
+      return;
+    }
+
+    const limits = this.inputCompressionLimits();
+    const rawProject = loadProjectInstructions();
+    const rawMemory = loadMemory();
+    const overrides: SystemPromptOverrides = {};
+
+    if (rawProject && rawProject.length > limits.project) {
+      const r = await compressText(this.provider, this.model, "プロジェクト指示", rawProject);
+      if (r.applied) overrides.projectInstructions = r.text;
+      this.compressionState.push({ label: "プロジェクト指示", original: r.original, compressedText: r.applied ? r.text : undefined, beforeTokens: r.beforeTokens, afterTokens: r.afterTokens, applied: r.applied, note: r.note });
+    }
+    if (rawMemory && rawMemory.length > limits.memory) {
+      const r = await compressText(this.provider, this.model, "メモ", rawMemory);
+      if (r.applied) overrides.memory = r.text;
+      this.compressionState.push({ label: "メモ", original: r.original, compressedText: r.applied ? r.text : undefined, beforeTokens: r.beforeTokens, afterTokens: r.afterTokens, applied: r.applied, note: r.note });
+    }
+
+    if (overrides.projectInstructions !== undefined || overrides.memory !== undefined) {
+      const compressed = buildSystemPrompt(
+        this.builtSkills, this.builtHasSecondLLM, this.builtHasObsidian, this.llmProfiles, this.capability.tier, overrides,
+      );
+      this.history.updateSystemPrompt(compressed);
+    }
+  }
+
+  /**
+   * 現在キャッシュされている圧縮結果から system prompt overrides を復元する
+   * (LLM 再呼出なし)。 圧縮 ON 中に system prompt を再ビルドする経路
+   * (updateLLMProfiles / restoreSession) が、 圧縮状態を取りこぼして全量に
+   * 戻ってしまう silent な不整合を防ぐ。
+   */
+  private currentCompressionOverrides(): SystemPromptOverrides {
+    const ov: SystemPromptOverrides = {};
+    if (!this.inputCompressionEnabled) return ov;
+    for (const s of this.compressionState) {
+      if (!s.applied || s.compressedText === undefined) continue;
+      if (s.label === "プロジェクト指示") ov.projectInstructions = s.compressedText;
+      else if (s.label === "メモ") ov.memory = s.compressedText;
+    }
+    return ov;
   }
 
   restoreSession(sessionData: SessionData): void {
@@ -2141,8 +2262,12 @@ export class AgentLoop {
     // (同プロセス内 /resume での cross-contamination 阻止)。
     this.exitGoalSeek("abort");
     clearTodos();
-    // Phase B-2: tier 反映
-    const systemPrompt = buildSystemPrompt(undefined, undefined, undefined, this.llmProfiles, this.capability.tier);
+    // Phase B-2: tier 反映。 入力圧縮 ON 中はキャッシュ済み圧縮テキストを引き継ぐ
+    // (project/メモは作業フォルダ単位で session を跨いでも不変)。
+    const systemPrompt = buildSystemPrompt(
+      this.builtSkills, this.builtHasSecondLLM, this.builtHasObsidian, this.llmProfiles, this.capability.tier,
+      this.currentCompressionOverrides(),
+    );
     this.history = new MessageHistory(systemPrompt);
     // 戦略 ToDo Phase 1: 新しい MessageHistory にも composer を注入
     this.history.setSystemPromptComposer((base) => this.composeQuasiSystemPrompt(base));
