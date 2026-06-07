@@ -199,16 +199,20 @@ salvage 正規化ブロック（text 由来・thinking 由来の 2 つ）を**�
    - e2e（実モデル・ユーザー環境）: しりとりセッション再走で `second_llm_consult` が発火し、しりとりが複数手進む（ops に `source=thinking` 抽出 + 直後に tool 実行が続く）
    - 単体での担保限界（正直な記録）: この回帰は「ループ内のブロック順序」依存で、`normalizeToolCalls` 単体テストでは捕捉できない。AgentLoop の統合テスト harness が無いため、コード上の位置（salvage が実行ブロックの前にあること）とレビューで担保する。統合テスト新設の要否は三者レビューで判断。
 
-### 6.6 変更ファイル（§6 分）
+### 6.6 既知の限界（スコープ外）
+
+- **`finishReason === "length"` で thinking 途中切れ**: thinking に tool 呼び出しを書いている最中にトークン上限へ達した場合、salvage より前にある truncation/継続チェック（`agent-loop.ts` ~843、`isTruncatedByLength`）が先に `continue` するため salvage は発火しない。これは本変更が導入した挙動ではなく（truncation チェックは旧来から salvage より前にある）、対応はスコープを大きく広げるため今回は不問。`length` 切れ時は継続生成で全文が揃った次イテレーションで salvage に乗りうる。
+
+### 6.7 変更ファイル（§6 分）
 
 | ファイル | 変更 |
 |---|---|
-| `src/agent/agent-loop.ts` | salvage 正規化ブロック 2 つを実行ブロック前へ移動、coherence トリガに `toolCalls.length===0` ガード追加、旧位置のブロック削除 |
+| `src/agent/agent-loop.ts` | salvage 正規化ブロック 2 つを実行ブロック前へ移動、coherence トリガに `toolCalls.length===0` ガード追加（`hasRC` は false 固定で意図明示）、旧位置のブロック削除 |
 | `docs/tool-call-salvage-pipe-format-design.md` | 本 §6 追記、§3/§4 訂正 |
 
 ---
 
-## 5. 変更履歴
+## 変更履歴
 
 | 日付 | 内容 |
 |---|---|

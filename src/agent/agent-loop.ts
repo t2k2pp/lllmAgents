@@ -914,7 +914,10 @@ export class AgentLoop {
             source: "thinking",
             tier: this.capability.tier,
           });
-          // textContent は元から空 (このブロックの前提)。 toolCalls だけ追加して実行ルートへ。
+          // toolCalls が空の場合 (textContent の有無は問わない) に thinking 内のツール呼び出しを
+          // 救出する。 textContent は通常空だが、 上の text salvage がツールを抽出できなかった
+          // (normalized.toolCalls.length===0) 場合は非空のまま到達しうる。 toolCalls を追加すれば
+          // 実行ブロックの addAssistantMessage(textContent, toolCalls, ...) が textContent も正しく永続化する。
           toolCalls.push(...normalized.toolCalls);
         }
       }
@@ -938,7 +941,10 @@ export class AgentLoop {
         // 出さない。 さもないと続行意図のツール呼び出しを「完了ズレ」 と誤判定して drop し continue
         // してしまう (2026-06-07: salvage 移動に伴う取りこぼし防止)。
         if (toolCalls.length === 0 && isStandardOrUp && coherenceGateRetries < MAX_NEW_GATE_RETRIES) {
-          const hasRC = toolCalls.some((tc) => tc.function.name === "response_complete");
+          // この時点で toolCalls は空 (上の length===0 ガード) なので response_complete は無い。
+          // hasRC を toolCalls.some(...) で計算すると常に false の死蔵コードになり、 ガードを
+          // 変えた未来のメンテナがロジックを誤解する恐れがあるため false 固定で意図を明示する。
+          const hasRC = false;
           const coherence = checkCoherence(thinkingContent, textContent, hasRC);
           if (coherence.mismatch) {
             coherenceGateRetries++;
