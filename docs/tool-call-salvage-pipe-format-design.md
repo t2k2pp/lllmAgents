@@ -125,15 +125,17 @@ Gemma 12B でのじゃんけんが未完了になった。実ログ解析の結�
 
 **§4-3 e2e の実行手順（ユーザー向け）**: gemma-4-12B で「セカンドLLMとじゃんけんして勝敗を教えて」を再走し、(a) コンソールに `[tool-format] pipe-call 形式から 1 件…抽出`、(b) ops ログ（`tool-format` カテゴリ）に `format=pipe-call`、(c) `second_llm_consult` 発火と勝敗テキスト、を確認する。
 
+> **検証対象の切り分け（評価者レビュー指摘）**: この §4-3 手順は **pipe-call 形式の抽出**（gemma 固有の `<|tool|>call:` 出力）の確認。§6 の**実行位置バグ**（抽出物が実行経路に乗るか）の確認は別物で、§6.5 の Qwen3.6 しりとり再走（露呈セッション mq34du2c と同条件）が対応する。前者は「抽出器」、後者は「配線」のテストであり、両方が必要。
+
 **ストリーミング境界の懸念について**: `normalizeToolCalls` は `textContent += chunk.text`（`agent-loop.ts:683`）でストリームを**全量組み立てた後**（`for await` ループ完了後、同 1079 行）に走る。`<|tool|>` が chunk 境界をまたいでも組み立て済み全文に対して照合するため、chunk 分割の影響は受けない。
 
 ### 4.2 観測性
 
 `normalizeToolCalls` 発火時、コンソール（`chalk.dim`）に加え **ops-logger に構造化記録**（`tool-format` カテゴリ、`format` / `toolCount` / `toolNames` / `source` / `tier`）を残す。非TTY・`--background` でも JSONL で `jq` 可能。誤発火頻度・発火元の事後調査に使う（全形式共通）。
 
-### 4.3 フォローアップ（本変更の範囲外・将来）
+### 4.3 フォローアップ
 
-- **agent-loop 統合テスト**: `textContent = cleanedText; toolCalls.push(...)`（`agent-loop.ts:1084-1086`）経路の mock ベース統合テスト。現状 AgentLoop の test harness が無く新設コストが高いため見送り。該当コード自体は 2 行で、normalizer 単体＋ops ログで実質カバー
+- **agent-loop 統合テスト**: 初版では「AgentLoop の test harness が無く新設コストが高いため見送り。該当コードは 2 行で normalizer 単体＋ops ログで実質カバー」と書いていたが、**これは誤りで、まさにその未テスト領域に §6 の実行位置バグが潜んでいた**。ops ログは事後証跡（実行されなくても抽出時点で記録される）であり事前の回帰防止にはならない。§6 修正に伴い `tests/agent/agent-loop-salvage.test.ts` を新設（mock provider で thinking/text にツール呼び出しを含む応答を流し、tool が実行されることを assert）。詳細は §6.5。
 - **unknownTool シグナル**: §2.3 の拡張点（拾えたが下流で未知ツール弾き、を normalizer に遡らせる）
 
 ---
@@ -198,8 +200,10 @@ salvage 正規化ブロック（text 由来・thinking 由来の 2 つ）を**�
 ### 6.5 追加の成功基準
 
 5. **抽出物の実行到達（本バグの回帰防止）**: salvage で抽出した `toolCalls` が、native tool 呼び出しと同じ実行ブロックに到達し実行される。空応答経路・最終応答経路に落ちない。
-   - e2e（実モデル・ユーザー環境）: しりとりセッション再走で `second_llm_consult` が発火し、しりとりが複数手進む（ops に `source=thinking` 抽出 + 直後に tool 実行が続く）
-   - 単体での担保限界（正直な記録）: この回帰は「ループ内のブロック順序」依存で、`normalizeToolCalls` 単体テストでは捕捉できない。AgentLoop の統合テスト harness が無いため、コード上の位置（salvage が実行ブロックの前にあること）とレビューで担保する。統合テスト新設の要否は三者レビューで判断。
+   - ✅ **統合テスト新設済み**: `tests/agent/agent-loop-salvage.test.ts`（4 tests）。mock provider で「thinking に ChatML / Anthropic XML、本文に ChatML のツール呼び出しを含む応答」を流し、probe tool が実行されることを assert（probe の execute が `loop.abort()` を呼び次イテレーション冒頭で決定的に終了）。native tool_call チャンクの実行を健全性確認として併設。
+     - **逆検証で本物の回帰ガードと確認**: 旧バグ版 `agent-loop.ts`（9f5ec2f）に差し替えると salvage 3 ケースが赤・native 1 ケースが緑（= 抽出器でなく配線の欠陥を正しく捕捉）。修正版では 4/4 緑。
+   - e2e（実モデル・ユーザー環境、任意）: Qwen3.6 でしりとりセッション再走 → `second_llm_consult` が発火し複数手進む（ops に `source=thinking` 抽出 + 直後に tool 実行が続く）。露呈セッション mq34du2c と同条件。
+   - **検証境界の教訓（評価者レビュー §N-3）**: salvage のような「変換 → 実行経路に乗せる」機能は、**変換器**（`normalizeToolCalls` = 単体テストで十分）と**配線**（抽出物が実行ブロックに到達する = ループ順序依存で単体不能 → 統合テストが要る）を**別の検証境界**として扱う。今回の盲点は「変換器が動く前提でのみ単体テストを書き、配線を検証しなかった」こと。今後 agent-loop のループ順序を触る変更では「配線テストはあるか」を必ず問う。
 
 ### 6.6 既知の限界（スコープ外）
 
@@ -210,6 +214,7 @@ salvage 正規化ブロック（text 由来・thinking 由来の 2 つ）を**�
 | ファイル | 変更 |
 |---|---|
 | `src/agent/agent-loop.ts` | salvage 正規化ブロック 2 つを実行ブロック前へ移動、coherence トリガに `toolCalls.length===0` ガード追加（`hasRC` は false 固定で意図明示）、旧位置のブロック削除 |
+| `tests/agent/agent-loop-salvage.test.ts` | **新規**。salvage 抽出物の実行到達を検証する統合テスト（§6.5） |
 | `docs/tool-call-salvage-pipe-format-design.md` | 本 §6 追記、§3/§4 訂正 |
 
 ---
@@ -221,3 +226,4 @@ salvage 正規化ブロック（text 由来・thinking 由来の 2 つ）を**�
 | 2026-06-07 | 初版（Claude Opus 4.8 + user 議論）。既存 normalizeToolCalls への pipe-call 形式追加として設計 |
 | 2026-06-07 | 引き継ぎ三者レビュー（設計者／開発者／評価者の各サブエージェント、引き継ぎ拒否条件のヒアリング形式）を実施し採用分を反映。主な修正: 文字列認識コアース（値内 `,:` 誤変換バグ）、シングルクオートのエスケープ／`}` 誤切断バグ、scanBalancedBrace のクオート種別追跡、ops-logger 構造化ログ、検証ステータスの明文化（e2e はユーザー環境送り）、roadmap §4 の tier 乖離修正 |
 | 2026-06-07 | §6 追記: **実行位置バグ**（しりとりセッション mq34du2c で露呈）。salvage で抽出した tool 呼び出しが実行ブロックの後に置かれていたため一度も実行されず空応答でターン終了していた。§3「agent-loop 変更不要」の誤前提を訂正し、salvage を実行ブロック前へ移動＋coherence ガード追加。全 salvage 形式に共通の欠陥で、e2e 未実施（§4.1 基準3）のため発覚が遅れた |
+| 2026-06-07 | §6 引き継ぎ三者レビュー反映。設計者: 死蔵 `hasRC` を false 固定／コメント訂正／設計書整理。開発者: coherence ガードが旧コードの潜在バグ（native tool 呼び出しの coherence 取りこぼし）も塞ぐことを明記。評価者: **統合テスト新設**（`agent-loop-salvage.test.ts`、旧コードで赤・修正版で緑を逆検証）、§4.3「ops で実質カバー」の過大主張を訂正、検証境界の教訓（変換器 vs 配線）を §6.5 に追記 |
