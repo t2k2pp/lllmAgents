@@ -77,8 +77,7 @@ export function buildAcceptanceRules(tier?: Tier): string {
 
 ## 重要
 思考しただけで実行に移らない (= 計画蒸発) は禁止。 思考の結果は必ず \`todo_append\` で commit する。
-**ただし explore (会話・遊び・一発回答・調査回答) は例外** — ツールを呼ばず 1-3 文で即答してよい。 これは計画蒸発ではなく、 成果物が無いタスクの正しい完了形。 「じゃんけんしよう」 に \`todo_append\` を作るのは過剰。
-旧 \`todo_write\` は deprecated — 上記 3 つの分離 tool を使う。`;
+**ただし explore (会話・遊び・一発回答・調査回答) は例外** — ツールを呼ばず 1-3 文で即答してよい。 これは計画蒸発ではなく、 成果物が無いタスクの正しい完了形。 「じゃんけんしよう」 に \`todo_append\` を作るのは過剰。`;
   }
   return `# 戦略 ToDo / Acceptance Checklist [standard / production で必須]
 
@@ -88,7 +87,7 @@ export function buildAcceptanceRules(tier?: Tier): string {
 - 戦略を agent / harness / user で共有可能にする (system prompt に常時表示)
 - 完了条件として使い、 全 ✓ で response_complete を許可する
 
-## ツール (旧 \`todo_write\` は deprecated)
+## ツール
 - \`todo_append(items)\`: 戦略の commit / 項目追加。 例: \`{items: [{content: "32x32 描画順を決める", status: "pending"}]}\`
 - \`todo_mark(id, status)\`: 状態だけ変える。 status は pending / in_progress / completed / **blocked**
 - \`todo_delete(ids)\`: 不要項目の削除。 戦略破棄したい時は delete + 新 append の 2 段
@@ -144,20 +143,11 @@ export function buildVerificationRules(tier?: Tier): string {
 - 同じ build を edit ごとに連発する (まとめて 1 回)
 - 確認用に起動したサーバーを止めずに次へ進む`;
   }
+  // 詳細 (レジスター別の検証深度表 / GUI 系の確認 / 細切れ build 回避 / PID 後始末) は
+  // bash・file_write 初回呼出時に tool-guides の `verification` ガイドとして注入される。
+  // 常駐はツール呼出前に必要な原則だけに絞る (段階的開示)。
   return `# 検証 [必須]
-コード / 成果物を生成したら必ず検証 (構文チェック → 動作確認 → レジスター応相当のテスト)。 詳細な検証ルール表は bash / file_write 初回呼出時にツール結果末尾へガイドが注入される (段階的開示)。
-- standard 以上では「ファイル存在 = 完了」 とは絶対に判定しない
-- HTML / Three.js のような GUI 系では構文チェックだけでは不十分。 file_read で主要要素 (色指定 / 配置 / 状態機械 / イベント) を確認
-- 仕様ファイルがあれば、 仕様キーワードを成果物が含むか grep で確認
-- production レジスターでは可能なら browser_screenshot で実際の表示を確認
-
-# 検証粒度の最適化 [必須] — 細切れ build は反復浪費の主因
-- **複数の file_edit を行ってから 1 回 build** が原則。 1 edit ごとに \`npm run build && PORT=... node ...\` のような重い検証を回さない (観測ログで同一 build を 11 連発した事例あり)
-- 軽い syntax check (\`node --check\` / \`python -m py_compile\` / \`tsc --noEmit\` 等) で edit 中の暫定確認、 build/run はまとまった単位で
-- ホットリロード可能なサーバーは「再起動なし」 で確認できないか先に検討
-- 検証用プロセスを起動したら、 用が済んだら止める。 起動 → 確認 → kill のサイクルで PID を放置しない
-
-検証失敗 → 修正 → 再検証を通るまで繰り返す。 検証成功の事実を完了報告に含める。`;
+コード / 成果物を生成したら必ず検証する (構文チェック → 動作確認 → レジスター相当のテスト)。 standard 以上では「ファイル存在 = 完了」 とは絶対に判定しない。 検証失敗 → 修正 → 再検証を通るまで繰り返し、 検証成功の事実を完了報告に含める。 詳細な検証ルール (レジスター別の深さ / GUI 系の確認 / 細切れ build 回避 / 検証用プロセスの後始末) は bash・file_write 初回使用時にガイドが注入される。`;
 }
 
 /** 同種失敗 2 回 → 別アプローチ */
@@ -175,16 +165,13 @@ export function buildEscalationRules(tier?: Tier): string {
 2 回連続で同じエラーが出たら、 ask_user で人間に状況を伝える。
 回帰 (前は動いていた成果物が壊れた) と判断したら、 前進修正を重ねる前に、 チェックポイントが有効なら \`/checkpoint list\` → \`/checkpoint restore <n>\` で直前の動く版へ戻すことをユーザーに提案する。`;
   }
+  // ツール別の復旧例は各ツール description / (T3 は) failure-guide でも補われるが、 T2 には
+  // failure-guide 注入が無いため、 最頻出の file_edit 失敗ループだけは具体例を常駐に残す。
   return `# 失敗時のエスカレーション [必須]
-同じツール × 同じ引数で 2 回失敗したら、 3 回目を試す前に **必ず** 別アプローチに切替える:
-- file_read で File not found → エラーに同梱の候補 / 親dir ls を参考に。 同じパスで再試行しない
-- file_edit で old_string not found → エラーに同梱されたファイル現状を読み、 (a) 一意な部分文字列で再試行 / (b) 諦めて file_write で全体書き直し
-- glob で hit 0 → エラーに同梱の親dir / 拡張子ヒントから pattern を変える、 または bash の find に切替
-- bash で文字化け / 異常 exitCode → 別コマンドや別経路を試す。 同じコマンドを繰り返さない
-3 回連続で同種失敗が続いたら状況を整理 (壁ドンループの自覚)。 メイン側はユーザーに ask_user で共有、 サブ側は整理して return しメインに対話を委ねる。
+同じツール × 同じ引数で 2 回失敗したら、 3 回目を試す前に **必ず** 別アプローチに切替える (エラー文の指示に従い引数を変えるか、 別ツールへ)。 例: file_edit "found N times" → replace_all=true か前後を含め一意化 / file_edit "not found" → file_read で現状確認 or file_write で全体書き直し。 3 回連続で同種失敗なら状況を整理 (壁ドンループの自覚) し、 メインは ask_user で共有、 サブは整理して return する。
 
 # 回帰したら「戻る」 を選択肢に [必須]
-前に動いていた成果物が壊れた / 同種の修正失敗が続く ときは、 闇雲に前進修正を重ねない (= 沼の入口)。 作業フォルダの版管理 (チェックポイント) が **有効** なら、 \`/checkpoint list\` で直前の動く版を確認し、 \`/checkpoint restore <n>\` で戻すことをユーザーに提案する (実際の復元はユーザーが実行)。 **無効** なら、 アプリ/ゲーム作成のような壊れやすいタスクの着手時に \`/checkpoint on\` を提案して安全網を張ってから進める。`;
+前に動いていた成果物が壊れた / 同種の修正失敗が続く ときは、 闇雲に前進修正を重ねない (= 沼の入口)。 チェックポイントが有効なら \`/checkpoint list\` → \`/checkpoint restore <n>\` で直前の動く版へ戻すことを提案する (復元はユーザー実行)。 無効なら壊れやすいタスク着手時に \`/checkpoint on\` を提案して安全網を張る。`;
 }
 
 /** 想定外信号 (ユーザー拒否 / 委任失敗 / 予期せぬ結果) への基本姿勢 */

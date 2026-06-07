@@ -23,7 +23,7 @@ export const responseCompleteTool: ToolHandler = {
         "ユーザーの依頼を完了した、または追加作業が不要と判断した場合に呼ぶ。" +
         "自己点検メッセージ（[自己点検 N/3]）への応答として、作業完了を宣言するためのツール。" +
         "これを呼ばずテキストのみで返すと、ハーネスは最大3回まで自己点検を要求する。" +
-        "[ゲート] todo_write で立てた Acceptance Checklist に未完了項目があると警告を返す。 " +
+        "[ゲート] todo_append で立てた Acceptance Checklist に未完了項目があると警告を返す。 " +
         "force=true で強制完了可能だがその場合「未完了で完了報告した」 ことが ユーザーへの summary に反映される。",
       parameters: {
         type: "object",
@@ -55,7 +55,7 @@ export const responseCompleteTool: ToolHandler = {
         success: false,
         output: "",
         error:
-          `[Acceptance Checklist 未消化] todo_write で立てた ${todos.length} 項目中 ${open.length} 項目が未完了です。\n` +
+          `[Acceptance Checklist 未消化] todo_append で立てた ${todos.length} 項目中 ${open.length} 項目が未完了です。\n` +
           `${formatTodos()}\n` +
           `\n[次の手] (1) 残項目を実装/検証して todo を completed にする  (2) 部分完成で報告するなら force=true で再呼び出し (理由を summary に明記)。\n` +
           `[原則] 「ファイル存在 = 完了」 のような薄い完了報告は禁止。 standard 以上のレジスターでは Acceptance Criteria を満たしてから完了。`,

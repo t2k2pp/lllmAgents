@@ -60,6 +60,12 @@ delegate メッセージには次の 4 点を必ず含める:
 - production では browser_screenshot で実際の表示を確認するか、 不可なら「動作確認できない」 と完了報告に明記
 - 「ファイル存在 = 完了」 とは絶対に判定しない
 
+**検証粒度の最適化 — 細切れ build は反復浪費の主因**:
+- 複数の file_edit を行ってから 1 回 build が原則。 1 edit ごとに \`npm run build && node ...\` のような重い検証を回さない
+- 軽い syntax check (\`node --check\` / \`python -m py_compile\` / \`tsc --noEmit\` 等) で edit 中の暫定確認、 build/run はまとまった単位で
+- ホットリロード可能なサーバーは「再起動なし」 で確認できないか先に検討
+- 検証用に起動したプロセスは用が済んだら kill する。 起動 → 確認 → kill で PID を放置しない
+
 検証失敗 → 修正 → 再検証を通るまで繰り返す。 検証成功の事実を完了報告に含める。`,
 
   scopeStrict: `[ガイド: スコープ厳守]
