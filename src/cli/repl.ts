@@ -3128,7 +3128,9 @@ export class REPL {
             );
             break;
           }
-          process.stdout.write(formatContextDetail(this.agent, this.skillRegistry, section));
+          process.stdout.write(
+            formatContextDetail(this.agent, this.skillRegistry, section, process.cwd(), args[1]?.trim()),
+          );
           break;
         }
         // Claude Code 互換のカテゴリ別内訳: System prompt / Memory files / Skills / System tools / Messages / Free space

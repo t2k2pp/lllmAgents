@@ -289,6 +289,31 @@ describe("formatContextDetail", () => {
     expect(out).toContain("file_read");
   });
 
+  it("tools <name>: 指定ツールの parameters スキーマ全文を送信形のJSONで出す", () => {
+    const agent = makeAgent({
+      systemPrompt: "core",
+      toolDefs: [{ name: "bash" }, { name: "file_read" }],
+    });
+    const out = formatContextDetail(agent, undefined, "tools", process.cwd(), "file_read");
+    expect(out).toContain("file_read");
+    expect(out).toContain("body.tools");
+    // parameters スキーマ (型・required・引数説明) が JSON として含まれる
+    expect(out).toContain('"parameters"');
+    expect(out).toContain('"properties"');
+    expect(out).toContain('"x"'); // makeAgent が regist(x: string) で作る引数
+    expect(out).toContain("description for testing context breakdown");
+  });
+
+  it("tools <name>: 未知ツールは登録一覧を返す", () => {
+    const agent = makeAgent({
+      systemPrompt: "core",
+      toolDefs: [{ name: "bash" }],
+    });
+    const out = formatContextDetail(agent, undefined, "tools", process.cwd(), "nope");
+    expect(out).toContain("見つかりません");
+    expect(out).toContain("bash");
+  });
+
   it("messages: メッセージ単位の役割とプレビューが出る", () => {
     const agent = makeAgent({
       systemPrompt: "core",

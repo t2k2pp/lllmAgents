@@ -505,7 +505,7 @@ function detailSystem(agent: AgentLoop): string {
     } else {
       // header 行自体は body 先頭に含まれるので、 header があれば 2 行目以降が本文
       const bodyText = s.header ? s.body.split("\n").slice(1).join("\n") : s.body;
-      pushBody(out, bodyText, 4000);
+      pushBody(out, bodyText, 16000);
     }
     out.push("");
   }
@@ -526,7 +526,7 @@ function detailMemory(agent: AgentLoop, cwd: string): string {
     `    ${chalk.bold("# プロジェクト指示")}  ${chalk.dim(`~${formatTokens(estimateTokens(projectBody))} tokens`)}`,
   );
   if (projectBody) {
-    pushBody(out, projectBody.split("\n").slice(1).join("\n"), 4000);
+    pushBody(out, projectBody.split("\n").slice(1).join("\n"), 16000);
   } else {
     out.push(chalk.dim("    │ (なし)"));
   }
@@ -536,7 +536,7 @@ function detailMemory(agent: AgentLoop, cwd: string): string {
     `    ${chalk.bold("# メモ (auto-memory)")}  ${chalk.dim(`~${formatTokens(estimateTokens(memoryBody))} tokens`)}`,
   );
   if (memoryBody) {
-    pushBody(out, memoryBody.split("\n").slice(1).join("\n"), 4000);
+    pushBody(out, memoryBody.split("\n").slice(1).join("\n"), 16000);
   } else {
     out.push(chalk.dim("    │ (なし)"));
   }
@@ -595,11 +595,40 @@ function detailSkills(skillRegistry: SkillRegistry | undefined): string {
   return out.join("\n");
 }
 
-function detailTools(agent: AgentLoop): string {
+function detailTools(agent: AgentLoop, toolName?: string): string {
   const out: string[] = [];
+  const defs = agent.getToolRegistry().getDefinitions();
+
+  // /context tools <name> — 指定ツールの定義を「body.tools に送られる JSON そのもの」 で全文ダンプ。
+  // description + parameters スキーマ (各引数の型・説明・required) を隠さず見せ、 監査を可能にする。
+  if (toolName) {
+    out.push("");
+    out.push(chalk.bold(`  Context detail: System tools — ${toolName}`));
+    const lower = toolName.toLowerCase();
+    const def =
+      defs.find((d) => d.function.name === toolName) ??
+      defs.find((d) => d.function.name.toLowerCase() === lower) ??
+      defs.find((d) => d.function.name.toLowerCase().includes(lower));
+    if (!def) {
+      out.push(chalk.yellow(`    ツール "${toolName}" が見つかりません。`));
+      out.push(chalk.dim(`    登録ツール: ${defs.map((d) => d.function.name).join(", ")}`));
+      out.push("");
+      return out.join("\n");
+    }
+    const json = JSON.stringify(def, null, 2);
+    out.push(
+      chalk.dim(
+        `    API リクエストの body.tools[] に送られる定義そのもの (~${formatTokens(estimateTokens(json))} tokens)`,
+      ),
+    );
+    out.push("");
+    for (const line of json.split("\n")) out.push(chalk.dim("    │ ") + line);
+    out.push("");
+    return out.join("\n");
+  }
+
   out.push("");
   out.push(chalk.bold("  Context detail: System tools"));
-  const defs = agent.getToolRegistry().getDefinitions();
   if (defs.length === 0) {
     out.push(chalk.dim("    (ツールなし)"));
     out.push("");
@@ -615,6 +644,12 @@ function detailTools(agent: AgentLoop): string {
   const total = withTokens.reduce((acc, t) => acc + t.tokens, 0);
   out.push(
     chalk.dim(`    ${withTokens.length} 個のツール定義 (JSON) ~${formatTokens(total)} tokens、 トークン降順`),
+  );
+  out.push(
+    chalk.dim(`    全文 (description + parameters スキーマ) は /context tools <name> で確認`),
+  );
+  out.push(
+    chalk.dim(`    ※ plan mode / discord・slack 時は実際に送られるのはこの部分集合 (フィルタ後)`),
   );
   out.push("");
   for (const t of withTokens) {
@@ -676,6 +711,7 @@ export function formatContextDetail(
   skillRegistry: SkillRegistry | undefined,
   section: string,
   cwd: string = process.cwd(),
+  detailArg?: string,
 ): string {
   switch (section) {
     case "system":
@@ -685,7 +721,7 @@ export function formatContextDetail(
     case "skills":
       return detailSkills(skillRegistry);
     case "tools":
-      return detailTools(agent);
+      return detailTools(agent, detailArg);
     case "messages":
       return detailMessages(agent);
     default:
