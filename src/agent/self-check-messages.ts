@@ -67,8 +67,10 @@ export function formatSelfCheck(
   const truncated = rephrased.length > 200 ? rephrased.slice(0, 200) + "..." : rephrased;
   const action =
     actionHint ??
-    "次の 1 手はツール呼出のみ: (a) 完了済みなら response_complete を呼ぶ (b) 作業継続なら実装ツール (file_write / file_edit / bash 等) を呼ぶ。\n" +
-      "  ・テキスト応答単独はハーネスが作業継続と認識せず、 再度自己点検を要求する (上限到達でターン強制終了)";
+    "次の 1 手は、 依頼にふさわしい形で可視的な結果を出すこと:\n" +
+      "  (a) 答えが既に出ているなら、 そのまま回答を出して完了する (メインは response_complete。 答えだけで済む依頼はテキスト回答でよい)\n" +
+      "  (b) まだ作業が要るなら、 該当ツール (file_write / file_edit / bash / mcp__... 等) を呼ぶ\n" +
+      "  ・中身の無い promise テキスト (「了解しました」「実装します」 等) *だけ* では進捗と認識しない (上限到達でターン終了)。 中身のある回答や実行は進捗とみなす";
   return (
     `[自己点検 ${round}/${max}] 今の応答を確認してください:\n` +
     `  ・依頼「${truncated}」 に応えていますか?\n` +

@@ -1335,31 +1335,44 @@ export class AgentLoop {
           // 旧 nudge は「ツール呼べ」 という圧力で、 弱モデルが戦略を立てる前に反応的に動く原因だった。
           // 新 nudge: 思考の deliberation を todo_append で commit させ、 戦略 → 実行 のリズムへ誘導する。
           // 「思考 → ToDo 化 → Action」 = ジャンプ前のしゃがみ込み。
+          // 2026-06-07: 形状中立化 (docs/reactive-intervention-coherence-design.md §4.2)。
+          // 旧 nudge は「思考を ToDo に commit せよ」 と機構を指示し、 答えが思考にあるのに
+          // todo を作る矛盾を生んでいた (explore タスクと衝突)。 新 nudge は目的を再提示し、
+          // 「答えがあるなら出力、 作業が要るなら実行」 と形をモデルの register 判断に委ねる。
           const hasThinking = thinkingContent.length > 0;
           this.history.addUserMessage(
-            `[ハーネス通知] 直前の応答で thinking は記録されましたが、 実行に移っていません。\n\n` +
-            `# 期待される次の手 (思考 → ToDo → 実行 のリズム)\n` +
-            `あなたの思考から **戦略を ToDo に commit** してください:\n` +
-            `- 戦略がまだ deliberation 中なら: \`todo_append\` で「次に何を検討するか」 を 1-2 項目追加\n` +
-            `- 戦略が決まったなら: \`todo_append\` で具体的な計画 (3-5 項目) を書き出す\n` +
-            `- 既存の todo に従って進めるなら: 該当の実装 tool (file_write / file_edit / bash / mcp__... 等) を直接呼ぶ\n` +
-            `- 行き詰まりなら: \`todo_mark(id, "blocked")\` で自己宣言してから \`ask_user\` で相談\n\n` +
+            `[ハーネス通知] thinking は記録されましたが、 ユーザーに見える結果 (テキスト回答 / ツール呼出) がまだありません。\n\n` +
+            `# 次の手 — 依頼にふさわしい形で可視的な結果を出す\n` +
             (hasThinking
-              ? `あなたの前回の思考は上の assistant メッセージに保全しました。 再思考は不要、 結論を ToDo に書き出すか実行に移してください。\n\n`
+              ? `- 思考の中で結論や答えが出ているなら → **それを回答テキストとして出力**する (答えだけで済む依頼はそれで完了。 必要なら response_complete)\n`
+              : `- まず依頼への答え・方針をテキストで示す\n`) +
+            `- まだ作業 (ファイル作成・検証等) が要るなら → \`todo_append\` で計画を立てる、 もしくは実装ツール (file_write / file_edit / bash / mcp__... 等) を呼ぶ\n` +
+            `- 行き詰まりなら → \`ask_user\` で相談する\n\n` +
+            (hasThinking
+              ? `前回の思考は保全済み。 再思考は不要 — 結論をそのまま出力してください。\n\n`
               : "") +
-            `# 元依頼 (北極星)\n${nudgeIntent}\n\n` +
-            `単なる promise テキスト (「了解しました」「実装します」 等) や thinking-only ではハーネスは進捗と認識しません。`,
+            `# 元依頼\n${nudgeIntent}\n\n` +
+            `中身の無い promise テキスト (「了解しました」「実装します」 等) *だけ* は進捗と認識しません (中身のある回答や実行は進捗です)。`,
             { ephemeral: true },
           );
           continue;
         }
 
+        // 2026-06-07: honest failure (docs/reactive-intervention-coherence-design.md §4.3)。
+        // 捏造しない (思考を scrape して疑似回答にしない) / 隠蔽しない (無言終了しない) /
+        // 新規 LLM 呼び出しもしない (壊れた状態での追加呼出は無意味)。 何回試みて何が
+        // 起きたかを正直に・具体的に報告して止める。 思考は llmLogger に保全済み。
         const hasThinking = thinkingContent.length > 0 || textContent.includes("<think>");
-        const hint = hasThinking
-          ? "（モデルは考えましたが、応答が生成されませんでした。プロンプトを変えて再度お試しください）"
-          : "（モデルから空のレスポンスが返されました。再度お試しください）";
-        console.log(chalk.yellow(`\n  ${hint}`));
-        // 空メッセージは履歴に入れない
+        const reason = hasThinking
+          ? `モデルは ${thinkingContent.length}字 考えましたが、 ${emptyResponseRetries} 回試みても ユーザー向けの出力 (テキスト/ツール) を生成できませんでした`
+          : `モデルから ${emptyResponseRetries} 回連続で空の応答が返りました`;
+        console.log(chalk.yellow(
+          `\n  ⚠ 結果を出力できませんでした: ${reason}。\n` +
+          `    考えられる原因: コンテキスト長の超過 / 出力フォーマットの乱れ。\n` +
+          `    対処: もう一度依頼する / 入力を短くする / 別のモデルに切り替える。` +
+          (hasThinking ? `\n    （モデルの思考内容は LLM ログに保全されています）` : ""),
+        ));
+        // 偽の回答は履歴に入れない (捏造しない)。 honest failure は上記でユーザーに提示済み。
         this.purgeEphemeralAtSpanEnd("empty_response_giveup");
         return;
       }

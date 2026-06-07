@@ -67,3 +67,25 @@ describe("formatSelfCheck", () => {
     expect(msg).toContain("a".repeat(200));
   });
 });
+
+describe("formatSelfCheck 既定 actionHint の形状中立性 (reactive-intervention-coherence §4.1)", () => {
+  it("「テキスト応答単独は進捗でない」という形状バイアス文を含まない", () => {
+    const msg = formatSelfCheck(1, 3, "1ドル円の為替は?", "出力がありません。");
+    // 旧文面の形状バイアスが残っていないこと
+    expect(msg).not.toContain("ツール呼出のみ");
+    expect(msg).not.toContain("テキスト応答単独はハーネスが作業継続と認識せず");
+  });
+
+  it("答えがあるならテキスト回答での完了を正当な道として提示する", () => {
+    const msg = formatSelfCheck(1, 3, "1ドル円の為替は?", "出力がありません。");
+    expect(msg).toContain("答え"); // 「答えが既に出ているなら…回答を出して完了」
+    expect(msg).toMatch(/テキスト回答|回答を出して完了/);
+  });
+
+  it("promise だけ (中身の無い宣言) は依然として進捗と認めない (drawDot 非回帰)", () => {
+    const msg = formatSelfCheck(1, 3, "実装して", "出力がありません。");
+    expect(msg).toContain("promise");
+    // 「中身の無い promise *だけ* では進捗と認識しない」の趣旨が残ること
+    expect(msg).toMatch(/だけ.*進捗と認識しない|進捗と認識しない/);
+  });
+});
