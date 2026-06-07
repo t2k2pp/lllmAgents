@@ -862,6 +862,63 @@ export class AgentLoop {
         continue;
       }
 
+      // Phase D-1: 非標準形式 (Mistral [TOOL_CALLS] / ChatML <tool_call> / Anthropic XML /
+      // ReAct Action: / Plain JSON / pipe-call) の tool 呼び出しを fallback として正規化する。
+      // 2026-05-13: 当初は T2/T3 限定だったが、 gpt-5.x reasoning モードが thinking/text に
+      // <tool_call><function=...><parameter=...> を書き出す事例 (2026-05-12 観測) があるため
+      // T1 でも有効化。 toolCalls.length === 0 のときのみ動くので native function calling と競合しない。
+      //
+      // 2026-06-07: この正規化を「ツール実行ブロックより前」 に移動 (バグ修正)。 旧版は実行
+      // ブロック (下方の `if (toolCalls.length > 0)`) の *後* に置かれていたため、 thinking/text
+      // から救出した tool 呼び出しが ops ログには記録されるのに *一度も実行されず* に空応答として
+      // ターンが終わる致命的欠陥があった (session mq34du2c: Qwen3.6 が reasoning_content に
+      // second_llm_consult を正しく書いたのにしりとりが一手も進まなかった事例)。 抽出した
+      // toolCalls を flush / coherence / 実行 の手前で確定させ、 既存の実行ルートに合流させる。
+      // docs/tool-call-salvage-pipe-format-design.md §6 参照。
+      if (toolCalls.length === 0 && textContent.trim().length > 0) {
+        const normalized = normalizeToolCalls(textContent);
+        if (normalized.toolCalls.length > 0) {
+          console.log(chalk.dim(
+            `  [tool-format] ${normalized.format} 形式から ${normalized.toolCalls.length} 件の tool 呼び出しを抽出 (tier=${this.capability.tier})`,
+          ));
+          // 非TTY / --background では console が見えないため、 ops-logger に構造化記録を残す
+          // (誤発火・発火頻度の事後調査用。 全形式共通)。
+          getOpsLogger().info("tool-format", "テキストから tool 呼び出しを正規化抽出", {
+            format: normalized.format,
+            toolCount: normalized.toolCalls.length,
+            toolNames: normalized.toolCalls.map((tc) => tc.function.name),
+            source: "text",
+            tier: this.capability.tier,
+          });
+          // 既存の textContent / toolCalls を上書きして tool 実行ルートへ流す
+          textContent = normalized.cleanedText;
+          toolCalls.push(...normalized.toolCalls);
+        }
+      }
+
+      // Phase 2: 思考保全 — text/toolCalls がともに空でも thinking 内に <tool_call> 等が
+      // 埋まっているケース (例: Qwen3 が reasoning_content に ChatML 形式、
+      // gpt-5.x reasoning が Anthropic XML 形式を吐く) を救う。
+      // 思考は SoWhat/WhySo の核なので、 そこに完成形のツールコールがあるなら捨てずに実行する。
+      // docs/ephemeral-context-design.md §7.2 参照。
+      if (toolCalls.length === 0 && thinkingContent.trim().length > 0) {
+        const normalized = normalizeToolCalls(thinkingContent);
+        if (normalized.toolCalls.length > 0) {
+          console.log(chalk.dim(
+            `  [tool-format] thinking 内 ${normalized.format} 形式から ${normalized.toolCalls.length} 件の tool 呼び出しを抽出 (tier=${this.capability.tier})`,
+          ));
+          getOpsLogger().info("tool-format", "thinking から tool 呼び出しを正規化抽出", {
+            format: normalized.format,
+            toolCount: normalized.toolCalls.length,
+            toolNames: normalized.toolCalls.map((tc) => tc.function.name),
+            source: "thinking",
+            tier: this.capability.tier,
+          });
+          // textContent は元から空 (このブロックの前提)。 toolCalls だけ追加して実行ルートへ。
+          toolCalls.push(...normalized.toolCalls);
+        }
+      }
+
       // ツール呼び出しを伴うテキストは「これから〜する」 という中間ナレーションと確定 → 灰色で表示。
       // ツールを伴わないテキストは「最終応答」 か「自己点検で継続する中間」 か未確定なので、
       // ここでは出さず下流のディスポジション地点 (最終応答=白 / 自己点検=灰色) で flush する。
@@ -877,7 +934,10 @@ export class AgentLoop {
       // - 検出時は ephemeral nudge を inject、 retry counter 制限あり
       {
         const isStandardOrUp = this.isStandardOrAboveRegister();
-        if (isStandardOrUp && coherenceGateRetries < MAX_NEW_GATE_RETRIES) {
+        // toolCalls がある場合 (native / salvage 由来とも) は実行を優先し coherence nudge を
+        // 出さない。 さもないと続行意図のツール呼び出しを「完了ズレ」 と誤判定して drop し continue
+        // してしまう (2026-06-07: salvage 移動に伴う取りこぼし防止)。
+        if (toolCalls.length === 0 && isStandardOrUp && coherenceGateRetries < MAX_NEW_GATE_RETRIES) {
           const hasRC = toolCalls.some((tc) => tc.function.name === "response_complete");
           const coherence = checkCoherence(thinkingContent, textContent, hasRC);
           if (coherence.mismatch) {
@@ -1065,61 +1125,6 @@ export class AgentLoop {
         }
 
         continue;
-      }
-
-      // Phase D-1: 非標準形式 (Mistral [TOOL_CALLS] / ChatML <tool_call> / Anthropic XML /
-      // ReAct Action: / Plain JSON) の tool 呼び出しを fallback として正規化を試みる。
-      // 2026-05-13: 当初は T2/T3 限定だったが、 gpt-5.x reasoning モードが thinking/text に
-      // <tool_call><function=...><parameter=...> を書き出す事例 (2026-05-12 観測) があるため
-      // T1 でも有効化。 toolCalls.length === 0 のときのみ動くので native function calling と競合しない。
-      if (
-        toolCalls.length === 0 &&
-        textContent.trim().length > 0
-      ) {
-        const normalized = normalizeToolCalls(textContent);
-        if (normalized.toolCalls.length > 0) {
-          console.log(chalk.dim(
-            `  [tool-format] ${normalized.format} 形式から ${normalized.toolCalls.length} 件の tool 呼び出しを抽出 (tier=${this.capability.tier})`,
-          ));
-          // 非TTY / --background では console が見えないため、 ops-logger に構造化記録を残す
-          // (誤発火・発火頻度の事後調査用。 全形式共通)。
-          getOpsLogger().info("tool-format", "テキストから tool 呼び出しを正規化抽出", {
-            format: normalized.format,
-            toolCount: normalized.toolCalls.length,
-            toolNames: normalized.toolCalls.map((tc) => tc.function.name),
-            source: "text",
-            tier: this.capability.tier,
-          });
-          // 既存の textContent / toolCalls を上書きして tool 実行ルートへ流す
-          textContent = normalized.cleanedText;
-          toolCalls.push(...normalized.toolCalls);
-        }
-      }
-
-      // Phase 2: 思考保全 — text/toolCalls がともに空でも thinking 内に <tool_call> 等が
-      // 埋まっているケース (例: Qwen3 が reasoning_content に ChatML 形式、
-      // gpt-5.x reasoning が Anthropic XML 形式を吐く) を救う。
-      // 思考は SoWhat/WhySo の核なので、 そこに完成形のツールコールがあるなら捨てずに実行する。
-      // docs/ephemeral-context-design.md §7.2 参照。
-      if (
-        toolCalls.length === 0 &&
-        thinkingContent.trim().length > 0
-      ) {
-        const normalized = normalizeToolCalls(thinkingContent);
-        if (normalized.toolCalls.length > 0) {
-          console.log(chalk.dim(
-            `  [tool-format] thinking 内 ${normalized.format} 形式から ${normalized.toolCalls.length} 件の tool 呼び出しを抽出 (tier=${this.capability.tier})`,
-          ));
-          getOpsLogger().info("tool-format", "thinking から tool 呼び出しを正規化抽出", {
-            format: normalized.format,
-            toolCount: normalized.toolCalls.length,
-            toolNames: normalized.toolCalls.map((tc) => tc.function.name),
-            source: "thinking",
-            tier: this.capability.tier,
-          });
-          // textContent は元から空 (このブロックの前提)。 toolCalls だけ追加して実行ルートへ。
-          toolCalls.push(...normalized.toolCalls);
-        }
       }
 
       // ガベージ応答（トークンアーティファクト等）を検出: リプロンプトしても改善しないため中断

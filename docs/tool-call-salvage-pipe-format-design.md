@@ -138,9 +138,80 @@ Gemma 12B でのじゃんけんが未完了になった。実ログ解析の結�
 
 ---
 
+## 6. 実行位置バグ — 「抽出したのに実行されない」（2026-06-07 しりとりセッションで露呈）
+
+> **これは §3 の中核前提の誤りを正す追記**。§3 は「`agent-loop.ts` は変更不要（既存の呼び出し経路に自動的に乗る）」（line 97）と書いたが、**その呼び出し経路自体が壊れていた**。salvage で tool 呼び出しを抽出しても、それを**実行に届けていなかった**。§4.3 follow-up（line 136）で「`textContent = cleanedText; toolCalls.push(...)` 経路の統合テストは harness 無しのため見送り」と明記した、まさにその未テストの隙間にバグがあった。
+
+### 6.1 露呈したセッション
+
+`~/.localllm/sessions/mq34du2c-63rj.json`（2026-06-07、メイン = Qwen3.6-27B）で「あなたとセカンドLLMでしりとりをして」と依頼 → **一手も進まずユーザー入力待ちに戻った**。
+
+実ログ解析の確証:
+
+- LLM ログ（`2026-06-07T01-45-13_main.jsonl` turn 6, `finishReason:"stop"`）: Qwen は **`reasoning_content`（thinking チャネル）の中に** tool 呼び出しを正しく書いていた:
+  ```
+  <tool_call><function=second_llm_consult><parameter=prompt>
+  しりとりの実演中…【しりとり履歴】1. ねこ → 2. こだま ← あなたの番。「ま」から…
+  </parameter></function></tool_call>
+  ```
+  モデルは認知的に完璧: 「ねこ」を受け「こだま」を選び、履歴を構築し、`second_llm_consult` で継続しようとした。
+- ops ログ（`tool-format` カテゴリ）: `format=anthropic-xml, toolCount=2, toolNames=[todo_append, second_llm_consult], source=thinking, tier=T2` → **normalizer は 2 件正しく抽出していた**
+- にもかかわらず保存メッセージ `[10]` は `content:""`・`tool_calls` なし・後続の tool 結果メッセージ無し → 空応答でターン終了
+
+**モデルの能力不足ではない。ハーネスがモデルの正しい成果を捨てた**（メモリ `feedback_dont_underrate_local_llms`）。
+
+### 6.2 根本原因 — 抽出が実行ブロックの「後」にある
+
+`agent-loop.ts` の 1 イテレーションの処理順序:
+
+1. ストリーミングで `textContent` / `toolCalls`(native) / `thinkingContent` を組み立て
+2. （~843）max_tokens / 構造的不完全による継続チェック
+3. （~868）`toolCalls.length>0` のとき narration を flush
+4. （~878）coherence チェック（standard+ register、ズレ検出で nudge + `continue`）
+5. **（~897）`if (toolCalls.length > 0)` → ツール実行して `continue`** ← native tool 実行はここだけ
+6. （~1075）text からの salvage 正規化 → `toolCalls.push(...)` ※実行ブロックの**後**
+7. （~1104）thinking からの salvage 正規化 → `toolCalls.push(...)` ※同じく後
+8. 以降の `toolCalls.length === 0` ゲートは全スキップ → 最終応答経路で `addAssistantMessage(textContent, undefined, ...)` → `return`
+
+`toolCalls` は各イテレーション先頭（`agent-loop.ts:499`）で `[]` に再初期化されるローカル配列。よって 6/7 で push しても、(a) 実行ブロック 5 は既に通過済み、(b) `continue` しても次イテレーションで再初期化される。**抽出した tool 呼び出しは ops ログに記録されるだけで一度も実行されず、空応答としてターンが終わる**。
+
+これは pipe-call 形式に限らず**全 salvage 形式（Mistral / ChatML / Anthropic XML / ReAct / Plain JSON / pipe-call）に共通の欠陥**。salvage 機能は単体テストでパーサのみ検証され、e2e で実行まで到達したことが一度も無かった（§4.1 基準 3 が ⏳ 未実施だったため発覚が遅れた）。
+
+### 6.3 修正
+
+salvage 正規化ブロック（text 由来・thinking 由来の 2 つ）を**実行ブロック・flush・coherence の手前へ移動**する。これにより:
+
+- 抽出した `toolCalls` が flush（narration 表示）→ coherence → 既存の実行ブロック(5) に自然に合流し、**native tool 呼び出しと同じ経路で実行される**
+- `addAssistantMessage(textContent, toolCalls, {thinking})`（実行ブロック内）で正しく永続化される
+
+あわせて **coherence チェックに `toolCalls.length === 0` ガードを追加**する。salvage は「モデルが続行のため tool を呼んだ」状態なので、これを coherence の「完了ズレ」と誤判定して drop し `continue` すると、せっかく抽出した呼び出しを再び取りこぼす。tool 呼び出しがあるなら実行を優先し、completion-coherence nudge は出さない（native tool 呼び出しにとっても同様に正しい）。
+
+**設計思想の明確化**: salvage は「モデルの正しい認知成果（serving 層が取りこぼした tool 呼び出し）を拾う」ための機構。**拾って終わりでは無意味で、実行まで届けて初めて目的を果たす**。§3 の「agent-loop 変更不要」は、抽出と実行の接続を自明と見なした誤り。抽出器の正しさ（単体）と、抽出物が実行経路に乗ること（統合）は別の保証であり、後者が今回欠けていた。
+
+### 6.4 §3 / §4 への訂正
+
+- §3 line 97「`agent-loop.ts` は変更不要」→ **誤り。実行ブロックより前に salvage を置く構造変更が必要**（本 §6.3）。
+- §4 成功基準に追加（§6.5）。
+
+### 6.5 追加の成功基準
+
+5. **抽出物の実行到達（本バグの回帰防止）**: salvage で抽出した `toolCalls` が、native tool 呼び出しと同じ実行ブロックに到達し実行される。空応答経路・最終応答経路に落ちない。
+   - e2e（実モデル・ユーザー環境）: しりとりセッション再走で `second_llm_consult` が発火し、しりとりが複数手進む（ops に `source=thinking` 抽出 + 直後に tool 実行が続く）
+   - 単体での担保限界（正直な記録）: この回帰は「ループ内のブロック順序」依存で、`normalizeToolCalls` 単体テストでは捕捉できない。AgentLoop の統合テスト harness が無いため、コード上の位置（salvage が実行ブロックの前にあること）とレビューで担保する。統合テスト新設の要否は三者レビューで判断。
+
+### 6.6 変更ファイル（§6 分）
+
+| ファイル | 変更 |
+|---|---|
+| `src/agent/agent-loop.ts` | salvage 正規化ブロック 2 つを実行ブロック前へ移動、coherence トリガに `toolCalls.length===0` ガード追加、旧位置のブロック削除 |
+| `docs/tool-call-salvage-pipe-format-design.md` | 本 §6 追記、§3/§4 訂正 |
+
+---
+
 ## 5. 変更履歴
 
 | 日付 | 内容 |
 |---|---|
 | 2026-06-07 | 初版（Claude Opus 4.8 + user 議論）。既存 normalizeToolCalls への pipe-call 形式追加として設計 |
 | 2026-06-07 | 引き継ぎ三者レビュー（設計者／開発者／評価者の各サブエージェント、引き継ぎ拒否条件のヒアリング形式）を実施し採用分を反映。主な修正: 文字列認識コアース（値内 `,:` 誤変換バグ）、シングルクオートのエスケープ／`}` 誤切断バグ、scanBalancedBrace のクオート種別追跡、ops-logger 構造化ログ、検証ステータスの明文化（e2e はユーザー環境送り）、roadmap §4 の tier 乖離修正 |
+| 2026-06-07 | §6 追記: **実行位置バグ**（しりとりセッション mq34du2c で露呈）。salvage で抽出した tool 呼び出しが実行ブロックの後に置かれていたため一度も実行されず空応答でターン終了していた。§3「agent-loop 変更不要」の誤前提を訂正し、salvage を実行ブロック前へ移動＋coherence ガード追加。全 salvage 形式に共通の欠陥で、e2e 未実施（§4.1 基準3）のため発覚が遅れた |
