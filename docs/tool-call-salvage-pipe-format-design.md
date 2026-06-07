@@ -186,6 +186,8 @@ salvage 正規化ブロック（text 由来・thinking 由来の 2 つ）を**�
 
 あわせて **coherence チェックに `toolCalls.length === 0` ガードを追加**する。salvage は「モデルが続行のため tool を呼んだ」状態なので、これを coherence の「完了ズレ」と誤判定して drop し `continue` すると、せっかく抽出した呼び出しを再び取りこぼす。tool 呼び出しがあるなら実行を優先し、completion-coherence nudge は出さない（native tool 呼び出しにとっても同様に正しい）。
 
+> **副次的バグ修正（開発者レビューで判明）**: 旧コードは coherence チェックが実行ブロックの前に `toolCalls.length` ガード無しで置かれていた。そのため **native tool 呼び出し（`response_complete` を含む）があっても coherence mismatch を検出すると `addAssistantMessage(textContent, undefined, …)` + nudge + `continue` で tool を実行せずにループを続ける**取りこぼし経路が潜在的に存在した。`toolCalls.length === 0` ガードはこれも同時に塞ぐ（coherence は「tool 呼び出しが一切無い」ときだけ働く）。`hasRC` を `false` 固定にしたのはこのガードの帰結（ガード下では `response_complete` は存在し得ない）。
+
 **設計思想の明確化**: salvage は「モデルの正しい認知成果（serving 層が取りこぼした tool 呼び出し）を拾う」ための機構。**拾って終わりでは無意味で、実行まで届けて初めて目的を果たす**。§3 の「agent-loop 変更不要」は、抽出と実行の接続を自明と見なした誤り。抽出器の正しさ（単体）と、抽出物が実行経路に乗ること（統合）は別の保証であり、後者が今回欠けていた。
 
 ### 6.4 §3 / §4 への訂正

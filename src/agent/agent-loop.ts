@@ -890,7 +890,9 @@ export class AgentLoop {
             source: "text",
             tier: this.capability.tier,
           });
-          // 既存の textContent / toolCalls を上書きして tool 実行ルートへ流す
+          // 既存の textContent / toolCalls を上書きして tool 実行ルートへ流す。
+          // textContent を cleanedText に差し替えるので、 直後の flushAssistantText(true) と
+          // 実行ブロックの addAssistantMessage は非標準マーカーを除去済みの本文を使う。
           textContent = normalized.cleanedText;
           toolCalls.push(...normalized.toolCalls);
         }
