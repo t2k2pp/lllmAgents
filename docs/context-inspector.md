@@ -28,8 +28,8 @@ Messages / Free space) のトークン推定で表示する。しかし「何も
 
 本機能の目的は「実際に送信されるコンテキストの監査」であり、表示と送信物の乖離を最小化する。
 
-- **system / memory / messages の本文**: `MessageHistory` 上の実オブジェクトをそのまま表示
-  (再計算した推定ではない)。検証目的で本文は実質全量を出す (上限 16000 文字 + 超過分は省略文字数を明示)。
+- **system / memory の本文**: `MessageHistory` 上の実オブジェクトを **全量** 表示する。監査用途なので
+  truncate は行わない (`pushBody`)。欠損を黙って起こさないことを最優先とする。
 - **tools**: `/context tools <name>` は `ToolRegistry.getDefinitions()` の定義を `JSON.stringify`
   で全文ダンプする。これは provider が `body.tools` にそのまま載せる値 (`openai-compat.ts`) と同一。
   → ツールの I/O (各引数の型・説明・required・戻り値記述) はシステムプロンプトではなく **この

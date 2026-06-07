@@ -17,13 +17,23 @@ import {
 } from "./shared-principles.js";
 
 /**
- * テキストを指定文字数以内に切り詰める。行境界で切るため中途半端な切断を避ける。
+ * テキストをトークン予算 (maxChars) 以内に切り詰める。行境界で切る。
+ *
+ * 重要: 切り詰めは「黙って欠損させない」。 切った場合は何文字を落としたかを示す可視マーカーを
+ * 本文末尾に必ず付ける。 これによりプロンプトを読むモデル自身も「ここで切れている」 と分かり、
+ * /context で本文をダンプした人間にも欠損が見える (= 問題を隠さず可視化する)。
+ * label には対象名 (例: "プロジェクト指示") を渡す。
  */
-function truncateAtLine(text: string, maxChars: number): string {
+export function truncateAtLine(text: string, maxChars: number, label: string): string {
   if (text.length <= maxChars) return text;
   const cut = text.lastIndexOf("\n", maxChars);
   const end = cut > 0 ? cut : maxChars;
-  return text.slice(0, end);
+  const omitted = text.length - end;
+  return (
+    text.slice(0, end) +
+    `\n\n[⚠ ${label}はトークン予算 ${maxChars} 字を超過したため ${omitted} 字を省略しました。` +
+    `全文は元ファイルを file_read で参照すること。]`
+  );
 }
 
 export interface SkillInfo {
@@ -212,14 +222,14 @@ ${buildUnexpectedSignalRules(tier)}
     parts.push(`
 # プロジェクト指示（参考情報）
 以下は現在の作業ディレクトリのリポジトリ固有の開発ルールです。ユーザーから別の指示がある場合はユーザーの指示を優先すること。
-${truncateAtLine(projectInstructions, projInstrLimit)}`);
+${truncateAtLine(projectInstructions, projInstrLimit, "プロジェクト指示")}`);
   }
 
   // Auto-memory (truncate at line boundary)
   if (memory) {
     parts.push(`
 # メモ
-${truncateAtLine(memory, memoryLimit)}`);
+${truncateAtLine(memory, memoryLimit, "メモ")}`);
   }
 
   // Skills (dynamic list)

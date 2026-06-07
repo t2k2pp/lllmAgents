@@ -458,16 +458,14 @@ function preview(text: string, maxLen = 120): string {
   return collapsed.slice(0, maxLen) + "…";
 }
 
-/** 長い本文を行頭インデント付きで出力する (上限超過分は省略表示)。 */
-function pushBody(out: string[], body: string, maxChars: number): void {
+/**
+ * 本文を行頭インデント付きで全量出力する。
+ * これは監査用ダンプであり、 欠損は許されない (truncate しない)。 連続空行だけ畳む。
+ */
+function pushBody(out: string[], body: string): void {
   const trimmed = body.replace(/\n{3,}/g, "\n\n").trimEnd();
-  const shown = trimmed.length > maxChars ? trimmed.slice(0, maxChars) : trimmed;
-  for (const line of shown.split("\n")) {
+  for (const line of trimmed.split("\n")) {
     out.push(chalk.dim("    │ ") + line);
-  }
-  if (trimmed.length > maxChars) {
-    const omitted = trimmed.length - maxChars;
-    out.push(chalk.dim(`    │ … (残り ${omitted.toLocaleString()} 文字を省略)`));
   }
 }
 
@@ -505,7 +503,7 @@ function detailSystem(agent: AgentLoop): string {
     } else {
       // header 行自体は body 先頭に含まれるので、 header があれば 2 行目以降が本文
       const bodyText = s.header ? s.body.split("\n").slice(1).join("\n") : s.body;
-      pushBody(out, bodyText, 16000);
+      pushBody(out, bodyText);
     }
     out.push("");
   }
@@ -526,7 +524,7 @@ function detailMemory(agent: AgentLoop, cwd: string): string {
     `    ${chalk.bold("# プロジェクト指示")}  ${chalk.dim(`~${formatTokens(estimateTokens(projectBody))} tokens`)}`,
   );
   if (projectBody) {
-    pushBody(out, projectBody.split("\n").slice(1).join("\n"), 16000);
+    pushBody(out, projectBody.split("\n").slice(1).join("\n"));
   } else {
     out.push(chalk.dim("    │ (なし)"));
   }
@@ -536,7 +534,7 @@ function detailMemory(agent: AgentLoop, cwd: string): string {
     `    ${chalk.bold("# メモ (auto-memory)")}  ${chalk.dim(`~${formatTokens(estimateTokens(memoryBody))} tokens`)}`,
   );
   if (memoryBody) {
-    pushBody(out, memoryBody.split("\n").slice(1).join("\n"), 16000);
+    pushBody(out, memoryBody.split("\n").slice(1).join("\n"));
   } else {
     out.push(chalk.dim("    │ (なし)"));
   }
