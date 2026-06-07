@@ -16,26 +16,6 @@ import {
   buildCreativeRhythmRules,
 } from "./shared-principles.js";
 
-/**
- * テキストをトークン予算 (maxChars) 以内に切り詰める。行境界で切る。
- *
- * 重要: 切り詰めは「黙って欠損させない」。 切った場合は何文字を落としたかを示す可視マーカーを
- * 本文末尾に必ず付ける。 これによりプロンプトを読むモデル自身も「ここで切れている」 と分かり、
- * /context で本文をダンプした人間にも欠損が見える (= 問題を隠さず可視化する)。
- * label には対象名 (例: "プロジェクト指示") を渡す。
- */
-export function truncateAtLine(text: string, maxChars: number, label: string): string {
-  if (text.length <= maxChars) return text;
-  const cut = text.lastIndexOf("\n", maxChars);
-  const end = cut > 0 ? cut : maxChars;
-  const omitted = text.length - end;
-  return (
-    text.slice(0, end) +
-    `\n\n[⚠ ${label}はトークン予算 ${maxChars} 字を超過したため ${omitted} 字を省略しました。` +
-    `全文は元ファイルを file_read で参照すること。]`
-  );
-}
-
 export interface SkillInfo {
   name: string;
   trigger: string;
@@ -214,22 +194,21 @@ ${buildUnexpectedSignalRules(tier)}
     );
   }
 
-  // Project instructions (truncate at line boundary to avoid broken context)
-  // Phase B-2: T3 は短 ctx なので積極的に切る
-  const projInstrLimit = tier === "T3" ? 1500 : tier === "T1" ? 4000 : 3000;
-  const memoryLimit = tier === "T3" ? 1000 : tier === "T1" ? 3000 : 2000;
+  // Project instructions / メモ は **全量** 注入する (truncate しない)。
+  // 方針 (2026-06-08 ユーザー判断): 黙って切るくらいなら全部入れて、 入力トークンが
+  // モデル容量を超えたら API エラーで顕在化させる。「知らぬ間に切られて期待外れの応答」 より
+  // 「容量超過が見える」 方が良い。 ctx 肥大はユーザーが project ファイル/メモ側で調整する。
   if (projectInstructions) {
     parts.push(`
 # プロジェクト指示（参考情報）
 以下は現在の作業ディレクトリのリポジトリ固有の開発ルールです。ユーザーから別の指示がある場合はユーザーの指示を優先すること。
-${truncateAtLine(projectInstructions, projInstrLimit, "プロジェクト指示")}`);
+${projectInstructions}`);
   }
 
-  // Auto-memory (truncate at line boundary)
   if (memory) {
     parts.push(`
 # メモ
-${truncateAtLine(memory, memoryLimit, "メモ")}`);
+${memory}`);
   }
 
   // Skills (dynamic list)
