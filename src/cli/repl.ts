@@ -9,7 +9,12 @@ import { resetWindow, exportUsage, resolvePeriod, type PeriodSpec } from "../cos
 import { formatSummary, formatModels, formatProviders } from "./cost-view.js";
 import { displayHelp, type SkillSummary } from "./renderer.js";
 import { estimateMessageTokens } from "../agent/token-counter.js";
-import { buildContextBreakdown, formatContextBreakdown } from "./context-breakdown.js";
+import {
+  buildContextBreakdown,
+  formatContextBreakdown,
+  formatContextDetail,
+  normalizeContextSection,
+} from "./context-breakdown.js";
 import { formatTodos, formatTodosActive, clearTodos, archiveCompletedTodos } from "../tools/definitions/todo-write.js";
 import { collectResponse } from "../providers/base-provider.js";
 import type { GoalDefinition } from "../agent/goal-slot.js";
@@ -3112,6 +3117,20 @@ export class REPL {
         break;
 
       case "/context": {
+        // 引数なし: カテゴリ別内訳。 引数あり: そのカテゴリの中身をダンプ (ドリルダウン)
+        const sectionArg = args[0]?.trim();
+        if (sectionArg) {
+          const section = normalizeContextSection(sectionArg);
+          if (!section) {
+            console.log(chalk.yellow(`  不明な section: ${sectionArg}`));
+            console.log(
+              chalk.dim("  使い方: /context [system|memory|skills|tools|messages]"),
+            );
+            break;
+          }
+          process.stdout.write(formatContextDetail(this.agent, this.skillRegistry, section));
+          break;
+        }
         // Claude Code 互換のカテゴリ別内訳: System prompt / Memory files / Skills / System tools / Messages / Free space
         const breakdown = buildContextBreakdown(this.agent, this.skillRegistry, this.mcpManager);
         process.stdout.write(formatContextBreakdown(breakdown));

@@ -414,8 +414,286 @@ export function formatContextBreakdown(b: ContextBreakdown, cwd: string = proces
   out.push(categoryLine("⛶", chalk.dim, "Free space", b.freeSpace, win));
 
   out.push("");
-  out.push(chalk.dim("    /memory  でメモ本文を確認 / /skills で有効化状態 / /mcp で MCP 状態"));
+  out.push(
+    chalk.dim(
+      "    /context <section> で中身を確認: system / memory / skills / tools / messages",
+    ),
+  );
   out.push(chalk.dim("    トークン値は推定 (CJK=1, ASCII≈4字/トークン)。 圧縮は /compact"));
   out.push("");
   return out.join("\n");
+}
+
+// =============================================================================
+// 詳細ビュー: /context <section> — 各カテゴリの実際の中身をダンプする
+// =============================================================================
+
+/** 詳細ダンプで指定できるセクション名 (エイリアス込み) */
+const DETAIL_SECTIONS: Record<string, string> = {
+  system: "system",
+  sys: "system",
+  prompt: "system",
+  memory: "memory",
+  mem: "memory",
+  skill: "skills",
+  skills: "skills",
+  tool: "tools",
+  tools: "tools",
+  message: "messages",
+  messages: "messages",
+  msg: "messages",
+  history: "messages",
+};
+
+/** 与えられた section 引数を正規化する。 未知なら undefined。 */
+export function normalizeContextSection(arg: string | undefined): string | undefined {
+  if (!arg) return undefined;
+  return DETAIL_SECTIONS[arg.trim().toLowerCase()];
+}
+
+/** 1行プレビュー: 改行・連続空白を畳んで maxLen で切る。 */
+function preview(text: string, maxLen = 120): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= maxLen) return collapsed;
+  return collapsed.slice(0, maxLen) + "…";
+}
+
+/** 長い本文を行頭インデント付きで出力する (上限超過分は省略表示)。 */
+function pushBody(out: string[], body: string, maxChars: number): void {
+  const trimmed = body.replace(/\n{3,}/g, "\n\n").trimEnd();
+  const shown = trimmed.length > maxChars ? trimmed.slice(0, maxChars) : trimmed;
+  for (const line of shown.split("\n")) {
+    out.push(chalk.dim("    │ ") + line);
+  }
+  if (trimmed.length > maxChars) {
+    const omitted = trimmed.length - maxChars;
+    out.push(chalk.dim(`    │ … (残り ${omitted.toLocaleString()} 文字を省略)`));
+  }
+}
+
+function getSystemContent(agent: AgentLoop): string {
+  const messages = agent.getHistory().getMessages();
+  const systemMsg = messages[0];
+  return systemMsg && systemMsg.role === "system" && typeof systemMsg.content === "string"
+    ? systemMsg.content
+    : "";
+}
+
+function detailSystem(agent: AgentLoop): string {
+  const out: string[] = [];
+  const content = getSystemContent(agent);
+  const sections = splitByKnownHeaders(content);
+  out.push("");
+  out.push(chalk.bold("  Context detail: System prompt"));
+  out.push(
+    chalk.dim(
+      `    システムメッセージ全体 ~${formatTokens(estimateTokens(content))} tokens (Memory/Skills を含む)`,
+    ),
+  );
+  out.push("");
+  for (const s of sections) {
+    // Memory / Skills は専用ビューがあるので本文ダンプは省略 (重複回避)
+    const isMemory = s.header.startsWith("# プロジェクト指示") || s.header.startsWith("# メモ");
+    const isSkills = s.header.startsWith("# 利用可能なスキル一覧");
+    const label = s.header.trim() || "(冒頭・コアアイデンティティ)";
+    const tok = estimateTokens(s.body);
+    out.push(`    ${chalk.bold(label)}  ${chalk.dim(`~${formatTokens(tok)} tokens`)}`);
+    if (isMemory) {
+      out.push(chalk.dim("    │ → /context memory で確認"));
+    } else if (isSkills) {
+      out.push(chalk.dim("    │ → /context skills で確認"));
+    } else {
+      // header 行自体は body 先頭に含まれるので、 header があれば 2 行目以降が本文
+      const bodyText = s.header ? s.body.split("\n").slice(1).join("\n") : s.body;
+      pushBody(out, bodyText, 4000);
+    }
+    out.push("");
+  }
+  return out.join("\n");
+}
+
+function detailMemory(agent: AgentLoop, cwd: string): string {
+  const out: string[] = [];
+  const content = getSystemContent(agent);
+  const sections = splitByKnownHeaders(content);
+  const projectBody = findSection(sections, "# プロジェクト指示");
+  const memoryBody = findSection(sections, "# メモ");
+  out.push("");
+  out.push(chalk.bold("  Context detail: Memory files"));
+  out.push("");
+
+  out.push(
+    `    ${chalk.bold("# プロジェクト指示")}  ${chalk.dim(`~${formatTokens(estimateTokens(projectBody))} tokens`)}`,
+  );
+  if (projectBody) {
+    pushBody(out, projectBody.split("\n").slice(1).join("\n"), 4000);
+  } else {
+    out.push(chalk.dim("    │ (なし)"));
+  }
+  out.push("");
+
+  out.push(
+    `    ${chalk.bold("# メモ (auto-memory)")}  ${chalk.dim(`~${formatTokens(estimateTokens(memoryBody))} tokens`)}`,
+  );
+  if (memoryBody) {
+    pushBody(out, memoryBody.split("\n").slice(1).join("\n"), 4000);
+  } else {
+    out.push(chalk.dim("    │ (なし)"));
+  }
+  out.push("");
+
+  // ディスク上の実体ファイル
+  const projectFiles = listProjectInstructionFiles(cwd);
+  const autoMemoryPath = getAutoMemoryPath();
+  out.push(chalk.dim("    読み込み元ファイル:"));
+  for (const p of projectFiles) {
+    out.push(chalk.dim(`      • ${shortenPath(p, cwd)}  ~${formatTokens(safeFileTokens(p))} tokens`));
+  }
+  if (fs.existsSync(autoMemoryPath)) {
+    out.push(
+      chalk.dim(
+        `      • ${shortenPath(autoMemoryPath, cwd)}  ~${formatTokens(safeFileTokens(autoMemoryPath))} tokens`,
+      ),
+    );
+  }
+  out.push("");
+  return out.join("\n");
+}
+
+function detailSkills(skillRegistry: SkillRegistry | undefined): string {
+  const out: string[] = [];
+  out.push("");
+  out.push(chalk.bold("  Context detail: Skills"));
+  const skillsAll = skillRegistry?.listAllWithStatus() ?? [];
+  if (skillsAll.length === 0) {
+    out.push(chalk.dim("    (スキルなし)"));
+    out.push("");
+    return out.join("\n");
+  }
+  const enabled = skillsAll.filter((s) => s.enabled);
+  out.push(
+    chalk.dim(
+      `    システムプロンプトには有効スキル ${enabled.length} 件の「trigger: description」一覧が注入されている`,
+    ),
+  );
+  out.push("");
+  const sorted = [...skillsAll].sort((a, b) => {
+    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+    return a.trigger.localeCompare(b.trigger);
+  });
+  for (const s of sorted) {
+    const tok = estimateTokens(`- ${s.trigger}: ${s.description}`);
+    const mark = s.enabled ? chalk.green("●") : chalk.dim("○");
+    const tag = s.builtIn ? chalk.dim("[builtin]") : chalk.dim("[user]");
+    const tokLabel = s.enabled ? chalk.dim(`~${formatTokens(tok)} tok`) : chalk.dim("(無効・未注入)");
+    out.push(`    ${mark} ${chalk.bold(s.trigger)} ${tag}  ${tokLabel}`);
+    out.push(chalk.dim(`        ${preview(s.description, 140)}`));
+  }
+  out.push("");
+  out.push(chalk.dim("    ●=有効(注入中) ○=無効。 /skills で有効化/無効化を切り替え"));
+  out.push("");
+  return out.join("\n");
+}
+
+function detailTools(agent: AgentLoop): string {
+  const out: string[] = [];
+  out.push("");
+  out.push(chalk.bold("  Context detail: System tools"));
+  const defs = agent.getToolRegistry().getDefinitions();
+  if (defs.length === 0) {
+    out.push(chalk.dim("    (ツールなし)"));
+    out.push("");
+    return out.join("\n");
+  }
+  const withTokens = defs
+    .map((d) => ({
+      name: d.function.name,
+      desc: d.function.description ?? "",
+      tokens: estimateTokens(JSON.stringify(d)),
+    }))
+    .sort((a, b) => b.tokens - a.tokens);
+  const total = withTokens.reduce((acc, t) => acc + t.tokens, 0);
+  out.push(
+    chalk.dim(`    ${withTokens.length} 個のツール定義 (JSON) ~${formatTokens(total)} tokens、 トークン降順`),
+  );
+  out.push("");
+  for (const t of withTokens) {
+    out.push(`    ${chalk.bold(t.name.padEnd(22))} ${chalk.dim(`~${formatTokens(t.tokens)} tok`)}`);
+    if (t.desc) out.push(chalk.dim(`        ${preview(t.desc, 140)}`));
+  }
+  out.push("");
+  return out.join("\n");
+}
+
+function detailMessages(agent: AgentLoop): string {
+  const out: string[] = [];
+  out.push("");
+  out.push(chalk.bold("  Context detail: Messages"));
+  const all = agent.getHistory().getMessages();
+  const messages = all.slice(1); // [0] は system
+  if (messages.length === 0) {
+    out.push(chalk.dim("    (会話履歴なし)"));
+    out.push("");
+    return out.join("\n");
+  }
+  const total = estimateMessageTokens(messages);
+  out.push(chalk.dim(`    ${messages.length} 件 (system 除く) ~${formatTokens(total)} tokens`));
+  out.push("");
+  const roleColor: Record<string, (s: string) => string> = {
+    user: chalk.cyan,
+    assistant: chalk.green,
+    tool: chalk.hex("#9333ea"),
+  };
+  messages.forEach((m, idx) => {
+    const tok = estimateMessageTokens([m]);
+    const color = roleColor[m.role] ?? chalk.white;
+    const textContent =
+      typeof m.content === "string"
+        ? m.content
+        : m.content.map((p) => (p.type === "text" ? p.text ?? "" : "[image]")).join(" ");
+    out.push(
+      `    ${chalk.dim(`[${idx + 1}]`)} ${color(m.role.padEnd(9))} ${chalk.dim(`~${formatTokens(tok)} tok`)}`,
+    );
+    if (textContent.trim()) {
+      out.push(chalk.dim(`        ${preview(textContent, 160)}`));
+    }
+    if (m.tool_calls && m.tool_calls.length > 0) {
+      const names = m.tool_calls.map((tc) => tc.function.name).join(", ");
+      out.push(chalk.dim(`        ⚙ tool_calls: ${names}`));
+    }
+  });
+  out.push("");
+  out.push(chalk.dim("    全文は履歴そのもの。 圧縮は /compact、 全消去は /clear"));
+  out.push("");
+  return out.join("\n");
+}
+
+/**
+ * `/context <section>` 用の詳細ダンプを返す。 未知の section は利用可能な一覧を返す。
+ */
+export function formatContextDetail(
+  agent: AgentLoop,
+  skillRegistry: SkillRegistry | undefined,
+  section: string,
+  cwd: string = process.cwd(),
+): string {
+  switch (section) {
+    case "system":
+      return detailSystem(agent);
+    case "memory":
+      return detailMemory(agent, cwd);
+    case "skills":
+      return detailSkills(skillRegistry);
+    case "tools":
+      return detailTools(agent);
+    case "messages":
+      return detailMessages(agent);
+    default:
+      return [
+        "",
+        chalk.yellow(`  不明な section: ${section}`),
+        chalk.dim("  使い方: /context [system|memory|skills|tools|messages]"),
+        "",
+      ].join("\n");
+  }
 }

@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
 import type { AgentLoop } from "../../src/agent/agent-loop.js";
 import type { SkillRegistry } from "../../src/skills/skill-registry.js";
-import { buildContextBreakdown, formatContextBreakdown } from "../../src/cli/context-breakdown.js";
+import {
+  buildContextBreakdown,
+  formatContextBreakdown,
+  formatContextDetail,
+  normalizeContextSection,
+} from "../../src/cli/context-breakdown.js";
 import { MessageHistory } from "../../src/agent/message-history.js";
 import { ToolRegistry } from "../../src/tools/tool-registry.js";
 
@@ -185,5 +190,123 @@ describe("formatContextBreakdown", () => {
     expect(out).toContain("System tools");
     expect(out).toContain("Messages");
     expect(out).toContain("Free space");
+  });
+});
+
+describe("normalizeContextSection", () => {
+  it("既知の section とエイリアスを正規化する", () => {
+    expect(normalizeContextSection("system")).toBe("system");
+    expect(normalizeContextSection("SYS")).toBe("system");
+    expect(normalizeContextSection("mem")).toBe("memory");
+    expect(normalizeContextSection("skill")).toBe("skills");
+    expect(normalizeContextSection("tool")).toBe("tools");
+    expect(normalizeContextSection("msg")).toBe("messages");
+    expect(normalizeContextSection("history")).toBe("messages");
+  });
+
+  it("未知や空は undefined", () => {
+    expect(normalizeContextSection("nope")).toBeUndefined();
+    expect(normalizeContextSection("")).toBeUndefined();
+    expect(normalizeContextSection(undefined)).toBeUndefined();
+  });
+});
+
+describe("formatContextDetail", () => {
+  const sys = `本体のコアアイデンティティ。
+
+# 環境
+- platform: test
+
+# プロジェクト指示（参考情報）
+プロジェクト固有のルール本文。
+
+# メモ
+- メモ1
+- メモ2
+
+# 利用可能なスキル一覧（参照用）
+- /commit: コミットメッセージ生成`;
+
+  it("system: コアアイデンティティと環境セクションの本文が出る", () => {
+    const agent = makeAgent({ systemPrompt: sys });
+    const out = formatContextDetail(agent, undefined, "system");
+    expect(out).toContain("System prompt");
+    expect(out).toContain("# 環境");
+    expect(out).toContain("platform: test");
+    // memory / skills は専用ビュー誘導で本文は出さない
+    expect(out).toContain("/context memory");
+    expect(out).toContain("/context skills");
+  });
+
+  it("memory: プロジェクト指示とメモ本文が出る", () => {
+    const agent = makeAgent({ systemPrompt: sys });
+    const out = formatContextDetail(agent, undefined, "memory");
+    expect(out).toContain("Memory files");
+    expect(out).toContain("プロジェクト固有のルール本文");
+    expect(out).toContain("メモ1");
+  });
+
+  it("skills: registry の有効/無効状態が出る", () => {
+    const skillRegistry = {
+      listAllWithStatus: () => [
+        {
+          name: "commit",
+          trigger: "/commit",
+          description: "Generate commit messages",
+          content: "",
+          filePath: "",
+          builtIn: true,
+          enabled: true,
+          runtimeDisabled: false,
+        },
+        {
+          name: "review",
+          trigger: "/review",
+          description: "Review pull requests",
+          content: "",
+          filePath: "",
+          builtIn: false,
+          enabled: false,
+          runtimeDisabled: true,
+        },
+      ],
+    } as unknown as SkillRegistry;
+    const agent = makeAgent({ systemPrompt: "core" });
+    const out = formatContextDetail(agent, skillRegistry, "skills");
+    expect(out).toContain("/commit");
+    expect(out).toContain("/review");
+    expect(out).toContain("Generate commit messages");
+  });
+
+  it("tools: ツール名と説明が出る", () => {
+    const agent = makeAgent({
+      systemPrompt: "core",
+      toolDefs: [{ name: "bash" }, { name: "file_read" }],
+    });
+    const out = formatContextDetail(agent, undefined, "tools");
+    expect(out).toContain("System tools");
+    expect(out).toContain("bash");
+    expect(out).toContain("file_read");
+  });
+
+  it("messages: メッセージ単位の役割とプレビューが出る", () => {
+    const agent = makeAgent({
+      systemPrompt: "core",
+      userMessages: [
+        { role: "user", content: "プレビューされるユーザー発話" },
+        { role: "assistant", content: "アシスタントの返信" },
+      ],
+    });
+    const out = formatContextDetail(agent, undefined, "messages");
+    expect(out).toContain("Messages");
+    expect(out).toContain("user");
+    expect(out).toContain("assistant");
+    expect(out).toContain("プレビューされるユーザー発話");
+  });
+
+  it("未知 section はガイダンスを返す", () => {
+    const agent = makeAgent({ systemPrompt: "core" });
+    const out = formatContextDetail(agent, undefined, "bogus");
+    expect(out).toContain("不明な section");
   });
 });

@@ -45,7 +45,7 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/help")}           このヘルプを表示
     ${chalk.cyan("/quit")}           終了
     ${chalk.cyan("/clear")}          会話履歴をクリア
-    ${chalk.cyan("/context")}        コンテキスト使用状況 (System prompt / Memory / Skills / Tools / Messages 内訳)
+    ${chalk.cyan("/context")}        コンテキスト使用状況の内訳 (引数で中身をダンプ: system|memory|skills|tools|messages)
     ${chalk.cyan("/compact")}        コンテキストを手動圧縮
     ${chalk.cyan("/capability")}     現在のLLM能力ティア (T1/T2/T3) と profile を表示
     ${chalk.cyan("/metrics")}        現セッションのテレメトリ (反復・bash累積・stuck-loop・トークン)

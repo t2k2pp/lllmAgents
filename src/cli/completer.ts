@@ -26,6 +26,11 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/exit", description: "終了" },
   { command: "/clear", description: "会話履歴クリア" },
   { command: "/context", description: "コンテキスト使用状況 (System prompt / Memory / Skills / Tools / Messages 内訳)" },
+  { command: "/context system", description: "システムプロンプト本文の内訳をダンプ" },
+  { command: "/context memory", description: "メモ・プロジェクト指示の本文をダンプ" },
+  { command: "/context skills", description: "注入中スキル一覧 (trigger/description) をダンプ" },
+  { command: "/context tools", description: "ツール定義をトークン降順でダンプ" },
+  { command: "/context messages", description: "会話履歴をメッセージ単位でダンプ" },
   { command: "/compact", description: "コンテキスト圧縮" },
   // /capability /metrics /cost は /status に集約 (Phase optimize #4、 2026-05-28)
   { command: "/mcp status", description: "MCP サーバの接続状態を表示" },
