@@ -485,11 +485,11 @@ export class AgentLoop {
       const softCap = Math.min(this.computeRegisterSoftCap(), hardCap);
       if (iteration >= softCap && !this.softCapWarned) {
         console.log(chalk.yellow(
-          `\n  レジスター "${this.currentRegister}" のソフト上限 (${softCap}) に到達しました。 ` +
+          `\n  完了レベル "${this.currentRegister}" のソフト上限 (${softCap}) に到達しました。 ` +
           `必要なら ask_user で続行可否を確認するか、 区切って報告してください。`,
         ));
         this.history.addUserMessage(
-          `[ハーネス] レジスター "${this.currentRegister}" のソフト上限 (${softCap} 反復) に到達しました。\n` +
+          `[ハーネス] 完了レベル "${this.currentRegister}" のソフト上限 (${softCap} 反復) に到達しました。\n` +
           `  進捗を簡潔にまとめ、 残作業を提示してから ask_user で続行 or 中断を確認してください。\n` +
           `  「もう少しで終わる」 と判断するなら response_complete で完了報告を。 hard cap は ${hardCap} 反復です (tier=${this.capability.tier})。`,
         );
@@ -1791,12 +1791,12 @@ export class AgentLoop {
   private detectRegisterFromText(text: string): void {
     if (this.currentRegister !== "unknown") return; // 既に決まっていれば変えない
     if (!text) return;
-    // 「このタスクは X として」 / 「register: X」 / 「X register」 / 英語表現も拾う
+    // 「このタスクは X として」 / 「完了レベル: X」 / 「register: X」 / 英語表現も拾う
     const patterns: Array<[RegExp, AgentLoop["currentRegister"]]> = [
-      [/(?:このタスクは|task is|register[:：])\s*(production|本番品質|本番)/i, "production"],
-      [/(?:このタスクは|task is|register[:：])\s*(standard|通常)/i, "standard"],
-      [/(?:このタスクは|task is|register[:：])\s*(rough|ラフ|MVP)/i, "rough"],
-      [/(?:このタスクは|task is|register[:：])\s*(explore|探索|短答)/i, "explore"],
+      [/(?:このタスクは|task is|完了レベル[:：]?|register[:：])\s*(production|本番品質|本番)/i, "production"],
+      [/(?:このタスクは|task is|完了レベル[:：]?|register[:：])\s*(standard|通常)/i, "standard"],
+      [/(?:このタスクは|task is|完了レベル[:：]?|register[:：])\s*(rough|ラフ|MVP)/i, "rough"],
+      [/(?:このタスクは|task is|完了レベル[:：]?|register[:：])\s*(explore|探索|短答)/i, "explore"],
     ];
     for (const [re, reg] of patterns) {
       if (re.test(text)) {

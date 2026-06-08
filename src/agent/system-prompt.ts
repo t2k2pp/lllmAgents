@@ -145,7 +145,7 @@ ${buildUnexpectedSignalRules(tier)}
 
 ${buildRegisterRules(tier)}
 
-**開始時のレジスター宣言** [必須]: 最初のターンに「このタスクは <レジスター> として進めます」 の 1 行を入れる。
+**開始時の完了レベル宣言** [必須]: 最初のターンに「このタスクは <完了レベル> として進めます」 の 1 行を入れる。
 
 ${buildAcceptanceRules(tier)}
 
