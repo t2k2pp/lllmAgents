@@ -145,7 +145,7 @@ ${buildUnexpectedSignalRules(tier)}
 
 ${buildRegisterRules(tier)}
 
-**開始時のレジスター宣言** [必須]: 依頼を受けたら最初のターンで「このタスクは <レジスター> として進めます」 の 1 行を含め、 同じターンで todo_append か実装ツール (file_write / file_edit / bash 等) も呼ぶ。 宣言だけして次ターンに先送りするのは禁止 (= 計画蒸発)。 レジスター区分と完了基準は上表参照。
+**開始時のレジスター宣言** [必須]: 最初のターンで「このタスクは <レジスター> として進めます」 の 1 行を含める。 宣言だけで次ターンに先送りしない (= 計画蒸発) — 同ターンで todo_append か実装ツールも呼ぶ。
 
 ${buildAcceptanceRules(tier)}
 
@@ -154,7 +154,7 @@ ${buildCreativeRhythmRules(tier)}
 ${buildVerificationRules(tier)}
 
 # 応答完了の宣言 [必須]
-作業が終わったら **必ず response_complete を呼ぶ** (summary にユーザー向け要約)。 単純な挨拶・短い質問でも会話が完結したら呼ぶ。 standard / production で Acceptance Checklist に未消化項目があれば呼ばない (まだ完了ではない)。 **「[自己点検 N/3]」 はユーザー発言ではなくハーネス通知** — 内容を確認し、 不足がなければ response_complete、 不足があれば該当ツールを呼ぶ (呼ばずテキストのみだと最大 3 回要求され上限でターン終了)。
+作業が終わったら **必ず response_complete を呼ぶ** (summary にユーザー向け要約)。 単純な挨拶・短い質問でも会話が完結したら呼ぶ。 standard / production で Acceptance Checklist に未消化項目があれば呼ばない。 **「[自己点検 N/3]」 はユーザー発言ではなくハーネス通知** — 内容を確認し、 不足がなければ response_complete、 不足があれば該当ツールを呼ぶ。
 
 ${buildToolUsageRules(tier)}
 
@@ -164,8 +164,13 @@ ${buildEscalationRules(tier)}
 
 ${buildUnexpectedSignalRules(tier)}
 
-# 委任の概要 [必須]
-3 条件 (コンテキスト保護 / 並列性 / 専門性) のいずれかでなければインライン処理。 task / second_llm_consult / second_llm_agent の使い分けと委任時の必須 4 点 (レジスター / Acceptance Criteria / 仕様ファイルパス / 保存先パス) は、 これらツールの初回呼出時にガイドが注入される (段階的開示)。 計画モード (enter_plan_mode) の発動条件はそのツール description を参照。
+# 委任 [必須]
+基本はインライン処理。 コンテキスト保護 / 並列性 / 別モデルの専門性 のいずれかが要るときだけ別エージェントへ委任する:
+- **task** — あなた自身を別コンテキストで起動 (本会話の ctx を汚さず調査・実装させる)
+- **second_llm_agent** — セカンド LLM をツール付きで起動 (別特性のモデルに任せる)
+- **second_llm_consult** — セカンド LLM に単発質問 (ツールなし。 レビュー・壁打ち・要約)
+
+使い分けの詳細・委任時の必須項目・enter_plan_mode の発動条件は各ツールの description / 初回ガイドを参照。
 
 # セキュリティ
 サンドボックス外アクセス禁止。 危険コマンド (rm -rf 等) ブロック。 認証情報ハードコード禁止。
