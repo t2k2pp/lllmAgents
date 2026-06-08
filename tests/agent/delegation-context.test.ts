@@ -24,7 +24,6 @@ function makeFullRegistry(): ToolRegistry {
   for (const name of [
     "task",
     "task_output",
-    "second_llm_consult",
     "second_llm_agent",
     "enter_plan_mode",
     "exit_plan_mode",
@@ -78,14 +77,12 @@ describe("delegation-context: excludedToolsFor", () => {
     const ex = excludedToolsFor(extendAncestors(ROOT_ANCESTORS, "sub"));
     expect(ex.has("task")).toBe(true);
     expect(ex.has("task_output")).toBe(true);
-    // second_llm_* は呼べる (sub → second の異種 1 段は許可)
-    expect(ex.has("second_llm_consult")).toBe(false);
+    // second_llm_agent は呼べる (sub → second の異種 1 段は許可)
     expect(ex.has("second_llm_agent")).toBe(false);
   });
 
   it("祖先に second があれば second_llm_* を除外 (second 同種再帰禁止)", () => {
     const ex = excludedToolsFor(extendAncestors(ROOT_ANCESTORS, "second"));
-    expect(ex.has("second_llm_consult")).toBe(true);
     expect(ex.has("second_llm_agent")).toBe(true);
     // task は呼べる (second → sub の異種 1 段は許可)
     expect(ex.has("task")).toBe(false);
@@ -96,7 +93,6 @@ describe("delegation-context: excludedToolsFor", () => {
     const ex = excludedToolsFor(both);
     expect(ex.has("task")).toBe(true);
     expect(ex.has("task_output")).toBe(true);
-    expect(ex.has("second_llm_consult")).toBe(true);
     expect(ex.has("second_llm_agent")).toBe(true);
   });
 });
@@ -115,7 +111,6 @@ describe("delegation-context: filterRegistryForAncestors", () => {
     const reg = makeFullRegistry();
     const secondAncestors = extendAncestors(ROOT_ANCESTORS, "second");
     const filtered = filterRegistryForAncestors(reg, secondAncestors);
-    expect(filtered.get("second_llm_consult")).toBeUndefined();
     expect(filtered.get("second_llm_agent")).toBeUndefined();
     expect(filtered.get("task")).toBeDefined(); // second → sub は OK
     expect(filtered.get("bash")).toBeDefined();
@@ -128,7 +123,6 @@ describe("delegation-context: filterRegistryForAncestors", () => {
     const filtered = filterRegistryForAncestors(reg, grandchild);
     expect(filtered.get("task")).toBeUndefined();
     expect(filtered.get("task_output")).toBeUndefined();
-    expect(filtered.get("second_llm_consult")).toBeUndefined();
     expect(filtered.get("second_llm_agent")).toBeUndefined();
     // 通常ツールは残る
     expect(filtered.get("file_read")).toBeDefined();

@@ -1538,7 +1538,7 @@ export class AgentLoop {
     // 契機2: 委任失敗 + ユーザーが委任を明示
     if (
       !result.success &&
-      (toolName === "second_llm_agent" || toolName === "second_llm_consult") &&
+      toolName === "second_llm_agent" &&
       this.hasRecentDelegationIntent()
     ) {
       const errStr = String(result.error ?? "");
@@ -1878,7 +1878,7 @@ export class AgentLoop {
     const isInteractiveTool = toolName === "ask_user" || toolName === "exit_plan_mode";
     // 入れ子で独自スピナーを出すツール (second-llm-manager 等)。 外側スピナーと
     // 二重アニメーションになり同じ行で点滅するため、 外側は静的行として残す。
-    const isNestedSpinnerTool = toolName === "second_llm_consult" || toolName === "second_llm_agent";
+    const isNestedSpinnerTool = toolName === "second_llm_agent";
     const needsApproval = this.permissions.getPermissionLevel(toolName) === "ask"
       && this.currentSource === "cli";
     let outerSpinnerPersisted = false;

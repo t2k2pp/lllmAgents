@@ -87,54 +87,6 @@ function buildSecondLLMFailureError(toolName: string, e: unknown): string {
   );
 }
 
-export const secondLLMConsultTool: ToolHandler = {
-  name: "second_llm_consult",
-  definition: {
-    type: "function",
-    function: {
-      name: "second_llm_consult",
-      description:
-        "セカンドLLM に単発の質問・相談を投げる。ツール実行は伴わない。\n" +
-        "[使うべき場面] (1) コードレビュー・方針の壁打ち・別視点が欲しい時。 " +
-        "(2) 大きな調査結果や長文の要約 (コンテキスト節約)。 " +
-        "(3) セカンドLLM の特性 (高速・専門性等) が活きる単発推論。\n" +
-        "[使うべきでない] (1) ファイル操作やコマンド実行が必要 → second_llm_agent。 " +
-        "(2) 自分でも数秒で答えられる些末な確認 → 自分で考える方が速い。 " +
-        "(3) 多段階の作業 → 1回の consult で済まないなら最初から second_llm_agent。\n" +
-        "[よくある誤用] (a) コンテキストを渡し忘れ → セカンドLLMには会話履歴が無い。背景を prompt に同梱。 " +
-        "(b) 同じ質問を細切れに何度も投げる → まとめて1回で。",
-      parameters: {
-        type: "object",
-        properties: {
-          prompt: {
-            type: "string",
-            description: "セカンドLLMへの質問。背景・コンテキストを具体的に含めること。",
-          },
-        },
-        required: ["prompt"],
-      },
-    }
-  },
-  async execute(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
-    if (!secondLLMManager || !secondLLMManager.isAvailable()) {
-      return { success: false, output: "", error: "Error: Second LLM is not configured or not enabled." };
-    }
-    const prompt = params.prompt as string;
-    // D1: 呼出元の ancestors を SecondLLMManager に伝播
-    const parentAncestors = context?.ancestors ?? ROOT_ANCESTORS;
-    try {
-      const result = await secondLLMManager.consult(prompt, parentAncestors);
-      return { success: true, output: result };
-    } catch (e) {
-      return {
-        success: false,
-        output: "",
-        error: buildSecondLLMFailureError("second_llm_consult", e),
-      };
-    }
-  },
-};
-
 export const secondLLMAgentTool: ToolHandler = {
   name: "second_llm_agent",
   definition: {
@@ -142,38 +94,38 @@ export const secondLLMAgentTool: ToolHandler = {
     function: {
       name: "second_llm_agent",
       description:
-        "セカンドLLM をサブエージェント化して独立タスクを委任する (ツール実行可)。\n" +
-        "[委任の3条件] 以下のいずれかが満たされる時に使う:\n" +
-        "  (a) コンテキスト保護: 大量ファイル読込で本セッションのコンテキストを消費したくない。\n" +
-        "  (b) 並列性: 複数の独立調査を同時に走らせたい。\n" +
-        "  (c) 専門性: セカンドLLMの特性 (例: 高速 / 別モデル強み) が活きるタスク。\n" +
-        "[使うべきでない] (1) 自分が直接やった方が早いタスク。 " +
-        "(2) 数秒で済む単純操作 → bash や file_read で直接。 " +
-        "(3) 連続委任 (同じファイルへの修正を細切れに3回以上委任) → 修正リストを集約して1回で渡す。\n" +
-        "[重要原則] 一度委任したら **そのタスクの完成までを 1 回の委任内で完結** させる。" +
-        "完成物に対する細かな修正を別の second_llm_agent 呼び出しに分けると、コンテキストが分散して非効率。\n" +
-        "[よくある誤用] (a) 1500行のコード生成→修正指示→修正指示と細切れ委任 (= 丸投げ連鎖)。 " +
-        "(b) ファイル探索のような軽作業を毎回委任 → glob/bash で十分。 " +
-        "(c) 委任先での状態 (ファイル作成等) を自分で検証しない → 委任結果に対し file_read 等で確認を。",
+        "セカンドLLM をサブエージェントとして使う。道具を使う多段の作業も、道具の要らない単発の相談も、これ1本。\n" +
+        "[いつ使う] 次のいずれか: (a) コンテキスト保護=大量読込で本セッションの文脈を消費したくない / " +
+        "(b) 並列=独立した複数タスクを同時に走らせたい / (c) 別モデルの特性=セカンドLLMの強み (速い・別視点等) が活きる。\n" +
+        "[道具なしの相談・レビュー・要約] `no_tools: true` を付ける (この場合 reason は不要)。" +
+        "セカンドLLM が道具を使わず一発で答える (コードレビュー・方針の壁打ち・長文要約など)。\n" +
+        "[使うべきでない] (1) 自分でやった方が早い。 (2) 数秒で済む単純操作 → bash / file_read で直接。 " +
+        "(3) 同じ成果物への細切れ修正の連続委任 → 修正をまとめて1回で渡す。\n" +
+        "[重要原則] 一度委任したら **そのタスクの完成までを 1 回の委任内で完結** させる (細切れ委任は文脈が分散して非効率)。\n" +
+        "[よくある誤用] (a) 会話履歴を渡し忘れ → セカンドLLMに履歴は無い。背景を task に同梱。 " +
+        "(b) 委任先の状態 (ファイル作成等) を自分で検証しない → 結果を file_read 等で確認。",
       parameters: {
         type: "object",
         properties: {
           task: {
             type: "string",
-            description: "セカンドLLMに実行させるタスクの詳細な説明。必要なコンテキスト・制約を全て含めること。",
+            description: "依頼内容の詳細。必要な背景・制約を全て含める (no_tools の相談では質問・相談内容をここに書く)。",
           },
           reason: {
             type: "string",
             enum: ["context_protection", "parallelism", "specialty"],
             description:
-              "委任の理由 (3 条件のいずれか)。 [Phase 5-B3 ハードガード] " +
-              "context_protection=大量ファイル読込で本セッションのコンテキスト消費を避ける / " +
+              "委任の理由 (道具を使う委任では必須。no_tools の単発相談では不要)。 " +
+              "context_protection=大量読込で本セッションの文脈消費を避ける / " +
               "parallelism=独立した複数タスクを同時に走らせる / " +
-              "specialty=セカンドLLMの特性 (高速・別モデル強み等) が活きるタスク。 " +
-              "3 条件のいずれにも該当しない委任は禁止 (= インライン処理が適切)。",
+              "specialty=セカンドLLMの特性 (速い・別モデル強み等) が活きる。",
+          },
+          no_tools: {
+            type: "boolean",
+            description: "道具を使わない単発の相談・レビュー・要約なら true。この場合セカンドLLMは道具を使わず一発で答え、reason は不要。",
           },
         },
-        required: ["task", "reason"],
+        required: ["task"],
       },
     }
   },
@@ -181,7 +133,21 @@ export const secondLLMAgentTool: ToolHandler = {
     if (!secondLLMManager || !secondLLMManager.isAvailable()) {
       return { success: false, output: "", error: "Error: Second LLM is not configured or not enabled." };
     }
-    // Phase 5-B3: 委任理由ハードガード — 3 条件のいずれかでなければ拒否
+    const task = params.task as string;
+    // D1: 呼出元の ancestors を SecondLLMManager に伝播
+    const parentAncestors = context?.ancestors ?? ROOT_ANCESTORS;
+
+    // 道具なしの単発相談 (旧 second_llm_consult を畳んだ経路)。reason ガードは課さない。
+    if (params.no_tools === true) {
+      try {
+        const result = await secondLLMManager.consult(task, parentAncestors);
+        return { success: true, output: result };
+      } catch (e) {
+        return { success: false, output: "", error: buildSecondLLMFailureError("second_llm_agent", e) };
+      }
+    }
+
+    // 道具ありの委任: 委任理由ハードガード — 3 条件のいずれかでなければ拒否 (Phase 5-B3)
     const VALID_REASONS = ["context_protection", "parallelism", "specialty"] as const;
     const reason = params.reason as string | undefined;
     if (!reason || !VALID_REASONS.includes(reason as typeof VALID_REASONS[number])) {
@@ -189,15 +155,12 @@ export const secondLLMAgentTool: ToolHandler = {
         success: false,
         output: "",
         error:
-          `[Phase 5-B3 ハードガード] second_llm_agent の reason 引数は必須で、 ` +
-          `次のいずれかでなければなりません: ${VALID_REASONS.join(" / ")}\n` +
-          `→ context_protection (大量読込でコンテキスト消費を避ける) / parallelism (独立並列タスク) / specialty (セカンドLLMの特性が活きる)\n` +
-          `3 条件いずれにも該当しないなら、 インラインで処理してください (file_read / bash / glob / grep などで十分なはず)。`,
+          `second_llm_agent の reason 引数は必須で、 次のいずれかでなければなりません: ${VALID_REASONS.join(" / ")}\n` +
+          `→ context_protection (大量読込で文脈消費を避ける) / parallelism (独立並列タスク) / specialty (セカンドLLMの特性が活きる)\n` +
+          `3 条件いずれにも該当しないなら、 自分で処理してください (file_read / bash / glob / grep などで十分なはず)。\n` +
+          `※ 道具の要らない単発の相談・レビュー・要約なら no_tools: true を付ければ reason は不要です。`,
       };
     }
-    const task = params.task as string;
-    // D1: 呼出元の ancestors を SecondLLMManager に伝播
-    const parentAncestors = context?.ancestors ?? ROOT_ANCESTORS;
     try {
       const result = await secondLLMManager.runAsAgent(task, parentAncestors);
       return { success: true, output: result };

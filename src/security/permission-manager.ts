@@ -30,7 +30,6 @@ const INHERENTLY_SAFE_TOOLS = new Set([
   "current_datetime",
   "sandbox_info",
   "response_complete",
-  "second_llm_consult",
 ]);
 
 /**
@@ -593,10 +592,10 @@ export function formatToolSummary(toolName: string, params: Record<string, unkno
       return `取得: ${params.url}`;
     case "web_search":
       return `検索: ${params.query}`;
-    case "second_llm_consult":
-      return `相談:\n${params.prompt}`;
     case "second_llm_agent":
-      return `委任タスク:\n${params.task}`;
+      return params.no_tools === true
+        ? `相談:\n${params.task}`
+        : `委任タスク:\n${params.task}`;
     default:
       return JSON.stringify(params, null, 2);
   }

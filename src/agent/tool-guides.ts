@@ -16,12 +16,12 @@ import type { Tier } from "./capability-tier.js";
 
 /** ガイドキー → ガイドテキスト本体 */
 const GUIDE_TEXTS: Record<string, string> = {
-  secondLLM: `[ガイド: セカンドLLMの使い分け]
-- second_llm_consult: 単発の質問・相談 (分析・要約・レビュー)。 ツール実行は伴わない
-- second_llm_agent: ツール付きの複合タスク委任 (調査+生成+保存等)
+  secondLLM: `[ガイド: セカンドLLMの使い方]
+- second_llm_agent: 別モデル (セカンドLLM) に任せる。道具を使う複合作業 (調査+生成+保存等) も、
+  道具の要らない単発の相談・レビュー・要約 (no_tools:true、reason 不要) も これ1本。
 注意: 単純なファイル読み書きなど自分で直接できるタスクには使わない。`,
 
-  delegation: `[ガイド: 委任 (task / second_llm_agent / second_llm_consult) の判断]
+  delegation: `[ガイド: 委任 (task / second_llm_agent) の判断]
 **委任は 3 条件のいずれかが満たされる時のみ。 それ以外はインライン処理。**
 1. コンテキスト保護: 大量ファイル読込で本セッションのコンテキストを浪費したくない
 2. 並列性: 独立した複数タスクを同時に走らせたい
@@ -216,7 +216,6 @@ const T3_FEW_SHOTS: Record<string, string> = {
  */
 const TOOL_TO_GUIDES: Record<string, readonly string[]> = {
   task: ["delegation"],
-  second_llm_consult: ["secondLLM", "delegation"],
   second_llm_agent: ["secondLLM", "delegation"],
   bash: ["verification", "scopeStrict"],
   file_write: ["verification"],

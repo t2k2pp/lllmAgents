@@ -36,7 +36,7 @@ export function extendAncestors(current: AncestorTypes, origin: DelegationOrigin
  *
  * - 共通: `enter_plan_mode` / `exit_plan_mode` は子では常に禁止 (リーダー専権)
  * - `ancestors.has("sub")` → `task` / `task_output` を除外 (sub 同種再帰禁止 + 孫からの sub 起動禁止)
- * - `ancestors.has("second")` → `second_llm_consult` / `second_llm_agent` を除外
+ * - `ancestors.has("second")` → `second_llm_agent` を除外
  *   (second 同種再帰禁止 + 孫からの second 起動禁止)
  */
 export function excludedToolsFor(ancestors: AncestorTypes): Set<string> {
@@ -49,7 +49,6 @@ export function excludedToolsFor(ancestors: AncestorTypes): Set<string> {
     excluded.add("task_output");
   }
   if (ancestors.has("second")) {
-    excluded.add("second_llm_consult");
     excluded.add("second_llm_agent");
   }
   return excluded;

@@ -97,7 +97,7 @@ ${buildEscalationRules(tier)}
 
 ${buildUnexpectedSignalRules(tier)}
 
-# 委任 — task / second_llm_consult / second_llm_agent。 詳細は各ツール description。
+# 委任 — task / second_llm_agent (道具なしの単発相談は no_tools:true)。 詳細は各ツール description。
 # セキュリティ — サンドボックス外禁止、 rm -rf 等危険コマンド遮断、 認証情報ハードコード禁止。
 # 出力 — 日本語入力には日本語。 プロフェッショナルかつ簡潔。 ファイル操作報告はパスと概要のみ。`);
   } else if (tier === "T3") {
@@ -167,8 +167,7 @@ ${buildUnexpectedSignalRules(tier)}
 # 委任 [必須]
 基本は自分で処理する。 文脈の節約 / 並行作業 / 別モデルの得意分野 のいずれかが必要なときだけ、 別エージェントに任せる:
 - **task** — あなた自身を別の文脈で起動 (今の会話の文脈を消費せずに調査・実装させる)
-- **second_llm_agent** — セカンド LLM をツール付きで起動 (別の特性のモデルに任せる)
-- **second_llm_consult** — セカンド LLM への単発の相談 (ツールなし。 レビュー・相談・要約)
+- **second_llm_agent** — 別モデル (セカンド LLM) に任せる。道具を使う作業も、道具の要らない単発の相談・レビュー・要約 (no_tools:true) も、これ1本
 
 使い分け・委任時に渡すもの・enter_plan_mode を使う条件は、 各ツールの説明と初回ガイドを参照。
 
@@ -260,10 +259,9 @@ ${skillLines}`);
         : `特性: (未設定 — ユーザーが /second description <text> で設定可能)`);
 
       sections.push("");
-      sections.push(`サブタスク委任時の選択指針:`);
+      sections.push(`委任の選択指針:`);
       sections.push(`- task ツール → メインLLM (あなた自身) を別コンテキストで起動。メイン特性に合うタスクに使う`);
-      sections.push(`- second_llm_agent ツール → セカンドLLMをツール付きエージェントとして起動。セカンド特性に合うタスクに使う`);
-      sections.push(`- second_llm_consult ツール → セカンドLLMに単発質問 (ツールなし)。コードレビュー・壁打ち・要約でコンテキスト節約したいとき`);
+      sections.push(`- second_llm_agent ツール → セカンドLLMに任せる。道具を使う作業も、道具なしの単発相談・レビュー・要約 (no_tools:true) も これ1本`);
       sections.push(`両モデルの特性を見て、タスクの性質に合う方を選ぶこと。`);
       // ※ 旧 prompt にあった「どちらでも良い場合は ctx 節約のためセカンド優先」 は削除 (2026-05-11)。
       // ctx 節約はサブエージェント化 (task / second_llm_agent のいずれか) 全般の効果であり、
@@ -274,14 +272,14 @@ ${skillLines}`);
       }
     } else {
       sections.push("");
-      sections.push(`サブタスク委任: task ツールでメインLLM (あなた自身) を別コンテキスト起動できる。セカンドLLMは未設定のため委任先は1系統のみ。`);
+      sections.push(`委任: task ツールでメインLLM (あなた自身) を別コンテキスト起動できる。セカンドLLMは未設定のため委任先は1系統のみ。`);
     }
 
     parts.push("\n" + sections.join("\n"));
   } else if (hasSecondLLM) {
     // llmProfiles未提供だがセカンドLLMあり（旧経路・フォールバック）
     parts.push(`
-セカンドLLMツール利用可能: second_llm_consult(単発質問), second_llm_agent(複合タスク委任)。コンテキスト節約・レビュー・壁打ちに自発的に使用すること。`);
+セカンドLLM利用可能: second_llm_agent で委任 (道具なしの単発相談・レビュー・要約は no_tools:true)。コンテキスト節約・レビュー・壁打ちに自発的に使用すること。`);
   }
 
   // Obsidian Knowledge (詳細ガイドは初回使用時に注入)

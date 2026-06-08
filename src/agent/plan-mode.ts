@@ -145,7 +145,7 @@ export class PlanManager {
       "web_fetch", "web_search", "bash",
       "ask_user", "todo_write", "exit_plan_mode",
       "enter_plan_mode", "knowledge_search", "knowledge_save",
-      "second_llm_consult", "second_llm_agent",
+      "second_llm_agent",
     ]);
   }
 
