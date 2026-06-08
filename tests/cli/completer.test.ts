@@ -180,6 +180,25 @@ describe("createCommandMenuProvider", () => {
     expect(labels).toContain("/model vision clear");
   });
 
+  it("/context tools <名前> でツール名を動的補完する", () => {
+    const provider = createCommandMenuProvider([], ["bash", "file_read", "file_write", "mcp__blender__ping"]);
+    // "context tools ba" → bash のみ
+    const ba = provider("context tools ba").map((i) => i.value);
+    expect(ba).toEqual(["/context tools bash"]);
+    // "context tools file" → file_read / file_write
+    const file = provider("context tools file").map((i) => i.value).sort();
+    expect(file).toEqual(["/context tools file_read", "/context tools file_write"]);
+    // 空プレフィックスで MCP ツール含む全件
+    const all = provider("context tools ").map((i) => i.value);
+    expect(all).toContain("/context tools mcp__blender__ping");
+  });
+
+  it("createCompleter (readline) も /context tools のツール名を補完する", () => {
+    const completer = createCompleter({ toolNames: ["bash", "file_read"] });
+    const [matches] = completer("/context tools ba");
+    expect(matches).toEqual(["/context tools bash"]);
+  });
+
   it("/second は alias として補完に残るが [非推奨] 表記", () => {
     const provider = createCommandMenuProvider();
     const items = provider("second");

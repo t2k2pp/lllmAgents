@@ -18,7 +18,7 @@ Messages / Free space) のトークン推定で表示する。しかし「何も
 | `/context memory` | プロジェクト指示 + auto-memory の本文、読み込み元ファイル一覧 |
 | `/context skills` | 注入中スキルの `trigger: description` 一覧 (有効/無効・builtin/user・トークン) |
 | `/context tools` | ツール定義をトークン降順で一覧。名前 + 説明1行 + 推定トークン |
-| `/context tools <name>` | **指定ツールの定義全文** (`body.tools[]` に送られる JSON そのもの = description + parameters スキーマ) |
+| `/context tools <name>` | **指定ツールの定義全文** (`body.tools[]` に送られる JSON そのもの = description + parameters スキーマ)。`<name>` は Tab 補完対応 (builtin + MCP) |
 | `/context messages` | system を除く会話履歴をメッセージ単位で。役割・トークン・プレビュー・tool_calls 名 |
 
 エイリアス: `sys`/`prompt`→system, `mem`→memory, `skill`→skills, `tool`→tools,

@@ -188,6 +188,21 @@ export function createCommandMenuProvider(
         }));
     }
 
+    // /context tools <tool名> のツール名補完 (partial 例: "context tools ba")
+    const ctxToolMatch = partial.match(/^(context tools )(.*)$/);
+    if (ctxToolMatch && toolNames.length > 0) {
+      const cmdPrefix = ctxToolMatch[1]; // "context tools "
+      const toolPrefix = ctxToolMatch[2];
+      return toolNames
+        .filter((n) => n.startsWith(toolPrefix))
+        .sort()
+        .map((n) => ({
+          label: `/${cmdPrefix}${n}`,
+          value: `/${cmdPrefix}${n}`,
+          description: "このツールの定義全文 (parameters スキーマ) を表示",
+        }));
+    }
+
     // 通常コマンドマッチ
     return allDefs
       .filter((d) => d.command.slice(1).startsWith(partial.toLowerCase()))
@@ -243,6 +258,14 @@ export function createCompleter(
       if (permToolMatch && toolNames.length > 0) {
         const cmdPrefix = permToolMatch[1];
         const toolPrefix = permToolMatch[2];
+        const matches = toolNames.filter((n) => n.startsWith(toolPrefix)).map((n) => `${cmdPrefix}${n}`);
+        return [matches, line];
+      }
+      // /context tools <tool名> のツール名補完
+      const ctxToolMatch = line.match(/^(\/context tools )(.*)$/);
+      if (ctxToolMatch && toolNames.length > 0) {
+        const cmdPrefix = ctxToolMatch[1];
+        const toolPrefix = ctxToolMatch[2];
         const matches = toolNames.filter((n) => n.startsWith(toolPrefix)).map((n) => `${cmdPrefix}${n}`);
         return [matches, line];
       }
