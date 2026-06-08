@@ -76,12 +76,22 @@ external: ['chromium-bidi', 'chromium-bidi/*', 'playwright', 'playwright-core'],
   playwright をロードする。SEA の素の `require` を迂回し、ディスク上の非バンドル playwright を読むため
   playwright-core 内部の `require.resolve` も正常動作する。
 
-解決順（最初に見つかったものを使用）:
+解決順（候補: import → 各 root の `playwright` / `playwright-core`）:
 
-1. `~/.localllm/node_modules/playwright`（管理ホーム＝skills と同居。作業フォルダ非依存）
-2. 作業フォルダ `<cwd>/node_modules/playwright`（プロジェクト個別）
+1. `import("playwright")`（dev/tsx ＝ リポジトリ node_modules、 SEA では失敗してディスクへ）
+2. `~/.localllm/node_modules`（管理ホーム＝skills と同居。作業フォルダ非依存）
+3. 作業フォルダ `<cwd>/node_modules`
 
-どちらも無ければ**例外を投げず**、呼び出し側（`game_smoke` / `browser_*`）が
+**選択方針 (2026-06 改訂)**: 「最初に読めたもの」ではなく **「対応する Chromium が実在するものを優先」**
+する。playwright はライブラリ版と Chromium ビルドを 1:1 で固定するため、 ある版が読めても、 その版が
+要求する Chromium が未導入なら別の (Chromium を持つ) 版を使う方が良い。
+- 例: プロジェクト同梱の playwright 1.59.1 (→chromium-1217) が未導入でも、 `~/.localllm` の 1.60.0
+  (→chromium-1223、 これはユーザーが MCP 等で既に導入済み) が揃っていれば、 **そちらを再利用**して
+  追加ダウンロードなしでブラウザ機能が有効になる。
+- `playwright-core` だけの環境 (MCP 等) も候補に含める (chromium API は同じ)。
+- Chromium 実在の候補が一つも無ければ、 読めた最初の版を返す → `probe()` が「Chromium 未導入」を正しく報告。
+
+どれも読めなければ**例外を投げず**、呼び出し側（`game_smoke` / `browser_*`）が
 `ToolResult.error` として後述の誘導メッセージを返す。
 
 ```ts

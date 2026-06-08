@@ -1,8 +1,23 @@
 import type { Browser, BrowserContext, Page } from "playwright";
 import { createRequire } from "node:module";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as logger from "../utils/logger.js";
+
+/**
+ * その playwright モジュールが指す Chromium 実行ファイルが実在するか。
+ * playwright はライブラリ版と Chromium ビルド番号を 1:1 で固定するため、 単に「読める」だけでは
+ * 不十分で、 そのライブラリが要求する Chromium が実際に入っているかまで見る必要がある。
+ */
+function defaultChromiumPresent(mod: typeof import("playwright")): boolean {
+  try {
+    const exe = mod.chromium.executablePath();
+    return !!exe && fs.existsSync(exe);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * exe(SEA) では playwright を同梱しない（リーン配布）。未導入時にこのエラーを投げ、
@@ -23,40 +38,68 @@ export class PlaywrightNotInstalledError extends Error {
 
 /**
  * playwright を解決する純粋ロジック（テスト可能）。
- * 1. 通常の import を試す（dev/tsx ＝ リポジトリ node_modules から解決。require.resolve も健全）。
- * 2. 失敗時（exe/SEA・ラッパは playwright を同梱しないため import が失敗する）、
- *    ディスク上の非バンドル playwright を createRequire で読む。解決順:
- *    ~/.localllm/node_modules → 作業フォルダ node_modules。
- * 3. いずれも無ければ null（呼び出し側で PlaywrightNotInstalledError 化）。
  *
- * import を先に試すことで SEA 判定に依存せず、実SEA・シェルラッパ・dev の全形態を統一的に扱う。
+ * 候補: import("playwright") → 各 root の node_modules (playwright / playwright-core)。
+ * 解決順は ~/.localllm/node_modules → 作業フォルダ node_modules。
+ *
+ * 重要: 「読めた最初のもの」ではなく **「対応する Chromium が実在するもの」を優先**して返す。
+ * playwright はライブラリ版と Chromium ビルドを 1:1 固定するため、 ある版が読めても、 その版が
+ * 要求する Chromium が入っていなければ別の (Chromium を持つ) 版を使う方が良い。
+ * 例: 同梱/プロジェクトの playwright が要求する Chromium が未導入でも、 ~/.localllm 側に別版＋
+ * 対応 Chromium が揃っていれば、 そちら (= ユーザーが既に持つ動くペア) を再利用できる。
+ *
+ * Chromium 実在の候補が一つも無ければ、 読めた最初の候補を返す (呼び出し側 probe が「Chromium 未導入」
+ * を正しく報告できるように)。 全滅なら null。
  * docs/exe-playwright-externalization.md §3.2
  */
 export async function resolvePlaywright(
   importFn: () => Promise<typeof import("playwright")> = () => import("playwright"),
   roots: string[] = [path.join(os.homedir(), ".localllm"), process.cwd()],
   makeRequire: (from: string) => (id: string) => unknown = (from) => createRequire(from),
+  chromiumPresent: (mod: typeof import("playwright")) => boolean = defaultChromiumPresent,
 ): Promise<typeof import("playwright") | null> {
+  let firstLoadable: typeof import("playwright") | null = null;
+
+  // 候補を評価: chromium 実在なら即採用、 そうでなければ firstLoadable として控える。
+  const consider = (
+    mod: typeof import("playwright") | null,
+    label: string,
+  ): typeof import("playwright") | null => {
+    if (!mod || !mod.chromium) return null;
+    if (!firstLoadable) firstLoadable = mod;
+    if (chromiumPresent(mod)) {
+      logger.info(`Loaded playwright (Chromium present) from ${label}`);
+      return mod;
+    }
+    return null;
+  };
+
   try {
-    const mod = await importFn();
-    if (mod && mod.chromium) return mod;
+    const hit = consider(await importFn(), "import");
+    if (hit) return hit;
   } catch {
     /* バンドル/SEA では同梱していないので失敗する → ディスクから探す */
   }
 
   for (const root of roots) {
+    let mod: typeof import("playwright") | null = null;
     try {
       const req = makeRequire(path.join(root, "noop.js"));
-      const mod = req("playwright") as typeof import("playwright");
-      if (mod && mod.chromium) {
-        logger.info(`Loaded playwright from ${root}/node_modules`);
-        return mod;
+      try {
+        mod = req("playwright") as typeof import("playwright");
+      } catch {
+        // playwright-core だけ入っている環境もある (MCP 等)。 chromium API は同じ。
+        mod = req("playwright-core") as typeof import("playwright");
       }
     } catch {
-      /* 次の root を試す */
+      continue; // この root には無い
     }
+    const hit = consider(mod, `${root}/node_modules`);
+    if (hit) return hit;
   }
-  return null;
+
+  // Chromium 実在の候補は無かったが、 読めた版があればそれを返す (probe が未導入を報告する)。
+  return firstLoadable;
 }
 
 let playwrightModule: typeof import("playwright") | null = null;
