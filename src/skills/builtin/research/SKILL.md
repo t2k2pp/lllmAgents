@@ -1,83 +1,111 @@
 ---
 name: research
-description: lllmAgents プロジェクトでの調査・コードベース理解・設計把握ワークフロー。 ユーザーが「この機能どうなってる」「〜の挙動を調べて」「PR を読み解いて」 と要求した時、 または 大きな実装の前に影響範囲を把握する必要がある時に使用する。 docs/ 配下の設計書群・main_second_swap 等の重要文書・git log の使い分けまで含む。
+description: Research workflow. (A) Codebase — "how does this work", "investigate the behavior of X", "read this PR", or scoping impact before a large change. (B) External web — official facts such as cloud pricing, API specs, current model lists. Covers the static-fetch then browser-render ladder for dynamic pages (price tables etc.) and the rule to stop honestly rather than fill gaps from unofficial sources or memory.
 ---
 
-# Research (lllmAgents 向け)
+# Research
 
-## このプロジェクトの「真実の在処」
+## Sources of truth
 
-lllmAgents は **コード → 設計書 → メモリ** の 3 層に知識が分散している。 調査時はこの優先順位で当たる。
+Knowledge is split across code, design docs, and memory. Check in this order.
 
-| 層 | 場所 | 何が分かるか |
+| Layer | Location | Yields |
 |----|------|------------|
-| 1. コード | `src/` | 現在の実装と振る舞い (= 唯一動いている真実) |
-| 2. 設計書 | `docs/*.md` (44 本) | 「なぜそうしたか」 と意図された設計 |
-| 3. CLAUDE.md / README.md | ルート | ユーザー向け説明 / 作業ルール |
-| 4. git log / blame | `.git` | 変更の経緯と意図 |
-| 5. 永続メモリ | `~/.claude/projects/.../memory/` | Claude が過去に学んだ事実・user の好み |
+| 1. Code | `src/` | Current implementation and behavior (the only running truth) |
+| 2. Design docs | `docs/*.md` | Intended design and the decisions behind it |
+| 3. CLAUDE.md / README.md | root | User-facing description / work rules |
+| 4. git log / blame | `.git` | History and intent of changes |
+| 5. Persistent memory | `~/.claude/projects/.../memory/` | Facts learned earlier, user preferences |
 
-**注意**: 設計書は実装より古くなっていることがある。 設計書とコードが矛盾していたら **コードを真実とする** (CLAUDE.md の「設計書と実装の整合性を常に保つ」 ルールは作業時のルールであって、 調査時の参照優先度ではない)。
+When a design doc and the code disagree, the code is truth — docs lag the implementation.
 
-## docs/ 配下の主要文書 (起点として読むべきもの)
+## Entry-point docs
 
-| 文書 | 用途 |
+| Doc | Use |
 |------|------|
-| `docs/internal_design.md` | アーキテクチャ全体・モジュール構成・データフロー (mermaid 図あり) |
-| `docs/external_design.md` | 外部仕様 (REPL コマンド、 ツール、 設定) |
-| `docs/config-reference.md` | 設定ファイル全項目の意味 |
-| `docs/llm-profiles.md` | LLM プロファイル機構 |
-| `docs/model-registry.md` | モデル一覧管理 |
-| `docs/workspace-separation.md` | src/dist/deploy/sandbox の役割分担 |
-| `docs/<feature>-design.md` | 各機能の設計書 (feature ごと 1 本ある) |
+| `docs/internal_design.md` | Architecture, modules, data flow (mermaid) |
+| `docs/external_design.md` | External spec (REPL commands, tools, config) |
+| `docs/config-reference.md` | Every config key |
+| `docs/llm-profiles.md` | LLM profile mechanism |
+| `docs/model-registry.md` | Model list management |
+| `docs/workspace-separation.md` | src/dist/deploy/sandbox roles |
+| `docs/<feature>-design.md` | One per feature |
 
-**まず `ls docs/ | sort` で全件見て、 該当しそうなファイルを 1-2 本選んで読む** のが最短ルート。
+Run `ls docs/ | sort`, pick 1-2 candidates, read them.
 
-## 調査手順
+## Procedure
 
-### Step 1: 仮説を立てる前にまず広く読む
+### Step 1: Read broadly before forming a hypothesis
 
-1. `glob "src/**/*.ts"` で関連ディレクトリを把握
-2. `grep -r "<キーワード>" src/ --include="*.ts" -l` で対象ファイル候補を出す
-3. `docs/` に該当する設計書があるか確認 (`ls docs/ | grep -i <キーワード>`)
-4. 候補を 3-5 本に絞ってから `file_read` で精読
+1. `glob "src/**/*.ts"` to map relevant directories
+2. `grep -r "<keyword>" src/ --include="*.ts" -l` for candidate files
+3. Check for a matching design doc: `ls docs/ | grep -i <keyword>`
+4. Narrow to 3-5 files, then read them fully
 
-### Step 2: 推測ではなく実証 (永続メモリ: `feedback_diagnose_before_speculate`)
+### Step 2: Verify, don't speculate
 
-仮説を立てたら **検証**:
+After forming a hypothesis, confirm it:
 
 ```bash
-# 例: 「この設定キーは本当に使われている?」
 grep -rn "configKey" src/ --include="*.ts"
-
-# 例: 「この関数は誰から呼ばれている?」
 grep -rn "functionName(" src/ --include="*.ts"
-
-# 例: 「この変更はいつ・なぜ入った?」
-git log -p --all -S "識別子" -- src/ | head -50
+git log -p --all -S "identifier" -- src/ | head -50
 git blame src/path/to/file.ts | head -30
 ```
 
-### Step 3: 外部情報が必要なら web_search / web_fetch
+### Step 3: External info → web_search / web_fetch
 
-ライブラリの仕様確認 (vitest, anthropic SDK, playwright 等) は web_search → web_fetch。 ただし 永続メモリ (`feedback_llamacpp_parallel_ctx` 等) で既に合意済みの事実は再確認しない。
+Library specs (vitest, anthropic SDK, playwright) → web_search then web_fetch. For official numbers (pricing, API specs), follow §External web research.
 
-### Step 4: 文書化 (依頼があれば)
+## External web research
 
-調査結果を残す場合の配置:
+For official, current facts: cloud pricing, model lists, API specs. Priority is accuracy over appearance. Never present an unretrieved value as if it were retrieved.
 
-| 種類 | 配置 |
+### Primary path
+
+1. `web_search` to locate the official domain
+2. `web_fetch(url, prompt)` to extract the needed value
+
+### Detect a failed fetch (dynamic page)
+
+`web_fetch` converts static HTML to text and runs no JavaScript. Values rendered by JS (price tables) are absent; only the page shell returns. Treat the fetch as failed when:
+
+- The body is long but the target number (unit price) appears zero times
+- Every `$` is a currency selector or an unrelated amount
+- Content is mostly navigation and footer link text
+
+### Technique: render with the browser
+
+The `browser_*` tools run real Chromium, so JS executes. State this path in the report: the static fetch returned no value, so the page was rendered.
+
+1. `browser_navigate(url)`
+2. For a value behind an anchor: `browser_navigate(url + "#anchor")` or `browser_click("a[href=\"#anchor\"]")`
+3. `browser_snapshot()` to read the rendered DOM
+4. If the target is still absent: find its section selector from the snapshot tree, `browser_click` to expand, snapshot again. Last resort: `browser_screenshot(path)` then `vision_analyze(path, prompt)`
+
+### When the value stays unreachable
+
+- Stop and report that the value could not be retrieved
+- Do not fill it from unofficial articles or third-party blogs
+- Do not answer pricing from memory
+- Report: (1) the primary path tried (2) the technique tried and why it failed (3) the official URL the user can check
+
+## Documenting results (on request)
+
+| Kind | Location |
 |------|------|
-| 新機能の設計書 | `docs/<feature>-design.md` (CLAUDE.md 準拠) |
-| 一過性のメモ・検証ログ | `sandbox/<topic>-YYYY-MM-DD.md` (リポジトリには push しない選択肢あり) |
-| 過去の振り返り・レビュー | `sandbox/` または PR コメント |
-| user が見やすい sharable な調査結果 | 会話内 + 必要なら docs/ |
+| New-feature design | `docs/<feature>-design.md` |
+| One-off note / verification log | `sandbox/<topic>-YYYY-MM-DD.md` |
+| Past review / retrospective | `sandbox/` or PR comment |
+| Shareable result for the user | in conversation, plus `docs/` if needed |
 
-## 報告フォーマット
+## Report format
+
+Reply to the user in Japanese. Template:
 
 ```
 ## 調査対象と目的
-<何を調べたか・なぜ調べたか>
+<what was investigated, and why>
 
 ## 発見した事実
 - src/foo/bar.ts:42 — XXX が定義されている
@@ -85,25 +113,26 @@ git blame src/path/to/file.ts | head -30
 - git log によれば 2026-03-15 の commit abc1234 で導入
 
 ## 結論と推奨
-<結論。 user の問いへの直接回答>
+<direct answer to the user's question>
 
 ## 推測と事実の区別
-- 事実: コード/設計書/git log で確認したもの (上記の §発見した事実)
-- 推測: <ここに「未確認の仮説」を明示する。 「おそらく」 で曖昧にしない>
+- 事実: code / design doc / git log で確認したもの
+- 推測: <unconfirmed hypotheses, marked explicitly — never blur with「おそらく」>
 
 ## 不明点・追加調査候補
-<もし残っていれば>
+<if any remain>
 ```
 
-## やってはいけないこと
+## Don't
 
-- **推測を事実として書く** — 「おそらく〜」 は減点。 確認できないなら「未確認」 と明示
-- **コードを読まずに設計書だけで結論** — 設計書は古いことがある
-- **grep 1 回で結論** — 同じ概念に複数の命名 (snake_case / camelCase / 日本語名) があるので 2-3 パターン試す
-- **永続メモリの古い情報を鵜呑み** — memory は過去のスナップショット。 今のコードと矛盾したら今のコードを信じてメモリを更新する
+- State a guess as fact — mark anything unconfirmed as such
+- Conclude from design docs without reading code — docs can be stale
+- Conclude from a single grep — the same concept may use snake_case, camelCase, or a Japanese name; try 2-3 patterns
+- Trust stale memory — memory is a past snapshot; if it conflicts with current code, trust the code and update memory
+- Fill an unretrievable official value (especially cloud pricing) from unofficial sources or memory — stop and report instead (see §External web research)
 
-## 関連スキル
+## Related skills
 
-- `/code-review` — 調査結果を踏まえて品質指摘までするなら
-- `/refactoring` — 調査結果を踏まえて変更するなら (影響範囲調査は refactoring の中核ステップでもある)
-- `/claude-code-driver` (`/ultrareview`) — 自分で読みきれない規模ならクラウド claude 委譲
+- `/code-review` — to turn findings into quality feedback
+- `/refactoring` — to act on findings (impact analysis is also its core step)
+- `/claude-code-driver` — to delegate scope too large to read alone
