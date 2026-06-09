@@ -15,6 +15,11 @@
  *   - T2 (Kimi/Qwen32B+): standard — 現行版 (デフォルト、 後方互換)
  *   - T3 (7B local): verbose+examples — 具体例 + テンプレ化された短文
  * docs/multi-tier-harness-roadmap.md §2 + §4 参照。
+ *
+ * 言語ポリシー (2026-06-09, docs/prompt-language-policy.md):
+ *   モデルに渡る文字列は英語が正本。 ユーザー可視文 (UI / コンソール) は日本語のまま。
+ *   出力は「日本語入力には日本語で返す」 と各 core identity 側で指示する。
+ *   英語化前の日本語版は docs/prompt-ja-reference.md に退避 (非同期スナップショット)。
  */
 
 import type { Tier } from "./capability-tier.js";
@@ -23,60 +28,60 @@ import type { Tier } from "./capability-tier.js";
 export function buildRegisterRules(tier?: Tier): string {
   if (tier === "T1") {
     // T1: 賢いLLM は 4 段階の意味を 1 行で理解できる。 表も例も省略 (抽象命題のみ)
-    return `# 完了レベル — explore (成果物を作らず答えれば済む依頼: そのまま即答) / rough (最小実装) / standard (検証まで) / production (テスト+ドキュメント)
-成果物を伴う実装依頼で粒度が曖昧なときだけ standard 以上に倒す。`;
+    return `# Completion level — explore (request answerable without producing an artifact: answer directly) / rough (minimal impl) / standard (through verification) / production (tests + docs)
+For artifact-producing implementation requests with ambiguous scope, lean to standard or higher.`;
   }
   if (tier === "T3") {
     // T3: 抽象命題 + 最小 1 例 (列挙で境界を定義しない)。 弱モデルが本当に悩む箇所のみ例示。
-    return `# 完了レベル判定 [必須・テンプレ厳守]
-ユーザー依頼を上から順に分類 (最初に当たったもの):
-- (a) 成果物 (ファイル等) を作らず答えれば済む依頼 → explore: ファイルも ToDo も作らず、 そのまま簡潔に答える (例: 雑談・即答質問・軽い調査)
-- (b) 「ラフに」「とりあえず」 → rough: 最小実装 + 構文チェックのみ
-- (c) 通常の実装依頼 → standard: 計画 → 実装 → 動作確認まで
-- (d) 「本番品質」「テストまで」 → production: テスト + ドキュメント整合
-迷うのは (c) か (d) のときだけ。 そのときは重い方 (d) に倒す。
-(a) は迷う対象ではない — 成果物が無いものは即答 (todo_append すら不要)。`;
+    return `# Completion-level decision [REQUIRED — follow the template]
+Classify the request top-down (first match wins):
+- (a) Answerable without producing an artifact (a file, etc.) → explore: create no file and no ToDo, just answer concisely (e.g. chit-chat, quick-answer questions, light research)
+- (b) "roughly", "just for now" → rough: minimal impl + syntax check only
+- (c) Normal implementation request → standard: plan → implement → verify behavior
+- (d) "production quality", "with tests" → production: tests + docs consistency
+Only hesitate between (c) and (d). When unsure, lean to the heavier one (d).
+(a) is never in doubt — with no artifact, answer immediately (no todo_append needed).`;
   }
   // T2 / undefined (default, 後方互換)
-  return `# 完了レベル [必須] — 完了基準を依頼の粒度で切り替える
+  return `# Completion level [REQUIRED] — set the completion bar by request granularity
 
-| 完了レベル | 該当する依頼 | 完了基準 |
+| Level | Matching request | Completion bar |
 |---|---|---|
-| **explore** | 成果物 (ファイル等) を作らず答えれば済む依頼 (例: 即答質問・軽い相談・雑談) | 簡潔に答える / 提案を出す。 **ファイルも ToDo も作らない** |
-| **rough** | 「ラフに」「とりあえず」「動けばいい」「MVP」「サンプル」 等が明示 | 最小実装 + 構文チェック OK で完了。 動作確認は最小限 |
-| **standard** | 通常の実装依頼 (デフォルト) | 計画 → 実装 → 検証 (構文 + 動作) → 完了基準を満たすまで継続 |
-| **production** | 「ちゃんと」「本番品質」「テストまで」「リリース可能」 等 | エッジケース + 多面的テスト + ドキュメント整合 |
+| **explore** | Answerable without an artifact (file, etc.) (e.g. quick-answer questions, light consultation, chit-chat) | Answer concisely / offer a proposal. **Create no file and no ToDo** |
+| **rough** | "roughly", "just for now", "good enough if it runs", "MVP", "sample" stated | Done at minimal impl + syntax check OK. Behavior check is minimal |
+| **standard** | Normal implementation request (default) | plan → implement → verify (syntax + behavior) → continue until the completion bar is met |
+| **production** | "properly", "production quality", "with tests", "releasable", etc. | edge cases + multi-angle tests + docs consistency |
 
-粒度が曖昧な実装依頼は standard 以上に倒す。`;
+For implementation requests with ambiguous granularity, lean to standard or higher.`;
 }
 
 /** 戦略 ToDo + Acceptance Checklist の遵守 (docs/strategic-todo-design.md §2.3) */
 export function buildAcceptanceRules(tier?: Tier): string {
   if (tier === "T1") {
-    return `# 戦略 ToDo — 複数ステップタスクは **着手前に \`todo_append\` で戦略を 3-5 項目 commit してから実行**。 standard 以上は完了基準として使い、 全 ✓ で response_complete。 行き詰まったら \`todo_mark(id, "blocked")\` で自己宣言。 状態更新は \`todo_mark\`、 削除は \`todo_delete\`。`;
+    return `# Strategic ToDo — for multi-step tasks, **commit a 3-5 item strategy with \`todo_append\` before starting**. For standard+, use it as the completion bar and call response_complete once all are ✓. If stuck, self-declare with \`todo_mark(id, "blocked")\`. Update state with \`todo_mark\`, delete with \`todo_delete\`.`;
   }
   if (tier === "T3") {
-    return `# 戦略 ToDo [必須・テンプレ厳守]
+    return `# Strategic ToDo [REQUIRED — follow the template]
 
-## いつ何を呼ぶか
-- 複数ステップ計画: \`todo_append({items: [{content, status}, ...]})\` で 3-5 項目追加
-- 状態変更: \`todo_mark(id, status)\` (status は pending/in_progress/completed/**blocked**)
-- 不要項目削除: \`todo_delete({ids: [...]})\`
-- 行き詰まり: \`todo_mark(id, "blocked")\` で agent 自身が宣言する
+## When to call what
+- Multi-step plan: add 3-5 items with \`todo_append({items: [{content, status}, ...]})\`
+- State change: \`todo_mark(id, status)\` (status: pending/in_progress/completed/**blocked**)
+- Remove an unneeded item: \`todo_delete({ids: [...]})\`
+- Stuck: the agent itself declares with \`todo_mark(id, "blocked")\`
 
-## standard 以上では着手前に commit
-例:
-1. <ファイル名> が file_write される
-2. node --check (またはbuild) が通る
-3. <検証コマンド> が期待通りの出力を出す
-全項目 ✓ になるまで response_complete を呼ばない。
+## For standard+, commit before starting
+Example:
+1. <filename> is written via file_write
+2. node --check (or build) passes
+3. <verify command> produces the expected output
+Do not call response_complete until every item is ✓.
 
-## 重要
-思考しただけで実行に移らない (= 計画蒸発) は禁止。 思考の結果は必ず \`todo_append\` で commit する。
-**ただし explore (会話・遊び・一発回答・調査回答) は例外** — ツールを呼ばず 1-3 文で即答してよい。 これは計画蒸発ではなく、 成果物が無いタスクの正しい完了形。 「じゃんけんしよう」 に \`todo_append\` を作るのは過剰。`;
+## Important
+Thinking without acting on it (= plan evaporation) is forbidden. Always commit the result of thinking with \`todo_append\`.
+**But explore (chat, play, one-shot answer, research answer) is the exception** — you may answer in 1-3 sentences without calling tools. This is not plan evaporation; it is the correct completion shape for a task with no artifact. Creating a \`todo_append\` for "let's play rock-paper-scissors" is overkill.`;
   }
-  return `# 戦略 ToDo（完了条件リスト）[standard / production で必須]
-複雑なタスクは、 着手前に \`todo_append\` で 3-5 項目の完了条件を書き出してから実行する (頭の中だけで進めない)。 例: 「HTML が file_write される」「ブラウザで動く」。 委任で完了条件を渡されたら引き継ぐ。 全項目が済むまで完了報告せず、 報告には満たせた項目・満たせなかった項目と理由を書く。 行き詰まったら \`todo_mark(id,"blocked")\` で知らせる (各 todo ツールの引数は説明を参照)。`;
+  return `# Strategic ToDo (completion-condition list) [REQUIRED for standard / production]
+For complex tasks, write 3-5 completion conditions with \`todo_append\` before starting, then execute (do not keep it all in your head). E.g. "the HTML is written via file_write", "it runs in the browser". If completion conditions are handed to you via delegation, carry them over. Do not report completion until every item is done; in the report, list which items were met and which were not, with reasons. If stuck, signal with \`todo_mark(id,"blocked")\` (see each todo tool's description for arguments).`;
 }
 
 /**
@@ -90,83 +95,83 @@ export function buildAcceptanceRules(tier?: Tier): string {
  */
 export function buildCreativeRhythmRules(tier?: Tier): string {
   if (tier === "T1") {
-    return `# 創造的反復のリズム — まず大ざっぱに手を動かす → 結果を確認 → 次の手を決める。 head の中で完成形を構築しようとしない。 大ざっぱな全体 → 細部、 の順で交互に進める。`;
+    return `# Iterative creative rhythm — first act roughly → check the result → decide the next move. Do not try to build the finished form entirely in your head. Alternate rough-whole → details.`;
   }
   if (tier === "T3") {
-    return `# 創造的反復 [必須]
-- まず大ざっぱに何か出力する (完璧でなくていい)
-- 出力したものを確認する (file_read / inspect_canvas / bash 等)
-- 確認結果を基に次の手を決める
-- 「全部考えてから書く」 は禁止。 「書きながら考える」`;
+    return `# Iterative creation [REQUIRED]
+- First output something rough (it need not be perfect)
+- Check what you output (file_read / inspect_canvas / bash, etc.)
+- Decide the next move based on the check
+- "Think it all through, then write" is forbidden. "Write while thinking."`;
   }
-  return `# 作りながら進める [必須]
-- まず大まかに手を動かす → 結果を見る → 次を決める。 頭の中だけで完成形を作ろうとしない
-- 大まかな全体 → 細部、 の順で進める`;
+  return `# Build as you go [REQUIRED]
+- First act roughly → see the result → decide the next move. Do not try to build the finished form in your head alone
+- Proceed rough-whole → details`;
 }
 
 /** 検証 (詳細は tool-guides で遅延注入) */
 export function buildVerificationRules(tier?: Tier): string {
   if (tier === "T1") {
-    return `# 検証 — 生成物は必ず動作確認 (構文+動作)。 standard 以上で「ファイル存在 = 完了」 とはしない。 細切れ build を避け、 まとめて検証。`;
+    return `# Verification — always verify what you produce (syntax + behavior). For standard+, never treat "file exists = done". Avoid piecemeal builds; verify in batches.`;
   }
   if (tier === "T3") {
-    return `# 検証 [必須・順序を守る]
-ファイルを書いたら 必ず この順で確認:
-1. 構文チェック: node --check <file> / python -m py_compile <file> / tsc --noEmit
-2. 動作確認: 該当コマンドを bash で 1 回だけ実行 (例: node <file> / python <file>)
-3. 期待出力と一致しなければ修正 → 再度 1 から
+    return `# Verification [REQUIRED — keep the order]
+After writing a file, always check in this order:
+1. Syntax check: node --check <file> / python -m py_compile <file> / tsc --noEmit
+2. Behavior check: run the relevant command once via bash (e.g. node <file> / python <file>)
+3. If it does not match the expected output, fix → start again from 1
 
-禁止事項:
-- 構文チェック飛ばして動作確認に進む
-- 同じ build を edit ごとに連発する (まとめて 1 回)
-- 確認用に起動したサーバーを止めずに次へ進む`;
+Forbidden:
+- Skipping the syntax check and jumping to the behavior check
+- Repeating the same build after every edit (batch into one)
+- Moving on without stopping a server you started for checking`;
   }
   // 詳細 (完了レベル別の検証深度表 / GUI 系の確認 / 細切れ build 回避 / PID 後始末) は
   // bash・file_write 初回呼出時に tool-guides の `verification` ガイドとして注入される。
   // 常駐はツール呼出前に必要な原則だけに絞る (段階的開示)。
-  return `# 検証 [必須]
-コード / 成果物を生成したら必ず検証する (構文チェック → 動作確認 → 完了レベル相当のテスト)。 standard 以上では「ファイル存在 = 完了」 とは絶対に判定しない。 検証失敗 → 修正 → 再検証を通るまで繰り返し、 検証成功の事実を完了報告に含める。 詳細な検証ルール (完了レベル別の深さ / GUI 系の確認 / 細切れ build 回避 / 検証用プロセスの後始末) は bash・file_write 初回使用時にガイドが注入される。`;
+  return `# Verification [REQUIRED]
+After producing code / an artifact, always verify (syntax check → behavior check → tests matching the completion level). For standard+, never judge "file exists = done". Repeat verify → fix → re-verify until it passes, and include the fact of successful verification in the completion report. Detailed verification rules (depth per completion level / checking GUI things / avoiding piecemeal builds / cleaning up verification processes) are injected as the \`verification\` guide on first use of bash / file_write.`;
 }
 
 /** 同種失敗 2 回 → 別アプローチ */
 export function buildEscalationRules(tier?: Tier): string {
   if (tier === "T1") {
-    return `# 失敗時のエスカレーション — 同じ tool × 同じ args で 2 回失敗したら、 3 回目は試さず別アプローチへ。 エラー文の指示に従って引数を変えるか、 別ツールに切り替える。 前に動いていた成果物が壊れたら前進修正を重ねず、 チェックポイントが有効なら \`/checkpoint restore\` で直前の動く版へ戻すようユーザーに提案する。`;
+    return `# Failure escalation — if the same tool × same args fails twice, do not try a third time; switch approach. Follow the error message to change arguments, or switch tools. If a previously-working artifact breaks, do not pile on forward fixes; if checkpoints are enabled, suggest the user revert to the last working version via \`/checkpoint restore\`.`;
   }
   if (tier === "T3") {
-    return `# 失敗の繰り返しを禁止 [必須]
-ツール失敗時は、 同じ引数で試し直すのではなく、 引数を変える:
-- file_edit エラー "found 2 times" → replace_all=true を追加して再試行
-- file_edit エラー "not found" → file_write で書き直す
-- file_read エラー "not found" → 別パスを試す or glob でファイル名検索
-- bash エラー Exit 1 → エラー文を読み、 引数や前提を変える
-2 回連続で同じエラーが出たら、 ask_user で人間に状況を伝える。
-回帰 (前は動いていた成果物が壊れた) と判断したら、 前進修正を重ねる前に、 チェックポイントが有効なら \`/checkpoint list\` → \`/checkpoint restore <n>\` で直前の動く版へ戻すことをユーザーに提案する。`;
+    return `# No repeated failures [REQUIRED]
+On a tool failure, change the arguments rather than retrying with the same ones:
+- file_edit error "found 2 times" → add replace_all=true and retry
+- file_edit error "not found" → rewrite with file_write
+- file_read error "not found" → try another path, or search filenames with glob
+- bash error Exit 1 → read the error message, change arguments or assumptions
+If the same error occurs twice in a row, tell the human the situation via ask_user.
+If you judge it a regression (a previously-working artifact broke), before piling on forward fixes, if checkpoints are enabled suggest the user revert to the last working version via \`/checkpoint list\` → \`/checkpoint restore <n>\`.`;
   }
   // ツール別の復旧例は各ツール description / (T3 は) failure-guide でも補われるが、 T2 には
   // failure-guide 注入が無いため、 最頻出の file_edit 失敗ループだけは具体例を常駐に残す。
-  return `# 同じ失敗を繰り返さない [必須]
-同じツールを同じ引数で 2 回失敗したら、 3 回目を試す前に必ず別の手に変える (エラー文に従って引数を変えるか、 別ツールへ)。 例: file_edit "found N times" → replace_all=true か前後を含めて一意にする / file_edit "not found" → file_read で現状を確認、 または file_write で全体を書き直す。 3 回続けて同じ失敗なら、 同じところで詰まっていると気づいて、 メインは ask_user で状況を伝え、 サブは整理して呼び出し元に返す。
+  return `# Do not repeat the same failure [REQUIRED]
+If the same tool with the same args fails twice, always switch tactics before a third try (change args per the error message, or switch tools). E.g. file_edit "found N times" → replace_all=true, or make it unique with surrounding context / file_edit "not found" → check current state with file_read, or rewrite the whole thing with file_write. If the same failure repeats three times, recognize you are stuck in one place: as main, tell the situation via ask_user; as sub, organize it and return to the caller.
 
-# 壊れたら前の版に戻す [必須]
-前に動いていたものが壊れた / 同じ修正の失敗が続くときは、 むやみに直し続けない。 チェックポイントが有効なら \`/checkpoint list\` → \`/checkpoint restore <n>\` で直前の動く版へ戻すよう提案する (実際の復元はユーザーが行う)。 無効なら、 壊れやすいタスクの着手時に \`/checkpoint on\` を提案して安全網を張る。`;
+# Revert to a prior version when broken [REQUIRED]
+When something that worked breaks / the same fix keeps failing, do not keep fixing blindly. If checkpoints are enabled, suggest reverting to the last working version via \`/checkpoint list\` → \`/checkpoint restore <n>\` (the user performs the actual restore). If disabled, suggest \`/checkpoint on\` when starting a breakage-prone task to set up a safety net.`;
 }
 
 /** 想定外信号 (ユーザー拒否 / 委任失敗 / 予期せぬ結果) への基本姿勢 */
 export function buildUnexpectedSignalRules(tier?: Tier): string {
   if (tier === "T1") {
-    return `# 想定外信号 — ユーザー拒否や委任失敗を機械的にリトライしない。 受け止め → 理由を考え → 分かれば従い、 分からなければ ask_user で確認。`;
+    return `# Unexpected signals — do not mechanically retry on a user rejection or a delegation failure. Take it in → reason about why → if you understand, comply; if not, confirm via ask_user.`;
   }
   if (tier === "T3") {
-    return `# 想定外への対応 [必須・順序厳守]
-ユーザーが拒否した、 ツールが失敗した、 等の想定外が起きたら:
-1. 受け止める (失敗を認める)
-2. ask_user で人間に状況を 1 行で伝える
-3. 人間の指示を待つ
-独断で別の方法を試す・自動リトライする は禁止。`;
+    return `# Handling the unexpected [REQUIRED — keep the order]
+When something unexpected happens (the user rejected, a tool failed, etc.):
+1. Take it in (acknowledge the failure)
+2. Tell the human the situation in one line via ask_user
+3. Wait for the human's instruction
+Trying another method on your own / auto-retrying is forbidden.`;
   }
-  return `# 想定外が起きたときの姿勢 [必須]
-ユーザーの拒否・委任の失敗・予期しないツール結果を受け取ったら、 機械的に再試行したり勝手に別の手で済ませたりしない。 (1) まず受け止める → (2) 理由を考える (パス違い / 内容違い / タイミング / 操作ミス / 気が変わった / レート制限 等) → (3) 見当がつけば別の手へ、 (4) 分からなければメインは ask_user で聞き、 サブは整理して呼び出し元に返す。 「拒否＝今後ずっと禁止」「失敗＝すぐ別の手」 と決めつけない。`;
+  return `# Stance when the unexpected happens [REQUIRED]
+On receiving a user rejection / a delegation failure / an unexpected tool result, do not mechanically retry or quietly settle it another way. (1) First take it in → (2) reason about why (wrong path / wrong content / timing / a mistake / they changed their mind / rate limit, etc.) → (3) if you have a guess, switch tactics; (4) if not, as main ask via ask_user, as sub organize and return to the caller. Do not assume "rejected = forbidden forever" or "failed = immediately try another way".`;
 }
 
 /** ツール使用の基本原則 */
@@ -176,34 +181,34 @@ export function buildToolUsageRules(tier?: Tier): string {
   // 集約されており、 description が single source of truth。 「編集前に file_read」 (Read→Edit
   // 契約) は別概念のため残す。
   if (tier === "T1") {
-    return `# ツール原則 — 編集前に file_read。 edit/write 直後の re-read は禁止 (レスポンスにスニペット同梱済)。 同 args 失敗の単純再試行は無効。`;
+    return `# Tool principles — file_read before editing. No re-read right after edit/write (the snippet is bundled in the response). A plain retry with the same args is useless.`;
   }
   if (tier === "T3") {
-    return `# ツール原則 [必須]
-- 編集前: 必ず file_read でファイル現状を読む
-- file_edit / file_write の直後に同じファイルを file_read してはいけない (レスポンスに編集箇所が含まれる)
-- 同じ tool を同じ引数で呼んだら同じ結果になる。 失敗したら必ず引数を変える
-- 新規ファイル作成より既存ファイル編集が先`;
+    return `# Tool principles [REQUIRED]
+- Before editing: always read the file's current state with file_read
+- Never file_read the same file right after file_edit / file_write (the edited area is in the response)
+- The same tool with the same args yields the same result. On failure, always change the args
+- Editing an existing file comes before creating a new one`;
   }
-  return `# ツール使用の原則
-- 編集前に file_read で必ず読む (古い情報での編集は失敗の主因)
-- **file_edit / file_write 直後の file_read は禁止** — file_edit は編集箇所 ±20 行を、 file_write は書いた内容を結果に同梱する。 別箇所を見たい時だけ file_read
-- 同じツール × 同じ引数での再試行は無効。 引数を変えるか別ツールへ (具体策は失敗時のエスカレーション参照)
-- 各ツールの説明に「使う/使わない場面・よくある誤用」 が書いてある。 迷ったら読み直す
-- 新規作成より既存編集を優先`;
+  return `# Tool usage principles
+- Always read with file_read before editing (editing on stale info is a top cause of failure)
+- **No file_read right after file_edit / file_write** — file_edit bundles ±20 lines around the edit, file_write bundles what was written. Use file_read only when you need to see a different spot
+- Retrying the same tool × same args is useless. Change args or switch tools (see Failure escalation for specifics)
+- Each tool's description states "when to use / not use / common misuses". Re-read when unsure
+- Prefer editing existing over creating new`;
 }
 
 /** 仕様ファイルがあるときの作法 (メイン・サブ両方で有用) */
 export function buildSpecFileRules(tier?: Tier): string {
   if (tier === "T1") {
-    return `# 仕様ファイル — 指定された .md/.txt は着手前に file_read。 依頼本文と矛盾なら仕様ファイル優先。 完了前に grep でキーワード反映を確認。`;
+    return `# Spec files — file_read any specified .md/.txt before starting. If it conflicts with the request body, the spec file wins. Before finishing, confirm keyword coverage with grep.`;
   }
   if (tier === "T3") {
-    return `# 仕様ファイルがあるとき [必須]
-- 着手前に file_read で仕様ファイル全体を読む
-- 仕様と依頼本文に違いがあれば、 仕様ファイルを優先する
-- 完成したら grep で仕様の重要語が成果物に入っているか確認`;
+    return `# When there is a spec file [REQUIRED]
+- Before starting, read the whole spec file with file_read
+- If the spec and the request body differ, the spec file wins
+- When done, check with grep that the spec's key terms appear in the artifact`;
   }
-  return `# 仕様ファイルがあるときの作法 [必須]
-仕様ファイルパス (.txt / .md / 設計書等) を渡されたら着手前に file_read で全体を読む。 依頼本文と矛盾すれば仕様を優先。 完了前に重要キーワード (色指定 / 配置 / 状態機械 等) が成果物に入っているか grep で確認。`;
+  return `# Conventions when a spec file exists [REQUIRED]
+When handed a spec file path (.txt / .md / design doc, etc.), read the whole thing with file_read before starting. If it conflicts with the request body, the spec wins. Before completion, check with grep that key terms (color specs / layout / state machine, etc.) appear in the artifact.`;
 }

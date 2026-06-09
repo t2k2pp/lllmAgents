@@ -289,8 +289,8 @@ describe("RuleLoader", () => {
 
       const output = loader.formatForSystemPrompt();
 
-      expect(output).toContain("# ルール");
-      expect(output).toContain("以下のルールに常に従ってください");
+      expect(output).toContain("# Rules");
+      expect(output).toContain("Always follow the rules below.");
       expect(output).toContain("Never expose API keys.");
     });
 

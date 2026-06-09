@@ -35,23 +35,23 @@ function forcedMode(config?: Config): "on" | "off" | undefined {
 async function probe(): Promise<{ ok: boolean; reason: string }> {
   const pw = await resolvePlaywright();
   if (!pw) {
-    return { ok: false, reason: "Playwright(JS) が未導入です（`localllm --install-browser` で有効化）" };
+    return { ok: false, reason: "Playwright (JS) is not installed (enable with `localllm --install-browser`)" };
   }
   try {
     const exe = pw.chromium.executablePath();
     if (!exe || !fs.existsSync(exe)) {
       return {
         ok: false,
-        reason: "Chromium 未導入です（`localllm --install-browser` でダウンロード）",
+        reason: "Chromium is not installed (download with `localllm --install-browser`)",
       };
     }
   } catch (e) {
     return {
       ok: false,
-      reason: `Chromium 実行ファイルを特定できません（${e instanceof Error ? e.message : String(e)}）`,
+      reason: `Cannot locate the Chromium executable (${e instanceof Error ? e.message : String(e)})`,
     };
   }
-  return { ok: true, reason: "Playwright + Chromium 準備済み" };
+  return { ok: true, reason: "Playwright + Chromium ready" };
 }
 
 /**
@@ -60,11 +60,11 @@ async function probe(): Promise<{ ok: boolean; reason: string }> {
 export async function probeBrowserCapability(config?: Config): Promise<BrowserCapability> {
   const forced = forcedMode(config);
   if (forced === "off") {
-    cached = { ready: false, reason: "設定により無効 (features.browser=off / LOCALLLM_NO_BROWSER)", source: "forced-off" };
+    cached = { ready: false, reason: "disabled by config (features.browser=off / LOCALLLM_NO_BROWSER)", source: "forced-off" };
     return cached;
   }
   if (forced === "on") {
-    cached = { ready: true, reason: "設定により強制有効 (features.browser=on / LOCALLLM_FORCE_BROWSER)", source: "forced-on" };
+    cached = { ready: true, reason: "force-enabled by config (features.browser=on / LOCALLLM_FORCE_BROWSER)", source: "forced-on" };
     return cached;
   }
   const { ok, reason } = await probe();
@@ -77,5 +77,5 @@ export async function probeBrowserCapability(config?: Config): Promise<BrowserCa
  * 未プローブなら ready:false の安全側を返す。
  */
 export function getBrowserCapability(): BrowserCapability {
-  return cached ?? { ready: false, reason: "未プローブ", source: "auto" };
+  return cached ?? { ready: false, reason: "not probed", source: "auto" };
 }

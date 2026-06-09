@@ -66,6 +66,6 @@ export class RuleLoader {
     if (rules.length === 0) return "";
 
     const sections = rules.map((rule) => rule.content);
-    return `\n# ルール\n以下のルールに常に従ってください。\n\n${sections.join("\n\n")}`;
+    return `\n# Rules\nAlways follow the rules below.\n\n${sections.join("\n\n")}`;
   }
 }
