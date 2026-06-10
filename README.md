@@ -15,6 +15,7 @@
 - **セッション管理**: 会話の保存・復元・継続
 - **永続メモリ**: セッションを跨いで知識を蓄積
 - **画像認識**: Vision非対応LLM向けにサブLLM委譲をサポート
+- **画像生成**: Azure GPT Images / Stable Diffusion WebUI / ComfyUI に対応（ON/OFF 可能、`/image` で設定・直接生成、`/cost` でコスト確認）
 - **ブラウザ操作**: Playwright統合によるWeb自動化
 - **マルチライン入力**: Shift+Enter / Ctrl+J で改行、@path でファイル参照
 - **インタラクティブUI**: `/`コマンドと`@`ファイルパスの補完ドロップダウン
@@ -97,7 +98,8 @@ $ npm start
 | `/plan` | プランモードに入る |
 | `/skills` | 利用可能なスキル一覧 |
 | `/status` | 全体ステータス（モデル・コンテキスト・タスク等） |
-| `/cost` | セッションのトークン使用量・コスト表示 |
+| `/cost` | セッションのトークン使用量・コスト表示（画像生成コスト含む） |
+| `/image` | 画像生成の設定・実行 (`on` / `off` / `setup <azure\|sd-webui\|comfyui>` / `use <name>` / `list` / `test` / `gen <prompt>`) |
 | `/autorun` | Autorunモード切替（非破壊操作の自動許可） |
 | `/compress-input` | 入力圧縮モード切替（project指示/メモが閾値超過時に意図保持で圧縮、縮まなければ原文、既定OFF） |
 | `/parallel` | 並列ツール実行数の設定 |
@@ -157,6 +159,7 @@ LLMが自律的に呼び出すツール:
 | `knowledge_search` | 自動 | Obsidianナレッジベースの検索 |
 | `current_datetime` | 自動 | 現在日時の取得 |
 | `vision` | 自動 | 画像認識（マルチモーダル対応時） |
+| `image_generate` | 自動 | 画像生成（`/image` で有効化時のみ。Azure GPT Images / SD WebUI / ComfyUI。設計: docs/image-generation.md） |
 | `sandbox_info` | 自動 | サンドボックス情報の表示 |
 
 ### ブラウザツール（Playwright）

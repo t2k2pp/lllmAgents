@@ -58,6 +58,8 @@ export interface UsageRow {
   cachedTokens: number;
   costUsd: number;
   recordCount: number;
+  /** 画像生成枚数 (slot="image" レコードの imageCount 合計) */
+  imageCount: number;
 }
 
 export interface UsageAggregate {
@@ -277,7 +279,7 @@ function periodLabel(spec: PeriodSpec): string {
 }
 
 function emptyRow(key: string): UsageRow {
-  return { key, inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0, recordCount: 0 };
+  return { key, inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0, recordCount: 0, imageCount: 0 };
 }
 
 function addInto(row: UsageRow, r: TokenUsageRecord): void {
@@ -286,6 +288,7 @@ function addInto(row: UsageRow, r: TokenUsageRecord): void {
   row.cachedTokens += r.cachedTokens ?? 0;
   row.costUsd += r.estimatedCostUsd ?? 0;
   row.recordCount += 1;
+  row.imageCount += r.imageCount ?? 0;
 }
 
 function groupKey(r: TokenUsageRecord, groupBy: UsageGroupBy): string {
@@ -319,7 +322,8 @@ export function aggregate(
     }
     addInto(row, r);
     addInto(grand, r);
-    if (r.model && getModelPricing(r.model) === null) {
+    // 画像レコードはトークン単価テーブルに無いのが正常 (画像単価は image-pricing.ts で別管理)
+    if (r.model && r.slot !== "image" && getModelPricing(r.model) === null) {
       unpriced.add(r.model);
     }
   }
@@ -366,7 +370,7 @@ export function exportUsage(
   if (format === "jsonl") {
     fs.writeFileSync(outPath, records.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf-8");
   } else {
-    const header = "timestamp,slot,provider,model,inputTokens,outputTokens,cachedTokens,estimatedCostUsd,sessionId";
+    const header = "timestamp,slot,provider,model,inputTokens,outputTokens,cachedTokens,estimatedCostUsd,imageCount,sessionId";
     const lines = records.map((r) =>
       [
         r.timestamp,
@@ -377,6 +381,7 @@ export function exportUsage(
         r.outputTokens,
         r.cachedTokens,
         r.estimatedCostUsd,
+        r.imageCount ?? 0,
         r.sessionId ?? "",
       ].join(","),
     );

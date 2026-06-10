@@ -84,6 +84,9 @@ import { getOpsLogger, setOpsLogLevel, parseOpsLogLevel } from "../utils/ops-log
 import { getSubAgentManager } from "../tools/definitions/task.js";
 import { DEFAULT_PORTS } from "../config/types.js";
 import type { ProviderType } from "../config/types.js";
+import type { ImageGenProfile, ImageProviderType } from "../config/types.js";
+import { createImageGenerateTool } from "../tools/definitions/image-generate.js";
+import { AzureImageProvider } from "../image/azure-image.js";
 
 export class REPL {
   private input: InteractiveInput;
@@ -105,6 +108,8 @@ export class REPL {
     private mcpManager?: import("../mcp/mcp-manager.js").MCPManager,
     /** Phase 5: /model vision setup から hot-swap するために保持 */
     private visionService?: import("../tools/definitions/vision.js").VisionService,
+    /** /image コマンドで参照する画像生成サービス。docs/image-generation.md §7 */
+    private imageService?: import("../image/image-service.js").ImageService,
   ) {
     // スキル情報を取得してメニュープロバイダーに渡す
     const skillInfos = skillRegistry
@@ -674,6 +679,370 @@ export class REPL {
       }
     }
     console.log();
+  }
+
+  // ─── 画像生成 (/image) ────────────────────────────────────────────
+  // 設計: docs/image-generation.md §7
+
+  /** image_generate ツールの登録状態を config に合わせて同期する (動的 ON/OFF 用) */
+  private syncImageGenerateTool(): void {
+    if (!this.imageService) return;
+    const registry = this.agent.getToolRegistry();
+    const registered = registry.get("image_generate") !== undefined;
+    const shouldRegister = this.imageService.isEnabled();
+    if (shouldRegister && !registered) {
+      registry.register(createImageGenerateTool(this.imageService));
+    } else if (!shouldRegister && registered) {
+      registry.unregister("image_generate");
+    }
+  }
+
+  private async handleImageCommand(args: string[]): Promise<void> {
+    if (!this.imageService) {
+      console.log(chalk.yellow("  画像生成サービスが初期化されていません。"));
+      return;
+    }
+    const ig = this.config.imageGen ?? { enabled: false, profiles: [] };
+    const sub = (args[0] ?? "").toLowerCase();
+
+    const printStatus = (): void => {
+      const active = this.imageService?.getActiveProfile() ?? null;
+      const toolOn = this.agent.getToolRegistry().get("image_generate") !== undefined;
+      console.log(chalk.bold("\n  === 画像生成 (/image) ==="));
+      console.log(chalk.dim(`  機能:     ${ig.enabled ? chalk.green("有効") : chalk.red("無効")}  /  ツール登録: ${toolOn ? "image_generate ✓" : "なし"}`));
+      if (ig.profiles.length === 0) {
+        console.log(chalk.dim("  プロファイル: なし — /image setup <azure|sd-webui|comfyui> で追加"));
+      } else {
+        console.log(chalk.dim("  プロファイル:"));
+        for (const p of ig.profiles) {
+          const mark = active?.name === p.name ? chalk.green("● ") : "  ";
+          const loc = p.endpoint ?? p.baseUrl ?? "";
+          const model = p.model ?? p.checkpoint ?? "";
+          console.log(chalk.dim(`    ${mark}${p.name}  [${p.providerType}] ${model} @ ${loc}`));
+        }
+        if (!active) {
+          console.log(chalk.yellow("  ⚠ アクティブなプロファイルがありません。/image use <name> で選択してください。"));
+        }
+      }
+      console.log(chalk.dim("  使い方: /image on|off | setup <type> | use <name> | list | remove <name> | test | gen <prompt>"));
+      console.log();
+    };
+
+    switch (sub) {
+      case "":
+      case "status":
+      case "list": {
+        printStatus();
+        break;
+      }
+
+      case "on": {
+        if (ig.profiles.length === 0) {
+          console.log(chalk.yellow("  プロファイルがありません。先に /image setup <azure|sd-webui|comfyui> で追加してください。"));
+          break;
+        }
+        ig.enabled = true;
+        if (!ig.active || !ig.profiles.some((p) => p.name === ig.active)) {
+          ig.active = ig.profiles[0].name;
+          console.log(chalk.dim(`  アクティブ未設定のため "${ig.active}" を選択しました。`));
+        }
+        this.config.imageGen = ig;
+        saveConfig(this.config);
+        this.syncImageGenerateTool();
+        console.log(chalk.green("  ✓ 画像生成機能を有効化しました (image_generate ツール登録)。"));
+        break;
+      }
+
+      case "off": {
+        ig.enabled = false;
+        this.config.imageGen = ig;
+        saveConfig(this.config);
+        this.syncImageGenerateTool();
+        console.log(chalk.green("  ✓ 画像生成機能を無効化しました (image_generate ツール解除)。"));
+        break;
+      }
+
+      case "setup": {
+        const type = (args[1] ?? "").toLowerCase();
+        const typeMap: Record<string, ImageProviderType> = {
+          "azure": "azure-image",
+          "azure-image": "azure-image",
+          "sd-webui": "sd-webui",
+          "sd": "sd-webui",
+          "comfyui": "comfyui",
+          "comfy": "comfyui",
+        };
+        const providerType = typeMap[type];
+        if (!providerType) {
+          console.log(chalk.yellow("  使い方: /image setup <azure|sd-webui|comfyui>"));
+          break;
+        }
+        await this.setupImageProfile(providerType);
+        break;
+      }
+
+      case "use": {
+        const name = args[1];
+        if (!name) {
+          console.log(chalk.yellow("  使い方: /image use <name>"));
+          break;
+        }
+        if (!ig.profiles.some((p) => p.name === name)) {
+          console.log(chalk.red(`  プロファイル "${name}" が見つかりません。/image list で確認してください。`));
+          break;
+        }
+        ig.active = name;
+        this.config.imageGen = ig;
+        saveConfig(this.config);
+        this.syncImageGenerateTool();
+        console.log(chalk.green(`  ✓ アクティブプロファイルを "${name}" に切り替えました。`));
+        break;
+      }
+
+      case "remove": {
+        const name = args[1];
+        if (!name) {
+          console.log(chalk.yellow("  使い方: /image remove <name>"));
+          break;
+        }
+        const idx = ig.profiles.findIndex((p) => p.name === name);
+        if (idx < 0) {
+          console.log(chalk.red(`  プロファイル "${name}" が見つかりません。`));
+          break;
+        }
+        ig.profiles.splice(idx, 1);
+        if (ig.active === name) ig.active = undefined;
+        this.config.imageGen = ig;
+        saveConfig(this.config);
+        this.syncImageGenerateTool();
+        console.log(chalk.green(`  ✓ プロファイル "${name}" を削除しました。`));
+        if (!ig.active && ig.enabled && ig.profiles.length > 0) {
+          console.log(chalk.yellow("  ⚠ アクティブなプロファイルがありません。/image use <name> で選択してください。"));
+        }
+        break;
+      }
+
+      case "test": {
+        const active = this.imageService.getActiveProfile();
+        if (!active) {
+          console.log(chalk.yellow("  アクティブなプロファイルがありません。/image use <name> で選択してください。"));
+          break;
+        }
+        await this.testImageBackend(active);
+        break;
+      }
+
+      case "gen": {
+        const prompt = args.slice(1).join(" ").trim();
+        if (!prompt) {
+          console.log(chalk.yellow('  使い方: /image gen <プロンプト>  (例: /image gen a red dragon, pixel art)'));
+          break;
+        }
+        if (!this.imageService.isEnabled()) {
+          console.log(chalk.yellow("  画像生成機能が無効です。/image on で有効化してください。"));
+          break;
+        }
+        const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
+        const outputPath = path.resolve(process.cwd(), "generated-images", `img-${stamp}.png`);
+        console.log(chalk.dim(`  生成中... (保存先: ${outputPath})`));
+        try {
+          const result = await this.imageService.generateAndSave({ prompt }, outputPath);
+          console.log(chalk.green(`  ✓ 生成しました (${result.providerType} / ${result.model}):`));
+          for (const p of result.savedPaths) console.log(chalk.dim(`    ${p}`));
+          console.log(chalk.dim(result.costUsd > 0 ? `  推定コスト: $${result.costUsd.toFixed(4)}` : "  コスト: $0 (ローカル生成)"));
+          for (const w of result.warnings) console.log(chalk.yellow(`  ⚠ ${w}`));
+        } catch (e) {
+          console.log(chalk.red(`  生成に失敗しました: ${e instanceof Error ? e.message : String(e)}`));
+        }
+        break;
+      }
+
+      default: {
+        console.log(chalk.yellow("  使い方: /image [on|off|setup <type>|use <name>|list|remove <name>|test|gen <prompt>]"));
+        break;
+      }
+    }
+  }
+
+  /** アクティブバックエンドへの疎通確認。Azure は課金回避のため設定検証のみ */
+  private async testImageBackend(profile: ImageGenProfile): Promise<void> {
+    console.log(chalk.dim(`  プロファイル "${profile.name}" (${profile.providerType}) を確認中...`));
+    try {
+      if (profile.providerType === "azure-image") {
+        // 生成 API を叩くと課金されるため、設定値の検証 (apiKey 解決含む) のみ
+        const { createImageProvider } = await import("../image/image-provider-factory.js");
+        createImageProvider(profile, this.passphrase);
+        console.log(chalk.green("  ✓ 設定は有効です (endpoint/apiKey/model)。実生成は課金されるため確認していません。"));
+      } else {
+        const base = (profile.baseUrl ?? "").trim().replace(/\/$/, "");
+        const pingPath = profile.providerType === "sd-webui" ? "/sdapi/v1/options" : "/system_stats";
+        const res = await fetch(`${base}${pingPath}`);
+        if (res.ok) {
+          console.log(chalk.green(`  ✓ 接続 OK (${base}${pingPath})`));
+        } else {
+          console.log(chalk.yellow(`  ⚠ 応答はありましたが HTTP ${res.status} です (${base}${pingPath})`));
+        }
+      }
+    } catch (e) {
+      console.log(chalk.red(`  ✗ 確認失敗: ${e instanceof Error ? e.message : String(e)}`));
+      if (profile.providerType === "sd-webui") {
+        console.log(chalk.dim("    WebUI を --api オプション付きで起動しているか確認してください。"));
+      }
+    }
+  }
+
+  /** /image setup <type>: プロファイル追加ウィザード (/model setup と同じ inquirer 流儀) */
+  private async setupImageProfile(providerType: ImageProviderType): Promise<void> {
+    console.log(chalk.bold(`\n  ── 画像生成プロファイル セットアップ (${providerType}) ──`));
+    console.log(chalk.dim("  キャンセルは Ctrl+C\n"));
+
+    const ig = this.config.imageGen ?? { enabled: false, profiles: [] };
+
+    const name = await input({
+      message: "プロファイル名 (例: azure-main, local-sd):",
+      validate: (v: string) => {
+        const t = v.trim();
+        if (!t) return "プロファイル名は必須です";
+        if (ig.profiles.some((p) => p.name === t)) return `"${t}" は既に存在します`;
+        return true;
+      },
+    });
+
+    const profile: ImageGenProfile = { name: name.trim(), providerType };
+
+    if (providerType === "azure-image") {
+      const endpointUrl = await input({
+        message: "Azure endpoint URL (例: https://your-resource.openai.azure.com — 完全URLでも host 部に自動正規化):",
+        validate: (v: string) => {
+          if (!v.trim()) return "endpoint URL は必須です";
+          if (!/^https?:\/\//i.test(v.trim())) return "http(s):// で始めてください";
+          return true;
+        },
+      });
+      profile.endpoint = AzureImageProvider.normalizeEndpoint(endpointUrl.trim());
+
+      profile.model = (await input({
+        message: "Deployment 名 (例: gpt-image-2):",
+        validate: (v: string) => v.trim().length > 0 || "deployment 名は必須です",
+      })).trim();
+
+      const storageMode = await select({
+        message: "API Key の保存方法:",
+        choices: [
+          { name: "パスフレーズで暗号化保存 (推奨)", value: "encrypt" },
+          { name: "環境変数参照 (env:VAR_NAME)", value: "env" },
+          { name: "平文で保存 (非推奨)", value: "plain" },
+        ],
+        default: "encrypt",
+      });
+      if (storageMode === "env") {
+        const envName = await input({
+          message: "環境変数名 (例: AZURE_IMAGE_API_KEY):",
+          validate: (v: string) =>
+            /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim()) || "有効な環境変数名を入力してください",
+        });
+        profile.apiKey = `env:${envName.trim()}`;
+        if (!process.env[envName.trim()]) {
+          console.log(chalk.yellow(`  ⚠ 環境変数 ${envName.trim()} は現在未設定です。アプリ起動時にセットしてください。`));
+        }
+      } else {
+        const apiKey = await password({ message: "API Key (入力は表示されません):", mask: "*" });
+        if (!apiKey.trim()) {
+          console.log(chalk.red("  API Key が空です。中止しました。"));
+          return;
+        }
+        if (storageMode === "plain") {
+          const ok = await confirm({
+            message: "平文保存は config.json にそのまま記録されます。本当に続行しますか？",
+            default: false,
+          });
+          if (!ok) {
+            console.log(chalk.yellow("  セットアップを中止しました。"));
+            return;
+          }
+          profile.apiKey = apiKey.trim();
+        } else {
+          const pass1 = await password({ message: "暗号化用パスフレーズ:", mask: "*" });
+          const pass2 = await password({ message: "もう一度入力 (確認):", mask: "*" });
+          if (pass1 !== pass2) {
+            console.log(chalk.red("  パスフレーズが一致しません。中止しました。"));
+            return;
+          }
+          if (pass1.length < 4) {
+            console.log(chalk.red("  パスフレーズが短すぎます (4文字以上)。中止しました。"));
+            return;
+          }
+          profile.apiKey = CredentialVault.encrypt(apiKey.trim(), pass1);
+          console.log(chalk.yellow("  ⚠ 暗号化保存のため、生成実行にはメインLLM と同じ合言葉での起動が必要です。"));
+        }
+      }
+
+      const quality = await select({
+        message: "既定品質 (high は 1024x1024 で約$0.21/枚と高額):",
+        choices: [
+          { name: "medium (約$0.05/枚) — 推奨", value: "medium" },
+          { name: "low (約$0.006/枚)", value: "low" },
+          { name: "high (約$0.21/枚)", value: "high" },
+        ],
+        default: "medium",
+      });
+      profile.defaultQuality = quality as "low" | "medium" | "high";
+    } else {
+      // sd-webui / comfyui (ローカル)
+      const defaultPort = providerType === "sd-webui" ? "7860" : "8188";
+      const baseUrl = await input({
+        message: `API URL (例: http://localhost:${defaultPort}):`,
+        default: `http://localhost:${defaultPort}`,
+        validate: (v: string) => /^https?:\/\//i.test(v.trim()) || "http(s):// で始めてください",
+      });
+      profile.baseUrl = baseUrl.trim().replace(/\/$/, "");
+
+      if (providerType === "comfyui") {
+        const checkpoint = await input({
+          message: "Checkpoint ファイル名 (組み込みテンプレート用。例: sd_xl_base_1.0.safetensors):",
+          validate: (v: string) => v.trim().length > 0 || "組み込みテンプレートには checkpoint 名が必須です",
+        });
+        profile.checkpoint = checkpoint.trim();
+        const tpl = await input({
+          message: "独自ワークフローテンプレート JSON の絶対パス (空欄で組み込み txt2img):",
+        });
+        if (tpl.trim()) profile.workflowTemplate = tpl.trim();
+      }
+
+      const negative = await input({
+        message: "既定 negative prompt (空欄可):",
+      });
+      if (negative.trim()) profile.negativePrompt = negative.trim();
+    }
+
+    const size = await input({
+      message: '既定サイズ "WxH" (空欄で 1024x1024):',
+      validate: (v: string) =>
+        !v.trim() || /^\d+\s*[xX×]\s*\d+$/.test(v.trim()) || '"WxH" 形式で入力してください (例: 1024x1024)',
+    });
+    if (size.trim()) profile.defaultSize = size.trim();
+
+    ig.profiles.push(profile);
+    // 初回プロファイルは自動でアクティブ + 機能有効化
+    const isFirst = ig.profiles.length === 1;
+    if (isFirst || !ig.active) {
+      ig.active = profile.name;
+    }
+    if (isFirst && !ig.enabled) {
+      ig.enabled = true;
+      console.log(chalk.dim("  初回プロファイルのため画像生成機能を有効化しました。"));
+    }
+    this.config.imageGen = ig;
+    saveConfig(this.config);
+    this.syncImageGenerateTool();
+
+    console.log(chalk.green(`\n  ✓ プロファイル "${profile.name}" を追加しました:`));
+    console.log(chalk.dim(`    タイプ:   ${providerType}`));
+    console.log(chalk.dim(`    接続先:   ${profile.endpoint ?? profile.baseUrl}`));
+    if (profile.model) console.log(chalk.dim(`    Model:    ${profile.model}`));
+    if (profile.checkpoint) console.log(chalk.dim(`    Checkpoint: ${profile.checkpoint}`));
+    console.log(chalk.dim(`    アクティブ: ${ig.active === profile.name ? "はい" : `いいえ (現在: ${ig.active})`}`));
+    console.log(chalk.dim("    疎通確認: /image test  /  試し生成: /image gen <プロンプト>\n"));
   }
 
   // ─── LLM プロファイル履歴 (/profiles) ────────────────────────────
@@ -5489,6 +5858,13 @@ export class REPL {
         }
         for (const l of lines) console.log(l);
         console.log();
+        break;
+      }
+
+      // /image: 画像生成機能 (Azure GPT Images / SD WebUI / ComfyUI)。
+      // 設計: docs/image-generation.md §7
+      case "/image": {
+        await this.handleImageCommand(args);
         break;
       }
 

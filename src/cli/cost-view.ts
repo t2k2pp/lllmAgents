@@ -100,6 +100,14 @@ export function formatSummary(
       out.push(chalk.dim(`    ${r.key.padEnd(20)} ${fmtUsd(r.costUsd)}  (${pct}%)`));
     }
   }
+  // 画像生成 (slot="image") があれば枚数とコストを別行で表示 (docs/image-generation.md §6.3)
+  if (g.imageCount > 0) {
+    const bySlot = aggregate(period, "slot", sessionRecords);
+    const imageRow = bySlot.rows.find((r) => r.key === "image");
+    if (imageRow) {
+      out.push(chalk.dim(`  画像生成: ${imageRow.imageCount}枚  ${fmtUsd(imageRow.costUsd)}`));
+    }
+  }
   if (agg.unpricedModels.length > 0) {
     out.push(chalk.yellow(`  ⚠ 単価未登録: ${agg.unpricedModels.join(", ")} (cost=0 で計上)`));
   }
@@ -192,6 +200,6 @@ export function formatProviders(
   }
   out.push(...axisTable(byProvider, "provider 別"));
   out.push("");
-  out.push(...axisTable(bySlot, "slot 別 (main / second / vision)"));
+  out.push(...axisTable(bySlot, "slot 別 (main / second / vision / image)"));
   return out;
 }

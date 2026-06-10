@@ -288,6 +288,50 @@ export interface FeaturesConfig {
   browser?: "auto" | "on" | "off";
 }
 
+/**
+ * 画像生成バックエンドの種別。設計: docs/image-generation.md
+ * - "azure-image": Azure OpenAI images/generations (gpt-image-1 系 / gpt-image-2)
+ * - "sd-webui":    Stable Diffusion WebUI (AUTOMATIC1111) /sdapi/v1/txt2img
+ * - "comfyui":     ComfyUI /prompt + /history ポーリング (テンプレートワークフロー方式)
+ */
+export type ImageProviderType = "azure-image" | "sd-webui" | "comfyui";
+
+/** 画像生成プロファイル (登録単位)。docs/image-generation.md §3 */
+export interface ImageGenProfile {
+  /** 一意な表示名 (= /image use の引数) */
+  name: string;
+  providerType: ImageProviderType;
+  /** azure-image: リソース base URL (normalizeEndpoint 適用) */
+  endpoint?: string;
+  /** azure-image: API Key (env:VAR / encrypted:... / 平文) */
+  apiKey?: string;
+  /** azure-image: deployment 名 (例: gpt-image-2) */
+  model?: string;
+  /** sd-webui / comfyui: 例 http://localhost:7860 / http://localhost:8188 */
+  baseUrl?: string;
+  /** comfyui: テンプレートワークフロー JSON の絶対パス。未指定で組み込み txt2img */
+  workflowTemplate?: string | null;
+  /** comfyui: 組み込みテンプレートの CheckpointLoaderSimple に注入する checkpoint 名 */
+  checkpoint?: string;
+  /** ツールパラメータ未指定時の既定サイズ "WxH" (既定 "1024x1024") */
+  defaultSize?: string;
+  /** azure-image: 既定品質 (既定 "medium"。high は 1024x1024 で $0.21/枚と高額なため) */
+  defaultQuality?: "low" | "medium" | "high";
+  /** sd-webui / comfyui: 既定 negative prompt */
+  negativePrompt?: string;
+  /** sd-webui / comfyui: サンプリングステップ数 (既定 25) */
+  steps?: number;
+}
+
+/** 画像生成機能の設定。docs/image-generation.md */
+export interface ImageGenConfig {
+  /** 機能トグル。false ならツール非登録 (browser ゲートと同型) */
+  enabled: boolean;
+  /** アクティブな profile の name (1つだけアクティブ) */
+  active?: string;
+  profiles: ImageGenProfile[];
+}
+
 export interface Config {
   mainLLM: LLMEndpoint;
   visionLLM: LLMEndpoint | null;
@@ -302,6 +346,8 @@ export interface Config {
   obsidian?: ObsidianConfig;
   /** 機能トグル (環境依存ケイパビリティの強制制御) */
   features?: FeaturesConfig;
+  /** 画像生成機能 (Azure GPT Images / SD WebUI / ComfyUI)。docs/image-generation.md */
+  imageGen?: ImageGenConfig;
   /** true: テキストをリアルタイムにストリーミング表示。false(デフォルト): スピナー+完了後Markdownレンダリング */
   streamingDisplay?: boolean;
   /** ツールの最大並列実行数（デフォルト: 3）。vLLM KVキャッシュやリソースに合わせて調整 */

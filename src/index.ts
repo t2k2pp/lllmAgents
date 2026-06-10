@@ -10,6 +10,8 @@ import { ToolRegistry } from "./tools/tool-registry.js";
 import { PermissionManager } from "./security/permission-manager.js";
 import { PlaywrightManager } from "./browser/playwright-manager.js";
 import { VisionService, createVisionTool } from "./tools/definitions/vision.js";
+import { ImageService } from "./image/image-service.js";
+import { createImageGenerateTool } from "./tools/definitions/image-generate.js";
 import { PlanManager } from "./agent/plan-mode.js";
 import { SubAgentManager } from "./agent/sub-agent.js";
 import { SkillRegistry } from "./skills/skill-registry.js";
@@ -207,6 +209,20 @@ async function main(): Promise<void> {
   const visionModel = config.visionLLM?.model ?? config.mainLLM.model;
   const visionService = new VisionService(visionProvider, visionModel);
   toolRegistry.register(createVisionTool(visionService));
+
+  // Image generation tool — imageGen.enabled かつ active profile があるときのみ登録
+  // (browser ゲートと同型。 無効時はツールを出さない)。 docs/image-generation.md §8
+  const imageService = new ImageService(config, sharedPassphrase);
+  if (config.imageGen) {
+    if (imageService.isEnabled()) {
+      toolRegistry.register(createImageGenerateTool(imageService));
+    } else {
+      console.log(
+        chalk.dim("ℹ 画像生成機能 (image_generate) は無効: /image on または /image setup で有効化"),
+      );
+    }
+  }
+  // imageGen 未設定 (undefined) なら何も表示しない (初心者ノイズ回避)
 
   // MCP servers
   // Phase F-1b: 起動時 --no-mcp フラグ / config.mcpEnabled で全体 ON/OFF を制御。
@@ -585,7 +601,7 @@ async function main(): Promise<void> {
   }
 
   // Start REPL (sharedPassphrase は /swap や /second setup 後の Provider 再生成で使い回す)
-  const repl = new REPL(agent, config, skillRegistry, planManager, secondLLMManager, sharedPassphrase, mcpManager, visionService);
+  const repl = new REPL(agent, config, skillRegistry, planManager, secondLLMManager, sharedPassphrase, mcpManager, visionService, imageService);
   await repl.start();
 
   // Cleanup

@@ -1,6 +1,6 @@
 import { appendUsageRecord } from "./usage-store.js";
 
-export type UsageSlot = "main" | "second" | "vision";
+export type UsageSlot = "main" | "second" | "vision" | "image";
 
 export interface TokenUsageRecord {
   timestamp: string;         // ISO 8601
@@ -12,6 +12,8 @@ export interface TokenUsageRecord {
   outputTokens: number;
   cachedTokens: number;
   estimatedCostUsd: number;
+  /** 画像生成 (slot="image") の生成枚数。docs/image-generation.md §6 */
+  imageCount?: number;
   sessionId?: string;
 }
 
