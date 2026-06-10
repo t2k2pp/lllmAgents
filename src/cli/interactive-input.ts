@@ -114,8 +114,31 @@ export class InteractiveInput {
         this.dataListenerInstalled = true;
       }
 
+      // raw mode を「強制再適用」する。libuv は要求モードが内部キャッシュと一致すると
+      // 何もしないため、子プロセスや inquirer が実コンソールのモードを変えた後は
+      // setRawMode(true) 単発では復旧できないことがある（Node は raw のつもりでも実際は
+      // cooked のまま → Enter を押すまで入力が届かない症状）。一度 false に落としてから
+      // true を適用し、実モードと内部キャッシュを確実に同期させる。
+      if (stdin.isRaw) {
+        stdin.setRawMode(false);
+      }
       stdin.setRawMode(true);
       stdin.resume();
+
+      // 入力待ち中のウォッチドッグ: バックグラウンド処理（Discord/Slack/ループ経由の
+      // processInput）が interruptWatcher.stop() や inquirer 後始末で raw mode を外したり
+      // stdin を pause すると、プロンプト表示中なのに入力が反応しなくなる。
+      // 定期検査で自動復旧し、「一度改行しないと入力できない」状態を防ぐ。
+      const rawModeWatchdog = setInterval(() => {
+        if (!stdin.isTTY) return;
+        if (!stdin.isRaw) {
+          stdin.setRawMode(true);
+        }
+        if (stdin.isPaused()) {
+          stdin.resume();
+        }
+      }, 500);
+      rawModeWatchdog.unref?.();
       // ブラケット貼り付けモードを有効化（モダンターミナル: Windows Terminal/iTerm2/kitty/mintty等）
       // マルチライン貼り付け時、端末は \x1b[200~ ... \x1b[201~ で内容を囲む。
       // これによりペースト内の \r を Enter と誤認せず改行として取り込める。
@@ -480,6 +503,7 @@ export class InteractiveInput {
       // ─── 終了処理 ─────────────────────────────
 
       const cleanup = (): void => {
+        clearInterval(rawModeWatchdog);
         clearMenuDisplay();
         // ブラケット貼り付けモードを無効化
         stdout.write("\x1b[?2004l");
@@ -669,10 +693,16 @@ export class InteractiveInput {
           return;
         }
 
-        // ── Escape → メニュー閉じる ──
+        // ── Escape → メニュー閉じる / 入力クリア ──
         if (key.name === "escape") {
           if (menuVisible) {
             dismissMenu();
+          } else if (buffer.length > 0) {
+            // Claude Code と同様、メニュー非表示時の ESC は入力中テキストの破棄
+            buffer = "";
+            cursorPos = 0;
+            this.historyIndex = -1;
+            renderInput();
           }
           return;
         }

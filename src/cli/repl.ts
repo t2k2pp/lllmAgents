@@ -215,6 +215,10 @@ export class REPL {
     // 1回の Ctrl+C で exit してしまう事象 (user 報告) があった。 常に 2 回押し必須にして
     // 事故的な終了を防ぐ。 raw mode 中の Ctrl+C は interactive-input が拾うため、 通常の
     // 待機プロンプトでは /quit を案内するメッセージのみが出る (この handler は呼ばれない)。
+    //
+    // 2026-06-10 修正: エージェント実行中 (interruptWatcher が raw mode を保持) は端末が
+    // SIGINT を生成しないため、Ctrl+C が完全に無視される事象があった。interrupt-watcher が
+    // 0x03 バイトを検知して process.emit("SIGINT") でこの handler に合流させる。
     let ctrlCCount = 0;
     let ctrlCResetTimer: ReturnType<typeof setTimeout> | null = null;
     const sigintHandler = () => {
