@@ -36,6 +36,7 @@ import type {
 import { setInteractionBridge } from "../agent/interaction-bridge-registry.js";
 import { formatReportFooter } from "../agent/task-reporter.js";
 import { ChannelProgressTracker } from "../agent/channel-progress.js";
+import { ConversationStore, ChannelRunQueue, waitForAgentIdle } from "../agent/channel-sessions.js";
 import type { DiscordConfig } from "../config/types.js";
 import * as logger from "../utils/logger.js";
 
@@ -68,6 +69,9 @@ export class DiscordInteractionServer implements InteractionBridge {
   private current: ConversationContext | null = null;
   /** ボタン押下 / Modal 送信待ち: nonce → resolver */
   private pendingComponents = new Map<string, PendingComponent>();
+  /** A-5: チャンネル単位の会話ストア + 依頼の直列キュー */
+  private conversations = new ConversationStore();
+  private queue = new ChannelRunQueue();
 
   constructor(
     private config: DiscordConfig,
@@ -227,26 +231,32 @@ export class DiscordInteractionServer implements InteractionBridge {
 
     const prompt = interaction.data?.options?.[0]?.value as string ?? "";
     const token = interaction.token as string;
+    const channelId = (interaction.channel_id as string) ?? "unknown";
     const username = interaction.member?.user?.username ?? interaction.user?.username ?? "Unknown";
 
     console.log(`\n  [Discord] ${username}: ${prompt}`);
 
-    // 非同期で処理 (deferred 応答済みのため時間制限なし)
-    this.processPrompt(prompt, token, userId).catch((e) => {
+    // A-5: 拒否せずキューに積む (docs/channel-session-queue-design.md §3)。
+    // 注意: interaction token は 15 分で失効するため、 長いキュー待ちでは応答できないことがある
+    const { position, result } = this.queue.enqueue(() =>
+      this.processPrompt(prompt, token, userId, channelId),
+    );
+    if (position > 0) {
+      this.sendFollowUp(
+        token,
+        `⏳ キューに追加しました（前に ${position} 件）。待ち時間が 15 分を超えると応答できない場合があります。`,
+      ).catch(() => {});
+    }
+    result.catch((e) => {
       logger.error("Discord prompt processing error:", e);
       this.sendFollowUp(token, "❌ 処理中にエラーが発生しました。").catch(() => {});
     });
   }
 
-  /** AgentLoop でプロンプトを処理し、Discord に結果を返す */
-  private async processPrompt(prompt: string, token: string, userId: string): Promise<void> {
-    if (this.agentLoop.isProcessing) {
-      await this.sendFollowUp(
-        token,
-        "⏳ 現在別のリクエストを処理中です。少し待ってから再試行してください。",
-      );
-      return;
-    }
+  /** AgentLoop でプロンプトを処理し、Discord に結果を返す (キューにより直列実行される) */
+  private async processPrompt(prompt: string, token: string, userId: string, channelId: string): Promise<void> {
+    // CLI 操作中はジョブ開始を待つ (CLI 優先)
+    await waitForAgentIdle(this.agentLoop);
 
     // AgentEventBus 購読で最終応答を受け取る (docs/agent-events-design.md §3.2)
     let completeEvent: import("../agent/agent-events.js").AgentEventMap["task_complete"] | null = null;
@@ -256,6 +266,10 @@ export class DiscordInteractionServer implements InteractionBridge {
     // A-4: 進捗の中間報告。 deferred 応答 (@original) を編集し続け、 完了時に最終応答が上書きする
     const tracker = new ChannelProgressTracker((text) => this.sendFollowUp(token, text))
       .attach(this.agentLoop.events);
+    // A-5: チャンネルの会話に載せ替え (CLI の会話は退避し、 finally で復帰する)
+    const convKey = `discord:${channelId}`;
+    const cliState = this.agentLoop.exportConversation();
+    this.agentLoop.importConversation(this.conversations.get(convKey));
     this.current = { token, userId };
     try {
       await this.agentLoop.run(prompt, { source: "discord" });
@@ -289,6 +303,9 @@ export class DiscordInteractionServer implements InteractionBridge {
       tracker.detach();
       off();
       this.current = null;
+      // A-5: チャンネルの会話を保存し、 CLI の会話を復帰する
+      this.conversations.set(convKey, this.agentLoop.exportConversation());
+      this.agentLoop.importConversation(cliState);
     }
   }
 

@@ -56,6 +56,7 @@ import type { ChatLogger } from "./chat-logger.js";
 import { renderEditDiff, renderWriteDiff } from "../cli/diff-display.js";
 import {
   type GoalDefinition,
+  type EvaluationRecord,
   setGoal as setGoalSlot,
   getGoal as getGoalSlot,
   clearGoal as clearGoalSlot,
@@ -65,12 +66,26 @@ import {
   restoreGoalState,
 } from "./goal-slot.js";
 import {
+  type TodoItem,
   setTodos as setTodosFromGoal,
   getTodos as getTodosCurrent,
   clearTodos,
   buildTodoSection,
   formatTodos,
 } from "../tools/definitions/todo-write.js";
+
+/**
+ * チャネル会話スワップ用の会話状態 (A-5: docs/channel-session-queue-design.md §2)。
+ * 「履歴 + ToDo + Goal slot + mode」 の 4 点セット = session 境界と同じ範囲
+ * (docs/todo-goal-lifecycle.md)。 MessageHistory はオブジェクト参照のまま保持する
+ * (メッセージ再生ではないため thinking/ephemeral も無劣化)。
+ */
+export interface ConversationState {
+  history: MessageHistory;
+  todos: TodoItem[];
+  goal: { definition: GoalDefinition; history: EvaluationRecord[] } | null;
+  mode: AgentMode;
+}
 
 /**
  * AgentMode — paradigm 軸の切替。 register (style 軸) と直交。
@@ -2455,6 +2470,52 @@ export class AgentLoop {
       restoreGoalState(sessionData.goal.definition, sessionData.goal.history);
       this.currentMode = "goal-seek";
     }
+  }
+
+  /**
+   * A-5: 現用の会話状態への参照を取り出す (チャネル会話スワップ用)。
+   * docs/channel-session-queue-design.md §2
+   */
+  exportConversation(): ConversationState {
+    const goal = getGoalSlot();
+    return {
+      history: this.history,
+      todos: getTodosCurrent(),
+      goal: goal ? { definition: goal, history: getEvaluationHistory() } : null,
+      mode: this.currentMode,
+    };
+  }
+
+  /**
+   * A-5: 会話状態を載せ替える (null = 新規会話)。 キューで直列化されている前提
+   * (実行中の run の最中に呼んではならない)。 todos / goal slot は module singleton
+   * のためここで同期する。
+   */
+  importConversation(state: ConversationState | null): void {
+    if (state) {
+      this.history = state.history;
+      clearTodos();
+      if (state.todos.length > 0) setTodosFromGoal(state.todos);
+      if (state.goal) {
+        restoreGoalState(state.goal.definition, state.goal.history);
+      } else {
+        clearGoalSlot();
+      }
+      this.currentMode = state.mode;
+    } else {
+      // 新規会話: 現在の設定でシステムプロンプトを組み直す
+      const systemPrompt = buildSystemPrompt(
+        this.builtSkills, this.builtHasSecondLLM, this.builtHasObsidian,
+        this.llmProfiles, this.capability.tier, this.currentCompressionOverrides(),
+      );
+      this.history = new MessageHistory(systemPrompt);
+      this.history.setSystemPromptComposer((base) => this.composeQuasiSystemPrompt(base));
+      clearTodos();
+      clearGoalSlot();
+      this.currentMode = "forward";
+    }
+    // chatLogger コールバックは history オブジェクトに紐づくため再適用する
+    this.setChatLogger(this.chatLogger);
   }
 
   getHistory(): MessageHistory {

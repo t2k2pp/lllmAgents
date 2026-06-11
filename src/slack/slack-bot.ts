@@ -36,6 +36,7 @@ import type {
 import { setInteractionBridge } from "../agent/interaction-bridge-registry.js";
 import { formatReportFooter, formatOutcome, formatStatsLine } from "../agent/task-reporter.js";
 import { ChannelProgressTracker } from "../agent/channel-progress.js";
+import { ConversationStore, ChannelRunQueue, waitForAgentIdle } from "../agent/channel-sessions.js";
 import type { SlackConfig } from "../config/types.js";
 import { markdownToSlackMrkdwn } from "../utils/slack.js";
 import * as logger from "../utils/logger.js";
@@ -80,6 +81,9 @@ export class SlackBot implements InteractionBridge {
   private pendingActions = new Map<string, PendingAction>();
   /** 自由入力 (スレッド返信) 待ち。 直列実行のため同時に 1 件 */
   private pendingText: PendingText | null = null;
+  /** A-5: スレッド単位の会話ストア + 依頼の直列キュー */
+  private conversations = new ConversationStore();
+  private queue = new ChannelRunQueue();
 
   constructor(
     private config: SlackConfig,
@@ -190,16 +194,36 @@ export class SlackBot implements InteractionBridge {
 
     if (!prompt) return;
 
-    // 処理中チェック
-    if (this.agentLoop.isProcessing) {
+    console.log(`\n  [Slack] <${userId}>: ${prompt}`);
+
+    // A-5: 拒否せずキューに積む (docs/channel-session-queue-design.md §3)
+    const ctx: ConversationContext = { channel, threadTs: threadRoot, userId, isDM };
+    const convKey = `slack:${channel}:${threadRoot}`;
+    const { position, result } = this.queue.enqueue(() =>
+      this.processRequest(prompt, ctx, convKey, say),
+    );
+    if (position > 0) {
       await say({
-        text: ":hourglass_flowing_sand: 別のリクエストを処理中です。少し待ってから再試行してください。",
+        text: `:hourglass_flowing_sand: キューに追加しました（前に ${position} 件）`,
         thread_ts: threadRoot,
       });
-      return;
     }
+    // エラーは processRequest 内で通知済み (キューのチェーンは壊れない)
+    await result.catch(() => {});
+  }
 
-    console.log(`\n  [Slack] <${userId}>: ${prompt}`);
+  /** 1 件のチャネル依頼を処理する (キューにより直列実行される) */
+  private async processRequest(
+    prompt: string,
+    ctx: ConversationContext,
+    convKey: string,
+    say: (msg: any) => Promise<any>,
+  ): Promise<void> {
+    // CLI 操作中はジョブ開始を待つ (CLI 優先)
+    await waitForAgentIdle(this.agentLoop);
+
+    const channel = ctx.channel;
+    const threadRoot = ctx.threadTs;
 
     // 「処理中」インジケーター (A-4: この 1 メッセージを chat.update で編集し続ける)
     const progressMsg = await say({
@@ -218,7 +242,10 @@ export class SlackBot implements InteractionBridge {
       if (!progressTs) return;
       await this.app.client.chat.update({ channel, ts: progressTs, text });
     }).attach(this.agentLoop.events);
-    this.current = { channel, threadTs: threadRoot, userId, isDM };
+    // A-5: スレッドの会話に載せ替え (CLI の会話は退避し、 finally で復帰する)
+    const cliState = this.agentLoop.exportConversation();
+    this.agentLoop.importConversation(this.conversations.get(convKey));
+    this.current = ctx;
     try {
       await this.agentLoop.run(prompt, { source: "slack" });
       tracker.detach();
@@ -253,6 +280,9 @@ export class SlackBot implements InteractionBridge {
       tracker.detach();
       off();
       this.current = null;
+      // A-5: スレッドの会話を保存し、 CLI の会話を復帰する
+      this.conversations.set(convKey, this.agentLoop.exportConversation());
+      this.agentLoop.importConversation(cliState);
     }
   }
 
