@@ -103,7 +103,7 @@ export class ToolExecutor {
     }
     try {
       logger.debug(`Executing tool: ${toolName}`, params);
-      const result = await handler.execute(params, { ancestors: this.ancestors });
+      const result = await handler.execute(params, { ancestors: this.ancestors, source });
 
       // Post-tool hooks
       if (this.hookManager) {

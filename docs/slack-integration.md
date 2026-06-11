@@ -193,3 +193,11 @@ Slack経由のリクエストはDiscordと同じheadlessモデル:
 - **リアクション操作**: 処理完了時にリアクション追加
 - **Slash Command**: Slack側のスラッシュコマンド `/ask` 対応
 - **インタラクティブ権限確認**: Slack Buttonで権限確認UI
+
+## 更新履歴
+
+- **2026-06-11 (A-2/A-3)**: インタラクティブ権限確認と ask_user ブリッジを実装。
+  headless 制限が緩和され、ブリッジ経由で書き込み系ツールも確認付きで利用可能になった。
+  認可 (allowedUserIds)・タイムアウト・本人限定ボタンを含む詳細は
+  [channel-interaction-bridge-design.md](channel-interaction-bridge-design.md) を参照。
+  上記「制約事項」のうち権限まわりの記述は A-2 以前の内容。

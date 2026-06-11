@@ -1,6 +1,7 @@
 import inquirer from "inquirer";
 import { nonTTYReader } from "../../utils/non-tty-reader.js";
-import type { ToolHandler, ToolResult } from "../tool-registry.js";
+import type { ToolHandler, ToolResult, ToolExecutionContext } from "../tool-registry.js";
+import { getInteractionBridge } from "../../agent/interaction-bridge-registry.js";
 
 const isTTY = process.stdin.isTTY === true;
 
@@ -61,7 +62,7 @@ export const askUserTool: ToolHandler = {
       },
     },
   },
-  async execute(params: Record<string, unknown>): Promise<ToolResult> {
+  async execute(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
     const question = params.question as string;
     const rawOptions = params.options as AskUserOption[] | string[] | undefined;
     const multiSelect = (params.multiSelect as boolean) ?? false;
@@ -76,6 +77,33 @@ export const askUserTool: ToolHandler = {
     const OTHER_LABEL = "その他（自由入力）";
 
     try {
+      // チャネル経由 (discord/slack): InteractionBridge へ委譲 (A-3)。
+      // ブリッジ未登録のチャネルではこのツール自体が公開されない (getFilteredToolDefs)。
+      const source = context?.source ?? "cli";
+      if (source === "discord" || source === "slack") {
+        const bridge = getInteractionBridge(source);
+        if (!bridge?.askUser) {
+          return {
+            success: false,
+            output: "",
+            error: `${source} には対話ブリッジが登録されていないため ask_user は使えません`,
+          };
+        }
+        // ボタンラベルは label のみ。 description は質問文に併記する
+        const descLines = (options ?? [])
+          .filter((o) => o.description)
+          .map((o) => `- ${o.label}: ${o.description}`);
+        const fullQuestion = descLines.length > 0
+          ? `${question}\n${descLines.join("\n")}`
+          : question;
+        const res = await bridge.askUser({
+          question: fullQuestion,
+          choices: options?.map((o) => o.label),
+          source,
+        });
+        return { success: true, output: res.answer };
+      }
+
       if (!isTTY) {
         return await executeNonTTY(question, options, multiSelect, OTHER_LABEL);
       }

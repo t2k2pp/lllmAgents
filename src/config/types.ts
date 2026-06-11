@@ -167,6 +167,10 @@ export interface DiscordConfig {
   botToken?: string;        // Bot トークン (コマンド登録・follow-up 送信)
   interactionPort?: number; // HTTP サーバーポート (デフォルト: 3003)
   listenEnabled?: boolean;  // 起動時に interaction サーバーを自動起動するか
+  /** コマンド・確認ボタンを受け付けるユーザー ID。 未設定/空 = 全員 (確認ボタンは常に依頼者のみ) */
+  allowedUserIds?: string[];
+  /** 権限確認ボタンのタイムアウト秒 (デフォルト 300。 ask_user はこの 2 倍) */
+  interactionTimeoutSec?: number;
 }
 
 export interface SlackConfig {
@@ -174,6 +178,10 @@ export interface SlackConfig {
   webhookUrl: string;         // 通知用Incoming Webhook URL
   botToken?: string;          // xoxb- Bot Token (Bolt用)
   appToken?: string;          // xapp- App-Level Token (Socket Mode用)
+  /** メッセージ・確認ボタンを受け付けるユーザー ID。 未設定/空 = 全員 (確認ボタンは常に依頼者のみ) */
+  allowedUserIds?: string[];
+  /** 権限確認ボタンのタイムアウト秒 (デフォルト 300。 ask_user はこの 2 倍) */
+  interactionTimeoutSec?: number;
 }
 
 export interface SearchConfig {

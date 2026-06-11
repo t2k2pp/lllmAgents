@@ -9,6 +9,8 @@ import { evaluateRules } from "./rule-engine.js";
 import { isBashNetworkContained } from "./containment.js";
 import { isDestructiveCommand } from "./destructive-commands.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
+import { getInteractionBridge } from "../agent/interaction-bridge-registry.js";
+import * as logger from "../utils/logger.js";
 
 /** リクエストの発生元 */
 export type RequestSource = "cli" | "discord" | "slack";
@@ -89,6 +91,10 @@ export class PermissionManager {
   private sessionApprovals = new Set<string>();
   // Always-allow for specific tools in this session
   private alwaysAllowTools = new Set<string>();
+  // チャネル (discord/slack) セッション中の常時許可ツール (A-2: ブリッジ確認で「セッション中許可」)
+  private channelSessionAllow = new Map<RequestSource, Set<string>>();
+  // チャネルの「今回のみ」承認キャッシュ: "source:tool:paramsHash"
+  private channelSessionApprovals = new Set<string>();
   // 並列ツール実行時に権限確認を直列化するキュー
   private _permissionQueue: Promise<void> = Promise.resolve();
   // 自律実行モード: 作業フォルダ内の非破壊操作を自動承認
@@ -228,72 +234,145 @@ export class PermissionManager {
     params: Record<string, unknown>,
     source: RequestSource = "cli",
   ): Promise<{ allowed: boolean; reason?: string; abortExecution?: boolean }> {
-    // Discord/Slack: インタラクティブ確認不可のためheadlessモード
-    if (source === "discord") {
-      return this.checkDiscordPermission(toolName, params);
-    }
-    if (source === "slack") {
-      return this.checkSlackPermission(toolName, params);
+    // Discord/Slack: チャネルフロー (ブリッジがあれば対話確認、 無ければ headless 拒否)
+    if (source === "discord" || source === "slack") {
+      return this.checkChannelPermission(source, toolName, params);
     }
 
     // CLI: 通常の確認フロー
     return this.checkCliPermission(toolName, params);
   }
 
-  /** Discord経由: discordAutoApproveTools + INHERENTLY_SAFE_TOOLS のみ許可 */
-  private checkDiscordPermission(
-    toolName: string,
-    params: Record<string, unknown>,
-  ): { allowed: boolean; reason?: string } {
-    // denyルールは Discord でも有効（セキュリティ上の強制）
-    if (evaluateRules({ allow: [], deny: this.rules.deny, ask: [] }, toolName, params) === "deny") {
-      return { allowed: false, reason: `ルールにより ${toolName} はブロックされました（Discord）` };
-    }
-
-    const allowed = INHERENTLY_SAFE_TOOLS.has(toolName) || this.discordAutoApprove.has(toolName);
-    if (!allowed) {
-      return {
-        allowed: false,
-        reason: `Discord経由では ${toolName} は許可されていません（/permission discord-add ${toolName} で追加可能）`,
-      };
-    }
-
-    // ファイル操作はサンドボックスチェック
-    if (toolName.startsWith("file_") || toolName === "glob" || toolName === "grep") {
-      const filePath = (params.path ?? params.file_path ?? params.pattern) as string | undefined;
-      if (filePath && !this.sandbox.isPathAllowed(filePath)) {
-        return { allowed: false, reason: `パス ${filePath} はサンドボックス外です` };
-      }
-    }
-
-    return { allowed: true };
+  /** チャネル別の自動許可セット (discord/slackAutoApproveTools) */
+  private channelAutoApprove(source: RequestSource): Set<string> {
+    return source === "discord" ? this.discordAutoApprove : this.slackAutoApprove;
   }
 
-  /** Slack経由: slackAutoApproveTools + INHERENTLY_SAFE_TOOLS のみ許可 */
-  private checkSlackPermission(
+  /**
+   * Discord/Slack 経由の権限チェック (docs/channel-interaction-bridge-design.md §3)。
+   *
+   * 自動許可 (INHERENTLY_SAFE + チャネル autoApprove + セッション許可) に無いツールは、
+   * InteractionBridge が登録されていればチャネルのボタン UI で確認する (A-2)。
+   * ブリッジが無ければ従来どおり拒否 (headless 互換)。
+   */
+  private async checkChannelPermission(
+    source: RequestSource,
     toolName: string,
     params: Record<string, unknown>,
-  ): { allowed: boolean; reason?: string } {
+  ): Promise<{ allowed: boolean; reason?: string }> {
+    const label = source === "discord" ? "Discord" : "Slack";
+
+    // denyルールはチャネルでも有効（セキュリティ上の強制、 ブリッジでも覆せない）
     if (evaluateRules({ allow: [], deny: this.rules.deny, ask: [] }, toolName, params) === "deny") {
-      return { allowed: false, reason: `ルールにより ${toolName} はブロックされました（Slack）` };
+      return { allowed: false, reason: `ルールにより ${toolName} はブロックされました（${label}）` };
     }
 
-    const allowed = INHERENTLY_SAFE_TOOLS.has(toolName) || this.slackAutoApprove.has(toolName);
-    if (!allowed) {
+    // サンドボックスチェック (自動許可・ブリッジ確認のどちらでも適用)
+    const sandboxHit = this.checkChannelSandbox(toolName, params);
+    if (sandboxHit) return sandboxHit;
+
+    // 自動許可: INHERENTLY_SAFE + チャネル autoApprove + チャネルセッション許可
+    const sessionAllow = this.channelSessionAllow.get(source);
+    if (
+      INHERENTLY_SAFE_TOOLS.has(toolName) ||
+      this.channelAutoApprove(source).has(toolName) ||
+      sessionAllow?.has(toolName)
+    ) {
+      return { allowed: true };
+    }
+
+    // ブリッジ未登録 → 従来の headless 拒否
+    const bridge = getInteractionBridge(source);
+    if (!bridge?.requestPermission) {
       return {
         allowed: false,
-        reason: `Slack経由では ${toolName} は許可されていません（/permission slack-add ${toolName} で追加可能）`,
+        reason: `${label}経由では ${toolName} は許可されていません（/permission ${source}-add ${toolName} で追加可能）`,
       };
     }
 
-    if (toolName.startsWith("file_") || toolName === "glob" || toolName === "grep") {
+    // 「今回のみ」承認キャッシュ (同一パラメータの再実行)
+    const cacheKey = `${source}:${toolName}:${hashParams(params)}`;
+    if (this.channelSessionApprovals.has(cacheKey)) {
+      return { allowed: true };
+    }
+
+    // 危険コマンド: block は拒否、 warn は確認文に併記
+    let warning = "";
+    if (toolName === "bash") {
+      const command = (params.command as string) ?? "";
+      const dangerousRule = checkCommand(command);
+      if (dangerousRule) {
+        if (dangerousRule.action === "block") {
+          return { allowed: false, reason: dangerousRule.message };
+        }
+        warning = `⚠ ${dangerousRule.message}\n`;
+      }
+    }
+
+    // ブリッジ確認 (既存 _permissionQueue で 1 件ずつ直列化)
+    let resolveQueue!: () => void;
+    const prev = this._permissionQueue;
+    this._permissionQueue = new Promise<void>((r) => { resolveQueue = r; });
+    await prev;
+
+    try {
+      const summary = warning + formatToolSummary(toolName, params);
+      const decision = await bridge.requestPermission({ toolName, params, source, summary });
+      if (decision === "allow_once") {
+        this.channelSessionApprovals.add(cacheKey);
+        return { allowed: true };
+      }
+      if (decision === "allow_session") {
+        let set = this.channelSessionAllow.get(source);
+        if (!set) {
+          set = new Set();
+          this.channelSessionAllow.set(source, set);
+        }
+        set.add(toolName);
+        return { allowed: true };
+      }
+      // deny: CLI 拒否と同じ「対話を促す」理由文 (Phase 5 第10ラウンドの哲学を踏襲)
+      return {
+        allowed: false,
+        reason:
+          `ユーザーがこの操作を拒否しました。 これは「書けなかった」 ではなく明示的な意思表示です。\n` +
+          `\n[基本姿勢] まず受け止める → 理由を考える → 分かれば指示に従う / 分からなければ聞く。\n` +
+          `\n[対処] 理由が推測できるなら別アプローチへ。 不確かなら ask_user でユーザーに確認すること。 同じ操作を機械的に再試行しないこと。`,
+      };
+    } catch (e) {
+      // タイムアウト・送信失敗など。 安全側に倒して拒否
+      logger.warn(`Channel permission bridge error (${source}/${toolName}): ${e}`);
+      return {
+        allowed: false,
+        reason: `権限確認がタイムアウトまたは失敗しました (${e instanceof Error ? e.message : String(e)})。 操作は実行されていません`,
+      };
+    } finally {
+      resolveQueue();
+    }
+  }
+
+  /** チャネルフロー共通のサンドボックスチェック。 違反時のみ結果を返す */
+  private checkChannelSandbox(
+    toolName: string,
+    params: Record<string, unknown>,
+  ): { allowed: boolean; reason?: string } | null {
+    if (
+      toolName.startsWith("file_") ||
+      toolName === "glob" ||
+      toolName === "grep"
+    ) {
       const filePath = (params.path ?? params.file_path ?? params.pattern) as string | undefined;
       if (filePath && !this.sandbox.isPathAllowed(filePath)) {
         return { allowed: false, reason: `パス ${filePath} はサンドボックス外です` };
       }
     }
-
-    return { allowed: true };
+    if (toolName === "browser_screenshot" && params.save_path) {
+      const savePath = params.save_path as string;
+      if (!this.sandbox.isPathAllowed(savePath)) {
+        return { allowed: false, reason: `save_path ${savePath} はサンドボックス外です` };
+      }
+    }
+    return null;
   }
 
   /** CLI経由: 従来の確認フロー */

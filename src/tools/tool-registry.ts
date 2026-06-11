@@ -26,6 +26,12 @@ export interface ToolResult {
 export interface ToolExecutionContext {
   /** 呼出元エージェントの祖先系統 (メインなら空)。 子起動時に `extendAncestors` で 1 段拡張する */
   ancestors: AncestorTypes;
+  /**
+   * リクエストの発生元 (cli / discord / slack)。 ask_user 等の対話ツールが
+   * チャネルブリッジへ委譲するかの判定に使う (docs/channel-interaction-bridge-design.md §4)。
+   * 省略時は cli 扱い。
+   */
+  source?: "cli" | "discord" | "slack";
 }
 
 export interface ToolHandler {

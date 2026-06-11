@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import ora from "ora";
 import { AgentEventBus, type TaskOutcome } from "./agent-events.js";
+import { getInteractionBridge } from "./interaction-bridge-registry.js";
 import { HarnessState, enrichToolResult } from "./harness-intervention.js";
 import { formatSelfCheck, rephraseUserIntent } from "./self-check-messages.js";
 import { globalTokenTracker } from "../cost/token-tracker.js";
@@ -1552,6 +1553,26 @@ export class AgentLoop {
     }
 
     if (this.currentSource === "discord" || this.currentSource === "slack") {
+      // A-2: 対話ブリッジがあるチャネルは CLI とほぼ同等のツールを公開し、
+      // 個別の許可はブリッジ確認 (PermissionManager.checkChannelPermission) に委ねる。
+      // docs/channel-interaction-bridge-design.md §5
+      const bridge = getInteractionBridge(this.currentSource);
+      if (bridge?.requestPermission) {
+        const excluded = new Set([
+          // exit_plan_mode の承認 UI が inquirer 直結 (サーバー端末でハングする)
+          "enter_plan_mode",
+          "exit_plan_mode",
+          // サブエージェントの ToolExecutor が source を継承せず CLI 確認に流れる
+          "task",
+          "second_llm_agent",
+        ]);
+        return allDefs.filter((d) => {
+          const name = d.function.name;
+          if (name === "ask_user") return !!bridge.askUser;
+          return !excluded.has(name);
+        });
+      }
+      // ブリッジ無し: 従来の headless フィルタ
       const allowed = this.currentSource === "discord"
         ? this.permissions.getDiscordAllowedToolNames()
         : this.permissions.getSlackAllowedToolNames();

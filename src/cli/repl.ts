@@ -4973,12 +4973,39 @@ export class REPL {
           } else {
             console.log(chalk.yellow("  使い方: /discord listen [start|stop|auto-start [off]]"));
           }
+        } else if (subCmd === "user-add" || subCmd === "user-remove" || subCmd === "users") {
+          // A-2: 利用許可ユーザーの管理 (docs/channel-interaction-bridge-design.md §6)
+          if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
+          const list = this.config.discord.allowedUserIds ?? [];
+          if (subCmd === "users") {
+            if (list.length === 0) {
+              console.log(chalk.dim("  許可ユーザー: 未設定 (全員が利用可能。確認ボタンは常に依頼者のみ有効)"));
+            } else {
+              console.log(chalk.bold("  許可ユーザー:"));
+              for (const id of list) console.log(chalk.dim(`    - ${id}`));
+            }
+          } else {
+            const id = args[1];
+            if (!id) {
+              console.log(chalk.yellow(`  使い方: /discord ${subCmd} <DiscordユーザーID>`));
+            } else if (subCmd === "user-add") {
+              if (!list.includes(id)) list.push(id);
+              this.config.discord.allowedUserIds = list;
+              saveConfig(this.config);
+              console.log(chalk.green(`  許可ユーザーに ${id} を追加しました (${list.length} 名)。`));
+            } else {
+              this.config.discord.allowedUserIds = list.filter((u) => u !== id);
+              saveConfig(this.config);
+              console.log(chalk.yellow(`  許可ユーザーから ${id} を削除しました。`));
+            }
+          }
         } else {
           console.log(chalk.yellow("  使い方: /discord <サブコマンド>"));
           console.log(chalk.dim("  通知系:    status | enable | disable | url <URL> | test"));
           console.log(chalk.dim("  受信設定:  app-id <id> | public-key <key> | bot-token <tok> | port <num>"));
           console.log(chalk.dim("  コマンド:  register [guild-id]"));
           console.log(chalk.dim("  サーバー:  listen start | listen stop | listen auto-start [off]"));
+          console.log(chalk.dim("  認可:      user-add <ID> | user-remove <ID> | users"));
         }
         break;
       }
@@ -5065,10 +5092,37 @@ export class REPL {
             saveConfig(this.config);
             console.log(chalk.green("  App-Level Token を設定しました。"));
           }
+        } else if (subCmd === "user-add" || subCmd === "user-remove" || subCmd === "users") {
+          // A-2: 利用許可ユーザーの管理 (docs/channel-interaction-bridge-design.md §6)
+          if (!this.config.slack) this.config.slack = { enabled: false, webhookUrl: "" };
+          const list = this.config.slack.allowedUserIds ?? [];
+          if (subCmd === "users") {
+            if (list.length === 0) {
+              console.log(chalk.dim("  許可ユーザー: 未設定 (全員が利用可能。確認ボタンは常に依頼者のみ有効)"));
+            } else {
+              console.log(chalk.bold("  許可ユーザー:"));
+              for (const id of list) console.log(chalk.dim(`    - ${id}`));
+            }
+          } else {
+            const id = args[1];
+            if (!id) {
+              console.log(chalk.yellow(`  使い方: /slack ${subCmd} <SlackユーザーID (例: U01234567)>`));
+            } else if (subCmd === "user-add") {
+              if (!list.includes(id)) list.push(id);
+              this.config.slack.allowedUserIds = list;
+              saveConfig(this.config);
+              console.log(chalk.green(`  許可ユーザーに ${id} を追加しました (${list.length} 名)。`));
+            } else {
+              this.config.slack.allowedUserIds = list.filter((u) => u !== id);
+              saveConfig(this.config);
+              console.log(chalk.yellow(`  許可ユーザーから ${id} を削除しました。`));
+            }
+          }
         } else {
           console.log(chalk.yellow("  使い方: /slack <サブコマンド>"));
           console.log(chalk.dim("  通知系:    status | enable | disable | url <URL> | test"));
           console.log(chalk.dim("  Bot設定:   bot-token <xoxb-...> | app-token <xapp-...>"));
+          console.log(chalk.dim("  認可:      user-add <ID> | user-remove <ID> | users"));
           console.log(chalk.dim("  起動:      npm run start -- --slack"));
         }
         break;

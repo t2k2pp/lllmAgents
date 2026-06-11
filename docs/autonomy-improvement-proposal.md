@@ -131,6 +131,8 @@ AgentLoop ──emit──> AgentEvents
 
 #### A-2. チャネル経由のインタラクティブ権限確認
 
+**ステータス: 実装済み (2026-06-11)。個別設計書: [channel-interaction-bridge-design.md](channel-interaction-bridge-design.md)**
+
 headless 拒否をやめ、`onPermissionRequest` を Slack Block Kit ボタン / Discord Message
 Components（許可 / 今回のみ / 拒否）にブリッジする。
 
@@ -140,6 +142,8 @@ Components（許可 / 今回のみ / 拒否）にブリッジする。
   G1 の解消 = チャネル自律性の最大のアンロック
 
 #### A-3. ask_user のチャネルブリッジ
+
+**ステータス: 実装済み (2026-06-11)。個別設計書: [channel-interaction-bridge-design.md](channel-interaction-bridge-design.md)**
 
 同じ仕組みで `ask_user` の質問・選択肢をボタン/スレッド返信にマップ。G2 解消。
 「不明点は聞く」という system prompt の原則がチャネルでも機能するようになる。
@@ -212,8 +216,8 @@ A-2/A-3、可視性の A-4 を P0/P1 に置いた。
 | ID | 内容 | 効果 | コスト | Claude案 | ユーザー確定 |
 |----|------|------|--------|----------|--------------|
 | A-1 | AgentLoop イベント化 (ChannelAdapter) | ◎ (土台) | 中 | **P0** | ✅ Phase 1 実装済み (2026-06-11) |
-| A-2 | チャネル経由の権限確認 | ◎ | 中 | **P0** | |
-| A-3 | ask_user ブリッジ | ◎ | 小 (A-2と同基盤) | **P0** | |
+| A-2 | チャネル経由の権限確認 | ◎ | 中 | **P0** | ✅ 実装済み (2026-06-11) |
+| A-3 | ask_user ブリッジ | ◎ | 小 (A-2と同基盤) | **P0** | ✅ 実装済み (2026-06-11) |
 | A-4 | 進捗の中間報告 | ○ | 小〜中 | **P1** | |
 | A-5 | セッション分離 + キュー | ○ | 中 | **P1** | |
 | A-6 | 完了報告の構造化 + proactive 通知 | ○ | 小 | **P1** | |
