@@ -30,8 +30,10 @@ export interface AgentEventMap {
   };
   /**
    * アシスタントテキストの確定。 think タグ除去済み。
-   * final=true: ユーザー向け最終応答 (CLI の白/Markdown 表示に対応)
-   * final=false: 中間ナレーション (CLI の灰色表示に対応)
+   * CLI 表示はモードを問わず常に白/Markdown (docs/spinner-mode-response-coloring-design.md v2)。
+   * final は構造ベースのチャネル通知用フラグ:
+   * final=true: span を終わらせる応答のテキスト (response_complete 同伴 / 最終テキスト応答)
+   * final=false: span が継続する応答のテキスト (実行ツール同伴ナレーション / 自己点検で継続する中間)
    */
   assistant_text: {
     text: string;
