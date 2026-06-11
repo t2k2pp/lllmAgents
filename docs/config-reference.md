@@ -382,6 +382,8 @@ CLI からは `/integrations` (短縮: `/intg`) → Discord の picker で対話
 | `botToken` | string | Botトークン（コマンド登録・応答送信） |
 | `interactionPort` | number | HTTPサーバーポート (デフォルト: 3003) |
 | `listenEnabled` | boolean | 起動時にInteractionサーバーを自動起動するか |
+| `allowedUserIds` | string[] | コマンド・確認ボタンを受け付けるユーザーID。未設定=全員（確認ボタンは常に依頼者のみ有効）。`/discord user-add <ID>` で設定 |
+| `interactionTimeoutSec` | number | 権限確認ボタンのタイムアウト秒（デフォルト300。ask_user はこの2倍）。詳細: docs/channel-interaction-bridge-design.md |
 
 ## slack
 
@@ -391,6 +393,8 @@ CLI からは `/integrations` (短縮: `/intg`) → Discord の picker で対話
 | `webhookUrl` | string | Incoming Webhook URL |
 | `botToken` | string | `xoxb-` Bot Token (Bolt用) |
 | `appToken` | string | `xapp-` App-Level Token (Socket Mode用) |
+| `allowedUserIds` | string[] | メッセージ・確認ボタンを受け付けるユーザーID。未設定=全員（確認ボタンは常に依頼者のみ有効）。`/slack user-add <ID>` で設定 |
+| `interactionTimeoutSec` | number | 権限確認ボタンのタイムアウト秒（デフォルト300。ask_user はこの2倍）。詳細: docs/channel-interaction-bridge-design.md |
 
 Slack Bot (`--slack` モード) を使う場合は `botToken` + `appToken` の両方が必要。
 CLI からは `/integrations` → Slack の picker で対話設定 (canonical)。 旧 `/slack bot-token <TOKEN>` → `/slack app-token <TOKEN>` も dispatcher 互換で動作する。
@@ -433,6 +437,8 @@ CLIコマンド `/knowledge vault <path>` でも設定可能。設定すると�
 |------|-----|----------|------|
 | `streamingDisplay` | boolean | false | LLM応答をリアルタイム表示するか。`false` ならスピナー+完了後Markdownレンダリング |
 | `maxParallelTools` | number | 3 | ツールの最大同時実行数。vLLMのKVキャッシュやリソースに合わせて調整 |
+| `notifications.minDurationSec` | number | 0 | この秒数未満で完了したタスクは webhook 完了通知を送らない（docs/task-report-notification-design.md） |
+| `goalSeek.autoPropose` | boolean | true | 複雑なタスクで Goal Seek 昇格を自動提案する（docs/goal-promotion-design.md） |
 
 CLIコマンド `/parallel <N>` で実行時に変更可能。
 

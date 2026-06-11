@@ -358,6 +358,11 @@ export interface Config {
   slack?: SlackConfig;
   /** 完了通知の共通設定 (A-6: docs/task-report-notification-design.md) */
   notifications?: NotificationsConfig;
+  /** Goal Seek 関連 (B-1: docs/goal-promotion-design.md) */
+  goalSeek?: {
+    /** 複雑なタスクで Goal Seek 昇格を自動提案する (デフォルト true) */
+    autoPropose?: boolean;
+  };
   /** Web検索設定 */
   search?: SearchConfig;
   /** Obsidian Vault 連携 (ナレッジベース) */

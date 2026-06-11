@@ -37,6 +37,7 @@ import { setInteractionBridge } from "../agent/interaction-bridge-registry.js";
 import { formatReportFooter } from "../agent/task-reporter.js";
 import { ChannelProgressTracker } from "../agent/channel-progress.js";
 import { ConversationStore, ChannelRunQueue, waitForAgentIdle } from "../agent/channel-sessions.js";
+import { maybePromoteToGoal } from "../agent/goal-promotion.js";
 import type { DiscordConfig } from "../config/types.js";
 import * as logger from "../utils/logger.js";
 
@@ -272,6 +273,8 @@ export class DiscordInteractionServer implements InteractionBridge {
     this.agentLoop.importConversation(this.conversations.get(convKey));
     this.current = { token, userId };
     try {
+      // B-1: 複雑なタスクは Goal Seek への昇格をボタンで提案 (docs/goal-promotion-design.md)
+      await maybePromoteToGoal({ input: prompt, source: "discord", agent: this.agentLoop });
       await this.agentLoop.run(prompt, { source: "discord" });
       tracker.detach();
 

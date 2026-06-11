@@ -37,6 +37,7 @@ import { setInteractionBridge } from "../agent/interaction-bridge-registry.js";
 import { formatReportFooter, formatOutcome, formatStatsLine } from "../agent/task-reporter.js";
 import { ChannelProgressTracker } from "../agent/channel-progress.js";
 import { ConversationStore, ChannelRunQueue, waitForAgentIdle } from "../agent/channel-sessions.js";
+import { maybePromoteToGoal } from "../agent/goal-promotion.js";
 import type { SlackConfig } from "../config/types.js";
 import { markdownToSlackMrkdwn } from "../utils/slack.js";
 import * as logger from "../utils/logger.js";
@@ -247,6 +248,8 @@ export class SlackBot implements InteractionBridge {
     this.agentLoop.importConversation(this.conversations.get(convKey));
     this.current = ctx;
     try {
+      // B-1: 複雑なタスクは Goal Seek への昇格をボタンで提案 (docs/goal-promotion-design.md)
+      await maybePromoteToGoal({ input: prompt, source: "slack", agent: this.agentLoop });
       await this.agentLoop.run(prompt, { source: "slack" });
       tracker.detach();
 

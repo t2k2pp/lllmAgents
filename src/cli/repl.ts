@@ -16,7 +16,6 @@ import {
   normalizeContextSection,
 } from "./context-breakdown.js";
 import { formatTodos, formatTodosActive, clearTodos, archiveCompletedTodos } from "../tools/definitions/todo-write.js";
-import { collectResponse } from "../providers/base-provider.js";
 import type { GoalDefinition } from "../agent/goal-slot.js";
 import { getGoal as getGoalSlot } from "../agent/goal-slot.js";
 import { listSessions, loadSession, getLatestSession } from "../agent/session-manager.js";
@@ -39,6 +38,7 @@ import type { PlanManager } from "../agent/plan-mode.js";
 import { sendDiscordNotification, isValidDiscordWebhookUrl } from "../utils/discord.js";
 import { sendSlackNotification, isValidSlackWebhookUrl } from "../utils/slack.js";
 import { formatTaskReport } from "../agent/task-reporter.js";
+import { maybePromoteToGoal, extractAcceptanceCriteria } from "../agent/goal-promotion.js";
 import { DiscordInteractionServer } from "../discord/interaction-server.js";
 import { registerAskCommand } from "../discord/slash-commands.js";
 import { select, input, password, confirm, checkbox } from "@inquirer/prompts";
@@ -3400,6 +3400,18 @@ export class REPL {
       if (mentions.length > 0) {
         printMentionFeedback(mentions);
       }
+      // B-1: 複雑なタスクは Goal Seek への昇格を提案 (docs/goal-promotion-design.md)。
+      // 承認時は goal slot が設定された状態でそのまま run する。 失敗/拒否は通常実行。
+      // 画像添付等で ContentPart[] の場合はテキスト主体でないため提案しない
+      if (typeof resolved === "string") {
+        await maybePromoteToGoal({
+          input: resolved,
+          source: "cli",
+          agent: this.agent,
+          enabled: this.config.goalSeek?.autoPropose,
+        });
+      }
+
       // A-6: task_complete イベントから構造化レポートを組み立てて通知する
       // (docs/task-report-notification-design.md)。 旧実装の履歴スキャンは廃止。
       let completeEvent: import("../agent/agent-events.js").AgentEventMap["task_complete"] | null = null;
@@ -4637,39 +4649,13 @@ export class REPL {
         this.agentBusy = true;
         try {
           // Step 1: LLM に acceptance criteria を抽出させる
+          // (B-1 で goal-promotion.ts の共通関数に集約 — docs/goal-promotion-design.md §3)
           console.log(chalk.cyan("\n  ── /goal-seek: acceptance criteria を抽出中 ──"));
-          const provider = this.agent.getProvider();
-          const model = this.agent.getModel();
-          const extractPrompt =
-            `ユーザーから以下の goal が提供されました:\n\n` +
-            `${goalText}\n\n` +
-            `この goal を達成するための **検証可能な acceptance criteria** を 3-5 個、 JSON 配列形式で抽出してください。\n` +
-            `criteria は「動作する」「ファイルが存在する」「テストがパスする」 等、 客観的に判定可能な観点で記述すること。\n` +
-            `各 criterion は 1 文 (50 文字程度) で簡潔に。\n\n` +
-            `出力形式 (JSON のみ、 他のテキストは不要):\n` +
-            `{"criteria": ["criterion 1", "criterion 2", "criterion 3"]}`;
-
-          let criteria: string[] = [];
-          try {
-            const gen = provider.chat({
-              model,
-              messages: [{ role: "user", content: extractPrompt }],
-              temperature: 0.1,
-              maxTokens: 800,
-              stream: true,
-            });
-            const response = await collectResponse(gen);
-            const raw = response.content;
-            const jsonMatch = raw.match(/\{[\s\S]*?"criteria"[\s\S]*?\]\s*\}/);
-            if (jsonMatch) {
-              const parsed = JSON.parse(jsonMatch[0]);
-              if (Array.isArray(parsed.criteria)) {
-                criteria = parsed.criteria.filter((c: unknown): c is string => typeof c === "string");
-              }
-            }
-          } catch (e) {
-            console.log(chalk.yellow(`  ⚠ criteria 抽出に失敗しました: ${String(e).slice(0, 100)}`));
-          }
+          const criteria = await extractAcceptanceCriteria(
+            this.agent.getProvider(),
+            this.agent.getModel(),
+            goalText,
+          );
 
           if (criteria.length === 0) {
             console.log(chalk.yellow(`  criteria が抽出できませんでした。 goal 文を再確認するか、 LLM 設定を確認してください。`));
