@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import ora from "ora";
+import { AgentEventBus, type TaskOutcome } from "./agent-events.js";
 import { HarnessState, enrichToolResult } from "./harness-intervention.js";
 import { formatSelfCheck, rephraseUserIntent } from "./self-check-messages.js";
 import { globalTokenTracker } from "../cost/token-tracker.js";
@@ -153,6 +154,19 @@ export class AgentLoop {
   private planManager: PlanManager | null = null;
   /** Discord Interaction Server などから並行処理を避けるためのフラグ */
   public isProcessing = false;
+  /**
+   * イベント境界 (docs/agent-events-design.md)。 Slack/Discord 等のチャネルアダプタが
+   * 購読する。 Phase 1 では CLI 表示は従来どおりインラインで行い、 同じ地点から併発する。
+   */
+  public readonly events = new AgentEventBus();
+  /** 現在の run() の統計 (task_complete イベント用)。 run() 冒頭でリセット */
+  private runStats = {
+    startMs: 0,
+    iterations: 0,
+    toolsExecuted: 0,
+    finalText: "",
+    outcome: "incomplete" as TaskOutcome,
+  };
   /** true: テキストをリアルタイムにストリーミング表示。false: スピナー+完了後Markdownレンダリング */
   private streamingDisplay: boolean = false;
   /** 現在処理中のリクエストの発生元 */
@@ -383,6 +397,11 @@ export class AgentLoop {
     );
   }
 
+  /** harness_notice イベントの発火ヘルパー (CLI 表示とは独立。 docs/agent-events-design.md §3) */
+  private notice(level: "info" | "warn" | "error", message: string): void {
+    this.events.emit("harness_notice", { level, message });
+  }
+
   /** 実行中の処理を中断する（Ctrl+C など）。次のイテレーション冒頭で停止する */
   abort(): void {
     this._aborted = true;
@@ -401,6 +420,23 @@ export class AgentLoop {
     this.currentSource = options?.source ?? "cli";
     this.isProcessing = true;
     this._aborted = false;
+    this.runStats = {
+      startMs: Date.now(),
+      iterations: 0,
+      toolsExecuted: 0,
+      finalText: "",
+      outcome: "incomplete",
+    };
+    this.events.emit("task_start", {
+      source: this.currentSource,
+      prompt: typeof userMessage === "string"
+        ? userMessage
+        : userMessage
+            .filter((p): p is { type: "text"; text: string } => p.type === "text")
+            .map((p) => p.text)
+            .join(" "),
+      timestamp: this.runStats.startMs,
+    });
     // P0-A: ユーザー発話のたびに失敗履歴をリセット (前ターンの失敗を引き摺らない)
     this.recentFailures = [];
     // P1-A/B: bash累積時間 / plan/todo 呼出回数も user span 単位でリセット
@@ -479,6 +515,7 @@ export class AgentLoop {
     const hardCap = this.capability.maxIterations;
     for (let iteration = 0; iteration < hardCap; iteration++) {
       this.currentIteration = iteration;
+      this.runStats.iterations = iteration + 1;
       // P3-A: レジスター別ソフトキャップ。 hard cap (= capability.maxIterations) 内で、
       // 軽量タスク (explore/rough) は早めに上限到達を促し、 standard はやや控えめ。
       // Phase C-4: production が hard cap (T3=50) を超えないよう min を取る。
@@ -488,6 +525,7 @@ export class AgentLoop {
           `\n  完了レベル "${this.currentRegister}" のソフト上限 (${softCap}) に到達しました。 ` +
           `必要なら ask_user で続行可否を確認するか、 区切って報告してください。`,
         ));
+        this.notice("warn", `完了レベル "${this.currentRegister}" のソフト上限 (${softCap} 反復) に到達`);
         this.history.addUserMessage(
           `[ハーネス] 完了レベル "${this.currentRegister}" のソフト上限 (${softCap} 反復) に到達しました。\n` +
           `  進捗を簡潔にまとめ、 残作業を提示してから ask_user で続行 or 中断を確認してください。\n` +
@@ -789,6 +827,7 @@ export class AgentLoop {
             });
             console.log(chalk.yellow(`\n  接続エラー: ${err.message}`));
             console.log(chalk.yellow(`  サーバー復帰を待機中... (${connectionRetries}/${MAX_CONNECTION_RETRIES})`));
+            this.notice("warn", `接続エラー: ${err.message} — リトライ ${connectionRetries}/${MAX_CONNECTION_RETRIES}`);
             await sleep(waitMs);
             textContent = "";
             thinkingContent = "";
@@ -808,6 +847,7 @@ export class AgentLoop {
             connectionRetries,
           });
           console.error(chalk.red(`\n  エラー: ${err.message}`));
+          this.notice("error", `LLM 呼び出しエラー: ${err.message}`);
           const action = await askUserOnError(err);
 
           if (action === "retry") {
@@ -846,10 +886,16 @@ export class AgentLoop {
       // assistantTextFlushed で 1 イテレーションにつき 1 回だけ表示する。
       let assistantTextFlushed = false;
       const flushAssistantText = (dim: boolean): void => {
-        if (assistantTextFlushed || this.streamingDisplay || !hasStartedOutput) return;
-        assistantTextFlushed = true;
+        if (assistantTextFlushed) return;
         const filteredText = createThinkingFilter()(textContent);
         if (!filteredText.trim()) return;
+        assistantTextFlushed = true;
+        // イベントは表示モードに依存せず発火する (チャネル購読者向け)。
+        // final=true (白表示相当) はユーザー向け最終応答として task_complete にも載せる。
+        this.events.emit("assistant_text", { text: filteredText, final: !dim });
+        if (!dim) this.runStats.finalText = filteredText;
+        // CLI 表示: ストリーミングモードはライブ出力済みのためここでは表示しない
+        if (this.streamingDisplay || !hasStartedOutput) return;
         if (dim) {
           const indented = filteredText.split("\n").map((l) => "  " + l).join("\n");
           console.log("\n" + chalk.dim(indented));
@@ -1084,7 +1130,10 @@ export class AgentLoop {
             forceFlag = (args.force as boolean) ?? false;
           } catch { /* ignore */ }
           if (summary.length > 0) {
-            // summary はユーザーへの最終応答。 docs/spinner-mode-response-coloring-design.md
+            // summary はユーザーへの最終応答 → イベント + task_complete の finalResponse に採用。
+            this.events.emit("assistant_text", { text: summary, final: true });
+            this.runStats.finalText = summary;
+            // docs/spinner-mode-response-coloring-design.md
             // スピナーモード: 白/Markdown で表示 (narration は toolCalls 経路で灰色 flush 済み)。
             // ストリーミングモード: 本文は既にライブ出力済みなので二重表示を避け従来どおり灰色サマリ。
             if (this.streamingDisplay) {
@@ -1175,6 +1224,7 @@ export class AgentLoop {
         flushAssistantText(true); // 継続する中間テキスト = 灰色
         const fileList = pendingVerification.map(f => `    - ${f}`).join("\n");
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] 検証未実施`));
+        this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] 検証未実施`);
         // 中間 promise テキストと self-check nudge は in-turn 専用 (応答完了時に purge)
         // thinking も保全 (span 内で活用、 span 終了時に破棄)
         this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
@@ -1211,6 +1261,7 @@ export class AgentLoop {
           flushAssistantText(true); // 継続する中間テキスト = 灰色
           const feedback = Evaluator.formatForInjection(result);
           console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`));
+          this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`);
           // Evaluator 指摘と中間応答は in-turn 専用、 thinking も保全
           this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
           this.history.addUserMessage(
@@ -1262,6 +1313,7 @@ export class AgentLoop {
         selfCheckRounds++;
         flushAssistantText(true); // promise テキスト (継続する中間) = 灰色
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ツール未呼び出し`));
+        this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ツール未呼び出し`);
         // promise テキストと nudge は in-turn 専用、 thinking も保全
         this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
         // 2026-05-01: C 案。 「promise テキストだけでは作業継続と認識しない」 を明示し、
@@ -1288,6 +1340,7 @@ export class AgentLoop {
         selfCheckRounds++;
         flushAssistantText(true); // 継続する中間テキスト = 灰色
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] コードがテキスト応答に含まれています`));
+        this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] コードがテキスト応答に含まれています`);
         // コードを含む中間応答と nudge は in-turn 専用、 thinking も保全
         this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
         this.history.addUserMessage(
@@ -1408,6 +1461,7 @@ export class AgentLoop {
           `    対処: もう一度依頼する / 入力を短くする / 別のモデルに切り替える。` +
           (hasThinking ? `\n    （モデルの思考内容は LLM ログに保全されています）` : ""),
         ));
+        this.notice("error", `結果を出力できませんでした: ${reason}`);
         // 偽の回答は履歴に入れない (捏造しない)。 honest failure は上記でユーザーに提示済み。
         this.purgeEphemeralAtSpanEnd("empty_response_giveup");
         return;
@@ -1432,6 +1486,7 @@ export class AgentLoop {
           console.log(chalk.dim(
             `  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ToDo未完了 (${openTodos.length}/${allTodos.length})`,
           ));
+          this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ToDo未完了 (${openTodos.length}/${allTodos.length})`);
           this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
           this.history.addUserMessage(
             formatSelfCheck(
@@ -1466,9 +1521,24 @@ export class AgentLoop {
     }
 
     console.log(chalk.yellow("\n  Maximum tool iterations reached."));
+    this.events.emit("harness_notice", { level: "warn", message: "反復上限に到達しました" });
     this.purgeEphemeralAtSpanEnd("max_iterations");
     } finally {
       this.isProcessing = false;
+      // task_complete は finally で必ず発火する (例外・全 return 経路を含む)。
+      // outcome は purgeEphemeralAtSpanEnd() の reason マッピングで設定済み。
+      // 未設定 (incomplete) のまま中断フラグが立っていれば aborted に倒す。
+      if (this.runStats.outcome === "incomplete" && this._aborted) {
+        this.runStats.outcome = "aborted";
+      }
+      this.events.emit("task_complete", {
+        source: this.currentSource,
+        outcome: this.runStats.outcome,
+        finalResponse: this.runStats.finalText,
+        iterations: this.runStats.iterations,
+        durationMs: Date.now() - this.runStats.startMs,
+        toolsExecuted: this.runStats.toolsExecuted,
+      });
     }
   }
 
@@ -1558,6 +1628,7 @@ export class AgentLoop {
     }
     this.dialogueLockReasons.push(...reasons);
     console.log(chalk.yellow(`  🔒 対話必須ロック発動 (file_write/file_edit を拒否、 ask_user で解除)`));
+    this.notice("warn", "対話必須ロック発動 (file_write/file_edit を拒否、 ask_user で解除)");
   }
 
   /**
@@ -1611,6 +1682,9 @@ export class AgentLoop {
    * @param reason ログ用の理由タグ (response_complete / user_abort / etc.)
    */
   private purgeEphemeralAtSpanEnd(reason: string): void {
+    // span 終了点はほぼすべてここを通るため、 task_complete イベント用の outcome を
+    // reason から決定する (docs/agent-events-design.md §3.1)。 発火自体は run() の finally。
+    this.runStats.outcome = AgentLoop.SPAN_END_OUTCOMES[reason] ?? "incomplete";
     const purged = this.history.purgeEphemeral();
     if (purged > 0) {
       console.log(chalk.dim(`  [ephemeral-purge] ${purged} 件の in-turn 補助メッセージを破棄 (${reason})`));
@@ -1622,6 +1696,24 @@ export class AgentLoop {
       console.log(chalk.dim(`  [thinking-purge] ${clearedThinking} 件の thinking を破棄 (${reason})`));
     }
   }
+
+  /**
+   * span 終了 reason → task_complete の outcome。 docs/agent-events-design.md §3.1
+   * self_check_limit は「点検上限に達したが応答は返した」 のでユーザー視点では completed。
+   */
+  private static readonly SPAN_END_OUTCOMES: Record<string, TaskOutcome> = {
+    response_complete: "completed",
+    final_text_response: "completed",
+    self_check_limit: "completed",
+    user_abort: "aborted",
+    llm_error_abort: "aborted",
+    tool_abort: "aborted",
+    synthetic_write_abort: "aborted",
+    garbage_response: "error",
+    empty_response_giveup: "error",
+    llm_call_unsuccessful: "error",
+    max_iterations: "max_iterations",
+  };
 
   /**
    * P0-A: ツール失敗を sliding window で追跡し、 同じ (signature, error) が
@@ -1653,6 +1745,7 @@ export class AgentLoop {
       ? this.buildT3DecisionTreeIntervention(toolCall, trimmedErr, prior.length + 1)
       : this.buildStandardStuckLoopIntervention(toolCall, trimmedErr, prior.length + 1);
     console.log(chalk.yellow(`\n  ⚠ stuck-loop 検出: ${toolCall.function.name} が直近${AgentLoop.FAILURE_WINDOW}反復で同一エラー再発 (tier=${this.capability.tier})`));
+    this.notice("warn", `stuck-loop 検出: ${toolCall.function.name} の同一エラー再発`);
     // stuck-loop 介入は in-turn の方向修正なので応答完了時に purge
     this.history.addUserMessage(intervention, { ephemeral: true });
     // 注入後は当該 signature の履歴をクリアして再注入を防ぐ
@@ -1867,6 +1960,7 @@ export class AgentLoop {
   /** Execute a single tool call, returning whether to abort the rest of the run loop */
   private async executeSingleTool(toolCall: ToolCall): Promise<boolean> {
     const summary = formatToolCall(toolCall);
+    this.events.emit("tool_start", { callId: toolCall.id, name: toolCall.function.name, summary });
     const spinner = ora(chalk.dim(`  ${summary}...`)).start();
     // 権限確認ダイアログがスピナーに隠れないよう、
     // 確認が必要なツールではスピナーを一時停止してから execute する。
@@ -1902,6 +1996,15 @@ export class AgentLoop {
       result = await this.toolExecutor.execute(toolCall, this.currentSource);
     }
     const toolDurationMs = Date.now() - toolStartMs;
+    this.runStats.toolsExecuted++;
+    this.events.emit("tool_end", {
+      callId: toolCall.id,
+      name: toolName,
+      summary,
+      success: result.success,
+      durationMs: toolDurationMs,
+      error: result.success ? undefined : result.error,
+    });
 
     // Phase 5 第10ラウンド: 対話必須ロックの発動契機を判定
     this.maybeTriggerDialogueLock(toolName, result);
@@ -2012,6 +2115,7 @@ export class AgentLoop {
       }
       try {
         const summary = formatToolCall(toolCall);
+        this.events.emit("tool_start", { callId: toolCall.id, name: toolCall.function.name, summary });
         const startMs = Date.now();
         // Phase 5 第10ラウンド: 並列ルートでも対話必須ロックを尊重
         const lockHit = this.checkDialogueLock(toolCall.function.name);
@@ -2022,6 +2126,15 @@ export class AgentLoop {
           result = await this.toolExecutor.execute(toolCall, this.currentSource);
         }
         const durationMs = Date.now() - startMs;
+        this.runStats.toolsExecuted++;
+        this.events.emit("tool_end", {
+          callId: toolCall.id,
+          name: toolCall.function.name,
+          summary,
+          success: result.success,
+          durationMs,
+          error: result.success ? undefined : result.error,
+        });
         // 対話必須ロックの発動契機を判定 (並列ルート)
         this.maybeTriggerDialogueLock(toolCall.function.name, result);
         const icon = result.success ? chalk.green("✓") : chalk.red("✗");

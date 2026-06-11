@@ -17,6 +17,7 @@
 import * as http from "http";
 import * as crypto from "crypto";
 import type { AgentLoop } from "../agent/agent-loop.js";
+import type { TaskOutcome } from "../agent/agent-events.js";
 import type { DiscordConfig } from "../config/types.js";
 import * as logger from "../utils/logger.js";
 
@@ -168,34 +169,18 @@ export class DiscordInteractionServer {
       return;
     }
 
+    // AgentEventBus 購読で最終応答を受け取る (docs/agent-events-design.md §3.2)。
+    // 履歴の逆順スキャン + think タグ除去の重複実装は廃止 (finalResponse は除去済み)。
+    let finalResponse = "";
+    let outcome: TaskOutcome = "incomplete";
+    const off = this.agentLoop.events.on("task_complete", (e) => {
+      finalResponse = e.finalResponse;
+      outcome = e.outcome;
+    });
     try {
       await this.agentLoop.run(prompt, { source: "discord" });
 
-      // 最後のアシスタントメッセージを取得
-      const messages = this.agentLoop.getHistory().getMessages();
-      let responseText = "";
-
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const msg = messages[i];
-        if (msg.role === "assistant") {
-          if (typeof msg.content === "string") {
-            responseText = msg.content;
-          } else if (Array.isArray(msg.content)) {
-            responseText = (msg.content as any[])
-              .filter((c) => c.type === "text")
-              .map((c) => c.text as string)
-              .join("\n");
-          }
-          break;
-        }
-      }
-
-      // <think>...</think> タグを除去
-      responseText = responseText.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-
-      if (!responseText) {
-        responseText = "（応答なし）";
-      }
+      const responseText = finalResponse.trim() || outcomeFallbackText(outcome);
 
       // Discord の 2000 文字制限に合わせて分割して送信
       const chunks = splitMessage(responseText, DISCORD_MAX_LENGTH);
@@ -205,6 +190,8 @@ export class DiscordInteractionServer {
     } catch (e) {
       logger.error("AgentLoop processing error:", e);
       throw e;
+    } finally {
+      off();
     }
   }
 
@@ -233,6 +220,20 @@ export class DiscordInteractionServer {
     } catch (e) {
       logger.error("Failed to send Discord follow-up:", e);
     }
+  }
+}
+
+/** finalResponse が空のときの outcome 別フォールバック文言 */
+function outcomeFallbackText(outcome: TaskOutcome): string {
+  switch (outcome) {
+    case "aborted":
+      return "（処理が中断されました）";
+    case "error":
+      return "（エラーにより応答を生成できませんでした。サーバー側のログを確認してください）";
+    case "max_iterations":
+      return "（反復上限に達したため処理を打ち切りました）";
+    default:
+      return "（応答なし）";
   }
 }
 

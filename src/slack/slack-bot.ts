@@ -19,6 +19,7 @@
  */
 
 import type { AgentLoop } from "../agent/agent-loop.js";
+import type { TaskOutcome } from "../agent/agent-events.js";
 import type { SlackConfig } from "../config/types.js";
 import { markdownToSlackMrkdwn } from "../utils/slack.js";
 import * as logger from "../utils/logger.js";
@@ -109,10 +110,18 @@ export class SlackBot {
       thread_ts: threadTs,
     });
 
+    // AgentEventBus 購読で最終応答を受け取る (docs/agent-events-design.md §3.2)。
+    // 履歴の逆順スキャン + think タグ除去の重複実装は廃止 (finalResponse は除去済み)。
+    let finalResponse = "";
+    let outcome: TaskOutcome = "incomplete";
+    const off = this.agentLoop.events.on("task_complete", (e) => {
+      finalResponse = e.finalResponse;
+      outcome = e.outcome;
+    });
     try {
       await this.agentLoop.run(prompt, { source: "slack" });
 
-      const responseText = this.extractLastResponse();
+      const responseText = finalResponse.trim() || outcomeFallbackText(outcome);
       const converted = markdownToSlackMrkdwn(responseText);
       const chunks = splitMessage(converted, SLACK_MAX_TEXT);
 
@@ -125,31 +134,23 @@ export class SlackBot {
         text: `:x: エラー: ${e instanceof Error ? e.message : String(e)}`,
         thread_ts: threadTs,
       });
+    } finally {
+      off();
     }
   }
+}
 
-  /** メッセージ履歴から最後のアシスタント応答を取得 */
-  private extractLastResponse(): string {
-    const messages = this.agentLoop.getHistory().getMessages();
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (msg.role === "assistant") {
-        let text: string;
-        if (typeof msg.content === "string") {
-          text = msg.content;
-        } else if (Array.isArray(msg.content)) {
-          text = (msg.content as any[])
-            .filter((c) => c.type === "text")
-            .map((c) => c.text as string)
-            .join("\n");
-        } else {
-          continue;
-        }
-        // <think>タグ除去
-        return text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-      }
-    }
-    return "（応答なし）";
+/** finalResponse が空のときの outcome 別フォールバック文言 */
+function outcomeFallbackText(outcome: TaskOutcome): string {
+  switch (outcome) {
+    case "aborted":
+      return "（処理が中断されました）";
+    case "error":
+      return "（エラーにより応答を生成できませんでした。サーバー側のログを確認してください）";
+    case "max_iterations":
+      return "（反復上限に達したため処理を打ち切りました）";
+    default:
+      return "（応答なし）";
   }
 }
 

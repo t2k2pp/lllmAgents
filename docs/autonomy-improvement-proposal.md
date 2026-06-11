@@ -110,6 +110,10 @@ Claude Code もチャネル統合は持たない。**ただし現状は最終応
 
 #### A-1. AgentLoop のイベント化 — ChannelAdapter 抽象（土台）
 
+**ステータス: Phase 1 実装済み (2026-06-11)。個別設計書: [agent-events-design.md](agent-events-design.md)**
+（AgentEventBus 新設・主要イベント発火・Slack/Discord アダプタの購読化まで。CLI 表示の購読者への
+移設は Phase 2 = A-4 と同時に実施）
+
 `agent-loop.ts` は console 出力と密結合（console.log / stdout 直書き 55箇所）。
 ここにイベント境界を入れる:
 
@@ -207,7 +211,7 @@ A-2/A-3、可視性の A-4 を P0/P1 に置いた。
 
 | ID | 内容 | 効果 | コスト | Claude案 | ユーザー確定 |
 |----|------|------|--------|----------|--------------|
-| A-1 | AgentLoop イベント化 (ChannelAdapter) | ◎ (土台) | 中 | **P0** | |
+| A-1 | AgentLoop イベント化 (ChannelAdapter) | ◎ (土台) | 中 | **P0** | ✅ Phase 1 実装済み (2026-06-11) |
 | A-2 | チャネル経由の権限確認 | ◎ | 中 | **P0** | |
 | A-3 | ask_user ブリッジ | ◎ | 小 (A-2と同基盤) | **P0** | |
 | A-4 | 進捗の中間報告 | ○ | 小〜中 | **P1** | |
