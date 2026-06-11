@@ -34,6 +34,7 @@ import type {
   AskUserResponse,
 } from "../agent/agent-events.js";
 import { setInteractionBridge } from "../agent/interaction-bridge-registry.js";
+import { formatReportFooter } from "../agent/task-reporter.js";
 import type { SlackConfig } from "../config/types.js";
 import { markdownToSlackMrkdwn } from "../utils/slack.js";
 import * as logger from "../utils/logger.js";
@@ -206,17 +207,21 @@ export class SlackBot implements InteractionBridge {
     });
 
     // AgentEventBus 購読で最終応答を受け取る (docs/agent-events-design.md §3.2)
-    let finalResponse = "";
-    let outcome: TaskOutcome = "incomplete";
+    let completeEvent: import("../agent/agent-events.js").AgentEventMap["task_complete"] | null = null;
     const off = this.agentLoop.events.on("task_complete", (e) => {
-      finalResponse = e.finalResponse;
-      outcome = e.outcome;
+      completeEvent = e;
     });
     this.current = { channel, threadTs: threadRoot, userId, isDM };
     try {
       await this.agentLoop.run(prompt, { source: "slack" });
 
-      const responseText = finalResponse.trim() || outcomeFallbackText(outcome);
+      const e = completeEvent as import("../agent/agent-events.js").AgentEventMap["task_complete"] | null;
+      const finalResponse = e?.finalResponse ?? "";
+      const outcome: TaskOutcome = e?.outcome ?? "incomplete";
+      let responseText = finalResponse.trim() || outcomeFallbackText(outcome);
+      // A-6: ツールを使ったタスクには構造化フッターを付ける
+      const footer = e ? formatReportFooter(e) : null;
+      if (footer) responseText += `\n${footer}`;
       const converted = markdownToSlackMrkdwn(responseText);
       const chunks = splitMessage(converted, SLACK_MAX_TEXT);
 

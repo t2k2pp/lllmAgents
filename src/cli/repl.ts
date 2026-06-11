@@ -38,6 +38,7 @@ import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { PlanManager } from "../agent/plan-mode.js";
 import { sendDiscordNotification, isValidDiscordWebhookUrl } from "../utils/discord.js";
 import { sendSlackNotification, isValidSlackWebhookUrl } from "../utils/slack.js";
+import { formatTaskReport } from "../agent/task-reporter.js";
 import { DiscordInteractionServer } from "../discord/interaction-server.js";
 import { registerAskCommand } from "../discord/slash-commands.js";
 import { select, input, password, confirm, checkbox } from "@inquirer/prompts";
@@ -3399,19 +3400,31 @@ export class REPL {
       if (mentions.length > 0) {
         printMentionFeedback(mentions);
       }
-      await this.agent.run(resolved);
+      // A-6: task_complete イベントから構造化レポートを組み立てて通知する
+      // (docs/task-report-notification-design.md)。 旧実装の履歴スキャンは廃止。
+      let completeEvent: import("../agent/agent-events.js").AgentEventMap["task_complete"] | null = null;
+      const offComplete = this.agent.events.on("task_complete", (e) => { completeEvent = e; });
+      try {
+        await this.agent.run(resolved);
+      } finally {
+        offComplete();
+      }
 
-      // LLMの応答が完了した後、通知設定が有効なら送信する
-      const historyMsgs = this.agent.getHistory().getMessages();
-      const lastMsg = historyMsgs[historyMsgs.length - 1];
-      if (lastMsg && lastMsg.role === "assistant" && typeof lastMsg.content === "string" && lastMsg.content.trim() !== "") {
-        if (this.config.discord?.enabled && this.config.discord?.webhookUrl) {
-          console.log(chalk.dim("  Sending response to Discord..."));
-          await sendDiscordNotification(this.config.discord.webhookUrl, lastMsg.content);
-        }
-        if (this.config.slack?.enabled && this.config.slack?.webhookUrl) {
-          console.log(chalk.dim("  Sending response to Slack..."));
-          await sendSlackNotification(this.config.slack.webhookUrl, lastMsg.content);
+      // LLMの応答が完了した後、通知設定が有効なら構造化レポートを送信する
+      if (completeEvent) {
+        const e = completeEvent as import("../agent/agent-events.js").AgentEventMap["task_complete"];
+        const shouldNotify = e.finalResponse.trim() !== "" || e.toolsExecuted > 0;
+        const minMs = (this.config.notifications?.minDurationSec ?? 0) * 1000;
+        if (shouldNotify && e.durationMs >= minMs) {
+          const report = formatTaskReport(e);
+          if (this.config.discord?.enabled && this.config.discord?.webhookUrl) {
+            console.log(chalk.dim("  Sending report to Discord..."));
+            await sendDiscordNotification(this.config.discord.webhookUrl, report);
+          }
+          if (this.config.slack?.enabled && this.config.slack?.webhookUrl) {
+            console.log(chalk.dim("  Sending report to Slack..."));
+            await sendSlackNotification(this.config.slack.webhookUrl, report);
+          }
         }
       }
 

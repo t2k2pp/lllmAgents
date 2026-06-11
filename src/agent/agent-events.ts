@@ -69,6 +69,13 @@ export interface AgentEventMap {
     durationMs: number;
     /** 実行したツール呼び出し数 */
     toolsExecuted: number;
+    /** この run で file_write / file_edit が成功したファイル (重複なし)。 A-6 完了報告用 */
+    filesChanged: string[];
+    /** この run の累計トークン (provider が usage を報告した分のみ) */
+    tokensIn: number;
+    tokensOut: number;
+    /** この run の推定コスト USD (コスト単価未登録モデルは 0) */
+    costUsd: number;
   };
 }
 

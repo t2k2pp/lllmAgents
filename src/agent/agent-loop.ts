@@ -167,6 +167,10 @@ export class AgentLoop {
     toolsExecuted: 0,
     finalText: "",
     outcome: "incomplete" as TaskOutcome,
+    filesChanged: new Set<string>(),
+    tokensIn: 0,
+    tokensOut: 0,
+    costUsd: 0,
   };
   /** true: テキストをリアルタイムにストリーミング表示。false: スピナー+完了後Markdownレンダリング */
   private streamingDisplay: boolean = false;
@@ -403,6 +407,18 @@ export class AgentLoop {
     this.events.emit("harness_notice", { level, message });
   }
 
+  /** A-6: file_write / file_edit の成功を run 統計に記録する (task_complete の完了報告用) */
+  private trackFileChange(toolCall: ToolCall, success: boolean): void {
+    if (!success) return;
+    const name = toolCall.function.name;
+    if (name !== "file_write" && name !== "file_edit") return;
+    try {
+      const args = JSON.parse(toolCall.function.arguments ?? "{}");
+      const fp = (args.file_path ?? args.path) as string | undefined;
+      if (fp) this.runStats.filesChanged.add(fp);
+    } catch { /* parse 失敗は無視 (統計用途のみ) */ }
+  }
+
   /** 実行中の処理を中断する（Ctrl+C など）。次のイテレーション冒頭で停止する */
   abort(): void {
     this._aborted = true;
@@ -427,6 +443,10 @@ export class AgentLoop {
       toolsExecuted: 0,
       finalText: "",
       outcome: "incomplete",
+      filesChanged: new Set<string>(),
+      tokensIn: 0,
+      tokensOut: 0,
+      costUsd: 0,
     };
     this.events.emit("task_start", {
       source: this.currentSource,
@@ -788,6 +808,10 @@ export class AgentLoop {
                     estimatedCostUsd: cost,
                     sessionId: this.session.meta.id
                   });
+                  // A-6: run 単位の累計 (task_complete の完了報告用)
+                  this.runStats.tokensIn += chunk.usage.promptTokens ?? 0;
+                  this.runStats.tokensOut += chunk.usage.completionTokens ?? 0;
+                  this.runStats.costUsd += cost;
                 }
                 stopWaitingSpinner();
                 stopThinkingSpinner();
@@ -1539,6 +1563,10 @@ export class AgentLoop {
         iterations: this.runStats.iterations,
         durationMs: Date.now() - this.runStats.startMs,
         toolsExecuted: this.runStats.toolsExecuted,
+        filesChanged: [...this.runStats.filesChanged],
+        tokensIn: this.runStats.tokensIn,
+        tokensOut: this.runStats.tokensOut,
+        costUsd: this.runStats.costUsd,
       });
     }
   }
@@ -2018,6 +2046,7 @@ export class AgentLoop {
     }
     const toolDurationMs = Date.now() - toolStartMs;
     this.runStats.toolsExecuted++;
+    this.trackFileChange(toolCall, result.success);
     this.events.emit("tool_end", {
       callId: toolCall.id,
       name: toolName,
@@ -2148,6 +2177,7 @@ export class AgentLoop {
         }
         const durationMs = Date.now() - startMs;
         this.runStats.toolsExecuted++;
+        this.trackFileChange(toolCall, result.success);
         this.events.emit("tool_end", {
           callId: toolCall.id,
           name: toolCall.function.name,

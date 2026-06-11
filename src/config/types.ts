@@ -184,6 +184,14 @@ export interface SlackConfig {
   interactionTimeoutSec?: number;
 }
 
+export interface NotificationsConfig {
+  /**
+   * この秒数未満で完了したタスクは webhook 完了通知を送らない (デフォルト 0 = 常に送る)。
+   * 長時間タスクの完了だけ知りたい場合に設定する (例: 60)。
+   */
+  minDurationSec?: number;
+}
+
 export interface SearchConfig {
   /** 検索プロバイダー: "duckduckgo" (デフォルト) | "searxng" */
   provider: "duckduckgo" | "searxng";
@@ -348,6 +356,8 @@ export interface Config {
   context: ContextConfig;
   discord?: DiscordConfig;
   slack?: SlackConfig;
+  /** 完了通知の共通設定 (A-6: docs/task-report-notification-design.md) */
+  notifications?: NotificationsConfig;
   /** Web検索設定 */
   search?: SearchConfig;
   /** Obsidian Vault 連携 (ナレッジベース) */
