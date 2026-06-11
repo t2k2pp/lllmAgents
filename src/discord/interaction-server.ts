@@ -35,6 +35,7 @@ import type {
 } from "../agent/agent-events.js";
 import { setInteractionBridge } from "../agent/interaction-bridge-registry.js";
 import { formatReportFooter } from "../agent/task-reporter.js";
+import { ChannelProgressTracker } from "../agent/channel-progress.js";
 import type { DiscordConfig } from "../config/types.js";
 import * as logger from "../utils/logger.js";
 
@@ -252,9 +253,13 @@ export class DiscordInteractionServer implements InteractionBridge {
     const off = this.agentLoop.events.on("task_complete", (e) => {
       completeEvent = e;
     });
+    // A-4: 進捗の中間報告。 deferred 応答 (@original) を編集し続け、 完了時に最終応答が上書きする
+    const tracker = new ChannelProgressTracker((text) => this.sendFollowUp(token, text))
+      .attach(this.agentLoop.events);
     this.current = { token, userId };
     try {
       await this.agentLoop.run(prompt, { source: "discord" });
+      tracker.detach();
 
       const e = completeEvent as import("../agent/agent-events.js").AgentEventMap["task_complete"] | null;
       const finalResponse = e?.finalResponse ?? "";
@@ -264,15 +269,24 @@ export class DiscordInteractionServer implements InteractionBridge {
       const footer = e ? formatReportFooter(e) : null;
       if (footer) responseText += `\n${footer}`;
 
-      // Discord の 2000 文字制限に合わせて分割して送信
+      // Discord の 2000 文字制限に合わせて分割して送信。
+      // 第 1 チャンクは @original を上書き (進捗表示が回答に変わる)、
+      // 2 チャンク目以降は新規 follow-up (旧実装の同一メッセージ上書きバグを修正)
       const chunks = splitMessage(responseText, DISCORD_MAX_LENGTH);
-      for (const chunk of chunks) {
-        await this.sendFollowUp(token, chunk);
+      for (let i = 0; i < chunks.length; i++) {
+        if (i === 0) {
+          await this.sendFollowUp(token, chunks[i]);
+        } else {
+          await this.postFollowUp(token, { content: chunks[i] }).catch((err) => {
+            logger.error("Discord additional chunk failed:", err);
+          });
+        }
       }
     } catch (e) {
       logger.error("AgentLoop processing error:", e);
       throw e;
     } finally {
+      tracker.detach();
       off();
       this.current = null;
     }

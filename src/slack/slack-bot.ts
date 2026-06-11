@@ -34,7 +34,8 @@ import type {
   AskUserResponse,
 } from "../agent/agent-events.js";
 import { setInteractionBridge } from "../agent/interaction-bridge-registry.js";
-import { formatReportFooter } from "../agent/task-reporter.js";
+import { formatReportFooter, formatOutcome, formatStatsLine } from "../agent/task-reporter.js";
+import { ChannelProgressTracker } from "../agent/channel-progress.js";
 import type { SlackConfig } from "../config/types.js";
 import { markdownToSlackMrkdwn } from "../utils/slack.js";
 import * as logger from "../utils/logger.js";
@@ -200,22 +201,36 @@ export class SlackBot implements InteractionBridge {
 
     console.log(`\n  [Slack] <${userId}>: ${prompt}`);
 
-    // 「処理中」インジケーター
-    await say({
+    // 「処理中」インジケーター (A-4: この 1 メッセージを chat.update で編集し続ける)
+    const progressMsg = await say({
       text: ":hourglass_flowing_sand: 処理中...",
       thread_ts: threadRoot,
     });
+    const progressTs: string | undefined = progressMsg?.ts;
 
     // AgentEventBus 購読で最終応答を受け取る (docs/agent-events-design.md §3.2)
     let completeEvent: import("../agent/agent-events.js").AgentEventMap["task_complete"] | null = null;
     const off = this.agentLoop.events.on("task_complete", (e) => {
       completeEvent = e;
     });
+    // A-4: 進捗の中間報告 (docs/channel-progress-design.md)
+    const tracker = new ChannelProgressTracker(async (text) => {
+      if (!progressTs) return;
+      await this.app.client.chat.update({ channel, ts: progressTs, text });
+    }).attach(this.agentLoop.events);
     this.current = { channel, threadTs: threadRoot, userId, isDM };
     try {
       await this.agentLoop.run(prompt, { source: "slack" });
+      tracker.detach();
 
       const e = completeEvent as import("../agent/agent-events.js").AgentEventMap["task_complete"] | null;
+      // 進捗メッセージを outcome + 統計で確定させる
+      if (progressTs && e) {
+        await this.app.client.chat
+          .update({ channel, ts: progressTs, text: `${formatOutcome(e.outcome)} (${formatStatsLine(e)})` })
+          .catch(() => {});
+      }
+
       const finalResponse = e?.finalResponse ?? "";
       const outcome: TaskOutcome = e?.outcome ?? "incomplete";
       let responseText = finalResponse.trim() || outcomeFallbackText(outcome);
@@ -235,6 +250,7 @@ export class SlackBot implements InteractionBridge {
         thread_ts: threadRoot,
       });
     } finally {
+      tracker.detach();
       off();
       this.current = null;
     }
