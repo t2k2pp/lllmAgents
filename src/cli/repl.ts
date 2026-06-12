@@ -363,12 +363,12 @@ export class REPL {
       this.interactionServer = new DiscordInteractionServer(d, this.agent);
       await this.interactionServer.start();
       const port = d.interactionPort ?? 3003;
-      console.log(chalk.green(`  ✅ Discord Interaction Server を起動しました (port ${port})`));
-      console.log(chalk.dim(`  Discord Developer Portal の Interactions Endpoint URL を:`));
-      console.log(chalk.dim(`    http://<your-ip>:${port}/interactions`));
-      console.log(chalk.dim("  に設定してください。"));
+      console.log(chalk.green(`  ✅ Discord からの呼び出しの受信を開始しました (ポート ${port})`));
+      console.log(chalk.dim(`  Discord Developer Portal の Interactions Endpoint URL に:`));
+      console.log(chalk.dim(`    http://<このPCのIPアドレス>:${port}/interactions`));
+      console.log(chalk.dim("  を設定してください。"));
     } catch (e) {
-      console.log(chalk.red(`  ❌ Interaction Server の起動に失敗しました: ${e}`));
+      console.log(chalk.red(`  ❌ 受信サーバーの起動に失敗しました: ${e}`));
       this.interactionServer = null;
     }
   }
@@ -2479,21 +2479,21 @@ export class REPL {
       const cEnabled = this.config.chatLog?.enabled ?? false;
       const cVault = this.config.chatLog?.vaultPath;
       const searchProv = this.config.search?.provider ?? "duckduckgo";
-      const dTag = `${dEnabled ? chalk.green("enabled") : chalk.yellow("disabled")}${dListening ? ", " + chalk.cyan("listening") : ""}`;
-      const sTag = sEnabled ? chalk.green("enabled") : chalk.yellow("disabled");
-      const cTag = cVault ? (cEnabled ? chalk.green("enabled") : chalk.yellow("disabled")) : chalk.yellow("未設定");
+      const dTag = `${dEnabled ? chalk.green("通知オン") : chalk.yellow("通知オフ")}${dListening ? ", " + chalk.cyan("受信中") : ""}`;
+      const sTag = sEnabled ? chalk.green("通知オン") : chalk.yellow("通知オフ");
+      const cTag = cVault ? (cEnabled ? chalk.green("オン") : chalk.yellow("オフ")) : chalk.yellow("未設定");
       const searchTag = chalk.cyan(searchProv);
 
       let pick: string;
       try {
         pick = await select({
-          message: "Integrations — 設定する対象を選択:",
+          message: "外部サービス連携 — 設定したい項目を選んでください:",
           choices: [
-            { name: `Discord    [${dTag}]`, value: "discord" },
-            { name: `Slack      [${sTag}]`, value: "slack" },
-            { name: `Chatlog    [${cTag}]`, value: "chatlog" },
-            { name: `Search     [${searchTag}]`, value: "search" },
-            { name: chalk.dim("Done"), value: "done" },
+            { name: `Discord 連携        [${dTag}]`, value: "discord" },
+            { name: `Slack 連携          [${sTag}]`, value: "slack" },
+            { name: `会話ログの保存       [${cTag}]`, value: "chatlog" },
+            { name: `Web検索エンジン      [${searchTag}]`, value: "search" },
+            { name: chalk.dim("設定を終える"), value: "done" },
           ],
         });
       } catch { return; }
@@ -2512,21 +2512,21 @@ export class REPL {
       let action: string;
       try {
         action = await select({
-          message: "Discord 操作:",
+          message: "Discord 連携 — やりたいことを選んでください:",
           choices: [
-            { name: "Enable webhook notifications", value: "enable" },
-            { name: "Disable webhook notifications", value: "disable" },
-            { name: "Set Webhook URL", value: "url" },
-            { name: "Test webhook", value: "test" },
-            { name: "Set Application ID", value: "app-id" },
-            { name: "Set Public Key", value: "public-key" },
-            { name: "Set Bot Token", value: "bot-token" },
-            { name: "Set Interaction Port", value: "port" },
-            { name: "Register /ask slash command", value: "register" },
-            { name: "Start interaction server", value: "listen-start" },
-            { name: "Stop interaction server", value: "listen-stop" },
-            { name: "Toggle interaction-server auto-start", value: "auto-start-toggle" },
-            { name: chalk.dim("Back"), value: "back" },
+            { name: "通知をオンにする (作業の完了などを Discord に知らせる)", value: "enable" },
+            { name: "通知をオフにする", value: "disable" },
+            { name: "通知の送り先を設定する (Webhook URL)", value: "url" },
+            { name: "テスト通知を送ってみる", value: "test" },
+            { name: "Application ID を設定する (Discord から呼び出すための準備 1/3)", value: "app-id" },
+            { name: "Public Key を設定する (Discord から呼び出すための準備 2/3)", value: "public-key" },
+            { name: "Bot Token を設定する (Discord から呼び出すための準備 3/3)", value: "bot-token" },
+            { name: "受信用のポート番号を変える (通常は変更不要)", value: "port" },
+            { name: "/ask コマンドを Discord に登録する", value: "register" },
+            { name: "受信を開始する (Discord からの呼び出しを受け付ける)", value: "listen-start" },
+            { name: "受信を停止する", value: "listen-stop" },
+            { name: "起動時に受信を自動開始するか切り替える", value: "auto-start-toggle" },
+            { name: chalk.dim("前のメニューに戻る"), value: "back" },
           ],
           pageSize: 14,
         });
@@ -2544,9 +2544,16 @@ export class REPL {
         await this.handleCommand(`/discord listen auto-start ${cur ? "off" : "on"}`);
       } else {
         // url / app-id / public-key / bot-token / port — 1 引数
+        const fieldLabel: Record<string, string> = {
+          "url": "Webhook URL (Discord のサーバー設定 → 連携サービス → ウェブフック で取得)",
+          "app-id": "Application ID (Discord Developer Portal → General Information)",
+          "public-key": "Public Key (Discord Developer Portal → General Information)",
+          "bot-token": "Bot Token (Discord Developer Portal → Bot)",
+          "port": "ポート番号 (例: 3003)",
+        };
         try {
-          const val = await input({ message: `${action} の値を入力 (空でキャンセル):` });
-          if (!val.trim()) { console.log(chalk.dim("  キャンセル。")); continue; }
+          const val = await input({ message: `${fieldLabel[action] ?? action} を入力 (空欄で取り消し):` });
+          if (!val.trim()) { console.log(chalk.dim("  取り消しました。")); continue; }
           await this.handleCommand(`/discord ${action} ${val.trim()}`);
         } catch { /* cancel */ }
       }
@@ -2560,15 +2567,15 @@ export class REPL {
       let action: string;
       try {
         action = await select({
-          message: "Slack 操作:",
+          message: "Slack 連携 — やりたいことを選んでください:",
           choices: [
-            { name: "Enable webhook notifications", value: "enable" },
-            { name: "Disable webhook notifications", value: "disable" },
-            { name: "Set Webhook URL", value: "url" },
-            { name: "Test webhook", value: "test" },
-            { name: "Set Bot Token (xoxb-...)", value: "bot-token" },
-            { name: "Set App-Level Token (xapp-...)", value: "app-token" },
-            { name: chalk.dim("Back"), value: "back" },
+            { name: "通知をオンにする (作業の完了などを Slack に知らせる)", value: "enable" },
+            { name: "通知をオフにする", value: "disable" },
+            { name: "通知の送り先を設定する (Webhook URL)", value: "url" },
+            { name: "テスト通知を送ってみる", value: "test" },
+            { name: "Bot Token を設定する (xoxb- で始まる文字列)", value: "bot-token" },
+            { name: "App-Level Token を設定する (xapp- で始まる文字列)", value: "app-token" },
+            { name: chalk.dim("前のメニューに戻る"), value: "back" },
           ],
         });
       } catch { return; }
@@ -2578,9 +2585,14 @@ export class REPL {
         await this.handleCommand(`/slack ${action}`);
       } else {
         // url / bot-token / app-token
+        const fieldLabel: Record<string, string> = {
+          "url": "Webhook URL (Slack アプリ設定 → Incoming Webhooks で取得)",
+          "bot-token": "Bot Token (Slack アプリ設定 → OAuth & Permissions、xoxb- で始まる)",
+          "app-token": "App-Level Token (Slack アプリ設定 → Basic Information、xapp- で始まる)",
+        };
         try {
-          const val = await input({ message: `${action} の値を入力 (空でキャンセル):` });
-          if (!val.trim()) { console.log(chalk.dim("  キャンセル。")); continue; }
+          const val = await input({ message: `${fieldLabel[action] ?? action} を入力 (空欄で取り消し):` });
+          if (!val.trim()) { console.log(chalk.dim("  取り消しました。")); continue; }
           await this.handleCommand(`/slack ${action} ${val.trim()}`);
         } catch { /* cancel */ }
       }
@@ -2594,12 +2606,12 @@ export class REPL {
       let action: string;
       try {
         action = await select({
-          message: "Chatlog 操作:",
+          message: "会話ログの保存 (Obsidian) — やりたいことを選んでください:",
           choices: [
-            { name: "Enable", value: "enable" },
-            { name: "Disable", value: "disable" },
-            { name: "Set Vault path", value: "vault" },
-            { name: chalk.dim("Back"), value: "back" },
+            { name: "保存をオンにする", value: "enable" },
+            { name: "保存をオフにする", value: "disable" },
+            { name: "保存先フォルダを設定する (Obsidian Vault のパス)", value: "vault" },
+            { name: chalk.dim("前のメニューに戻る"), value: "back" },
           ],
         });
       } catch { return; }
@@ -2608,8 +2620,8 @@ export class REPL {
         await this.handleCommand(`/chatlog ${action}`);
       } else {
         try {
-          const val = await input({ message: "Obsidian Vault のパス (空でキャンセル):" });
-          if (!val.trim()) { console.log(chalk.dim("  キャンセル。")); continue; }
+          const val = await input({ message: "Obsidian Vault のフォルダパス (空欄で取り消し):" });
+          if (!val.trim()) { console.log(chalk.dim("  取り消しました。")); continue; }
           await this.handleCommand(`/chatlog vault ${val.trim()}`);
         } catch { /* cancel */ }
       }
@@ -2623,12 +2635,12 @@ export class REPL {
       let action: string;
       try {
         action = await select({
-          message: "Search provider 操作:",
+          message: "Web検索エンジン — やりたいことを選んでください:",
           choices: [
-            { name: "Switch to DuckDuckGo", value: "ddg" },
-            { name: "Switch to SearXNG", value: "searxng" },
-            { name: "Test search", value: "test" },
-            { name: chalk.dim("Back"), value: "back" },
+            { name: "DuckDuckGo を使う (標準。設定不要)", value: "ddg" },
+            { name: "SearXNG を使う (自分で立てた検索サーバー)", value: "searxng" },
+            { name: "テスト検索をしてみる", value: "test" },
+            { name: chalk.dim("前のメニューに戻る"), value: "back" },
           ],
         });
       } catch { return; }
@@ -2640,7 +2652,7 @@ export class REPL {
       } else if (action === "searxng") {
         try {
           const val = await input({
-            message: "SearXNG URL (空で現状維持):",
+            message: "SearXNG の URL (空欄なら今の設定のまま):",
             default: this.config.search?.searxngUrl ?? "",
           });
           await this.handleCommand(`/search searxng ${val.trim()}`.trim());
@@ -4820,10 +4832,10 @@ export class REPL {
           const dAppId = d?.applicationId ? chalk.dim(d.applicationId) : chalk.yellow("未設定");
           const dPubKey = d?.publicKey ? chalk.green("設定済み") : chalk.yellow("未設定");
           const dToken = d?.botToken ? chalk.green("設定済み") : chalk.yellow("未設定");
-          console.log(chalk.bold("\n  === Discord Status ==="));
-          console.log(chalk.dim(`  通知 (Webhook): ${dEnabled ? chalk.green("有効") : chalk.yellow("無効")}`));
+          console.log(chalk.bold("\n  === Discord 連携の状態 ==="));
+          console.log(chalk.dim(`  通知 (Webhook): ${dEnabled ? chalk.green("オン") : chalk.yellow("オフ")}`));
           console.log(chalk.dim(`  Webhook URL:    ${dUrl}`));
-          console.log(chalk.dim(`  受信サーバー:   ${dListening ? chalk.green(`起動中 (port ${dPort})`) : chalk.yellow("停止中")}`));
+          console.log(chalk.dim(`  受信サーバー:   ${dListening ? chalk.green(`起動中 (ポート ${dPort})`) : chalk.yellow("停止中")}`));
           console.log(chalk.dim(`  Application ID: ${dAppId}`));
           console.log(chalk.dim(`  Public Key:     ${dPubKey}`));
           console.log(chalk.dim(`  Bot Token:      ${dToken}`));
@@ -4918,7 +4930,7 @@ export class REPL {
             if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
             this.config.discord.interactionPort = portNum;
             saveConfig(this.config);
-            console.log(chalk.green(`  ✅ Interaction Server ポートを ${portNum} に設定しました。`));
+            console.log(chalk.green(`  ✅ 受信サーバーのポート番号を ${portNum} に設定しました。`));
           }
         } else if (subCmd === "register") {
           // スラッシュコマンドを Discord に登録
@@ -4948,16 +4960,16 @@ export class REPL {
           const action = args[1];
           if (action === "start") {
             if (this.interactionServer?.running) {
-              console.log(chalk.yellow("  Interaction Server はすでに起動中です。"));
+              console.log(chalk.yellow("  受信サーバーはすでに起動中です。"));
             } else {
               await this.startInteractionServer();
             }
           } else if (action === "stop") {
             if (!this.interactionServer?.running) {
-              console.log(chalk.yellow("  Interaction Server は起動していません。"));
+              console.log(chalk.yellow("  受信サーバーは起動していません。"));
             } else {
               this.interactionServer.stop();
-              console.log(chalk.yellow("  Interaction Server を停止しました。"));
+              console.log(chalk.yellow("  受信サーバーを停止しました。"));
             }
           } else if (action === "auto-start") {
             // 次回起動時から自動起動
@@ -4966,8 +4978,8 @@ export class REPL {
             this.config.discord.listenEnabled = on;
             saveConfig(this.config);
             console.log(on
-              ? chalk.green("  ✅ 次回起動時から Interaction Server を自動起動します。")
-              : chalk.yellow("  自動起動を無効化しました。"),
+              ? chalk.green("  ✅ 次回起動時から受信サーバーを自動で起動します。")
+              : chalk.yellow("  受信サーバーの自動起動をオフにしました。"),
             );
           } else {
             console.log(chalk.yellow("  使い方: /discord listen [start|stop|auto-start [off]]"));
@@ -5017,8 +5029,8 @@ export class REPL {
           const sUrl = s?.webhookUrl || "未設定";
           const sBotToken = s?.botToken ? chalk.green("設定済み") : chalk.yellow("未設定");
           const sAppToken = s?.appToken ? chalk.green("設定済み") : chalk.yellow("未設定");
-          console.log(chalk.bold("\n  === Slack Status ==="));
-          console.log(chalk.dim(`  通知 (Webhook): ${sEnabled ? chalk.green("有効") : chalk.yellow("無効")}`));
+          console.log(chalk.bold("\n  === Slack 連携の状態 ==="));
+          console.log(chalk.dim(`  通知 (Webhook): ${sEnabled ? chalk.green("オン") : chalk.yellow("オフ")}`));
           console.log(chalk.dim(`  Webhook URL:    ${sUrl}`));
           console.log(chalk.dim(`  Bot Token:      ${sBotToken}`));
           console.log(chalk.dim(`  App Token:      ${sAppToken}`));
