@@ -34,6 +34,16 @@ export class MessageHistory {
   private onAssistantMessage: AssistantMessageCallback | null = null;
   private ephemeralMessages = new WeakSet<Message>();
   /**
+   * ユーザーに表示済み (白表示 / ストリーミング出力済み) の assistant メッセージ。
+   * ephemeral でも span 終了時に purge せず永続化する (promoteDisplayedEphemeral)。
+   *
+   * 背景 (2026-06-12): 会話リクエストの実回答 (テキストのみ応答) が自己点検経路で
+   * ephemeral 扱いになり、 span 終了時に purge されて「モデルが自分の直前の回答を
+   * 参照できない」 状態が発生した (ユーザーが回答内容を指摘しても履歴に回答が無い)。
+   * ユーザーが読んだ言葉は会話記録であり、 黙って欠損させてはならない。
+   */
+  private displayedMessages = new WeakSet<Message>();
+  /**
    * 動的合成 composer。 注入されていれば getMessages() で毎回呼ばれて準システムプロンプトを作る。
    * 未注入なら従来通り this.systemPrompt をそのまま返す (後方互換)。
    */
@@ -108,9 +118,12 @@ export class MessageHistory {
   addAssistantMessage(
     content: string,
     toolCalls?: ToolCall[],
-    opts?: { ephemeral?: boolean; thinking?: string },
+    opts?: { ephemeral?: boolean; thinking?: string; displayed?: boolean },
   ): void {
     const msg: Message = { role: "assistant", content };
+    if (opts?.displayed) {
+      this.displayedMessages.add(msg);
+    }
     if (toolCalls && toolCalls.length > 0) {
       msg.tool_calls = toolCalls;
     }
@@ -152,6 +165,24 @@ export class MessageHistory {
     const before = this.messages.length;
     this.messages = this.messages.filter((m) => !this.ephemeralMessages.has(m));
     return before - this.messages.length;
+  }
+
+  /**
+   * ユーザーに表示済みの ephemeral assistant メッセージを永続化する (purge 前に呼ぶ)。
+   * ユーザーが読んだ言葉 = 会話記録。 purge すると次 span でモデルが「自分が何を
+   * 答えたか」 を参照できず、 指摘への応答が支離滅裂になる (2026-06-12 の実害)。
+   * harness 注入の user nudge / 未表示 placeholder は従来通り purge 対象のまま。
+   * @returns 永続化した件数
+   */
+  promoteDisplayedEphemeral(): number {
+    let promoted = 0;
+    for (const m of this.messages) {
+      if (this.ephemeralMessages.has(m) && this.displayedMessages.has(m)) {
+        this.ephemeralMessages.delete(m);
+        promoted++;
+      }
+    }
+    return promoted;
   }
 
   /**
@@ -234,5 +265,6 @@ export class MessageHistory {
     this.messages = [];
     // WeakSet は参照消失で自動 GC されるので明示クリア不要だが、 防御的に新規化
     this.ephemeralMessages = new WeakSet<Message>();
+    this.displayedMessages = new WeakSet<Message>();
   }
 }

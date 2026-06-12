@@ -112,9 +112,16 @@ export async function httpPostStream(
   connectTimeoutMs = DEFAULT_STREAM_CONNECT_TIMEOUT,
   idleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT,
   additionalHeaders?: Record<string, string>,
+  externalSignal?: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
   const controller = new AbortController();
   const connectTimer = setTimeout(() => controller.abort(), connectTimeoutMs);
+  // 外部シグナル (ユーザーの Esc 中断等) を内部 controller に連動させる。
+  // これが無いと中断後も接続が残り、 サーバ側 (llama.cpp 等) が生成を続けてしまう。
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
 
   const reqHeaders = {
     "Content-Type": "application/json",
@@ -201,7 +208,10 @@ function wrapWithIdleTimeout(
     },
     cancel() {
       if (idleTimer) clearTimeout(idleTimer);
-      reader.cancel();
+      // reader.cancel() に加えて controller も abort し、 undici に確実に接続を
+      // 切断させる (サーバ側の生成停止はクライアント切断の検知に依存するため)。
+      void reader.cancel().catch(() => {});
+      abortController.abort();
     },
   });
 }

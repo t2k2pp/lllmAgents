@@ -49,6 +49,13 @@ export interface ChatParams {
   top_p?: number;
   top_k?: number;
   repetition_penalty?: number;
+  /**
+   * ユーザー中断 (Esc) を HTTP 層まで伝播させるためのシグナル。
+   * これが無いと中断後も接続が残り、 llama.cpp 等のサーバが生成を続けて
+   * 後続リクエストが詰まる (2026-06-12 に 557 秒の応答遅延として顕在化)。
+   * 未対応 provider は無視してよい (従来挙動)。
+   */
+  signal?: AbortSignal;
 }
 
 export interface ChatWithToolsParams extends ChatParams {

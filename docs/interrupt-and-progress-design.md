@@ -182,3 +182,35 @@ ESC と Ctrl+C の役割:
 - 並列 tool_use の抑制 (system prompt or agent-loop での直列化) → 別設計書
 - subagent (mcp__lllmagents__task) の途中経過をストリームする仕組み → 別設計書
 - inquirer の代わりに自前 raw mode ダイアログを使うか → 中断統合のため将来検討
+
+## 追補 S4. 中断の HTTP 層への伝播 (実装済 2026-06-12)
+
+### 観測された実害
+
+`2026-06-12T13-50-48` セッションで、Esc 中断後に再送信したリクエストの応答が **557 秒** かかる事象が発生
+(通常 20〜90 秒)。ユーザー目線では「入力しても無反応 → Esc → 再送信 → さらに無反応」の悪循環。
+
+### 根本原因
+
+`agent.abort()` はフラグを立てるだけで、`abortableIterator` は **イテレータの消費をやめるだけ** だった:
+
+1. `gen.return()` を呼ばないため provider generator の finally が走らない
+2. finally も `reader.releaseLock()` のみで、ストリームを cancel しない
+3. → HTTP 接続が開いたままになり、llama.cpp サーバは中断済み生成を完走するまで占有される
+4. → 再送信したリクエストはサーバ側キューで待たされ「固まった」ように見える (シングルスロット直列処理)
+
+### 修正 (3 層で伝播)
+
+| 層 | ファイル | 変更 |
+|---|---|---|
+| agent-loop | `src/agent/agent-loop.ts` | LLM 呼び出しごとに `AbortController` を生成し `ChatParams.signal` で渡す。`abort()` が `controller.abort()` も呼ぶ。`abortableIterator` は中断時に `gen.return()` で generator の finally を走らせる |
+| provider | `src/providers/base-provider.ts` / `openai-compat.ts` | `ChatParams.signal?: AbortSignal` 追加。`httpPostStream` へ引き渡し。finally は `releaseLock` → `reader.cancel()` に変更。ユーザー中断時 (`signal.aborted`) はエラー chunk を出さず静かに終了 |
+| HTTP | `src/utils/http-client.ts` | `httpPostStream` に `externalSignal` 引数を追加し内部 controller に連動。`wrapWithIdleTimeout` の cancel で `abortController.abort()` も実行し undici に確実に接続を切断させる |
+
+llama.cpp / vLLM はクライアント切断を検知すると生成スロットを解放するため、Esc の瞬間にサーバ側の生成も止まる。
+
+注: `signal` 未対応の provider (gemini / azure-gpt 等の独自実装) は従来挙動のまま (後続課題)。
+OpenAI 互換系 (llamacpp / vllm / lmstudio / ollama の openai-compat 経由) は本修正でカバーされる。
+
+関連: 中断された span の履歴可視化 (中断マーカー) と表示済みテキストの保全は
+`docs/ephemeral-context-design.md` §8 を参照。

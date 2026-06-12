@@ -163,7 +163,7 @@ export class OpenAICompatProvider implements LLMProvider {
       if (process.env.LLM_DEBUG_HTTP) {
         console.error(`[LLM_DEBUG_HTTP] POST ${chatUrl}  model=${body.model}  msgs=${(body.messages as unknown[])?.length}`);
       }
-      streamBody = await httpPostStream(chatUrl, body, undefined, undefined, headers);
+      streamBody = await httpPostStream(chatUrl, body, undefined, undefined, headers, params.signal);
     } catch (e) {
       // 失敗時は URL と model を含めて原因特定を容易にする (404/401/403 デバッグ向け)
       yield {
@@ -276,6 +276,10 @@ export class OpenAICompatProvider implements LLMProvider {
     } catch (e) {
       // アイドルタイムアウトやAbortによるストリーム切断をわかりやすいエラーに変換
       const err = e instanceof Error ? e : new Error(String(e));
+      if (params.signal?.aborted) {
+        // ユーザー中断 (Esc): エラーではないので黙って終了する (呼び出し側が中断処理を行う)
+        return;
+      }
       if (err.name === "AbortError" || err.message.includes("abort")) {
         yield {
           type: "error",
@@ -286,7 +290,9 @@ export class OpenAICompatProvider implements LLMProvider {
       }
       return;
     } finally {
-      reader.releaseLock();
+      // releaseLock だけでは接続が残る。 cancel で wrapWithIdleTimeout → res.body →
+      // undici へ伝播させて接続を確実に閉じる (正常終了後の cancel は no-op)。
+      void reader.cancel().catch(() => {});
     }
   }
 

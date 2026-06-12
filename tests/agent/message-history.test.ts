@@ -116,6 +116,35 @@ describe("MessageHistory.purgeEphemeral — span 境界での揮発メッセー�
     }
   });
 
+  it("displayed=true の ephemeral は promoteDisplayedEphemeral で永続化され purge を生き残る", () => {
+    // 2026-06-12 の実害: 会話リクエストの実回答 (表示済みテキスト) が self-check 経路で
+    // ephemeral になり、 span 終了の purge で消えてモデルが自分の回答を参照できなくなった
+    const history = new MessageHistory("system");
+    history.addUserMessage("感動する四字熟語ベスト10を教えて");
+    history.addAssistantMessage("1. 一期一会 …", undefined, { ephemeral: true, displayed: true });
+    history.addUserMessage("[ハーネス] self-check nudge", { ephemeral: true });
+    history.addAssistantMessage("確認しました (self-check 応答)");
+
+    const promoted = history.promoteDisplayedEphemeral();
+    expect(promoted).toBe(1);
+    const purged = history.purgeEphemeral();
+    expect(purged).toBe(1); // nudge のみ purge
+    expect(history.getRawMessages().map((m) => m.content)).toEqual([
+      "感動する四字熟語ベスト10を教えて",
+      "1. 一期一会 …",
+      "確認しました (self-check 応答)",
+    ]);
+  });
+
+  it("displayed=false (未表示 placeholder 等) は promote されず purge される", () => {
+    const history = new MessageHistory("system");
+    history.addAssistantMessage("（空のレスポンス）", undefined, { ephemeral: true });
+    history.addAssistantMessage("表示済み", undefined, { ephemeral: true, displayed: true });
+    expect(history.promoteDisplayedEphemeral()).toBe(1);
+    expect(history.purgeEphemeral()).toBe(1);
+    expect(history.getRawMessages().map((m) => m.content)).toEqual(["表示済み"]);
+  });
+
   it("複数回 purge 呼んでも 2 回目以降は 0 件 (idempotent)", () => {
     const history = new MessageHistory("system");
     history.addUserMessage("nudge", { ephemeral: true });

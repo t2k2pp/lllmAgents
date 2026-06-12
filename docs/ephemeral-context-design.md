@@ -273,7 +273,53 @@ T1 (Claude/GPT-5) は OpenAI 互換 function calling が確実なのでスキッ
 
 ---
 
-## 8. 結語
+## 8. Phase 3 — 表示済みテキストの保全 (displayed) と中断マーカー (実装済 2026-06-12)
+
+### 8.1 観測された実害
+
+2026-06-12 のセッションログ (`2026-06-12T13-50-48_main.jsonl`) で 2 つの欠損事故を確認:
+
+1. **実回答の消失**: 会話リクエスト (四字熟語ベスト10) のテキストのみ応答が「ツール未呼び出し
+   self-check」経路で `ephemeral: true` となり、 直後の `response_complete` で purge された。
+   履歴には self-check の確認文 (「確認しました。…提示しており…」) だけが残り、 **ユーザーが
+   読んだ回答本文がモデルから見えなくなった**。 次 span でユーザーが回答内容の誤りを指摘した際、
+   モデルは thinking で「前回の応答履歴を確認できないが」と述べ、 支離滅裂な応酬になった。
+2. **中断 span の不可視**: Esc 中断された user メッセージが「応答なし」のまま履歴に残り、
+   ユーザーが同文を再送信するたびに同一メッセージが 2 重 3 重に蓄積した (turn 5: ×1 →
+   turn 6: ×2 → turn 7: ×3)。 モデルには重複の意味が分からない。
+
+### 8.2 設計原則の追補
+
+> **ユーザーに表示した言葉は会話記録であり、 ephemeral (スクラッチ) ではない。**
+
+§2.1 の二分法 (本処理=永続 / harness 補助=揮発) はそのまま。 ただし「assistant の純テキスト」 を
+一律揮発とした §1 の規約は粗すぎた: flushAssistantText で白表示 (またはストリーミング出力) された
+テキストはユーザーが読んだ「本処理」 側であり、 purge は silent な欠損 (禁止事項) になる。
+
+### 8.3 実装
+
+- `MessageHistory.addAssistantMessage` に `displayed?: boolean` を追加。 表示済みなら
+  `displayedMessages` (WeakSet) にマーク。
+- `purgeEphemeralAtSpanEnd` は purge の前に `promoteDisplayedEphemeral()` を呼び、
+  ephemeral かつ displayed のメッセージを永続へ昇格 (`[ephemeral-promote]` ログ)。
+- displayed の判定は注入箇所で `assistantTextFlushed || (streamingDisplay && hasStartedOutput)`
+  (= 実際にユーザーの目に入ったか)。 coherence ゲートの却下テキストはストリーミング表示時のみ
+  displayed。 未表示の空応答 placeholder・harness user nudge は従来通り purge される。
+- max_tokens 継続の部分応答も displayed 扱い (purge すると履歴上の最終回答が「続き」 の後半
+  だけになり欠損するため)。
+- **中断マーカー** (`appendAbortMarker`): `user_abort` / `llm_error_abort` の span 終了時、
+  部分テキスト + `[この応答はユーザーにより中断されました (Esc)。…]` を永続 assistant
+  メッセージとして積む。 user メッセージの黙殺削除ではなく可視化で対応 (silent loss 禁止)。
+
+### 8.4 トレードオフ
+
+中間の promise テキスト (「了解しました、実装します」 等) も表示済みなら残るため、 §4.1 の
+ctx 節約効果はわずかに減る。 ただし nudge (長文) は引き続き purge されるため節約の大半は維持。
+正しさ (モデルが自分の発言を参照できる) を節約より優先する。
+
+---
+
+## 9. 結語
 
 ハーネスは LLM のためのスクラッチ空間を提供すべきだが、 そのスクラッチを永続履歴に紛れさせるとモデルの判断品質を下げる。 「span 内で書いて、 完了で消える」 という素直な分離を入れることで:
 

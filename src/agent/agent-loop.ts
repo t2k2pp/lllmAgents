@@ -193,6 +193,12 @@ export class AgentLoop {
   private currentSource: RequestSource = "cli";
   /** Ctrl+C などによる中断フラグ */
   private _aborted = false;
+  /**
+   * 進行中 LLM 呼び出しの AbortController。 abort() で HTTP 接続ごと切断する。
+   * フラグ (_aborted) だけだとクライアントが読むのをやめるだけでサーバ側の生成が
+   * 走り続け、 後続リクエストが詰まる (llama.cpp はシングルスロット直列処理)。
+   */
+  private llmAbortController: AbortController | null = null;
   /** Phase 5 第2ラウンド: ハーネス介入の状態 (file_edit/壁ドン/Read→Edit/連続委任) を一元管理 */
   private harnessState = new HarnessState();
   /**
@@ -434,9 +440,12 @@ export class AgentLoop {
     } catch { /* parse 失敗は無視 (統計用途のみ) */ }
   }
 
-  /** 実行中の処理を中断する（Ctrl+C など）。次のイテレーション冒頭で停止する */
+  /** 実行中の処理を中断する（Esc / Ctrl+C など）。進行中の LLM 接続も即座に切断する */
   abort(): void {
     this._aborted = true;
+    // HTTP 接続を切断してサーバ側の生成も止める。 これが無いと llama.cpp が
+    // 中断済み生成を完走するまで後続リクエストが待たされ「固まった」 ように見える。
+    this.llmAbortController?.abort();
   }
 
   /** 中断フラグをリセットする（次の run() 開始前に呼ぶ） */
@@ -574,6 +583,10 @@ export class AgentLoop {
       // 中断チェック
       if (this._aborted) {
         console.log(chalk.yellow("\n  (処理を中断しました)"));
+        // 中断ターンを履歴上で可視化する。 これが無いと「応答の無い user メッセージ」 が
+        // 残り、 再送信のたびに同文が重複蓄積してモデルを混乱させる (2026-06-12 ログで実証)。
+        this.appendAbortMarker("");
+        this.purgeEphemeralAtSpanEnd("user_abort");
         return;
       }
       // Context compression check
@@ -622,18 +635,23 @@ export class AgentLoop {
           //     (例: Kimi-K2 で 13991 input + 256000 max_tokens > 262144 → BadRequest)。
           //   - azure-anthropic: max_tokens 必須だが provider 側に DEFAULT_MAX_TOKENS=64000 のフォールバックあり。
           //   - azure-gpt (Responses API): max_output_tokens 省略時はサーバ既定 (= 残コンテキスト) が適用される。
+          // 呼び出しごとに AbortController を作り直す。 abort() がこれを切断することで
+          // Esc 中断が HTTP 層まで届く (ストリーム待機中でも即座に reject される)。
+          this.llmAbortController = new AbortController();
           const gen = toolDefs.length > 0
             ? this.provider.chatWithTools({
               model: this.model,
               messages: this.history.getMessages(),
               tools: toolDefs,
               stream: true,
+              signal: this.llmAbortController.signal,
               ...this.samplingParams,
             })
             : this.provider.chat({
               model: this.model,
               messages: this.history.getMessages(),
               stream: true,
+              signal: this.llmAbortController.signal,
               ...this.samplingParams,
             });
 
@@ -715,6 +733,8 @@ export class AgentLoop {
               stopThinkingSpinner();
               if (this.streamingDisplay && hasStartedOutput) process.stdout.write("\n");
               console.log(chalk.yellow("\n  (処理を中断しました)"));
+              // 部分テキストごと中断マーカーを履歴に残す (重複 user メッセージ蓄積の防止)
+              this.appendAbortMarker(textContent);
               this.purgeEphemeralAtSpanEnd("user_abort");
               return;
             }
@@ -905,6 +925,7 @@ export class AgentLoop {
             // "abort" → この発話を中止してREPLに戻る（プロセスは終了しない）
             // _aborted を立てることで /try などの呼び出し元もループを抜けられる
             this._aborted = true;
+            this.appendAbortMarker("", "LLM 呼び出しエラーにより中止");
             this.purgeEphemeralAtSpanEnd("llm_error_abort");
             return;
           }
@@ -955,12 +976,13 @@ export class AgentLoop {
         const structReason = "reason" in structural ? structural.reason : undefined;
         const reason = isTruncatedByLength ? "max_tokens到達" : `構造的不完全: ${structReason}`;
         console.log(chalk.dim(`\n  (${reason}のため、続きを生成します...)`));
-        // 部分応答を一旦履歴に積んで「続き」 を促すが、 これは in-turn の継続合図なので
-        // ユーザー応答完了時に purge して context を綺麗にする (tool_calls がある場合は永続化)。
+        // 部分応答を一旦履歴に積んで「続き」 を促す。 部分テキストは最終回答の前半部分
+        // (ユーザーに見える言葉) なので displayed=true で span 終了後も保全する。
+        // これを purge すると履歴に残る最終回答が「続き」 の後半だけになり欠損する。
         this.history.addAssistantMessage(
           textContent,
           toolCalls.length > 0 ? toolCalls : undefined,
-          { ephemeral: toolCalls.length === 0, thinking: thinkingContent },
+          { ephemeral: toolCalls.length === 0, thinking: thinkingContent, displayed: textContent.trim().length > 0 },
         );
         this.history.addUserMessage(
           "続きを出力してください。途中から再開してください。",
@@ -1061,8 +1083,13 @@ export class AgentLoop {
             console.log(chalk.yellow(
               `  [coherence ${coherenceGateRetries}/${MAX_NEW_GATE_RETRIES}] thinking「${coherence.continuationHit}」 vs 完了「${coherence.completionHit}」 ズレ検出`,
             ));
-            // 元 response は履歴に積まずに (= 完了宣言を確定させず)、 nudge だけ inject して loop 続行
-            this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
+            // 元 response は履歴に積まずに (= 完了宣言を確定させず)、 nudge だけ inject して loop 続行。
+            // ストリーミング表示中はユーザーが既に読んでいるため displayed で保全する。
+            this.history.addAssistantMessage(textContent, undefined, {
+              ephemeral: true,
+              thinking: thinkingContent,
+              displayed: this.streamingDisplay && hasStartedOutput,
+            });
             this.history.addUserMessage(buildCoherenceNudge(coherence), { ephemeral: true });
             continue;
           }
@@ -1264,9 +1291,13 @@ export class AgentLoop {
         const fileList = pendingVerification.map(f => `    - ${f}`).join("\n");
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] 検証未実施`));
         this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] 検証未実施`);
-        // 中間 promise テキストと self-check nudge は in-turn 専用 (応答完了時に purge)
-        // thinking も保全 (span 内で活用、 span 終了時に破棄)
-        this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
+        // self-check nudge は in-turn 専用 (応答完了時に purge)。 thinking も保全。
+        // 表示済みテキストは会話記録として保全する (displayed)。
+        this.history.addAssistantMessage(textContent, undefined, {
+          ephemeral: true,
+          thinking: thinkingContent,
+          displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
+        });
         this.history.addUserMessage(
           formatSelfCheck(
             selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
@@ -1301,8 +1332,12 @@ export class AgentLoop {
           const feedback = Evaluator.formatForInjection(result);
           console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`));
           this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`);
-          // Evaluator 指摘と中間応答は in-turn 専用、 thinking も保全
-          this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
+          // Evaluator 指摘は in-turn 専用、 thinking も保全。 表示済みテキストは保全 (displayed)。
+          this.history.addAssistantMessage(textContent, undefined, {
+            ephemeral: true,
+            thinking: thinkingContent,
+            displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
+          });
           this.history.addUserMessage(
             formatSelfCheck(
               selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
@@ -1353,8 +1388,14 @@ export class AgentLoop {
         flushAssistantText(false); // span 継続 (自己点検) — 表示は白、final ではない
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ツール未呼び出し`));
         this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ツール未呼び出し`);
-        // promise テキストと nudge は in-turn 専用、 thinking も保全
-        this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
+        // nudge は in-turn 専用、 thinking も保全。 表示済みテキストは会話記録として保全する
+        // (displayed)。 2026-06-12: 会話リクエストの実回答がこの経路で purge され、 次 span で
+        // モデルが自分の回答を参照できなくなる事故があった (履歴に self-check 確認文だけが残る)。
+        this.history.addAssistantMessage(textContent, undefined, {
+          ephemeral: true,
+          thinking: thinkingContent,
+          displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
+        });
         // 2026-05-01: C 案。 「promise テキストだけでは作業継続と認識しない」 を明示し、
         // 短い「了解しました」「実装します」 等の応答で止まるループを抜けやすくする。
         this.history.addUserMessage(
@@ -1380,8 +1421,12 @@ export class AgentLoop {
         flushAssistantText(false); // span 継続 (自己点検) — 表示は白、final ではない
         console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] コードがテキスト応答に含まれています`));
         this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] コードがテキスト応答に含まれています`);
-        // コードを含む中間応答と nudge は in-turn 専用、 thinking も保全
-        this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
+        // nudge は in-turn 専用、 thinking も保全。 表示済みテキストは保全 (displayed)。
+        this.history.addAssistantMessage(textContent, undefined, {
+          ephemeral: true,
+          thinking: thinkingContent,
+          displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
+        });
         this.history.addUserMessage(
           formatSelfCheck(
             selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
@@ -1526,7 +1571,11 @@ export class AgentLoop {
             `  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ToDo未完了 (${openTodos.length}/${allTodos.length})`,
           ));
           this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ToDo未完了 (${openTodos.length}/${allTodos.length})`);
-          this.history.addAssistantMessage(textContent, undefined, { ephemeral: true, thinking: thinkingContent });
+          this.history.addAssistantMessage(textContent, undefined, {
+            ephemeral: true,
+            thinking: thinkingContent,
+            displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
+          });
           this.history.addUserMessage(
             formatSelfCheck(
               selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
@@ -1735,6 +1784,25 @@ export class AgentLoop {
   }
 
   /**
+   * 中断された span を履歴上で可視化する assistant マーカーを積む (永続)。
+   *
+   * 背景 (2026-06-12): Esc 中断後、 user メッセージが「応答なし」 のまま履歴に残り、
+   * ユーザーが同文を再送信するたびに同一 user メッセージが 2 重 3 重に蓄積していた。
+   * モデルには区別がつかず混乱の原因になる。 silent に user メッセージを削除する案は
+   * 「黙った欠損の禁止」 方針に反するため、 中断の事実を明示するマーカーで対応する。
+   *
+   * @param partialText 中断時点までにモデルが出力していたテキスト (あれば保全して併記)
+   * @param reason マーカーに併記する理由 (省略時はユーザー中断)
+   */
+  private appendAbortMarker(partialText: string, reason = "ユーザーにより中断されました (Esc)"): void {
+    const note = `[この応答は${reason}。 直前のユーザーメッセージへの回答は完了していません]`;
+    const content = partialText.trim().length > 0
+      ? `${partialText}\n\n${note}`
+      : note;
+    this.history.addAssistantMessage(content);
+  }
+
+  /**
    * span 境界 (= ユーザー応答完了 / abort / 上限到達) で in-turn 専用のメッセージを破棄する。
    * 詳細は docs/ephemeral-context-design.md を参照。
    *
@@ -1748,6 +1816,12 @@ export class AgentLoop {
     // span 終了点はほぼすべてここを通るため、 task_complete イベント用の outcome を
     // reason から決定する (docs/agent-events-design.md §3.1)。 発火自体は run() の finally。
     this.runStats.outcome = AgentLoop.SPAN_END_OUTCOMES[reason] ?? "incomplete";
+    // ユーザーに表示済みの応答テキストは purge せず会話記録として保全する
+    // (docs/ephemeral-context-design.md §displayed 参照。 2026-06-12 の回答消失対策)。
+    const promoted = this.history.promoteDisplayedEphemeral();
+    if (promoted > 0) {
+      console.log(chalk.dim(`  [ephemeral-promote] 表示済み応答 ${promoted} 件を履歴に保全 (${reason})`));
+    }
     const purged = this.history.purgeEphemeral();
     if (purged > 0) {
       console.log(chalk.dim(`  [ephemeral-purge] ${purged} 件の in-turn 補助メッセージを破棄 (${reason})`));
@@ -3000,12 +3074,23 @@ async function* abortableIterator<T>(
   isAborted: () => boolean,
 ): AsyncGenerator<T> {
   const POLL_INTERVAL = 500;
+  // 中断時は放置せず gen.return() で generator の finally (ストリーム cancel 等) を
+  // 走らせる。 これが無いと provider 側の HTTP 接続クリーンアップが永久に実行されない。
+  const cleanup = (): void => {
+    void gen.return(undefined as never).catch(() => {});
+  };
   while (true) {
-    if (isAborted()) return;
+    if (isAborted()) {
+      cleanup();
+      return;
+    }
     // gen.next() を1回だけ呼び、その Promise をタイムアウトと繰り返し競争させる
     const nextPromise = gen.next();
     while (true) {
-      if (isAborted()) return;
+      if (isAborted()) {
+        cleanup();
+        return;
+      }
       const result = await Promise.race([
         nextPromise.then((v) => ({ kind: "value" as const, v })),
         new Promise<{ kind: "timeout" }>((resolve) => setTimeout(() => resolve({ kind: "timeout" }), POLL_INTERVAL)),
