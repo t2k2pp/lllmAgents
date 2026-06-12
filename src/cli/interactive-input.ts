@@ -37,6 +37,44 @@ export interface InteractiveInputOptions {
 /** Ctrl+C が押されたことを示す特殊値 */
 export const SIGINT_SIGNAL = "\x03";
 
+// ─── stdin チャンク分類 ──────────────────────────────────
+
+/** classifyChunkNewline の判定結果 */
+export type ChunkNewlineKind =
+  /** 改行を含まない (通常のタイプ・IME確定テキスト) */
+  | "none"
+  /** 本文の途中に改行がある = マルチライン貼り付け (Enter は改行挿入として扱う) */
+  | "paste-burst"
+  /** 改行が末尾のみ = 「1行ぶんのテキスト + Enter」 または単発 Enter (Enter は確定として扱う) */
+  | "line-submit";
+
+const CR = 0x0d;
+const LF = 0x0a;
+
+/**
+ * 生 stdin チャンクの改行位置から「貼り付け」 と「行確定」 を区別する。
+ *
+ * 背景 (2026-06-13): IME で日本語を確定した直後の Enter を ConPTY が
+ * 「続けて\r」 のような 1 チャンクに合流させることがある。 旧判定
+ * (複数バイト + 改行 = 貼り付け) はこれを貼り付けと誤検出し、 Enter が
+ * 確定でなく改行挿入になって「一度無駄に Enter を押さないと送信できない」
+ * 症状を起こした。 真のマルチライン貼り付けは本文の途中に改行を持つので、
+ * 「改行が末尾だけ」 のチャンクは行確定として扱う。
+ *
+ * トレードオフ: ブラケット貼り付け非対応端末 (legacy conhost) で貼り付けが
+ * 行単位のチャンクに分かれて届いた場合、 1 行目が即確定し得る。 タイプした
+ * Enter の飲み込み (毎回の送信失敗) の方が実害が大きいため行確定側に倒す。
+ */
+export function classifyChunkNewline(chunk: Buffer): ChunkNewlineKind {
+  if (chunk.length === 0) return "none";
+  let end = chunk.length;
+  while (end > 0 && (chunk[end - 1] === CR || chunk[end - 1] === LF)) end--;
+  const body = chunk.subarray(0, end);
+  if (body.includes(CR) || body.includes(LF)) return "paste-burst"; // 本文中に改行
+  if (end === chunk.length) return "none"; // 改行を含まない
+  return "line-submit"; // 改行は末尾のみ ("テキスト+Enter" 合流 or 単発 Enter)
+}
+
 // ─── メインクラス ───────────────────────────────────────
 
 export class InteractiveInput {
@@ -46,8 +84,14 @@ export class InteractiveInput {
   private historyIndex = -1;
   private keypressInitialized = false;
   private dataListenerInstalled = false;
-  /** stdin に複数バイト+改行 chunk が届いた直近時刻 + 猶予 (ms) — この時刻まで届く \r は改行扱い */
+  /** stdin に「本文中に改行を含む」 chunk が届いた直近時刻 + 猶予 (ms) — この時刻まで届く \r は改行扱い */
   private pasteBurstUntilMs = 0;
+  /**
+   * stdin に「改行が末尾のみ」 の chunk が届いた直近時刻 + 猶予 (ms)。
+   * この時刻までの \r は貼り付け判定 (pasteBurst / 連続キー間隔) を打ち消して
+   * 通常の確定 Enter として扱う。 IME 確定 + Enter の ConPTY 合流対策 (2026-06-13)。
+   */
+  private lineSubmitUntilMs = 0;
 
   constructor(options: InteractiveInputOptions = {}) {
     this.commandProvider = options.commandProvider ?? (() => []);
@@ -100,15 +144,18 @@ export class InteractiveInput {
       // 同じ chunk から keypress イベントが順次発火するため、その間 isPasteBurst を有効化する。
       if (!this.dataListenerInstalled) {
         stdin.on("data", (chunk: Buffer) => {
-          // chunk が複数バイト + 改行 (\r/\n) を含む = 貼り付けほぼ確実。
-          // 単一バイト改行は人間の Enter 押下と区別できないので除外。
-          // 単独マルチバイト文字（日本語入力など）も length > 1 だが改行は含まないので誤判定しない。
-          if (
-            chunk.length > 1 &&
-            (chunk.includes(0x0d) || chunk.includes(0x0a))
-          ) {
-            // 200ms の余裕を持たせる: 同じ貼り付けから後続の keypress が発火し終わるまで保持
-            this.pasteBurstUntilMs = Date.now() + 200;
+          // 改行の位置で「マルチライン貼り付け」 と「行確定」 を区別する (classifyChunkNewline)。
+          //   paste-burst: 本文中に改行 = 貼り付けほぼ確実 → 200ms の間 \r を改行扱い
+          //                (同じ貼り付けから後続の keypress が発火し終わるまで保持)
+          //   line-submit: 改行が末尾のみ = 「タイプした 1 行 + Enter」 の合流 or 単発 Enter
+          //                → 200ms の間 \r を確定扱い (貼り付けバースト継続中を除く)
+          // 単独マルチバイト文字 (日本語 IME 確定など) は改行を含まないのでどちらにも該当しない。
+          const kind = classifyChunkNewline(chunk);
+          const now = Date.now();
+          if (kind === "paste-burst") {
+            this.pasteBurstUntilMs = now + 200;
+          } else if (kind === "line-submit" && now >= this.pasteBurstUntilMs) {
+            this.lineSubmitUntilMs = now + 200;
           }
         });
         this.dataListenerInstalled = true;
@@ -588,8 +635,13 @@ export class InteractiveInput {
         // 二段構えの貼り付け検出:
         //   (a) 生 stdin chunk で複数バイト+改行を観測 → pasteBurstUntilMs まで保持
         //   (b) 直前キーから FAST_PASTE_DELTA_MS 未満で連続発火 → 貼り付け中とみなす
+        // line-submit 窓 (改行が末尾のみのチャンク = タイプ入力の確定) は貼り付け判定より優先。
+        // ConPTY が「続けて\r」 を 1 チャンクで届けると (a) 改行入りチャンク (b) keyDelta≈0 の
+        // 両方が誤発動して Enter が飲み込まれるため、 ここで両方を打ち消す (2026-06-13)。
         const isPasteBurst =
-          now < this.pasteBurstUntilMs || keyDelta < FAST_PASTE_DELTA_MS;
+          now < this.lineSubmitUntilMs
+            ? false
+            : now < this.pasteBurstUntilMs || keyDelta < FAST_PASTE_DELTA_MS;
 
         // \r の直後でも \n 以外のキーが来たら CRLF 吸収状態を解除
         if (lastKeyWasReturn && key.name !== "enter") {
