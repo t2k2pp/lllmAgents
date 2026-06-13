@@ -84,16 +84,24 @@ interface RoomConfig {
 - `index.ts`: 起動時に RoomManager 初期化。
 
 ## 10. 未決事項（レビューで確認したい）
-1. **複数サーフェスが同一 Room を指す場合の同時実行**: 例 REPL と Discord が両方 A。`ChannelRunQueue` は各サーフェス内直列だがサーフェス間は別。同一 Room への同時 run をどう直列化するか（Room 単位のロック導入が素直）。
+1. **複数サーフェスが同一 Room を指す場合の同時実行**（解決済み・方針変更）: **ロックは採らない**。Claude Code と同じく「受信順に積んで FIFO 処理」する（§13）。AgentLoop は単一インスタンスで run は同時実行できないため、**受信順グローバル FIFO キュー** に統一し、各ジョブが自分の Room に swap して順に処理する。これにより同一 Room／別 Room とも到着順に直列化され、ロック不要。既存の per-surface `ChannelRunQueue` はこの統一キューに置き換える（2026-06-13 ユーザー指摘）。
 2. **Discord の複数チャンネル**（解決済み）: 全チャンネル → Room B 集約で確定。別チャンネルの発話が同じ B に混ざるのは許容。チャンネル毎 Room は将来拡張（2026-06-13 ユーザー合意）。
 3. **mode の永続化**: `SessionData.mode?` を追加して保存（解決済み・採用）。goal-seek 中の Room を保存/復元するため。
 4. **設定の置き場所**（解決済み）: 専用 rooms.json は**作らない**。bindings / autoResume は `config.json`、currentSessionId は保存せず `meta.room` から導出。理由: currentSessionId はターン毎には変わらず低頻度、かつ Room↔セッションの紐付けはセッション側が正本。二重管理・ファイル分散を避ける（2026-06-13 ユーザー合意）。
 
-## 11. 段階実装計画（初回スコープ = コア）
-- **Phase 1（今回・コア）**: RoomManager + 3 Room 固定 + サーフェス既定バインド + ディスク永続化（ターン毎保存）+ `/room`（表示・移動・手動 resume）+ B/C 自動 Resume + セッションへの Room タグ。`/clear`/`/status` の Room 対応。
-- **Phase 2（次回以降）**: `/room autoresume` 等の設定 UI 充実、同一 Room 同時実行ロック（§10-1）、`/context`/`/todo` の Discord 返却整備、移行（既存 volatile 会話の扱い）。
+## 11. 受信順 FIFO キューと処理中の追加入力（Claude Code 方式）
+- **受信順グローバル FIFO**: 全サーフェス（REPL/Discord/Slack）の入力を、受信（イベント受付）タイミングの順で 1 本のキューに積む。各エントリは `{ surface, roomId, message, replyHandle }`。単一ワーカーが FIFO で取り出し、`roomId` の `ConversationState` に swap → run → 保存 → 応答。ロック不要。既存 `ChannelRunQueue`/`waitForAgentIdle` はこのキューへ統合。
+- **処理中の追加入力**:
+  - Discord/Slack: 既にイベント駆動でキューに積まれる（現状動作を統一キューへ移行するだけ）。
+  - REPL: 現状は run 中に入力できない（入力ループが processInput を await）。**run と入力受付を分離**し、run 中に打ったテキストはキューへ積む（Claude Code 同様）。表示は「キュー投入」をフィードバック。ESC/Ctrl+C の既存挙動は維持。
+  - キュー投入時のフィードバック（「N 番目に追加」）と、キュー内容の確認/取消は段階的に（最小は投入のみ）。
 
-## 12. テスト方針
+## 12. 段階実装計画（初回スコープ = コア）
+- **Phase 1（今回・コア）**: RoomManager + 3 Room 固定 + サーフェス既定バインド + ディスク永続化（ターン毎保存）+ 受信順グローバル FIFO キュー（§13、既存 ChannelRunQueue を統合）+ `/room`（表示・移動・手動 resume）+ B/C 自動 Resume + セッションへの Room タグ。`/clear`/`/status` の Room 対応。
+- **Phase 1.5 or 2（要相談）**: REPL の「処理中の追加入力」対応（run と入力ループの分離、§13）。入力系の挙動変更で TTY 検証が要るため独立させる案。
+- **Phase 2（次回以降）**: `/room autoresume` 等の設定 UI 充実、キュー確認/取消 UI、`/context`/`/todo` の Discord 返却整備、移行（既存 volatile 会話の扱い）。
+
+## 13. テスト方針
 - RoomManager の単体テスト（load/save/move/resume、後方互換 = room 無しセッション）。
 - 永続化の round-trip（ConversationState ⇆ SessionData）。
 - TTY 対話・Discord/Slack 実機は手動検証（パイプ不可）。
