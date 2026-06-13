@@ -35,7 +35,7 @@ import type {
 } from "../agent/agent-events.js";
 import { setInteractionBridge } from "../agent/interaction-bridge-registry.js";
 import { formatReportFooter, formatOutcome, formatStatsLine } from "../agent/task-reporter.js";
-import { ChannelProgressTracker } from "../agent/channel-progress.js";
+import { ChannelProgressTracker, ChannelResponseCollector } from "../agent/channel-progress.js";
 import { ConversationStore, ChannelRunQueue, waitForAgentIdle } from "../agent/channel-sessions.js";
 import { maybePromoteToGoal } from "../agent/goal-promotion.js";
 import type { SlackConfig } from "../config/types.js";
@@ -243,6 +243,8 @@ export class SlackBot implements InteractionBridge {
       if (!progressTs) return;
       await this.app.client.chat.update({ channel, ts: progressTs, text });
     }).attach(this.agentLoop.events);
+    // 最終応答は assistant_text 全件の結合 (finalResponse だけだと途中ターンの本文が欠落する)
+    const collector = new ChannelResponseCollector().attach(this.agentLoop.events);
     // A-5: スレッドの会話に載せ替え (CLI の会話は退避し、 finally で復帰する)
     const cliState = this.agentLoop.exportConversation();
     this.agentLoop.importConversation(this.conversations.get(convKey));
@@ -261,9 +263,9 @@ export class SlackBot implements InteractionBridge {
           .catch(() => {});
       }
 
-      const finalResponse = e?.finalResponse ?? "";
+      const fullResponse = collector.text() || (e?.finalResponse ?? "");
       const outcome: TaskOutcome = e?.outcome ?? "incomplete";
-      let responseText = finalResponse.trim() || outcomeFallbackText(outcome);
+      let responseText = fullResponse.trim() || outcomeFallbackText(outcome);
       // A-6: ツールを使ったタスクには構造化フッターを付ける
       const footer = e ? formatReportFooter(e) : null;
       if (footer) responseText += `\n${footer}`;
@@ -281,6 +283,7 @@ export class SlackBot implements InteractionBridge {
       });
     } finally {
       tracker.detach();
+      collector.detach();
       off();
       this.current = null;
       // A-5: スレッドの会話を保存し、 CLI の会話を復帰する

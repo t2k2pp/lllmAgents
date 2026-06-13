@@ -35,7 +35,7 @@ import type {
 } from "../agent/agent-events.js";
 import { setInteractionBridge } from "../agent/interaction-bridge-registry.js";
 import { formatReportFooter } from "../agent/task-reporter.js";
-import { ChannelProgressTracker } from "../agent/channel-progress.js";
+import { ChannelProgressTracker, ChannelResponseCollector } from "../agent/channel-progress.js";
 import { ConversationStore, ChannelRunQueue, waitForAgentIdle } from "../agent/channel-sessions.js";
 import { maybePromoteToGoal } from "../agent/goal-promotion.js";
 import type { DiscordConfig } from "../config/types.js";
@@ -233,6 +233,8 @@ export class DiscordInteractionServer implements InteractionBridge {
     // A-4: 進捗の中間報告。 deferred 応答 (@original) を編集し続け、 完了時に最終応答が上書きする
     const tracker = new ChannelProgressTracker((text) => this.sendFollowUp(token, text))
       .attach(this.agentLoop.events);
+    // 最終応答は assistant_text 全件の結合 (finalResponse だけだと途中ターンの本文が欠落する)
+    const collector = new ChannelResponseCollector().attach(this.agentLoop.events);
     // A-5: チャンネルの会話に載せ替え (CLI の会話は退避し、 finally で復帰する)
     const convKey = `discord:${channelId}`;
     const cliState = this.agentLoop.exportConversation();
@@ -245,9 +247,9 @@ export class DiscordInteractionServer implements InteractionBridge {
       tracker.detach();
 
       const e = completeEvent as import("../agent/agent-events.js").AgentEventMap["task_complete"] | null;
-      const finalResponse = e?.finalResponse ?? "";
+      const fullResponse = collector.text() || (e?.finalResponse ?? "");
       const outcome: TaskOutcome = e?.outcome ?? "incomplete";
-      let responseText = finalResponse.trim() || outcomeFallbackText(outcome);
+      let responseText = fullResponse.trim() || outcomeFallbackText(outcome);
       // A-6: ツールを使ったタスクには構造化フッターを付ける
       const footer = e ? formatReportFooter(e) : null;
       if (footer) responseText += `\n${footer}`;
@@ -270,6 +272,7 @@ export class DiscordInteractionServer implements InteractionBridge {
       throw e;
     } finally {
       tracker.detach();
+      collector.detach();
       off();
       this.current = null;
       // A-5: チャンネルの会話を保存し、 CLI の会話を復帰する

@@ -17,6 +17,40 @@ function truncateLine(s: string): string {
   return oneLine.length > MAX_LINE_CHARS ? oneLine.slice(0, MAX_LINE_CHARS) + "…" : oneLine;
 }
 
+/**
+ * span 中の assistant_text を全件収集する (チャネルの最終応答用)。
+ *
+ * task_complete.finalResponse は「span を終わらせた応答のテキスト」だけのため、
+ * 本文を途中ターンで出し終えて最終ターンが確認・要約だけになるパターン
+ * (自己点検リプロンプト後の response_complete 等) では肝心の本文が欠落する。
+ * CLI で白表示されるテキスト (= assistant_text イベント) を全て結合することで、
+ * チャネルにも CLI と同じ情報量を届ける。意味による取捨選択はしない (構造ベース)。
+ */
+export class ChannelResponseCollector {
+  private texts: string[] = [];
+  private detachFns: Unsubscribe[] = [];
+
+  attach(events: AgentEventBus): this {
+    this.detachFns.push(
+      events.on("assistant_text", (e) => {
+        const t = e.text.trim();
+        if (t) this.texts.push(t);
+      }),
+    );
+    return this;
+  }
+
+  detach(): void {
+    for (const off of this.detachFns) off();
+    this.detachFns = [];
+  }
+
+  /** 収集した全テキストを発話順に結合して返す (何も無ければ空文字) */
+  text(): string {
+    return this.texts.join("\n\n");
+  }
+}
+
 export class ChannelProgressTracker {
   private startMs = Date.now();
   private toolCount = 0;

@@ -54,10 +54,29 @@ ChannelProgressTracker(update: (text) => Promise, minIntervalMs = 5000)
 旧実装は全チャンクを @original に PATCH しており、2 チャンク目以降が前を上書きしていた。
 第 1 チャンクのみ @original、以降は新規 follow-up (POST) に修正。
 
+## 3.5 ChannelResponseCollector — 最終応答の全文収集 (2026-06-13 追加)
+
+チャネルの最終応答は当初 `task_complete.finalResponse` を使っていたが、これは
+「span を終わらせた応答のテキスト」だけを持つ。本文を途中ターンで出し終え、
+最終ターンが確認・要約だけになるパターン（自己点検リプロンプト後に
+response_complete で締める等）では、**肝心の本文がチャネルに届かない**
+事故が起きた（Discord /ask「自己紹介して」で要約のみ返った実例、2026-06-13）。
+
+対策として `ChannelResponseCollector` を追加。run 中に emit された
+`assistant_text` イベント（= CLI で白表示されるユーザー向けテキスト）を
+全件収集し、発話順に `\n\n` で結合したものを最終応答とする。
+
+- CLI とチャネルの情報量が一致する（no-silent-loss）
+- 「どれが本文か」の意味分類はしない（構造ベース。coloring v2 と同じ思想）
+- ツール実行前のナレーション（「では確認します」等）も含まれるが、CLI で
+  見えるものと同じであり、欠落より冗長を選ぶ
+- collector が空のときのみ finalResponse にフォールバック（保険）
+
 ## 4. テスト
 
 `tests/agent/channel-progress.test.ts` — fake timers でスロットリング、coalesce、
-detach 後の停止、表示内容（✓/✗/▶、件数）を検証。
+detach 後の停止、表示内容（✓/✗/▶、件数）、ChannelResponseCollector の
+収集・結合・detach 後の無視を検証。
 
 ## 5. 後続課題
 

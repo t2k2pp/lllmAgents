@@ -103,3 +103,33 @@ describe("ChannelProgressTracker", () => {
     expect(failing).toHaveBeenCalled();
   });
 });
+
+describe("ChannelResponseCollector", () => {
+  it("span 中の assistant_text を発話順に全件収集して結合する", async () => {
+    const { ChannelResponseCollector } = await import("../../src/agent/channel-progress.js");
+    const bus = new AgentEventBus();
+    const collector = new ChannelResponseCollector().attach(bus);
+    bus.emit("assistant_text", { text: "本文です。長い説明...", final: false });
+    bus.emit("assistant_text", { text: "確認しました。完了します。", final: true });
+    expect(collector.text()).toBe("本文です。長い説明...\n\n確認しました。完了します。");
+  });
+
+  it("空テキストは無視し、何も無ければ空文字を返す", async () => {
+    const { ChannelResponseCollector } = await import("../../src/agent/channel-progress.js");
+    const bus = new AgentEventBus();
+    const collector = new ChannelResponseCollector().attach(bus);
+    expect(collector.text()).toBe("");
+    bus.emit("assistant_text", { text: "   ", final: false });
+    expect(collector.text()).toBe("");
+  });
+
+  it("detach 後の assistant_text は収集しない", async () => {
+    const { ChannelResponseCollector } = await import("../../src/agent/channel-progress.js");
+    const bus = new AgentEventBus();
+    const collector = new ChannelResponseCollector().attach(bus);
+    bus.emit("assistant_text", { text: "収集される", final: false });
+    collector.detach();
+    bus.emit("assistant_text", { text: "収集されない", final: true });
+    expect(collector.text()).toBe("収集される");
+  });
+});
