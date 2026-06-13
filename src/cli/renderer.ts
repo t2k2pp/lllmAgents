@@ -83,7 +83,7 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/cost")}           LLM 使用量・コストの可視化 (画像生成コスト含む)
     ${chalk.cyan("/image")}          画像生成 (on/off/setup <azure|sd-webui|comfyui>/use/list/test/gen <prompt>)
     ${chalk.cyan("/search")}         Web検索プロバイダー設定 (SearXNG/DuckDuckGo)
-    ${chalk.cyan("/discord")}        Discord通知の設定
+    ${chalk.cyan("/discord")}        Discord 連携の設定 (通知 / /ask 受信)
     ${chalk.cyan("/knowledge")}      Obsidianナレッジベース (vault設定/検索/一覧)
     ${chalk.cyan("/autorun")}         自律実行モード切替（作業フォルダ内の削除以外を自動承認）
     ${chalk.cyan("/compress-input")}  入力圧縮モード切替（project指示/メモが閾値超過時に意図保持で圧縮、既定OFF）

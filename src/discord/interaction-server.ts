@@ -1,29 +1,29 @@
 /**
- * Discord Slash Command 受信サーバー
+ * Discord Slash Command 受信 (Gateway 方式)
  *
- * Discord Developer Portal で設定した Interactions Endpoint URL に対して
- * Discord がリクエストを送信してくる。本モジュールはそれを受け取り AgentLoop で処理する。
+ * Bot がこちらから Discord に WebSocket で接続し (gateway-client.ts)、
+ * INTERACTION_CREATE イベントとして /ask・ボタン・Modal を受け取る。
+ * 公開 URL・ポート開放・トンネルは不要 (docs/discord-gateway-design.md)。
+ * interaction への初回応答は REST の callback エンドポイントに POST する。
  *
  * A-2/A-3 (docs/channel-interaction-bridge-design.md): InteractionBridge を実装し、
  * 権限確認 (Message Components ボタン) と ask_user (ボタン / Modal 自由入力) を
- * Discord 上で行う。ボタン押下・Modal 送信も同じ Interactions Endpoint に届く。
+ * Discord 上で行う。
  *
  * セットアップ手順:
- * 1. Discord Developer Portal でアプリを作成し applicationId, publicKey, botToken を取得
- * 2. /discord app-id / /discord public-key / /discord bot-token で設定
- * 3. /discord register でスラッシュコマンドを登録
- * 4. /discord listen start でサーバーを起動
- * 5. Discord Developer Portal の Interactions Endpoint URL を
- *    http://<your-ip>:<port>/interactions に設定
- *    (ローカル環境の場合は cloudflared tunnel や ngrok で公開)
- * 6. /discord user-add <DiscordユーザーID> (任意: 利用者を制限する場合)
+ * 1. Discord Developer Portal でアプリを作成し applicationId, botToken を取得
+ *    → /discord app-id / /discord bot-token で設定
+ * 2. 招待 URL (scope=bot+applications.commands) で Bot をサーバーに招待
+ * 3. /discord register [サーバーID] でスラッシュコマンドを登録
+ * 4. /discord listen start で受信開始
+ *    (Developer Portal の Interactions Endpoint URL は空欄にしておくこと。
+ *     設定されていると interaction が Gateway に届かない)
+ * 5. /discord user-add <DiscordユーザーID> (任意: 利用者を制限する場合)
  *
  * 既知の制約: interaction token は 15 分で失効するため、 15 分を超える長時間タスクの
  * 途中では権限確認・follow-up を送信できない (docs/channel-interaction-bridge-design.md §9)。
  */
 
-import * as http from "http";
-import * as crypto from "crypto";
 import type { AgentLoop } from "../agent/agent-loop.js";
 import type {
   TaskOutcome,
@@ -39,6 +39,7 @@ import { ChannelProgressTracker } from "../agent/channel-progress.js";
 import { ConversationStore, ChannelRunQueue, waitForAgentIdle } from "../agent/channel-sessions.js";
 import { maybePromoteToGoal } from "../agent/goal-promotion.js";
 import type { DiscordConfig } from "../config/types.js";
+import { DiscordGatewayClient } from "./gateway-client.js";
 import * as logger from "../utils/logger.js";
 
 const DISCORD_API = "https://discord.com/api/v10";
@@ -65,8 +66,7 @@ interface PendingComponent {
 }
 
 export class DiscordInteractionServer implements InteractionBridge {
-  private server: http.Server | null = null;
-  private _running = false;
+  private gateway: DiscordGatewayClient | null = null;
   private current: ConversationContext | null = null;
   /** ボタン押下 / Modal 送信待ち: nonce → resolver */
   private pendingComponents = new Map<string, PendingComponent>();
@@ -79,118 +79,84 @@ export class DiscordInteractionServer implements InteractionBridge {
     private agentLoop: AgentLoop,
   ) {}
 
-  /** HTTP サーバーを起動する */
+  /** Gateway に接続して受信を開始する */
   async start(): Promise<void> {
-    if (this._running) return;
+    if (this.gateway?.running) return;
 
-    const port = this.config.interactionPort ?? 3003;
+    if (!this.config.botToken) {
+      throw new Error("Bot Token が未設定です。'/discord bot-token <トークン>' で設定してください。");
+    }
 
-    this.server = http.createServer(async (req, res) => {
-      if (req.method !== "POST" || req.url !== "/interactions") {
-        res.writeHead(404).end("Not Found");
-        return;
-      }
-
-      // ボディを読み込む
-      const chunks: Buffer[] = [];
-      for await (const chunk of req) {
-        chunks.push(chunk as Buffer);
-      }
-      const body = Buffer.concat(chunks).toString("utf-8");
-
-      // Discord 署名検証
-      const signature = req.headers["x-signature-ed25519"] as string | undefined;
-      const timestamp = req.headers["x-signature-timestamp"] as string | undefined;
-
-      if (!signature || !timestamp || !this.config.publicKey) {
-        res.writeHead(401).end("Unauthorized");
-        return;
-      }
-
-      const valid = await this.verifySignature(body, signature, timestamp);
-      if (!valid) {
-        res.writeHead(401).end("Invalid request signature");
-        return;
-      }
-
-      let interaction: any;
-      try {
-        interaction = JSON.parse(body);
-      } catch {
-        res.writeHead(400).end("Bad Request");
-        return;
-      }
-
-      // PING (type: 1) - Discord の疎通確認
-      if (interaction.type === 1) {
-        respondJson(res, { type: 1 });
-        return;
-      }
-
-      // APPLICATION_COMMAND (type: 2) - スラッシュコマンド
-      if (interaction.type === 2) {
-        await this.handleCommand(res, interaction);
-        return;
-      }
-
-      // MESSAGE_COMPONENT (type: 3) - ボタン押下 (A-2/A-3)
-      if (interaction.type === 3) {
-        this.handleComponent(res, interaction);
-        return;
-      }
-
-      // MODAL_SUBMIT (type: 5) - 自由入力 Modal の送信 (A-3)
-      if (interaction.type === 5) {
-        this.handleModalSubmit(res, interaction);
-        return;
-      }
-
-      res.writeHead(400).end("Unknown interaction type");
+    this.gateway = new DiscordGatewayClient({
+      botToken: this.config.botToken,
+      onInteraction: (interaction) => void this.dispatchInteraction(interaction),
+      onStatus: (message) => console.log(`  [Discord] ${message}`),
     });
-
-    await new Promise<void>((resolve, reject) => {
-      this.server!.listen(port, () => {
-        this._running = true;
-        resolve();
-      });
-      this.server!.on("error", reject);
-    });
+    await this.gateway.start();
 
     // A-2/A-3: 対話ブリッジとして登録 (PermissionManager / ask_user が参照)
     setInteractionBridge("discord", this);
   }
 
-  /** HTTP サーバーを停止する */
+  /** Gateway 接続を切って受信を停止する */
   stop(): void {
-    if (this.server) {
+    if (this.gateway) {
       setInteractionBridge("discord", null);
-      this.server.close();
-      this.server = null;
-      this._running = false;
+      this.gateway.stop();
+      this.gateway = null;
     }
   }
 
   get running(): boolean {
-    return this._running;
+    return this.gateway?.running ?? false;
   }
 
-  /** Discord の Ed25519 署名を検証する (Node.js 18+ 組み込み crypto.subtle 使用) */
-  private async verifySignature(body: string, signature: string, timestamp: string): Promise<boolean> {
+  /** 接続中の Bot ユーザー名 (status 表示用) */
+  get botUser(): string | null {
+    return this.gateway?.botUser ?? null;
+  }
+
+  /** INTERACTION_CREATE を種類別に振り分ける */
+  private async dispatchInteraction(interaction: any): Promise<void> {
     try {
-      const publicKeyBytes = Buffer.from(this.config.publicKey!, "hex");
-      const key = await crypto.subtle.importKey(
-        "raw",
-        publicKeyBytes,
-        { name: "Ed25519" },
-        false,
-        ["verify"],
-      );
-      const signatureBytes = Buffer.from(signature, "hex");
-      const messageBytes = Buffer.from(timestamp + body, "utf-8");
-      return await crypto.subtle.verify("Ed25519", key, signatureBytes, messageBytes);
+      // APPLICATION_COMMAND (type: 2) - スラッシュコマンド
+      if (interaction.type === 2) {
+        await this.handleCommand(interaction);
+        return;
+      }
+      // MESSAGE_COMPONENT (type: 3) - ボタン押下 (A-2/A-3)
+      if (interaction.type === 3) {
+        await this.handleComponent(interaction);
+        return;
+      }
+      // MODAL_SUBMIT (type: 5) - 自由入力 Modal の送信 (A-3)
+      if (interaction.type === 5) {
+        await this.handleModalSubmit(interaction);
+        return;
+      }
+      logger.warn(`Discord: 未対応の interaction type を受信しました: ${interaction.type}`);
     } catch (e) {
-      logger.error("Discord signature verification error:", e);
-      return false;
+      logger.error("Discord interaction dispatch error:", e);
+    }
+  }
+
+  /**
+   * interaction への初回応答 (3 秒以内) を callback エンドポイントに POST する。
+   * Endpoint 方式で HTTP レスポンスに書いていた payload をそのまま渡せる。
+   */
+  private async respondInteraction(interaction: any, payload: Record<string, unknown>): Promise<void> {
+    const url = `${DISCORD_API}/interactions/${interaction.id}/${interaction.token}/callback`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": "lllmAgents/1.0",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Discord interaction callback failed: ${res.status} ${text}`);
     }
   }
 
@@ -209,17 +175,17 @@ export class DiscordInteractionServer implements InteractionBridge {
   // ─── スラッシュコマンド ───
 
   /** /ask コマンドを処理する */
-  private async handleCommand(res: http.ServerResponse, interaction: any): Promise<void> {
+  private async handleCommand(interaction: any): Promise<void> {
     const commandName = interaction.data?.name;
     if (commandName !== "ask") {
-      res.writeHead(400).end("Unknown command");
+      logger.warn(`Discord: 未対応のコマンドを受信しました: ${commandName}`);
       return;
     }
 
     const userId = DiscordInteractionServer.extractUserId(interaction);
     if (!this.isUserAllowed(userId)) {
       // flags 64 = ephemeral (本人にのみ見える)
-      respondJson(res, {
+      await this.respondInteraction(interaction, {
         type: 4,
         data: { content: "⛔ このボットの利用は許可されていません（allowedUserIds 設定）。", flags: 64 },
       });
@@ -228,7 +194,7 @@ export class DiscordInteractionServer implements InteractionBridge {
 
     // Discord の 3 秒ルール: まず deferred 応答を返す (type: 5)
     // その後非同期で処理して follow-up を送信する
-    respondJson(res, { type: 5 }); // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
+    await this.respondInteraction(interaction, { type: 5 }); // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
 
     const prompt = interaction.data?.options?.[0]?.value as string ?? "";
     const token = interaction.token as string;
@@ -315,10 +281,10 @@ export class DiscordInteractionServer implements InteractionBridge {
   // ─── コンポーネント (ボタン) / Modal ───
 
   /** ボタン押下 (custom_id: "lllm:<nonce>:<value>") */
-  private handleComponent(res: http.ServerResponse, interaction: any): void {
+  private async handleComponent(interaction: any): Promise<void> {
     const customId = (interaction.data?.custom_id as string) ?? "";
     if (!customId.startsWith("lllm:")) {
-      res.writeHead(400).end("Unknown component");
+      logger.warn(`Discord: 未知のコンポーネントを受信しました: ${customId}`);
       return;
     }
     const rest = customId.slice("lllm:".length);
@@ -328,7 +294,7 @@ export class DiscordInteractionServer implements InteractionBridge {
 
     const pending = this.pendingComponents.get(nonce);
     if (!pending) {
-      respondJson(res, {
+      await this.respondInteraction(interaction, {
         type: 4,
         data: { content: "（この確認は期限切れです）", flags: 64 },
       });
@@ -337,7 +303,7 @@ export class DiscordInteractionServer implements InteractionBridge {
 
     const clickerId = DiscordInteractionServer.extractUserId(interaction);
     if (clickerId !== pending.requesterId) {
-      respondJson(res, {
+      await this.respondInteraction(interaction, {
         type: 4,
         data: { content: "⛔ この確認は依頼者のみ操作できます。", flags: 64 },
       });
@@ -346,7 +312,7 @@ export class DiscordInteractionServer implements InteractionBridge {
 
     // 自由入力: Modal を開く (pending は維持し、 Modal 送信で解決する)
     if (value === MODAL_VALUE) {
-      respondJson(res, {
+      await this.respondInteraction(interaction, {
         type: 9, // MODAL
         data: {
           custom_id: `lllmmodal:${nonce}`,
@@ -390,23 +356,23 @@ export class DiscordInteractionServer implements InteractionBridge {
     pending.resolve(resolved);
     // 元メッセージを更新してボタンを除去 (後からのクリック防止)
     const original = (interaction.message?.content as string) ?? "確認";
-    respondJson(res, {
+    await this.respondInteraction(interaction, {
       type: 7, // UPDATE_MESSAGE
       data: { content: `${original}\n→ ${display}`, components: [] },
     });
   }
 
   /** Modal 送信 (custom_id: "lllmmodal:<nonce>") */
-  private handleModalSubmit(res: http.ServerResponse, interaction: any): void {
+  private async handleModalSubmit(interaction: any): Promise<void> {
     const customId = (interaction.data?.custom_id as string) ?? "";
     if (!customId.startsWith("lllmmodal:")) {
-      res.writeHead(400).end("Unknown modal");
+      logger.warn(`Discord: 未知の Modal を受信しました: ${customId}`);
       return;
     }
     const nonce = customId.slice("lllmmodal:".length);
     const pending = this.pendingComponents.get(nonce);
     if (!pending) {
-      respondJson(res, {
+      await this.respondInteraction(interaction, {
         type: 4,
         data: { content: "（この確認は期限切れです）", flags: 64 },
       });
@@ -415,7 +381,7 @@ export class DiscordInteractionServer implements InteractionBridge {
 
     const submitterId = DiscordInteractionServer.extractUserId(interaction);
     if (submitterId !== pending.requesterId) {
-      respondJson(res, {
+      await this.respondInteraction(interaction, {
         type: 4,
         data: { content: "⛔ この確認は依頼者のみ操作できます。", flags: 64 },
       });
@@ -425,7 +391,7 @@ export class DiscordInteractionServer implements InteractionBridge {
     const value = (interaction.data?.components?.[0]?.components?.[0]?.value as string) ?? "";
     this.pendingComponents.delete(nonce);
     pending.resolve(value);
-    respondJson(res, {
+    await this.respondInteraction(interaction, {
       type: 4,
       data: { content: `✏️ 回答を受け付けました: ${value.slice(0, 200)}` },
     });
@@ -608,11 +574,6 @@ export class DiscordInteractionServer implements InteractionBridge {
       logger.error("Failed to send Discord follow-up:", e);
     }
   }
-}
-
-function respondJson(res: http.ServerResponse, payload: Record<string, unknown>): void {
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(payload));
 }
 
 function makeNonce(prefix: string): string {

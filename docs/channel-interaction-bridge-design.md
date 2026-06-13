@@ -4,6 +4,9 @@
 対応提案: docs/autonomy-improvement-proposal.md §4.1 A-2, A-3
 前提: docs/agent-events-design.md (A-1) の InteractionBridge 型
 ステータス: 実装済み
+更新 (2026-06-13): Discord の受信は Endpoint 方式から Gateway 方式 (WebSocket) に
+切り替えた (docs/discord-gateway-design.md)。本書の対話フロー (ボタン/Modal/
+follow-up) は受信経路に依存しないため設計はそのまま有効。
 
 ## 1. 背景と目的
 
@@ -67,7 +70,8 @@ ask_user ツール (context.source=slack)
   選択肢なし / multiSelect → スレッド返信待ち（multiSelect はカンマ区切り番号 or 自由文）。
   返信の解釈: pending 中は同スレッド・同ユーザーの次メッセージを回答として消費する
 - **Discord**: 選択肢 → ボタン。自由入力 → 「回答を入力する」ボタン → Modal (TEXT_INPUT)。
-  （Interactions Endpoint はメッセージイベントを受けられないため Modal を使う）
+  （interaction ベースの受信ではメッセージイベントを購読しないため Modal を使う。
+  Gateway 方式移行後も intents=0 で運用しており同じ理由で Modal を維持）
 - タイムアウト → ツール失敗（"ユーザー応答タイムアウト"）として返し、モデルに状況を伝える
 
 ## 5. ツール公開の緩和

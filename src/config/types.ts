@@ -163,10 +163,10 @@ export interface DiscordConfig {
   webhookUrl: string;
   // Slash Command 受信用 (Discord Developer Portal で取得)
   applicationId?: string;
-  publicKey?: string;       // Ed25519 公開鍵 (署名検証用)
-  botToken?: string;        // Bot トークン (コマンド登録・follow-up 送信)
-  interactionPort?: number; // HTTP サーバーポート (デフォルト: 3003)
-  listenEnabled?: boolean;  // 起動時に interaction サーバーを自動起動するか
+  publicKey?: string;       // [未使用] 旧 Endpoint 方式の署名検証用。 Gateway 方式移行で不要 (後方互換のため型に残す)
+  botToken?: string;        // Bot トークン (Gateway 接続・コマンド登録・follow-up 送信)
+  interactionPort?: number; // [未使用] 旧 Endpoint 方式の HTTP ポート。 Gateway 方式移行で不要 (後方互換のため型に残す)
+  listenEnabled?: boolean;  // 起動時に受信 (Gateway 接続) を自動開始するか
   /** コマンド・確認ボタンを受け付けるユーザー ID。 未設定/空 = 全員 (確認ボタンは常に依頼者のみ) */
   allowedUserIds?: string[];
   /** 権限確認ボタンのタイムアウト秒 (デフォルト 300。 ask_user はこの 2 倍) */
@@ -615,7 +615,6 @@ export function getDefaultConfig(): Config {
     discord: {
       enabled: false,
       webhookUrl: "",
-      interactionPort: 3003,
       listenEnabled: false,
     },
     slack: {

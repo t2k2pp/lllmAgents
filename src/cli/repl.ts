@@ -255,8 +255,8 @@ export class REPL {
       process.exit(0);
     });
 
-    // listenEnabled が有効なら起動時に Interaction Server を自動起動
-    if (this.config.discord?.listenEnabled && this.config.discord.publicKey) {
+    // listenEnabled が有効なら起動時に受信 (Gateway 接続) を自動開始
+    if (this.config.discord?.listenEnabled && this.config.discord.botToken) {
       await this.startInteractionServer();
     }
     try {
@@ -347,7 +347,7 @@ export class REPL {
     }
   }
 
-  // ─── Discord Interaction Server ──────────────────────
+  // ─── Discord 受信 (Gateway 接続。 docs/discord-gateway-design.md) ──────
 
   private async startInteractionServer(): Promise<void> {
     const d = this.config.discord;
@@ -355,20 +355,20 @@ export class REPL {
       console.log(chalk.yellow("  Application ID が未設定です。'/discord app-id <id>' で設定してください。"));
       return;
     }
-    if (!d.publicKey) {
-      console.log(chalk.yellow("  Public Key が未設定です。'/discord public-key <key>' で設定してください。"));
+    if (!d.botToken) {
+      console.log(chalk.yellow("  Bot Token が未設定です。'/discord bot-token <トークン>' で設定してください。"));
       return;
     }
     try {
       this.interactionServer = new DiscordInteractionServer(d, this.agent);
       await this.interactionServer.start();
-      const port = d.interactionPort ?? 3003;
-      console.log(chalk.green(`  ✅ Discord からの呼び出しの受信を開始しました (ポート ${port})`));
-      console.log(chalk.dim(`  Discord Developer Portal の Interactions Endpoint URL に:`));
-      console.log(chalk.dim(`    http://<このPCのIPアドレス>:${port}/interactions`));
-      console.log(chalk.dim("  を設定してください。"));
+      const botName = this.interactionServer.botUser;
+      console.log(chalk.green(`  ✅ Discord に接続し、呼び出しの受信を開始しました${botName ? ` (Bot: ${botName})` : ""}`));
+      console.log(chalk.dim("  公開 URL やトンネルは不要です (Bot がこちらから Discord に接続しています)。"));
+      console.log(chalk.dim("  注意: Developer Portal の Interactions Endpoint URL は空欄にしてください。"));
+      console.log(chalk.dim("        設定されていると、呼び出しがこちらに届かなくなります。"));
     } catch (e) {
-      console.log(chalk.red(`  ❌ 受信サーバーの起動に失敗しました: ${e}`));
+      console.log(chalk.red(`  ❌ 受信の開始に失敗しました: ${e instanceof Error ? e.message : e}`));
       this.interactionServer = null;
     }
   }
@@ -2518,17 +2518,15 @@ export class REPL {
             { name: "通知をオフにする", value: "disable" },
             { name: "通知の送り先を設定する (Webhook URL)", value: "url" },
             { name: "テスト通知を送ってみる", value: "test" },
-            { name: "Application ID を設定する (Discord から呼び出すための準備 1/3)", value: "app-id" },
-            { name: "Public Key を設定する (Discord から呼び出すための準備 2/3)", value: "public-key" },
-            { name: "Bot Token を設定する (Discord から呼び出すための準備 3/3)", value: "bot-token" },
-            { name: "受信用のポート番号を変える (通常は変更不要)", value: "port" },
+            { name: "Application ID を設定する (Discord から呼び出すための準備 1/2)", value: "app-id" },
+            { name: "Bot Token を設定する (Discord から呼び出すための準備 2/2)", value: "bot-token" },
             { name: "/ask コマンドを Discord に登録する", value: "register" },
             { name: "受信を開始する (Discord からの呼び出しを受け付ける)", value: "listen-start" },
             { name: "受信を停止する", value: "listen-stop" },
             { name: "起動時に受信を自動開始するか切り替える", value: "auto-start-toggle" },
             { name: chalk.dim("前のメニューに戻る"), value: "back" },
           ],
-          pageSize: 14,
+          pageSize: 12,
         });
       } catch { return; }
       if (action === "back") return;
@@ -2551,13 +2549,11 @@ export class REPL {
         const cur = this.config.discord?.listenEnabled ?? false;
         await this.handleCommand(`/discord listen auto-start ${cur ? "off" : "on"}`);
       } else {
-        // url / app-id / public-key / bot-token / port — 1 引数
+        // url / app-id / bot-token — 1 引数
         const fieldLabel: Record<string, string> = {
           "url": "Webhook URL (Discord のサーバー設定 → 連携サービス → ウェブフック で取得)",
           "app-id": "Application ID (Discord Developer Portal → General Information)",
-          "public-key": "Public Key (Discord Developer Portal → General Information)",
           "bot-token": "Bot Token (Discord Developer Portal → Bot)",
-          "port": "ポート番号 (例: 3003)",
         };
         try {
           const val = await input({ message: `${fieldLabel[action] ?? action} を入力 (空欄で取り消し):` });
@@ -4836,16 +4832,14 @@ export class REPL {
           const dEnabled = d?.enabled ?? false;
           const dUrl = d?.webhookUrl || "未設定";
           const dListening = this.interactionServer?.running ?? false;
-          const dPort = d?.interactionPort ?? 3003;
+          const dBotName = this.interactionServer?.botUser;
           const dAppId = d?.applicationId ? chalk.dim(d.applicationId) : chalk.yellow("未設定");
-          const dPubKey = d?.publicKey ? chalk.green("設定済み") : chalk.yellow("未設定");
           const dToken = d?.botToken ? chalk.green("設定済み") : chalk.yellow("未設定");
           console.log(chalk.bold("\n  === Discord 連携の状態 ==="));
           console.log(chalk.dim(`  通知 (Webhook): ${dEnabled ? chalk.green("オン") : chalk.yellow("オフ")}`));
           console.log(chalk.dim(`  Webhook URL:    ${dUrl}`));
-          console.log(chalk.dim(`  受信サーバー:   ${dListening ? chalk.green(`起動中 (ポート ${dPort})`) : chalk.yellow("停止中")}`));
+          console.log(chalk.dim(`  Bot 接続:       ${dListening ? chalk.green(`接続中${dBotName ? ` (${dBotName})` : ""}`) : chalk.yellow("停止中")}`));
           console.log(chalk.dim(`  Application ID: ${dAppId}`));
-          console.log(chalk.dim(`  Public Key:     ${dPubKey}`));
           console.log(chalk.dim(`  Bot Token:      ${dToken}`));
           console.log();
         } else if (subCmd === "enable") {
@@ -4906,17 +4900,9 @@ export class REPL {
             console.log(chalk.green(`  ✅ Application ID を設定しました: ${id}`));
           }
         } else if (subCmd === "public-key") {
-          // Public Key 設定 (署名検証用)
-          const key = args[1];
-          if (!key) {
-            console.log(chalk.yellow("  使い方: /discord public-key <public-key>"));
-            console.log(chalk.dim("  Discord Developer Portal → アプリ → General Information → Public Key"));
-          } else {
-            if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
-            this.config.discord.publicKey = key;
-            saveConfig(this.config);
-            console.log(chalk.green("  ✅ Public Key を設定しました。"));
-          }
+          // Gateway 方式 (docs/discord-gateway-design.md) への移行で署名検証が不要になった
+          console.log(chalk.dim("  Public Key の設定は不要になりました (受信方式の変更により署名検証を使わなくなったため)。"));
+          console.log(chalk.dim("  必要な設定は Application ID と Bot Token の 2 つだけです。"));
         } else if (subCmd === "bot-token") {
           // Bot Token 設定 (コマンド登録・follow-up 送信用)
           const token = args[1];
@@ -4930,16 +4916,8 @@ export class REPL {
             console.log(chalk.green("  ✅ Bot Token を設定しました。"));
           }
         } else if (subCmd === "port") {
-          // Interaction Server のポート設定
-          const portNum = parseInt(args[1] ?? "", 10);
-          if (!portNum || portNum < 1 || portNum > 65535) {
-            console.log(chalk.yellow("  使い方: /discord port <port-number>  (例: 3003)"));
-          } else {
-            if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
-            this.config.discord.interactionPort = portNum;
-            saveConfig(this.config);
-            console.log(chalk.green(`  ✅ 受信サーバーのポート番号を ${portNum} に設定しました。`));
-          }
+          // Gateway 方式への移行で受信ポートが不要になった
+          console.log(chalk.dim("  ポート設定は不要になりました (Bot がこちらから Discord に接続する方式に変わったため)。"));
         } else if (subCmd === "register") {
           // スラッシュコマンドを Discord に登録
           const guildId = args[1]; // 省略時はグローバル登録
@@ -4977,16 +4955,16 @@ export class REPL {
           const action = args[1];
           if (action === "start") {
             if (this.interactionServer?.running) {
-              console.log(chalk.yellow("  受信サーバーはすでに起動中です。"));
+              console.log(chalk.yellow("  すでに受信を開始しています。"));
             } else {
               await this.startInteractionServer();
             }
           } else if (action === "stop") {
             if (!this.interactionServer?.running) {
-              console.log(chalk.yellow("  受信サーバーは起動していません。"));
+              console.log(chalk.yellow("  受信は開始していません。"));
             } else {
               this.interactionServer.stop();
-              console.log(chalk.yellow("  受信サーバーを停止しました。"));
+              console.log(chalk.yellow("  受信を停止しました (Discord との接続を切りました)。"));
             }
           } else if (action === "auto-start") {
             // 次回起動時から自動起動
@@ -4995,8 +4973,8 @@ export class REPL {
             this.config.discord.listenEnabled = on;
             saveConfig(this.config);
             console.log(on
-              ? chalk.green("  ✅ 次回起動時から受信サーバーを自動で起動します。")
-              : chalk.yellow("  受信サーバーの自動起動をオフにしました。"),
+              ? chalk.green("  ✅ 次回起動時から自動で受信を開始します。")
+              : chalk.yellow("  受信の自動開始をオフにしました。"),
             );
           } else {
             console.log(chalk.yellow("  使い方: /discord listen [start|stop|auto-start [off]]"));
@@ -5030,9 +5008,9 @@ export class REPL {
         } else {
           console.log(chalk.yellow("  使い方: /discord <サブコマンド>"));
           console.log(chalk.dim("  通知系:    status | enable | disable | url <URL> | test"));
-          console.log(chalk.dim("  受信設定:  app-id <id> | public-key <key> | bot-token <tok> | port <num>"));
+          console.log(chalk.dim("  受信設定:  app-id <id> | bot-token <トークン>"));
           console.log(chalk.dim("  コマンド:  register [サーバーID]"));
-          console.log(chalk.dim("  サーバー:  listen start | listen stop | listen auto-start [off]"));
+          console.log(chalk.dim("  受信:      listen start | listen stop | listen auto-start [off]"));
           console.log(chalk.dim("  認可:      user-add <ID> | user-remove <ID> | users"));
         }
         break;

@@ -501,22 +501,21 @@ async function main(): Promise<void> {
   // Run session start hooks
   await hookManager.runSessionHooks("start");
 
-  // ── バックグラウンドモード (--background): REPL を起動せず Discord Interaction Server のみ実行 ──
+  // ── バックグラウンドモード (--background): REPL を起動せず Discord 受信 (Gateway 接続) のみ実行 ──
   if (args.includes("--background")) {
     const discord = config.discord;
-    if (!discord?.applicationId || !discord?.publicKey) {
-      console.error("  --background モードには Discord の applicationId と publicKey が必要です。");
-      console.error("  通常モードで起動して /discord app-id と /discord public-key を設定してください。");
+    if (!discord?.applicationId || !discord?.botToken) {
+      console.error("  --background モードには Discord の applicationId と botToken が必要です。");
+      console.error("  通常モードで起動して /discord app-id と /discord bot-token を設定してください。");
       process.exit(1);
     }
-    const port = discord.interactionPort ?? 3003;
     const server = new DiscordInteractionServer(discord, agent);
     try {
       await server.start();
-      console.log(`  [Background Mode] Discord Interaction Server 起動 (port ${port})`);
+      console.log(`  [Background Mode] Discord に接続しました${server.botUser ? ` (Bot: ${server.botUser})` : ""}`);
       console.log("  Ctrl+C で終了します。");
     } catch (e) {
-      console.error(`  Interaction Server 起動失敗: ${e}`);
+      console.error(`  Discord への接続に失敗しました: ${e instanceof Error ? e.message : e}`);
       process.exit(1);
     }
     // SIGINT でグレースフルシャットダウン
@@ -529,7 +528,7 @@ async function main(): Promise<void> {
       await playwrightManager?.close();
       process.exit(0);
     });
-    // プロセスを生かしておく (サーバーが listen しているので自動的に続く)
+    // プロセスを生かしておく (WS 接続と heartbeat タイマーがイベントループを維持する)
     return;
   }
 
