@@ -1,9 +1,13 @@
 # Room モデル設計書
 
 ## 0. ステータス
-- 状態: **ドラフト（レビュー待ち）**
-- 起票: 2026-06-13
-- 関連: `docs/channel-session-queue-design.md`(A-5), `docs/todo-goal-lifecycle.md`, `src/agent/session-manager.ts`, `src/agent/channel-sessions.ts`
+- 状態: **Phase 1 / 1.5 / 2 実装済み（TTY 手動検証は残）**
+- 起票: 2026-06-13 / 実装: 2026-06-14
+- 主な実装: `src/agent/room-types.ts` `room-manager.ts` `room-run-queue.ts` `channel-commands.ts`、
+  `session-manager.ts`(room/mode タグ)、`config/types.ts`(roomConfig)、Discord/Slack/REPL 配線
+- 関連: `docs/todo-goal-lifecycle.md`, `src/agent/session-manager.ts`
+- 移行: 旧 volatile `ConversationStore`/`ChannelRunQueue`(channel-sessions.ts) は削除。 in-memory のみで
+  永続データが無かったため移行作業は不要（§12 Phase 2 の「移行」は N/A）。
 
 ## 1. 背景・目的
 REPL / Discord / Slack はそれぞれ別の会話コンテキストを持つ（A-5）。しかし現状:

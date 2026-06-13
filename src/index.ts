@@ -519,7 +519,7 @@ async function main(): Promise<void> {
     }
     // Room モデル: --background は REPL なしで Discord(Room B) を resting room とする。
     roomManager.initBackgroundSurface("discord");
-    const server = new DiscordInteractionServer(discord, agent, roomManager, roomQueue);
+    const server = new DiscordInteractionServer(discord, agent, roomManager, roomQueue, skillRegistry, mcpManager);
     try {
       await server.start();
       console.log(`  [Background Mode] Discord に接続しました${server.botUser ? ` (Bot: ${server.botUser})` : ""}`);
@@ -554,7 +554,7 @@ async function main(): Promise<void> {
     const { SlackBot } = await import("./slack/slack-bot.js");
     // Room モデル: --slack は REPL なしで Slack(Room C) を resting room とする。
     roomManager.initBackgroundSurface("slack");
-    const slackBot = new SlackBot(slackConfig, agent, roomManager, roomQueue);
+    const slackBot = new SlackBot(slackConfig, agent, roomManager, roomQueue, skillRegistry, mcpManager);
 
     try {
       await slackBot.start();

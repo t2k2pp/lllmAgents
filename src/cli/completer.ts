@@ -31,6 +31,8 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/room C", description: "REPL を Room C へ移動 (Slack 既定)" },
   { command: "/room resume", description: "現在の Room の最後の会話を再開 (/room resume A|B|C で指定)", needsArg: true },
   { command: "/room autoresume", description: "現在の Room の自動 Resume を on/off (/room autoresume on|off [A|B|C])", needsArg: true },
+  { command: "/queue", description: "受信順キューの待ち状況を表示" },
+  { command: "/queue clear", description: "REPL の type-ahead 待機入力を破棄" },
   { command: "/context", description: "コンテキスト使用状況 (System prompt / Memory / Skills / Tools / Messages 内訳)" },
   { command: "/context system", description: "システムプロンプト本文の内訳をダンプ" },
   { command: "/context memory", description: "メモ・プロジェクト指示の本文をダンプ" },

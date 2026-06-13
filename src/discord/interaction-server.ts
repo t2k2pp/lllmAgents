@@ -39,6 +39,7 @@ import { ChannelProgressTracker, ChannelResponseCollector } from "../agent/chann
 import { maybePromoteToGoal } from "../agent/goal-promotion.js";
 import type { RoomManager } from "../agent/room-manager.js";
 import type { RoomRunQueue } from "../agent/room-run-queue.js";
+import { runChannelCommand } from "../agent/channel-commands.js";
 import type { DiscordConfig } from "../config/types.js";
 import { DiscordGatewayClient } from "./gateway-client.js";
 import * as logger from "../utils/logger.js";
@@ -79,6 +80,9 @@ export class DiscordInteractionServer implements InteractionBridge {
     private roomManager: RoomManager,
     /** 受信順グローバル FIFO キュー(全サーフェス共有)。 */
     private roomQueue: RoomRunQueue,
+    /** /context・/status のコンテキスト内訳に使う (任意)。 */
+    private skillRegistry?: import("../skills/skill-registry.js").SkillRegistry,
+    private mcpManager?: import("../mcp/mcp-manager.js").MCPManager,
   ) {}
 
   /** Gateway に接続して受信を開始する */
@@ -204,6 +208,27 @@ export class DiscordInteractionServer implements InteractionBridge {
     const username = interaction.member?.user?.username ?? interaction.user?.username ?? "Unknown";
 
     console.log(`\n  [Discord] ${username}: ${prompt}`);
+
+    // 先頭が "/" ならチャネルコマンド (clear/context/status/todo/help/room) として処理する
+    // (docs/room-model-design.md §8)。 意味は全サーフェス共通で、 Discord は Room B に効く。
+    if (prompt.trim().startsWith("/")) {
+      const { result: cmdResult } = this.roomQueue.enqueue(async () => {
+        const text = await runChannelCommand(prompt, {
+          roomManager: this.roomManager,
+          agent: this.agentLoop,
+          room: this.roomManager.bindingFor("discord"),
+          skillRegistry: this.skillRegistry,
+          mcpManager: this.mcpManager,
+          pending: this.roomQueue.pending,
+        });
+        await this.sendFollowUp(token, text ?? "（コマンドを処理できませんでした）");
+      });
+      cmdResult.catch((e) => {
+        logger.error("Discord channel command error:", e);
+        this.sendFollowUp(token, "❌ コマンド処理中にエラーが発生しました。").catch(() => {});
+      });
+      return;
+    }
 
     // 受信順グローバル FIFO キューに積む (docs/room-model-design.md §11)。 拒否せず並ばせる。
     // 注意: interaction token は 15 分で失効するため、 長いキュー待ちでは応答できないことがある

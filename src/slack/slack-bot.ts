@@ -39,6 +39,7 @@ import { ChannelProgressTracker, ChannelResponseCollector } from "../agent/chann
 import { maybePromoteToGoal } from "../agent/goal-promotion.js";
 import type { RoomManager } from "../agent/room-manager.js";
 import type { RoomRunQueue } from "../agent/room-run-queue.js";
+import { runChannelCommand } from "../agent/channel-commands.js";
 import type { SlackConfig } from "../config/types.js";
 import { markdownToSlackMrkdwn } from "../utils/slack.js";
 import * as logger from "../utils/logger.js";
@@ -91,6 +92,9 @@ export class SlackBot implements InteractionBridge {
     private roomManager: RoomManager,
     /** 受信順グローバル FIFO キュー(全サーフェス共有)。 */
     private roomQueue: RoomRunQueue,
+    /** /context・/status のコンテキスト内訳に使う (任意)。 */
+    private skillRegistry?: import("../skills/skill-registry.js").SkillRegistry,
+    private mcpManager?: import("../mcp/mcp-manager.js").MCPManager,
   ) {}
 
   async start(): Promise<void> {
@@ -198,6 +202,27 @@ export class SlackBot implements InteractionBridge {
     if (!prompt) return;
 
     console.log(`\n  [Slack] <${userId}>: ${prompt}`);
+
+    // 先頭が "/" ならチャネルコマンド (clear/context/status/todo/help/room) として処理する
+    // (docs/room-model-design.md §8)。 Slack は Room C に効く。
+    if (prompt.trim().startsWith("/")) {
+      const { result: cmdResult } = this.roomQueue.enqueue(async () => {
+        const text = await runChannelCommand(prompt, {
+          roomManager: this.roomManager,
+          agent: this.agentLoop,
+          room: this.roomManager.bindingFor("slack"),
+          skillRegistry: this.skillRegistry,
+          mcpManager: this.mcpManager,
+          pending: this.roomQueue.pending,
+        });
+        await say({ text: markdownToSlackMrkdwn(text ?? "（コマンドを処理できませんでした）"), thread_ts: threadRoot });
+      });
+      await cmdResult.catch(async (e) => {
+        logger.error("Slack channel command error:", e);
+        await say({ text: ":x: コマンド処理中にエラーが発生しました。", thread_ts: threadRoot }).catch(() => {});
+      });
+      return;
+    }
 
     // 受信順グローバル FIFO キューに積む (docs/room-model-design.md §11)。 拒否せず並ばせる。
     const ctx: ConversationContext = { channel, threadTs: threadRoot, userId, isDM };

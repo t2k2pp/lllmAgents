@@ -84,6 +84,7 @@ $ npm start
 | `/quit` `/exit` | 終了 |
 | `/clear` | 会話履歴クリア（現在の Room） |
 | `/room` | 会話 Room (A/B/C) の表示・移動・再開。`/room A\|B\|C` で移動、`/room resume [A\|B\|C]` で再開、`/room autoresume <on\|off> [A\|B\|C]`。既定 REPL=A / Discord=B / Slack=C（docs/room-model-design.md） |
+| `/queue` | 受信順キューの待ち状況を表示（`/queue clear` で REPL の type-ahead 待機入力を破棄） |
 | `/context` | コンテキスト使用状況の内訳（トークン数・進捗バー）。`/context <system\|memory\|skills\|tools\|messages>` で各カテゴリの中身をダンプ |
 | `/compact` | コンテキストを手動圧縮 |
 | `/model` | 現在のモデル情報 / `/model list` / `/model <name>` / `/model url <URL>` / `/model provider <type>` / `/model description <text>` / `/model temperature <値>` / `/model top_p <値>` / `/model top_k <値>` / `/model rep_penalty <値>` |
@@ -112,6 +113,7 @@ $ npm start
 | `/goal-seek <goal>` | Goal Seek mode 開始（acceptance criteria を立て合格まで自律実行）。複雑なタスクは通常入力でも自動提案される（`goalSeek.autoPropose: false` で無効化） |
 | `/exit-goal-seek` | Goal Seek mode を抜ける |
 | `/integrations` | 外部サービス連携の設定メニュー (Discord / Slack / 会話ログ / Web検索)。Discord の `/ask` 受信は Gateway 方式で公開URL・トンネル不要 (docs/discord-gateway-design.md) |
+| Discord/Slack からのコマンド | `/ask` の本文（Slack は通常メッセージ）を `/` で始めると、`/help` `/clear` `/context` `/status` `/todo` `/room` をリモート実行できる。意味は REPL と共通で、Discord は Room B / Slack は Room C に効く (docs/room-model-design.md §8) |
 | `/discord` `/slack` `/chatlog` | [非推奨] 各サービスの単体設定コマンド。`/integrations` に集約済み (サブコマンド直打ちは動作維持) |
 | `/knowledge` | Obsidianナレッジベース連携 (`save` / `search`) |
 | `/try` | 実験的機能の実行 |

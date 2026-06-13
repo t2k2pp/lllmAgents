@@ -71,6 +71,7 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/resume [id]")}    セッション復元 (引数なしで対話的選択)
     ${chalk.cyan("/continue")}       最新セッションを復元
     ${chalk.cyan("/room")}           会話 Room (A/B/C) の表示・移動・再開 (REPL=A/Discord=B/Slack=C)
+    ${chalk.cyan("/queue")}          受信順キューの待ち状況 (/queue clear で type-ahead 破棄)
     ${chalk.cyan("/memory")}         自動メモリ表示
     ${chalk.cyan("/remember <text>")} メモリに追記
     ${chalk.cyan("/loglevel [lv]")}  運用ログのレベル変更 (trace/debug/info/warn/error)

@@ -379,7 +379,7 @@ export class REPL {
       return;
     }
     try {
-      this.interactionServer = new DiscordInteractionServer(d, this.agent, this.roomManager, this.roomQueue);
+      this.interactionServer = new DiscordInteractionServer(d, this.agent, this.roomManager, this.roomQueue, this.skillRegistry, this.mcpManager);
       await this.interactionServer.start();
       const botName = this.interactionServer.botUser;
       console.log(chalk.green(`  ✅ Discord に接続し、呼び出しの受信を開始しました${botName ? ` (Bot: ${botName})` : ""}`));
@@ -3683,6 +3683,27 @@ export class REPL {
         this.roomManager.moveSurface("repl", room);
         console.log(chalk.dim(`  REPL を Room ${room} に移動しました。`));
         this.printRoomStatus();
+        break;
+      }
+
+      case "/queue": {
+        const sub = (args[0] ?? "").toLowerCase();
+        if (sub === "clear") {
+          const n = this.pendingInputs.length;
+          this.pendingInputs = [];
+          console.log(chalk.dim(`  type-ahead の待機入力 ${n} 件を破棄しました。 (実行中/投入済みのジョブは取り消せません)`));
+          break;
+        }
+        const queued = this.roomQueue?.pending ?? 0;
+        console.log(chalk.bold("\n  === Queue ==="));
+        console.log(chalk.dim(`  実行中/待機ジョブ (全サーフェス): ${queued} 件`));
+        console.log(chalk.dim(`  REPL type-ahead 待機入力: ${this.pendingInputs.length} 件`));
+        if (this.pendingInputs.length > 0) {
+          this.pendingInputs.forEach((p, i) => console.log(chalk.dim(`    ${i + 1}. ${p.slice(0, 60)}`)));
+          console.log(chalk.dim("  破棄: /queue clear\n"));
+        } else {
+          console.log("");
+        }
         break;
       }
 
