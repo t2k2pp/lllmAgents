@@ -84,7 +84,7 @@ export class DiscordInteractionServer implements InteractionBridge {
     if (this.gateway?.running) return;
 
     if (!this.config.botToken) {
-      throw new Error("Bot Token が未設定です。'/discord bot-token <トークン>' で設定してください。");
+      throw new Error("Bot Token が未設定です。/integrations の Discord 連携メニューから設定してください。");
     }
 
     this.gateway = new DiscordGatewayClient({

@@ -63,8 +63,7 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/second")}         セカンドLLM管理 (status/url/provider/model/description/temperature等、/secondで全表示)
     ${chalk.cyan("/swap")}           メインLLM ⇔ セカンドLLM を入れ替え (-y で確認スキップ。alias: /switch)
     ${chalk.cyan("/profiles")}       LLM 接続プロファイル履歴 (矢印+スペース選択。 list / delete / help)
-    ${chalk.cyan("/slack")}          Slack設定 (status/url/test/bot-token/app-token)
-    ${chalk.cyan("/search")}         Web検索プロバイダー設定 (SearXNG/DuckDuckGo)
+    ${chalk.cyan("/integrations")}   外部サービス連携の設定 (Discord / Slack / 会話ログ / Web検索)
     ${chalk.cyan("/todo")}           タスクリスト (active のみ。 all / archive サブコマンドあり)
     ${chalk.cyan("/goal-seek <goal>")} Goal Seek mode 開始 — acceptance criteria を立て合格まで自律実行
     ${chalk.cyan("/exit-goal-seek")}  Goal Seek mode を抜ける (acceptance 未達成でも user 明示で中断)
@@ -82,8 +81,6 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/sandbox")}        bash 封じ込めトグル (status/on/off。Mac/Linux/WSL2内=OSサンドボックス。Winネイティブは非対応)
     ${chalk.cyan("/cost")}           LLM 使用量・コストの可視化 (画像生成コスト含む)
     ${chalk.cyan("/image")}          画像生成 (on/off/setup <azure|sd-webui|comfyui>/use/list/test/gen <prompt>)
-    ${chalk.cyan("/search")}         Web検索プロバイダー設定 (SearXNG/DuckDuckGo)
-    ${chalk.cyan("/discord")}        Discord 連携の設定 (通知 / /ask 受信)
     ${chalk.cyan("/knowledge")}      Obsidianナレッジベース (vault設定/検索/一覧)
     ${chalk.cyan("/autorun")}         自律実行モード切替（作業フォルダ内の削除以外を自動承認）
     ${chalk.cyan("/compress-input")}  入力圧縮モード切替（project指示/メモが閾値超過時に意図保持で圧縮、既定OFF）

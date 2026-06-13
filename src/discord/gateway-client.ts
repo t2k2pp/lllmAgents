@@ -31,7 +31,7 @@ const OP = {
 
 /** 再接続しても回復しない close code → 原因を表示して停止する */
 const FATAL_CLOSE_CODES: Record<number, string> = {
-  4004: "Bot Token が正しくありません。'/discord bot-token <トークン>' で設定し直してください。",
+  4004: "Bot Token が正しくありません。/integrations の Discord 連携メニューから設定し直してください。",
   4010: "シャード設定が不正です (本ツールでは通常発生しません)。",
   4011: "サーバー数が多くシャーディングが必要です。",
   4012: "Gateway API バージョンが無効です (アプリの更新が必要かもしれません)。",
@@ -182,7 +182,7 @@ export class DiscordGatewayClient {
     if (!res.ok) {
       const text = await res.text();
       if (res.status === 401) {
-        throw new Error("Bot Token が正しくありません (401)。'/discord bot-token <トークン>' で設定し直してください。");
+        throw new Error("Bot Token が正しくありません (401)。/integrations の Discord 連携メニューから設定し直してください。");
       }
       throw new Error(`Discord Gateway URL の取得に失敗しました: ${res.status} ${text}`);
     }

@@ -352,11 +352,11 @@ export class REPL {
   private async startInteractionServer(): Promise<void> {
     const d = this.config.discord;
     if (!d?.applicationId) {
-      console.log(chalk.yellow("  Application ID が未設定です。'/discord app-id <id>' で設定してください。"));
+      console.log(chalk.yellow("  Application ID が未設定です。/integrations の Discord 連携メニューから設定してください。"));
       return;
     }
     if (!d.botToken) {
-      console.log(chalk.yellow("  Bot Token が未設定です。'/discord bot-token <トークン>' で設定してください。"));
+      console.log(chalk.yellow("  Bot Token が未設定です。/integrations の Discord 連携メニューから設定してください。"));
       return;
     }
     try {
@@ -4845,7 +4845,7 @@ export class REPL {
         } else if (subCmd === "enable") {
           if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
           if (!this.config.discord.webhookUrl) {
-            console.log(chalk.yellow("  注意: Webhook URL が設定されていません。先に '/discord url <URL>' を実行してください。"));
+            console.log(chalk.yellow("  注意: 通知の送り先 (Webhook URL) が未設定です。/integrations の Discord 連携メニューから設定してください。"));
           }
           this.config.discord.enabled = true;
           saveConfig(this.config);
@@ -4870,14 +4870,14 @@ export class REPL {
             saveConfig(this.config);
             console.log(chalk.green(`  ✅ Discord Webhook URL を設定しました。`));
             console.log(chalk.dim(`  URL: ${urlStr}`));
-            console.log(chalk.dim("  /discord test でテスト送信できます。"));
+            console.log(chalk.dim("  「テスト通知を送ってみる」で動作確認できます。"));
           }
         } else if (subCmd === "test") {
           const webhookUrl = this.config.discord?.webhookUrl ?? "";
           if (!webhookUrl) {
-            console.log(chalk.yellow("  Webhook URL が設定されていません。先に '/discord url <URL>' を実行してください。"));
+            console.log(chalk.yellow("  通知の送り先 (Webhook URL) が未設定です。/integrations の Discord 連携メニューから設定してください。"));
           } else if (!isValidDiscordWebhookUrl(webhookUrl)) {
-            console.log(chalk.red("  ❌ 設定されているURLが無効です。'/discord url <URL>' で正しいWebhook URLを設定してください。"));
+            console.log(chalk.red("  ❌ 設定されている URL が無効です。/integrations の Discord 連携メニューから正しい Webhook URL を設定してください。"));
           } else {
             console.log(chalk.dim("  Discord にテストメッセージを送信中..."));
             const result = await sendDiscordNotification(webhookUrl, "🤖 lllmAgents テスト通知\nDiscord通知が正常に動作しています！");
@@ -4925,8 +4925,7 @@ export class REPL {
           const botToken = this.config.discord?.botToken;
           if (!appId || !botToken) {
             console.log(chalk.yellow("  Application ID と Bot Token が必要です。"));
-            console.log(chalk.dim("  /discord app-id <id>     → Application ID を設定"));
-            console.log(chalk.dim("  /discord bot-token <tok> → Bot Token を設定"));
+            console.log(chalk.dim("  /integrations の Discord 連携メニューから設定してください。"));
           } else {
             const scope = guildId ? `サーバー ${guildId} 限定` : "全サーバー向け";
             const inviteUrl = `https://discord.com/oauth2/authorize?client_id=${appId}&scope=bot+applications.commands&permissions=2048`;
@@ -4939,7 +4938,7 @@ export class REPL {
               console.log(chalk.cyan(`    ${inviteUrl}`));
               if (!guildId) {
                 console.log(chalk.dim("  全サーバー向けの登録は、反映まで最大 1 時間かかります。"));
-                console.log(chalk.dim("  すぐ試したい場合は '/discord register <サーバーID>' (即時反映) をどうぞ。"));
+                console.log(chalk.dim("  すぐ試したい場合は、もう一度登録を実行してサーバーIDを指定してください (即時反映)。"));
               }
             } else {
               console.log(chalk.red(`  ❌ 登録失敗: ${result.error}`));
@@ -5034,7 +5033,7 @@ export class REPL {
         } else if (subCmd === "enable") {
           if (!this.config.slack) this.config.slack = { enabled: false, webhookUrl: "" };
           if (!this.config.slack.webhookUrl) {
-            console.log(chalk.yellow("  注意: Webhook URL が設定されていません。先に '/slack url <URL>' を実行してください。"));
+            console.log(chalk.yellow("  注意: 通知の送り先 (Webhook URL) が未設定です。/integrations の Slack 連携メニューから設定してください。"));
           }
           this.config.slack.enabled = true;
           saveConfig(this.config);
@@ -5059,14 +5058,14 @@ export class REPL {
             saveConfig(this.config);
             console.log(chalk.green(`  Slack Webhook URL を設定しました。`));
             console.log(chalk.dim(`  URL: ${urlStr}`));
-            console.log(chalk.dim("  /slack test でテスト送信できます。"));
+            console.log(chalk.dim("  「テスト通知を送ってみる」で動作確認できます。"));
           }
         } else if (subCmd === "test") {
           const webhookUrl = this.config.slack?.webhookUrl ?? "";
           if (!webhookUrl) {
-            console.log(chalk.yellow("  Webhook URL が設定されていません。先に '/slack url <URL>' を実行してください。"));
+            console.log(chalk.yellow("  通知の送り先 (Webhook URL) が未設定です。/integrations の Slack 連携メニューから設定してください。"));
           } else if (!isValidSlackWebhookUrl(webhookUrl)) {
-            console.log(chalk.red("  設定されているURLが無効です。'/slack url <URL>' で正しいWebhook URLを設定してください。"));
+            console.log(chalk.red("  設定されている URL が無効です。/integrations の Slack 連携メニューから正しい Webhook URL を設定してください。"));
           } else {
             console.log(chalk.dim("  Slack にテストメッセージを送信中..."));
             const result = await sendSlackNotification(webhookUrl, "lllmAgents テスト通知\nSlack通知が正常に動作しています！");

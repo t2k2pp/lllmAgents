@@ -110,9 +110,8 @@ $ npm start
 | `/loop` | 反復実行モード |
 | `/goal-seek <goal>` | Goal Seek mode 開始（acceptance criteria を立て合格まで自律実行）。複雑なタスクは通常入力でも自動提案される（`goalSeek.autoPropose: false` で無効化） |
 | `/exit-goal-seek` | Goal Seek mode を抜ける |
-| `/discord` | Discord統合設定 (`status` / `enable` / `disable` / `url <URL>` / `app-id <id>` / `bot-token <tok>` / `register [サーバーID]` / `listen start\|stop` / `user-add <ID>` / `users`)。受信は Gateway 方式で公開URL・トンネル不要 (docs/discord-gateway-design.md) |
-| `/slack` | Slack統合設定 (`status` / `bot-token` / `app-token` / `user-add <ID>` / `users`) |
-| `/chatlog` | チャットログ保存設定 (`status` / `vault <path>` / `enable` / `disable`) |
+| `/integrations` | 外部サービス連携の設定メニュー (Discord / Slack / 会話ログ / Web検索)。Discord の `/ask` 受信は Gateway 方式で公開URL・トンネル不要 (docs/discord-gateway-design.md) |
+| `/discord` `/slack` `/chatlog` | [非推奨] 各サービスの単体設定コマンド。`/integrations` に集約済み (サブコマンド直打ちは動作維持) |
 | `/knowledge` | Obsidianナレッジベース連携 (`save` / `search`) |
 | `/try` | 実験的機能の実行 |
 
