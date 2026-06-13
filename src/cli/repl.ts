@@ -2533,8 +2533,16 @@ export class REPL {
       } catch { return; }
       if (action === "back") return;
 
-      if (["enable", "disable", "test", "register"].includes(action)) {
+      if (["enable", "disable", "test"].includes(action)) {
         await this.handleCommand(`/discord ${action}`);
+      } else if (action === "register") {
+        // サーバーID を聞いてから登録 (空欄なら全サーバー向け = 反映に最大 1 時間)
+        try {
+          const gid = await input({
+            message: "登録先サーバーの ID (空欄なら全サーバー向けに登録。サーバー限定なら即時反映):",
+          });
+          await this.handleCommand(`/discord register ${gid.trim()}`.trim());
+        } catch { /* cancel */ }
       } else if (action === "listen-start") {
         await this.handleCommand("/discord listen start");
       } else if (action === "listen-stop") {
@@ -4942,17 +4950,26 @@ export class REPL {
             console.log(chalk.dim("  /discord app-id <id>     → Application ID を設定"));
             console.log(chalk.dim("  /discord bot-token <tok> → Bot Token を設定"));
           } else {
-            const scope = guildId ? `ギルド ${guildId}` : "グローバル";
+            const scope = guildId ? `サーバー ${guildId} 限定` : "全サーバー向け";
+            const inviteUrl = `https://discord.com/oauth2/authorize?client_id=${appId}&scope=bot+applications.commands&permissions=2048`;
             console.log(chalk.dim(`  /ask コマンドを登録中 (${scope})...`));
             const result = await registerAskCommand(appId, botToken, guildId);
             if (result.success) {
               console.log(chalk.green(`  ✅ /ask コマンドを登録しました (ID: ${result.commandId})`));
+              console.log(chalk.dim("  注意: /ask が使えるのは、この Bot を招待したサーバーだけです。"));
+              console.log(chalk.dim("  まだ招待していなければ、下の URL を開いて招待してください:"));
+              console.log(chalk.cyan(`    ${inviteUrl}`));
               if (!guildId) {
-                console.log(chalk.dim("  グローバル登録は反映まで最大 1 時間かかります。"));
-                console.log(chalk.dim("  すぐ試したい場合は '/discord register <guild-id>' でギルド限定登録をどうぞ。"));
+                console.log(chalk.dim("  全サーバー向けの登録は、反映まで最大 1 時間かかります。"));
+                console.log(chalk.dim("  すぐ試したい場合は '/discord register <サーバーID>' (即時反映) をどうぞ。"));
               }
             } else {
               console.log(chalk.red(`  ❌ 登録失敗: ${result.error}`));
+              if (result.error?.includes("50001") || result.error?.includes("Missing Access")) {
+                console.log(chalk.yellow("  原因: この Bot は指定したサーバーにまだ参加していません。"));
+                console.log(chalk.dim("  下の URL を開いて Bot をサーバーに招待してから、もう一度お試しください:"));
+                console.log(chalk.cyan(`    ${inviteUrl}`));
+              }
             }
           }
         } else if (subCmd === "listen") {
@@ -5014,7 +5031,7 @@ export class REPL {
           console.log(chalk.yellow("  使い方: /discord <サブコマンド>"));
           console.log(chalk.dim("  通知系:    status | enable | disable | url <URL> | test"));
           console.log(chalk.dim("  受信設定:  app-id <id> | public-key <key> | bot-token <tok> | port <num>"));
-          console.log(chalk.dim("  コマンド:  register [guild-id]"));
+          console.log(chalk.dim("  コマンド:  register [サーバーID]"));
           console.log(chalk.dim("  サーバー:  listen start | listen stop | listen auto-start [off]"));
           console.log(chalk.dim("  認可:      user-add <ID> | user-remove <ID> | users"));
         }
