@@ -98,6 +98,8 @@ export class REPL {
   private interactionServer: DiscordInteractionServer | null = null;
   private loopManager = new LoopManager();
   private agentBusy = false;
+  /** Phase 1.5: run 中に type-ahead で打たれた追加入力 (受信順に後で処理する)。 docs/room-model-design.md §11 */
+  private pendingInputs: string[] = [];
 
   constructor(
     private agent: AgentLoop,
@@ -339,6 +341,8 @@ export class REPL {
           // save 失敗で REPL を止めない (= 主処理を優先)。 ログだけ出す
           console.error(chalk.dim(`  [warn] turn save 失敗: ${String(e).slice(0, 80)}`));
         }
+        // Phase 1.5: run 中に type-ahead で積まれた追加入力を受信順に処理する (docs §11)。
+        if (await this.drainPendingInputs()) break; // type-ahead の /quit で終了
       }
     } finally {
       this.agent.saveCurrentSession();
@@ -3429,6 +3433,8 @@ export class REPL {
       this.agent.abort();
       bashTool.killRunningProcess();
     });
+    // Phase 1.5: run 中の type-ahead 入力を捕捉してキューに積む (Claude Code 方式)。
+    const stopTypeAhead = this.startTypeAhead();
     try {
       if (input.startsWith("@second ")) {
          if (!this.secondLLMManager || !this.secondLLMManager.isAvailable()) {
@@ -3502,6 +3508,7 @@ export class REPL {
         chalk.red(`\n  Error: ${e instanceof Error ? e.message : String(e)}\n`),
       );
     } finally {
+      stopTypeAhead();
       interruptWatcher.stop();
       progressIndicator.end();
       this.agentBusy = false;
@@ -3509,6 +3516,65 @@ export class REPL {
         console.log(chalk.dim("  プロンプトに戻ります"));
       }
     }
+  }
+
+  /**
+   * Phase 1.5: run 中に積まれた type-ahead 入力を受信順に処理する。
+   * /quit が type-ahead された場合は true を返して REPL ループを終了させる。
+   */
+  private async drainPendingInputs(): Promise<boolean> {
+    while (this.pendingInputs.length > 0) {
+      const next = this.pendingInputs.shift()!;
+      console.log(chalk.dim(`  ▶ 追加入力を処理 (残り ${this.pendingInputs.length} 件): ${next.slice(0, 60)}`));
+      if (next.startsWith("/")) {
+        const r = await this.handleCommand(next);
+        if (r === "quit") return true;
+        continue;
+      }
+      await this.processInput(next);
+      try {
+        this.agent.saveCurrentSession();
+      } catch {
+        /* save 失敗で止めない */
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Phase 1.5: run 実行中に stdin へ届く type-ahead 入力を捕捉する。
+   * 印字文字を蓄積し、 Enter で 1 行確定して pendingInputs に積む (現ターン完了後に処理)。
+   * ESC/Ctrl+C は interrupt-watcher が扱うため触らない。 非 TTY では no-op。
+   * 返り値は捕捉を止める cleanup 関数。
+   *
+   * 注: run 中は対話プロンプトを描画しないため echo はしない (確定時に確認だけ出す)。
+   * マルチバイトはバイト蓄積→Enter で UTF-8 デコード。 対話品質は手動 TTY 検証が必要。
+   */
+  private startTypeAhead(): () => void {
+    if (!process.stdin.isTTY) return () => { /* no-op */ };
+    const stdin = process.stdin;
+    let bytes: number[] = [];
+    const onData = (chunk: Buffer): void => {
+      for (let i = 0; i < chunk.length; i++) {
+        const b = chunk[i];
+        if (b === 0x1b || b === 0x03) { bytes = []; return; } // ESC / Ctrl+C は interrupt-watcher
+        if (b === 0x0d || b === 0x0a) {
+          const text = Buffer.from(bytes).toString("utf8").trim();
+          bytes = [];
+          if (text) {
+            this.pendingInputs.push(text);
+            process.stdout.write(
+              chalk.dim(`\n  ⏳ キューに追加しました (待ち ${this.pendingInputs.length} 件)。 現在の処理完了後に順次実行します。\n`),
+            );
+          }
+          continue;
+        }
+        if (b === 0x7f || b === 0x08) { bytes.pop(); continue; } // backspace
+        if (b >= 0x20) bytes.push(b); // 印字 ASCII + マルチバイト先頭/継続 (>=0x80)
+      }
+    };
+    stdin.on("data", onData);
+    return () => { stdin.removeListener("data", onData); };
   }
 
   // ─── コマンドハンドラ ──────────────────────────────
