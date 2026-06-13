@@ -1,6 +1,6 @@
 import inquirer from "inquirer";
 import chalk from "chalk";
-import ora from "ora";
+import { createSpinner } from "../utils/spinner.js";
 import { Config, LLMEndpoint, ProviderType, DEFAULT_PORTS, PROVIDER_LABELS, getDefaultConfig } from "./types.js";
 import { saveConfig } from "./config-manager.js";
 import { createProviderByType } from "../providers/provider-factory.js";
@@ -203,7 +203,7 @@ export async function connectAndListModels(
 ): Promise<ModelInfo[]> {
   const provider = createProviderByType(providerType, baseUrl);
 
-  const spinner = ora(`${baseUrl} に接続中...`).start();
+  const spinner = createSpinner(`${baseUrl} に接続中...`).start();
   const connected = await provider.testConnection();
   if (!connected) {
     spinner.fail(`${baseUrl} に接続できませんでした`);
@@ -211,7 +211,7 @@ export async function connectAndListModels(
   }
   spinner.succeed("接続成功");
 
-  const modelSpinner = ora("モデル一覧を取得中...").start();
+  const modelSpinner = createSpinner("モデル一覧を取得中...").start();
   let models: ModelInfo[];
   try {
     models = await provider.listModels();
@@ -266,7 +266,7 @@ async function setupVisionLLM() {
   const visionBaseUrl = `http://${visionHost}:${visionPort}`;
   const visionProvider = createProviderByType(visionProviderType, visionBaseUrl);
 
-  const spinner = ora("Vision LLMに接続中...").start();
+  const spinner = createSpinner("Vision LLMに接続中...").start();
   const connected = await visionProvider.testConnection();
   if (!connected) {
     spinner.fail("接続失敗");

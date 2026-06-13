@@ -1,4 +1,4 @@
-import ora from "ora";
+import { createSpinner } from "../utils/spinner.js";
 import chalk from "chalk";
 import { globalTokenTracker } from "../cost/token-tracker.js";
 import { globalCostCalculator } from "../cost/cost-calculator.js";
@@ -202,7 +202,7 @@ export class SecondLLMManager {
     const log = this.createLogger("second-llm-consult");
     const startMs = Date.now();
     const elapsed = () => Math.floor((Date.now() - startMs) / 1000);
-    const spinner = ora(chalk.magenta("Consulting Second LLM...")).start();
+    const spinner = createSpinner(chalk.magenta("Consulting Second LLM...")).start();
     // 経過秒を 1 秒ごとに更新表示 (ユーザーが進行中だと分かるように)
     const timer = setInterval(() => {
       spinner.text = chalk.magenta(`Consulting Second LLM... (${elapsed()}s)`);
@@ -275,7 +275,7 @@ export class SecondLLMManager {
     const startMs = Date.now();
     const elapsed = () => Math.floor((Date.now() - startMs) / 1000);
     let activity = "Second LLM working as Agent...";
-    const spinner = ora(chalk.magenta(activity)).start();
+    const spinner = createSpinner(chalk.magenta(activity)).start();
     // 経過秒を 1 秒ごとに更新。 現在の activity (作業内容) に秒数を付けて表示する
     // ことで、 実行中ツール名などの情報を消さずに進行時間も見せる。
     const timer = setInterval(() => {
@@ -430,7 +430,7 @@ export class SecondLLMManager {
       .filter(d => EVALUATOR_ALLOWED_TOOLS.includes(d.function.name));
     const log = this.createLogger("evaluator");
 
-    const spinner = ora(chalk.cyan("  Evaluator reviewing...")).start();
+    const spinner = createSpinner(chalk.cyan("  Evaluator reviewing...")).start();
     try {
       const messages: Message[] = [
         { role: "system", content: params.systemPrompt },

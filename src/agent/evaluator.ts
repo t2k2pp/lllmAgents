@@ -9,7 +9,7 @@
  * 生成者と評価者を分離することで、自己評価の甘さを構造的に解決する。
  */
 import chalk from "chalk";
-import ora from "ora";
+import { createSpinner } from "../utils/spinner.js";
 import type { LLMProvider, Message } from "../providers/base-provider.js";
 import { collectResponse } from "../providers/base-provider.js";
 import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";
@@ -108,7 +108,7 @@ export class Evaluator {
     originalRequest: string;
     assistantResponse?: string;
   }): Promise<EvaluatorResult> {
-    const spinner = ora(chalk.cyan(`  Evaluator reviewing (mainLLM fallback)...`)).start();
+    const spinner = createSpinner(chalk.cyan(`  Evaluator reviewing (mainLLM fallback)...`)).start();
 
     try {
       // フォールバック時はファイルを読み込んでプロンプトに埋め込む

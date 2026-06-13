@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import ora from "ora";
+import { createSpinner } from "../utils/spinner.js";
 import { AgentEventBus, type TaskOutcome } from "./agent-events.js";
 import { getInteractionBridge } from "./interaction-bridge-registry.js";
 import { HarnessState, enrichToolResult } from "./harness-intervention.js";
@@ -591,7 +591,7 @@ export class AgentLoop {
       }
       // Context compression check
       if (this.contextManager.shouldCompress(this.history)) {
-        const compressSpinner = ora("コンテキストを圧縮中...").start();
+        const compressSpinner = createSpinner("コンテキストを圧縮中...").start();
         try {
           await this.contextManager.compress(this.history);
           compressSpinner.succeed("コンテキストを圧縮しました");
@@ -608,7 +608,7 @@ export class AgentLoop {
       let thinkingContent = "";
       const toolCalls: ToolCall[] = [];
       let hasStartedOutput = false;
-      let thinkingSpinner: ReturnType<typeof ora> | null = null;
+      let thinkingSpinner: ReturnType<typeof createSpinner> | null = null;
       let success = false;
 
       let receivedTokens = 0; // スピナーモード: 受信トークンカウンター
@@ -670,7 +670,7 @@ export class AgentLoop {
           const ctxInfo = ctxFragments.join(" · ");
           let receivingStartTime = 0; // 最初のテキストチャンク受信時刻（tok/s 計算用）
 
-          let waitingSpinner: ReturnType<typeof ora> | null = ora({
+          let waitingSpinner: ReturnType<typeof createSpinner> | null = createSpinner({
             text: chalk.dim(`  LLM処理中... (0:00 · ${ctxInfo})`),
             spinner: "dots",
           }).start();
@@ -704,7 +704,7 @@ export class AgentLoop {
           const startThinkingSpinner = (): void => {
             if (thinkingSpinner) return;
             thinkingStartTime = Date.now();
-            thinkingSpinner = ora(chalk.dim("  考え中...")).start();
+            thinkingSpinner = createSpinner(chalk.dim("  考え中...")).start();
             thinkingTimer = setInterval(() => {
               if (thinkingSpinner) {
                 const elapsed = Math.floor((Date.now() - thinkingStartTime) / 1000);
@@ -787,7 +787,7 @@ export class AgentLoop {
                       if (!hasStartedOutput) {
                         hasStartedOutput = true;
                         receivingStartTime = Date.now();
-                        thinkingSpinner = ora({ text: chalk.dim(`  受信中... (${receivedTokens} tok)`), spinner: "dots" }).start();
+                        thinkingSpinner = createSpinner({ text: chalk.dim(`  受信中... (${receivedTokens} tok)`), spinner: "dots" }).start();
                       }
                       if (thinkingSpinner !== null) {
                         const recvElapsed = (Date.now() - receivingStartTime) / 1000;
@@ -2098,7 +2098,7 @@ export class AgentLoop {
   private async executeSingleTool(toolCall: ToolCall): Promise<boolean> {
     const summary = formatToolCall(toolCall);
     this.events.emit("tool_start", { callId: toolCall.id, name: toolCall.function.name, summary });
-    const spinner = ora(chalk.dim(`  ${summary}...`)).start();
+    const spinner = createSpinner(chalk.dim(`  ${summary}...`)).start();
     // 権限確認ダイアログがスピナーに隠れないよう、
     // 確認が必要なツールではスピナーを一時停止してから execute する。
     // execute 内部で permission check → inquirer prompt が走るため、
