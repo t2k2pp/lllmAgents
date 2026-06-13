@@ -82,7 +82,8 @@ $ npm start
 |----------|------|
 | `/help` | ヘルプ表示 |
 | `/quit` `/exit` | 終了 |
-| `/clear` | 会話履歴クリア |
+| `/clear` | 会話履歴クリア（現在の Room） |
+| `/room` | 会話 Room (A/B/C) の表示・移動・再開。`/room A\|B\|C` で移動、`/room resume [A\|B\|C]` で再開、`/room autoresume <on\|off> [A\|B\|C]`。既定 REPL=A / Discord=B / Slack=C（docs/room-model-design.md） |
 | `/context` | コンテキスト使用状況の内訳（トークン数・進捗バー）。`/context <system\|memory\|skills\|tools\|messages>` で各カテゴリの中身をダンプ |
 | `/compact` | コンテキストを手動圧縮 |
 | `/model` | 現在のモデル情報 / `/model list` / `/model <name>` / `/model url <URL>` / `/model provider <type>` / `/model description <text>` / `/model temperature <値>` / `/model top_p <値>` / `/model top_k <値>` / `/model rep_penalty <値>` |

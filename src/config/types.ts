@@ -1,3 +1,7 @@
+import { getDefaultRoomConfig } from "../agent/room-types.js";
+import type { RoomConfig } from "../agent/room-types.js";
+export type { RoomConfig } from "../agent/room-types.js";
+
 export type ProviderType = "ollama" | "lmstudio" | "llamacpp" | "vllm";
 
 export type CloudProviderType =
@@ -426,6 +430,12 @@ export interface Config {
    * 既定 OFF のオプトイン。 REPL `/checkpoint on|off` で切替し、 結果はここに永続化。
    */
   checkpoints?: CheckpointConfig;
+  /**
+   * Room モデル設定 (docs/room-model-design.md)。 サーフェス→既定 Room の binding と
+   * Room ごとの自動 Resume。 未指定なら getDefaultRoomConfig() (REPL=A/Discord=B/Slack=C)。
+   * REPL/Discord/Slack の `/room` 操作結果はここに永続化される。
+   */
+  roomConfig?: RoomConfig;
 }
 
 export interface CheckpointConfig {
@@ -627,5 +637,6 @@ export function getDefaultConfig(): Config {
         level: "info",
       },
     },
+    roomConfig: getDefaultRoomConfig(),
   };
 }

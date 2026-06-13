@@ -19,6 +19,7 @@ import { formatTodos, formatTodosActive, clearTodos, archiveCompletedTodos } fro
 import type { GoalDefinition } from "../agent/goal-slot.js";
 import { getGoal as getGoalSlot } from "../agent/goal-slot.js";
 import { listSessions, loadSession, getLatestSession } from "../agent/session-manager.js";
+import { normalizeRoomId } from "../agent/room-types.js";
 import { loadMemory, saveMemory } from "../agent/memory.js";
 import { resolveAtMentions, printMentionFeedback } from "./input-resolver.js";
 import {
@@ -111,6 +112,10 @@ export class REPL {
     private visionService?: import("../tools/definitions/vision.js").VisionService,
     /** /image コマンドで参照する画像生成サービス。docs/image-generation.md §7 */
     private imageService?: import("../image/image-service.js").ImageService,
+    /** Room モデル: 会話 Room の管理 (docs/room-model-design.md)。 index.ts が必ず渡す */
+    private roomManager?: import("../agent/room-manager.js").RoomManager,
+    /** 受信順グローバル FIFO キュー (全サーフェス共有)。 index.ts が必ず渡す */
+    private roomQueue?: import("../agent/room-run-queue.js").RoomRunQueue,
   ) {
     // スキル情報を取得してメニュープロバイダーに渡す
     const skillInfos = skillRegistry
@@ -365,8 +370,12 @@ export class REPL {
       console.log(chalk.yellow("  Bot Token が未設定です。/integrations の Discord 連携メニューから設定してください。"));
       return;
     }
+    if (!this.roomManager || !this.roomQueue) {
+      console.log(chalk.yellow("  内部エラー: RoomManager 未初期化のため Discord 受信を開始できません。"));
+      return;
+    }
     try {
-      this.interactionServer = new DiscordInteractionServer(d, this.agent);
+      this.interactionServer = new DiscordInteractionServer(d, this.agent, this.roomManager, this.roomQueue);
       await this.interactionServer.start();
       const botName = this.interactionServer.botUser;
       console.log(chalk.green(`  ✅ Discord に接続し、呼び出しの受信を開始しました${botName ? ` (Bot: ${botName})` : ""}`));
@@ -3392,6 +3401,22 @@ export class REPL {
     return this.sandboxHudTag() + chalk.green("> ");
   }
 
+  /** /room の一覧表示。 各 Room の active / REPL バインド / 自動 Resume / メッセージ数を出す。 */
+  private printRoomStatus(): void {
+    if (!this.roomManager) return;
+    console.log(chalk.bold("\n  === Rooms ==="));
+    for (const r of this.roomManager.status()) {
+      const marker = r.active ? chalk.green("●") : chalk.dim("○");
+      const tags: string[] = [];
+      if (r.surfaces.length > 0) tags.push(r.surfaces.join("/"));
+      tags.push(`autoResume=${r.autoResume ? "ON" : "OFF"}`);
+      tags.push(`${r.messageCount} msgs`);
+      const title = r.title ? chalk.dim(`  "${r.title.slice(0, 40)}"`) : "";
+      console.log(`  ${marker} Room ${chalk.cyan(r.id)}  ${chalk.dim(tags.join(" · "))}${title}`);
+    }
+    console.log(chalk.dim("\n  移動: /room A|B|C   再開: /room resume [A|B|C]   自動再開: /room autoresume on|off [A|B|C]\n"));
+  }
+
   // ─── 入力処理 ──────────────────────────────────────
 
   private async processInput(input: string): Promise<void> {
@@ -3422,24 +3447,34 @@ export class REPL {
       if (mentions.length > 0) {
         printMentionFeedback(mentions);
       }
-      // B-1: 複雑なタスクは Goal Seek への昇格を提案 (docs/goal-promotion-design.md)。
-      // 承認時は goal slot が設定された状態でそのまま run する。 失敗/拒否は通常実行。
-      // 画像添付等で ContentPart[] の場合はテキスト主体でないため提案しない
-      if (typeof resolved === "string") {
-        await maybePromoteToGoal({
-          input: resolved,
-          source: "cli",
-          agent: this.agent,
-          enabled: this.config.goalSeek?.autoPropose,
-        });
-      }
-
       // A-6: task_complete イベントから構造化レポートを組み立てて通知する
       // (docs/task-report-notification-design.md)。 旧実装の履歴スキャンは廃止。
       let completeEvent: import("../agent/agent-events.js").AgentEventMap["task_complete"] | null = null;
       const offComplete = this.agent.events.on("task_complete", (e) => { completeEvent = e; });
-      try {
+      // run 本体: Goal Seek 昇格提案 (room 載せ替え後に行い、 正しい room の goal slot を操作) → run。
+      // 画像添付等で ContentPart[] の場合はテキスト主体でないため提案しない。
+      const runBody = async (): Promise<void> => {
+        if (typeof resolved === "string") {
+          await maybePromoteToGoal({
+            input: resolved,
+            source: "cli",
+            agent: this.agent,
+            enabled: this.config.goalSeek?.autoPropose,
+          });
+        }
         await this.agent.run(resolved);
+      };
+      try {
+        // 受信順グローバル FIFO キューに積んで REPL の Room で実行する
+        // (Discord/Slack と到着順に直列化)。 Phase 1 ではここで await する
+        // (run 中の追加入力対応は Phase 1.5)。 RoomManager 未注入時は直接実行 (後方互換)。
+        if (this.roomQueue && this.roomManager) {
+          await this.roomQueue.enqueue(() =>
+            this.roomManager!.runInRoom(this.roomManager!.bindingFor("repl"), runBody),
+          ).result;
+        } else {
+          await runBody();
+        }
       } finally {
         offComplete();
       }
@@ -3526,14 +3561,64 @@ export class REPL {
         return "quit";
       }
 
-      case "/clear":
+      case "/clear": {
         // docs/todo-goal-lifecycle.md §2.2 — session 境界の責任主体。
         // 履歴・goal-slot・todos を一括リセット (cross-contamination 阻止)。
+        // Room モデル: agent は resting room (= 現在の Room) をロードしているため、
+        // これは「今いる Room の会話」だけをクリアする (他 Room には影響しない)。
         this.agent.getHistory().clear();
         this.agent.exitGoalSeek("abort");
         clearTodos();
-        console.log(chalk.dim("  会話履歴・ToDo・Goal slot をクリアしました。"));
+        const clearedRoom = this.roomManager?.current();
+        console.log(chalk.dim(`  会話履歴・ToDo・Goal slot をクリアしました${clearedRoom ? ` (Room ${clearedRoom})` : ""}。`));
         break;
+      }
+
+      case "/room": {
+        if (!this.roomManager) {
+          console.log(chalk.yellow("  Room 機能が初期化されていません。"));
+          break;
+        }
+        const sub = (args[0] ?? "").toLowerCase();
+        // /room                 → 一覧表示
+        // /room A|B|C           → REPL を当該 Room へ移動
+        // /room resume [A|B|C]  → 当該 Room の最後の会話を再ロード (既定: 現在の Room)
+        // /room autoresume on|off [A|B|C] → 自動 Resume 設定
+        if (!sub) {
+          this.printRoomStatus();
+          break;
+        }
+        if (sub === "resume") {
+          const target = args[1] ? normalizeRoomId(args[1]) : (this.roomManager.current() ?? null);
+          if (!target) { console.log(chalk.yellow("  使い方: /room resume [A|B|C]")); break; }
+          const ok = this.roomManager.resumeRoom(target);
+          console.log(ok
+            ? chalk.dim(`  Room ${target} の最後の会話を再開しました。`)
+            : chalk.yellow(`  Room ${target} に保存された会話がありません。`));
+          break;
+        }
+        if (sub === "autoresume") {
+          const onoff = (args[1] ?? "").toLowerCase();
+          const target = args[2] ? normalizeRoomId(args[2]) : (this.roomManager.current() ?? null);
+          if ((onoff !== "on" && onoff !== "off") || !target) {
+            console.log(chalk.yellow("  使い方: /room autoresume <on|off> [A|B|C]"));
+            break;
+          }
+          this.roomManager.setAutoResume(target, onoff === "on");
+          console.log(chalk.dim(`  Room ${target} の自動 Resume を ${onoff.toUpperCase()} にしました。`));
+          break;
+        }
+        // 移動
+        const room = normalizeRoomId(sub);
+        if (!room) {
+          console.log(chalk.yellow("  不明な引数です。 /room [A|B|C] | /room resume [A|B|C] | /room autoresume <on|off> [A|B|C]"));
+          break;
+        }
+        this.roomManager.moveSurface("repl", room);
+        console.log(chalk.dim(`  REPL を Room ${room} に移動しました。`));
+        this.printRoomStatus();
+        break;
+      }
 
       case "/context": {
         // 引数なし: カテゴリ別内訳。 引数あり: そのカテゴリの中身をダンプ (ドリルダウン)
@@ -5817,6 +5902,13 @@ export class REPL {
         const ctxK = cap.contextWindow >= 1000 ? `${Math.round(cap.contextWindow / 1000)}K` : `${cap.contextWindow}`;
 
         console.log(chalk.bold("\n  === Session Status ==="));
+
+        // ─── Room ───
+        if (this.roomManager) {
+          const cur = this.roomManager.current();
+          console.log(chalk.dim("\n  ── Room ──"));
+          console.log(chalk.dim(`  現在: ${cur ? chalk.cyan(`Room ${cur}`) : "(未確定)"}  (詳細・移動は /room)`));
+        }
 
         // ─── Slots ───
         console.log(chalk.dim("\n  ── Slots ──"));

@@ -36,8 +36,9 @@ import type {
 import { setInteractionBridge } from "../agent/interaction-bridge-registry.js";
 import { formatReportFooter, formatOutcome, formatStatsLine } from "../agent/task-reporter.js";
 import { ChannelProgressTracker, ChannelResponseCollector } from "../agent/channel-progress.js";
-import { ConversationStore, ChannelRunQueue, waitForAgentIdle } from "../agent/channel-sessions.js";
 import { maybePromoteToGoal } from "../agent/goal-promotion.js";
+import type { RoomManager } from "../agent/room-manager.js";
+import type { RoomRunQueue } from "../agent/room-run-queue.js";
 import type { SlackConfig } from "../config/types.js";
 import { markdownToSlackMrkdwn } from "../utils/slack.js";
 import * as logger from "../utils/logger.js";
@@ -82,13 +83,14 @@ export class SlackBot implements InteractionBridge {
   private pendingActions = new Map<string, PendingAction>();
   /** 自由入力 (スレッド返信) 待ち。 直列実行のため同時に 1 件 */
   private pendingText: PendingText | null = null;
-  /** A-5: スレッド単位の会話ストア + 依頼の直列キュー */
-  private conversations = new ConversationStore();
-  private queue = new ChannelRunQueue();
 
   constructor(
     private config: SlackConfig,
     private agentLoop: AgentLoop,
+    /** Room モデル: Slack は既定 Room C。 docs/room-model-design.md */
+    private roomManager: RoomManager,
+    /** 受信順グローバル FIFO キュー(全サーフェス共有)。 */
+    private roomQueue: RoomRunQueue,
   ) {}
 
   async start(): Promise<void> {
@@ -197,11 +199,10 @@ export class SlackBot implements InteractionBridge {
 
     console.log(`\n  [Slack] <${userId}>: ${prompt}`);
 
-    // A-5: 拒否せずキューに積む (docs/channel-session-queue-design.md §3)
+    // 受信順グローバル FIFO キューに積む (docs/room-model-design.md §11)。 拒否せず並ばせる。
     const ctx: ConversationContext = { channel, threadTs: threadRoot, userId, isDM };
-    const convKey = `slack:${channel}:${threadRoot}`;
-    const { position, result } = this.queue.enqueue(() =>
-      this.processRequest(prompt, ctx, convKey, say),
+    const { position, result } = this.roomQueue.enqueue(() =>
+      this.processRequest(prompt, ctx, say),
     );
     if (position > 0) {
       await say({
@@ -213,16 +214,12 @@ export class SlackBot implements InteractionBridge {
     await result.catch(() => {});
   }
 
-  /** 1 件のチャネル依頼を処理する (キューにより直列実行される) */
+  /** 1 件のチャネル依頼を処理する (受信順 FIFO キューで直列実行される) */
   private async processRequest(
     prompt: string,
     ctx: ConversationContext,
-    convKey: string,
     say: (msg: any) => Promise<any>,
   ): Promise<void> {
-    // CLI 操作中はジョブ開始を待つ (CLI 優先)
-    await waitForAgentIdle(this.agentLoop);
-
     const channel = ctx.channel;
     const threadRoot = ctx.threadTs;
 
@@ -245,14 +242,14 @@ export class SlackBot implements InteractionBridge {
     }).attach(this.agentLoop.events);
     // 最終応答は assistant_text 全件の結合 (finalResponse だけだと途中ターンの本文が欠落する)
     const collector = new ChannelResponseCollector().attach(this.agentLoop.events);
-    // A-5: スレッドの会話に載せ替え (CLI の会話は退避し、 finally で復帰する)
-    const cliState = this.agentLoop.exportConversation();
-    this.agentLoop.importConversation(this.conversations.get(convKey));
     this.current = ctx;
     try {
-      // B-1: 複雑なタスクは Goal Seek への昇格をボタンで提案 (docs/goal-promotion-design.md)
-      await maybePromoteToGoal({ input: prompt, source: "slack", agent: this.agentLoop });
-      await this.agentLoop.run(prompt, { source: "slack" });
+      // Room モデル: Slack は Room C(既定)に載せ替えて run し、 終了後 resting room へ戻す。
+      await this.roomManager.runInRoom(this.roomManager.bindingFor("slack"), async () => {
+        // B-1: 複雑なタスクは Goal Seek への昇格をボタンで提案 (docs/goal-promotion-design.md)
+        await maybePromoteToGoal({ input: prompt, source: "slack", agent: this.agentLoop });
+        await this.agentLoop.run(prompt, { source: "slack" });
+      });
       tracker.detach();
 
       const e = completeEvent as import("../agent/agent-events.js").AgentEventMap["task_complete"] | null;
@@ -286,9 +283,7 @@ export class SlackBot implements InteractionBridge {
       collector.detach();
       off();
       this.current = null;
-      // A-5: スレッドの会話を保存し、 CLI の会話を復帰する
-      this.conversations.set(convKey, this.agentLoop.exportConversation());
-      this.agentLoop.importConversation(cliState);
+      // 会話の保存・resting room への復帰は runInRoom が担うため、 ここでは何もしない。
     }
   }
 

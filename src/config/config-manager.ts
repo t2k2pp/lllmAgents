@@ -48,6 +48,12 @@ export function loadConfig(): Config {
     context: { ...defaults.context, ...parsed.context },
     discord: { ...(defaults.discord ?? { enabled: false, webhookUrl: "" }), ...parsed.discord },
     slack: { ...(defaults.slack ?? { enabled: false, webhookUrl: "" }), ...parsed.slack },
+    // Room 設定は bindings / autoResume を個別にマージし、 手編集や旧 config での
+    // キー欠損 (例: autoResume だけ無い) でも全 Room 分そろうようにする。
+    roomConfig: {
+      bindings: { ...defaults.roomConfig!.bindings, ...parsed.roomConfig?.bindings },
+      autoResume: { ...defaults.roomConfig!.autoResume, ...parsed.roomConfig?.autoResume },
+    },
   };
 }
 

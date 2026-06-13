@@ -47,6 +47,8 @@ import { buildLLMProfiles } from "./agent/llm-profiles.js";
 import { DiscordInteractionServer } from "./discord/interaction-server.js";
 import { CredentialVault } from "./security/credential-vault.js";
 import { getLatestSession } from "./agent/session-manager.js";
+import { RoomManager } from "./agent/room-manager.js";
+import { RoomRunQueue } from "./agent/room-run-queue.js";
 import { HookManager } from "./hooks/hook-manager.js";
 import { MCPManager } from "./mcp/mcp-manager.js";
 import { SecondLLMManager } from "./second-llm/second-llm-manager.js";
@@ -483,6 +485,11 @@ async function main(): Promise<void> {
     }
   }
 
+  // Room モデル (docs/room-model-design.md): 固定 3 Room の管理と受信順グローバル FIFO キュー。
+  // 各サーフェス (REPL/Discord/Slack) はこれを共有する。
+  const roomManager = new RoomManager(config, agent);
+  const roomQueue = new RoomRunQueue();
+
   // チェックポイントの古いセッション掃除は、 resume 解決後 (= 現在セッションが確定し
   // 保護対象になった後) に実行する。 復元対象のチェックポイントを誤って消さないため。
   agent.runCheckpointMaintenance();
@@ -510,7 +517,9 @@ async function main(): Promise<void> {
       console.error("  通常モードで起動して /discord app-id と /discord bot-token を設定してください。");
       process.exit(1);
     }
-    const server = new DiscordInteractionServer(discord, agent);
+    // Room モデル: --background は REPL なしで Discord(Room B) を resting room とする。
+    roomManager.initBackgroundSurface("discord");
+    const server = new DiscordInteractionServer(discord, agent, roomManager, roomQueue);
     try {
       await server.start();
       console.log(`  [Background Mode] Discord に接続しました${server.botUser ? ` (Bot: ${server.botUser})` : ""}`);
@@ -543,7 +552,9 @@ async function main(): Promise<void> {
     }
 
     const { SlackBot } = await import("./slack/slack-bot.js");
-    const slackBot = new SlackBot(slackConfig, agent);
+    // Room モデル: --slack は REPL なしで Slack(Room C) を resting room とする。
+    roomManager.initBackgroundSurface("slack");
+    const slackBot = new SlackBot(slackConfig, agent, roomManager, roomQueue);
 
     try {
       await slackBot.start();
@@ -600,8 +611,11 @@ async function main(): Promise<void> {
     console.log(`  Restored: ${restoredStates.join(", ")}`);
   }
 
+  // Room モデル: REPL の現セッション (新規 or resume 済み) を Room A にバインドする。
+  roomManager.initReplSession();
+
   // Start REPL (sharedPassphrase は /swap や /second setup 後の Provider 再生成で使い回す)
-  const repl = new REPL(agent, config, skillRegistry, planManager, secondLLMManager, sharedPassphrase, mcpManager, visionService, imageService);
+  const repl = new REPL(agent, config, skillRegistry, planManager, secondLLMManager, sharedPassphrase, mcpManager, visionService, imageService, roomManager, roomQueue);
   await repl.start();
 
   // Cleanup

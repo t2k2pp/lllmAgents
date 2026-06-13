@@ -4,6 +4,9 @@ import * as os from "node:os";
 import type { Message } from "../providers/base-provider.js";
 import type { TodoItem } from "../tools/definitions/todo-write.js";
 import type { GoalDefinition, EvaluationRecord } from "./goal-slot.js";
+import type { RoomId } from "./room-types.js";
+// 型のみ参照 (実行時 import なし) なので agent-loop との循環には影響しない。
+import type { AgentMode } from "./agent-loop.js";
 
 const SESSION_DIR = path.join(os.homedir(), ".localllm", "sessions");
 
@@ -14,6 +17,12 @@ export interface SessionMeta {
   model: string;
   messageCount: number;
   title: string;
+  /**
+   * このセッションが属する Room (A/B/C)。 docs/room-model-design.md §5。
+   * 後方互換: 旧セッション (Room 導入前) は undefined。
+   * Room の「最後の会話」は room 一致セッションの updatedAt 最大で導出する。
+   */
+  room?: RoomId;
 }
 
 /**
@@ -31,6 +40,11 @@ export interface SessionData {
   messages: Message[];
   todos?: TodoItem[];
   goal?: SessionGoalSnapshot | null;
+  /**
+   * 会話の paradigm モード (forward / goal-seek)。 docs/room-model-design.md §10-3。
+   * goal-seek 中の Room を保存/復元するために永続化する。 旧ファイルは undefined。
+   */
+  mode?: AgentMode;
 }
 
 function ensureDir(): void {
@@ -45,7 +59,7 @@ function generateId(): string {
   return `${ts}-${rand}`;
 }
 
-export function createSession(model: string): SessionData {
+export function createSession(model: string, room?: RoomId): SessionData {
   const now = new Date().toISOString();
   return {
     meta: {
@@ -55,6 +69,7 @@ export function createSession(model: string): SessionData {
       model,
       messageCount: 0,
       title: "",
+      room,
     },
     messages: [],
   };
@@ -83,7 +98,7 @@ export function loadSession(id: string): SessionData | null {
   return JSON.parse(fs.readFileSync(filePath, "utf-8"));
 }
 
-export function listSessions(limit = 20): SessionMeta[] {
+export function listSessions(limit = 20, room?: RoomId): SessionMeta[] {
   ensureDir();
   const files = fs.readdirSync(SESSION_DIR).filter((f) => f.endsWith(".json"));
 
@@ -91,6 +106,8 @@ export function listSessions(limit = 20): SessionMeta[] {
   for (const file of files) {
     try {
       const data = JSON.parse(fs.readFileSync(path.join(SESSION_DIR, file), "utf-8")) as SessionData;
+      // room フィルタ: 指定時は meta.room 一致のみ (旧 room 無しセッションは除外)
+      if (room !== undefined && data.meta.room !== room) continue;
       sessions.push(data.meta);
     } catch {
       // Skip corrupt files
@@ -100,6 +117,15 @@ export function listSessions(limit = 20): SessionMeta[] {
   return sessions
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, limit);
+}
+
+/**
+ * 指定 Room の「最後の会話」 (room 一致セッションのうち updatedAt 最大) のメタを返す。
+ * 自動 Resume / 手動 Resume の対象解決に使う。 docs/room-model-design.md §5/§6。
+ */
+export function latestSessionMetaOfRoom(room: RoomId): SessionMeta | null {
+  const list = listSessions(1, room);
+  return list.length > 0 ? list[0] : null;
 }
 
 export function getLatestSession(): SessionData | null {

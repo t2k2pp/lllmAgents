@@ -36,8 +36,9 @@ import type {
 import { setInteractionBridge } from "../agent/interaction-bridge-registry.js";
 import { formatReportFooter } from "../agent/task-reporter.js";
 import { ChannelProgressTracker, ChannelResponseCollector } from "../agent/channel-progress.js";
-import { ConversationStore, ChannelRunQueue, waitForAgentIdle } from "../agent/channel-sessions.js";
 import { maybePromoteToGoal } from "../agent/goal-promotion.js";
+import type { RoomManager } from "../agent/room-manager.js";
+import type { RoomRunQueue } from "../agent/room-run-queue.js";
 import type { DiscordConfig } from "../config/types.js";
 import { DiscordGatewayClient } from "./gateway-client.js";
 import * as logger from "../utils/logger.js";
@@ -70,13 +71,14 @@ export class DiscordInteractionServer implements InteractionBridge {
   private current: ConversationContext | null = null;
   /** ボタン押下 / Modal 送信待ち: nonce → resolver */
   private pendingComponents = new Map<string, PendingComponent>();
-  /** A-5: チャンネル単位の会話ストア + 依頼の直列キュー */
-  private conversations = new ConversationStore();
-  private queue = new ChannelRunQueue();
 
   constructor(
     private config: DiscordConfig,
     private agentLoop: AgentLoop,
+    /** Room モデル: Discord は既定 Room B。 docs/room-model-design.md */
+    private roomManager: RoomManager,
+    /** 受信順グローバル FIFO キュー(全サーフェス共有)。 */
+    private roomQueue: RoomRunQueue,
   ) {}
 
   /** Gateway に接続して受信を開始する */
@@ -203,9 +205,9 @@ export class DiscordInteractionServer implements InteractionBridge {
 
     console.log(`\n  [Discord] ${username}: ${prompt}`);
 
-    // A-5: 拒否せずキューに積む (docs/channel-session-queue-design.md §3)。
+    // 受信順グローバル FIFO キューに積む (docs/room-model-design.md §11)。 拒否せず並ばせる。
     // 注意: interaction token は 15 分で失効するため、 長いキュー待ちでは応答できないことがある
-    const { position, result } = this.queue.enqueue(() =>
+    const { position, result } = this.roomQueue.enqueue(() =>
       this.processPrompt(prompt, token, userId, channelId),
     );
     if (position > 0) {
@@ -220,11 +222,8 @@ export class DiscordInteractionServer implements InteractionBridge {
     });
   }
 
-  /** AgentLoop でプロンプトを処理し、Discord に結果を返す (キューにより直列実行される) */
-  private async processPrompt(prompt: string, token: string, userId: string, channelId: string): Promise<void> {
-    // CLI 操作中はジョブ開始を待つ (CLI 優先)
-    await waitForAgentIdle(this.agentLoop);
-
+  /** AgentLoop でプロンプトを処理し、Discord に結果を返す (受信順 FIFO キューで直列実行される) */
+  private async processPrompt(prompt: string, token: string, userId: string, _channelId: string): Promise<void> {
     // AgentEventBus 購読で最終応答を受け取る (docs/agent-events-design.md §3.2)
     let completeEvent: import("../agent/agent-events.js").AgentEventMap["task_complete"] | null = null;
     const off = this.agentLoop.events.on("task_complete", (e) => {
@@ -235,15 +234,15 @@ export class DiscordInteractionServer implements InteractionBridge {
       .attach(this.agentLoop.events);
     // 最終応答は assistant_text 全件の結合 (finalResponse だけだと途中ターンの本文が欠落する)
     const collector = new ChannelResponseCollector().attach(this.agentLoop.events);
-    // A-5: チャンネルの会話に載せ替え (CLI の会話は退避し、 finally で復帰する)
-    const convKey = `discord:${channelId}`;
-    const cliState = this.agentLoop.exportConversation();
-    this.agentLoop.importConversation(this.conversations.get(convKey));
     this.current = { token, userId };
     try {
-      // B-1: 複雑なタスクは Goal Seek への昇格をボタンで提案 (docs/goal-promotion-design.md)
-      await maybePromoteToGoal({ input: prompt, source: "discord", agent: this.agentLoop });
-      await this.agentLoop.run(prompt, { source: "discord" });
+      // Room モデル: Discord は Room B(既定)に載せ替えて run し、 終了後 resting room へ戻す。
+      // 全 Discord チャンネルは Room B に集約される (docs/room-model-design.md §10-2)。
+      await this.roomManager.runInRoom(this.roomManager.bindingFor("discord"), async () => {
+        // B-1: 複雑なタスクは Goal Seek への昇格をボタンで提案 (docs/goal-promotion-design.md)
+        await maybePromoteToGoal({ input: prompt, source: "discord", agent: this.agentLoop });
+        await this.agentLoop.run(prompt, { source: "discord" });
+      });
       tracker.detach();
 
       const e = completeEvent as import("../agent/agent-events.js").AgentEventMap["task_complete"] | null;
@@ -275,9 +274,7 @@ export class DiscordInteractionServer implements InteractionBridge {
       collector.detach();
       off();
       this.current = null;
-      // A-5: チャンネルの会話を保存し、 CLI の会話を復帰する
-      this.conversations.set(convKey, this.agentLoop.exportConversation());
-      this.agentLoop.importConversation(cliState);
+      // 会話の保存・resting room への復帰は runInRoom が担うため、 ここでは何もしない。
     }
   }
 

@@ -37,6 +37,7 @@ import {
   saveSession,
   type SessionData,
 } from "./session-manager.js";
+import type { RoomId } from "./room-types.js";
 import { PlanManager } from "./plan-mode.js";
 import type { SamplingParams } from "../config/types.js";
 import { loadConfig } from "../config/config-manager.js";
@@ -2387,6 +2388,16 @@ export class AgentLoop {
   /** 現在の会話セッション ID (resume 用)。 ~/.localllm/sessions/ 配下のファイル名と一致。 */
   getCurrentSessionId(): string {
     return this.session.meta.id;
+  }
+
+  /** 現在ロード中のセッションが属する Room (未タグなら undefined)。 docs/room-model-design.md。 */
+  getCurrentSessionRoom(): RoomId | undefined {
+    return this.session.meta.room;
+  }
+
+  /** 現在のセッションに Room タグを付ける (RoomManager が startup/swap 時に使用)。 */
+  tagSessionRoom(room: RoomId): void {
+    this.session.meta.room = room;
   }
 
   /** 現在の会話メッセージ数 (system プロンプト等を除く保存対象数)。 */
