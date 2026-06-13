@@ -35,33 +35,29 @@ REPL / Discord / Slack はそれぞれ別の会話コンテキストを持つ（
 5. **Room 識別**: 保存セッションに Room（A/B/C）を紐付け、一覧で RoomA/B/C と判別できる。
 
 ## 5. データモデル
+**専用ファイル（rooms.json）は作らない。** 設定は `config.json`、Room↔セッションの紐付けはセッションファイル自身（`meta.room`）が持つ。理由は §10-4。
 ```ts
 type RoomId = "A" | "B" | "C";
 
-interface RoomSettings {
-  id: RoomId;
-  autoResume: boolean;          // B/C=true, A=false (既定)
-  currentSessionId: string | null; // この Room が今ぶら下げているセッション
-}
-
-// 永続化先: ~/.localllm/rooms.json（3 Room 分の RoomSettings 配列）
-//   + サーフェス→Room の現在割り当て（repl/discord/slack の activeRoom）
-interface RoomsFile {
-  rooms: RoomSettings[];
-  bindings: { repl: RoomId; discord: RoomId; slack: RoomId };
+// config.json に追加（純粋な設定。滅多に変わらない）
+interface RoomConfig {
+  bindings: { repl: RoomId; discord: RoomId; slack: RoomId }; // 既定 A/B/C
+  autoResume: Record<RoomId, boolean>;                         // B/C=true, A=false
 }
 ```
 - セッション側: `SessionMeta` に **`room?: RoomId`** を追加（後方互換: 旧ファイルは undefined）。
+- **currentSessionId は保存しない**。Room X の最後の会話は「`meta.room===X` のうち最終更新（updatedAt 最大）のセッション」として `listSessions()` から導出する。Room↔セッションの正は常にセッションファイル側にあり、config と二重管理しない。
 
 ## 6. RoomManager（新規 `src/agent/room-manager.ts`）
-責務: Room 設定の永続化、Room ↔ `ConversationState` のロード/保存、サーフェスのアクティブ Room 追跡。
+責務: Room 設定（config 経由）の読み書き、Room ↔ `ConversationState` のロード/保存、サーフェスのアクティブ Room 追跡。
 ```
-- load(): rooms.json を読み（無ければ既定生成）
-- getBinding(surface): RoomId
-- setBinding(surface, roomId): 移動。現アクティブ会話を保存してから差し替え
-- loadRoomState(roomId): ConversationState | null  // currentSessionId から SessionData を読み ConversationState 化
-- saveRoomState(roomId, state): SessionData 化して saveSession、currentSessionId/room を更新
-- startNewInRoom(roomId): 新規セッションを作って currentSessionId 差し替え
+- getBinding(surface): RoomId                      // config.roomConfig.bindings
+- setBinding(surface, roomId): 移動。現アクティブ会話を保存してから差し替え（config 更新）
+- latestSessionOf(roomId): SessionMeta | null      // meta.room===roomId で updatedAt 最大
+- loadRoomState(roomId): ConversationState | null  // latestSessionOf を loadSession → ConversationState 化
+- saveRoomState(roomId, state, sessionId): SessionData 化(meta.room=roomId)して saveSession
+- startNewInRoom(roomId): 新規 SessionData(meta.room=roomId) を作る
+- autoResume(roomId): boolean
 ```
 - `SessionData ⇆ ConversationState` の変換ヘルパ（messages⇄MessageHistory, todos, goal, mode）。mode は SessionData に新フィールド追加 or messages とは別管理（要検討、§10-3）。
 
@@ -80,8 +76,8 @@ interface RoomsFile {
 - 既存の **`/clear` `/context` `/status` `/todo` は「現在の Room」に作用**（別コマンドを作らない＝意味は全サーフェス共通）。`/status` に現在 Room（A/B/C）と autoResume を表示。
 
 ## 9. 既存コードへの変更点（影響範囲）
-- 新規: `src/agent/room-manager.ts`、`~/.localllm/rooms.json`。
-- `session-manager.ts`: `SessionMeta.room?` 追加、（必要なら）`SessionData.mode?` 追加。一覧表示に Room 反映。
+- 新規: `src/agent/room-manager.ts`。専用ファイルは作らず設定は `config.json`（`config/types.ts` に `roomConfig` 追加）。
+- `session-manager.ts`: `SessionMeta.room?` 追加、`SessionData.mode?` 追加。一覧表示に Room 反映。`listSessions` を Room フィルタ可能に。
 - `channel-sessions.ts`: `ConversationStore` を RoomManager 参照へ置換（Discord/Slack の per-channel キーは廃止 or Room へ集約）。
 - `interaction-server.ts` / `slack-bot.ts`: swap 先を RoomManager に。受信開始時の auto-resume。
 - `repl.ts`: 起動時の Room A バインド、`/room` コマンド追加（completer/help/README の 4 点セット）、`/clear`/`/status` の Room 対応表示。
@@ -89,9 +85,9 @@ interface RoomsFile {
 
 ## 10. 未決事項（レビューで確認したい）
 1. **複数サーフェスが同一 Room を指す場合の同時実行**: 例 REPL と Discord が両方 A。`ChannelRunQueue` は各サーフェス内直列だがサーフェス間は別。同一 Room への同時 run をどう直列化するか（Room 単位のロック導入が素直）。
-2. **Discord の複数チャンネル**: 全チャンネル → Room B 集約（確定方針）。別チャンネルの発話が同じ B に混ざる点は許容で良いか（運用上1チャンネル前提か）。
-3. **mode の永続化**: `ConversationState.mode` を SessionData に保存するか（現状 SessionData に mode 無し）。goal-seek 中の Room を保存/復元する際に必要。
-4. **rooms.json と config.json の関係**: binding/設定を config に統合するか別ファイルにするか。
+2. **Discord の複数チャンネル**（解決済み）: 全チャンネル → Room B 集約で確定。別チャンネルの発話が同じ B に混ざるのは許容。チャンネル毎 Room は将来拡張（2026-06-13 ユーザー合意）。
+3. **mode の永続化**: `SessionData.mode?` を追加して保存（解決済み・採用）。goal-seek 中の Room を保存/復元するため。
+4. **設定の置き場所**（解決済み）: 専用 rooms.json は**作らない**。bindings / autoResume は `config.json`、currentSessionId は保存せず `meta.room` から導出。理由: currentSessionId はターン毎には変わらず低頻度、かつ Room↔セッションの紐付けはセッション側が正本。二重管理・ファイル分散を避ける（2026-06-13 ユーザー合意）。
 
 ## 11. 段階実装計画（初回スコープ = コア）
 - **Phase 1（今回・コア）**: RoomManager + 3 Room 固定 + サーフェス既定バインド + ディスク永続化（ターン毎保存）+ `/room`（表示・移動・手動 resume）+ B/C 自動 Resume + セッションへの Room タグ。`/clear`/`/status` の Room 対応。
