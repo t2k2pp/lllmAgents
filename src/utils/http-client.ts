@@ -1,4 +1,4 @@
-import { Agent } from "undici";
+import { Agent, getGlobalDispatcher } from "undici";
 import { getOpsLogger, maskHeaders } from "./ops-logger.js";
 
 export interface HttpResponse<T = unknown> {
@@ -42,6 +42,22 @@ const streamAgent = new Agent({
   bodyTimeout: 0,
   headersTimeout: 0,
 });
+
+/**
+ * シャットダウン時に keep-alive 接続プールを破棄する。
+ *
+ * undici の Agent（streamAgent）とグローバル dispatcher（httpGet/httpPost の fetch が使用）は
+ * 仕様上コネクションをプールし、リクエスト完了後も keepAliveMaxTimeout（既定10分）まで
+ * ソケットを開いたまま保持する。このソケットは libuv の open handle として数えられるため、
+ * 閉じないと /quit 後もイベントループが枯渇せず、プロセスが終了しない（ターミナルに戻らない）。
+ * プロセス終了直前にこれを呼び、プールを明示破棄してハンドルを解放する。
+ */
+export async function shutdownHttpClient(): Promise<void> {
+  await Promise.allSettled([
+    streamAgent.destroy(),
+    getGlobalDispatcher().destroy(),
+  ]);
+}
 
 export async function httpGet<T = unknown>(
   url: string,

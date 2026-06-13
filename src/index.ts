@@ -53,6 +53,7 @@ import { SecondLLMManager } from "./second-llm/second-llm-manager.js";
 import { ChatLogger } from "./agent/chat-logger.js";
 import { createSessionId } from "./agent/llm-logger.js";
 import { initOpsLogger, getOpsLogger, parseOpsLogLevel } from "./utils/ops-logger.js";
+import { shutdownHttpClient } from "./utils/http-client.js";
 import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "./providers/utils/context-length.js";
 
 async function main(): Promise<void> {
@@ -608,6 +609,12 @@ async function main(): Promise<void> {
   agent.saveCurrentSession();
   await mcpManager.disconnectAll();
   await playwrightManager?.close();
+  // LLM サーバへの undici keep-alive ソケットを明示的に閉じる。
+  // undici Agent / グローバル dispatcher は仕様上コネクションをプールし
+  // keepAliveMaxTimeout (既定10分) までソケットを開いたまま保持する。これを閉じないと
+  // プール済みソケットが open handle として残り、/quit 後にイベントループが枯渇せず
+  // プロセスが終了しない (= "Goodbye!" 表示後ターミナルに戻らない) 原因になる。
+  await shutdownHttpClient();
 }
 
 main().catch((e) => {
