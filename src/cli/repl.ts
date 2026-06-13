@@ -342,6 +342,12 @@ export class REPL {
       if (stoppedLoops > 0) {
         console.log(chalk.dim(`  ループ ${stoppedLoops} 件を停止しました。`));
       }
+      // Discord 受信 (Gateway) を停止する。これを閉じないと WebSocket 接続と heartbeat
+      // タイマーがイベントループを維持し続け、/quit 後もプロセスが終了せずターミナルに
+      // 戻らない (--background モードが「WS 接続と heartbeat がプロセスを生かす」と
+      // コメントしている通り、REPL 終了時はこれを明示的に止める必要がある)。
+      this.interactionServer?.stop();
+      this.interactionServer = null;
       // stdin を pause してイベントループを解放し、プロセスを終了可能にする
       process.stdin.pause();
     }
