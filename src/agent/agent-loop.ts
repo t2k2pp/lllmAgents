@@ -2395,7 +2395,7 @@ export class AgentLoop {
     return this.session.meta.room;
   }
 
-  /** 現在のセッションに Room タグを付ける (RoomManager が startup/swap 時に使用)。 */
+  /** 現在のセッションに Room タグを付ける (RoomManager が startup/アクティブ化時に使用)。 */
   tagSessionRoom(room: RoomId): void {
     this.session.meta.room = room;
   }
@@ -2552,8 +2552,10 @@ export class AgentLoop {
     }
     if (sessionData.goal) {
       restoreGoalState(sessionData.goal.definition, sessionData.goal.history);
-      this.currentMode = "goal-seek";
     }
+    // モードは goal の有無から一意に導出する (単一情報源)。 別 Room をアクティブ化した際に
+    // 前 Room の currentMode が残らないよう、 goal が無ければ forward へ明示リセットする。
+    this.currentMode = sessionData.goal ? "goal-seek" : "forward";
   }
 
   /**

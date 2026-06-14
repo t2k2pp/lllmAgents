@@ -1,8 +1,8 @@
 # Room モデル設計書
 
 ## 0. ステータス
-- 状態: **Phase 1 / 1.5 / 2 実装済み（TTY 手動検証は残）**
-- 起票: 2026-06-13 / 実装: 2026-06-14
+- 状態: **Phase 1 / 1.5 / 2 実装済み + レビュー指摘修正済み（TTY 手動検証は残）**
+- 起票: 2026-06-13 / 実装: 2026-06-14 / レビュー反映: 2026-06-14（`docs/room-model-review.md`）
 - 主な実装: `src/agent/room-types.ts` `room-manager.ts` `room-run-queue.ts` `channel-commands.ts`、
   `session-manager.ts`(room/mode タグ)、`config/types.ts`(roomConfig)、Discord/Slack/REPL 配線
 - 関連: `docs/todo-goal-lifecycle.md`, `src/agent/session-manager.ts`
@@ -21,9 +21,11 @@ REPL / Discord / Slack はそれぞれ別の会話コンテキストを持つ（
 - **Room**: 名前付き（A/B/C）の永続的な会話スロット。中身は会話履歴・ToDo・Goal・mode（= `ConversationState`）＋ Room 設定。
 - **サーフェス**: 入力面。REPL / Discord / Slack の 3 つ。
 - **アクティブ Room**: あるサーフェスが「今しゃべっている」Room。
+- **アクティブ化（activate）**: 単一 AgentLoop に、ある Room の会話（履歴・ToDo・Goal）をロードして
+  操作対象にすること（実装: `RoomManager.activateRoom` / borrow-run-return は `runInRoom`）。
 
 ## 3. 現状分析（実装事実）
-- `ConversationState = { history, todos, goal, mode }`（`agent-loop.ts:83`）。会話・ToDo・Goal は**すべてコンテキスト単位**で、`exportConversation()`/`importConversation()` が module singleton（`todo-write.ts` の `let todos` 等）を swap する（`agent-loop.ts:2552`,`2567`）。→ 分離は会話だけでなく ToDo/Goal も一貫している。
+- `ConversationState = { history, todos, goal, mode }`（`agent-loop.ts:83`）。会話・ToDo・Goal は**すべてコンテキスト単位**で、`exportConversation()`/`importConversation()` が module singleton（`todo-write.ts` の `let todos` 等）を載せ替える（`agent-loop.ts:2552`,`2567`）。→ 分離は会話だけでなく ToDo/Goal も一貫している。
 - `ConversationStore`（`channel-sessions.ts`）: `key → ConversationState` の in-memory LRU（最大20・**再起動で消える**）。Discord=`discord:<channelId>` / Slack=`slack:<channel>:<thread>`。
 - 永続化: `SessionData = { meta, messages, todos?, goal? }` を `saveSession/loadSession/listSessions`（`session-manager.ts`）。`agent.saveCurrentSession()` は **REPL の `agent.session` のみ**保存。
 - 起動時 resume: REPL は `--resume <id>` / `--continue`。デフォルトは新規セッション。
@@ -69,7 +71,7 @@ interface RoomConfig {
 - **REPL 起動**: binding.repl(=A) を見る。A.autoResume=false なら**新規セッション**（現行どおり）。`--resume/--continue` は当該 Room に対する手動 resume として解釈。
 - **Discord 受信開始**: binding.discord(=B)。B.autoResume=true なら B.currentSessionId をロードして継続。なければ新規。
 - **Slack 同様**（C）。
-- **メッセージ処理**: 現行の swap（export 退避 → import → run → export 保存 → import 復帰）を、**ConversationStore ではなく RoomManager 経由**に置換。処理後は `saveRoomState` でディスク保存。
+- **メッセージ処理**: 現行の載せ替え（export 退避 → import → run → export 保存 → import 復帰）を、**ConversationStore ではなく RoomManager 経由**に置換。処理後は `saveRoomState` でディスク保存。
 - **移動**: あるサーフェスで `/room B` → 現アクティブ Room を保存し、binding.<surface> を B に変更、B の会話をロード。以降そのサーフェスの入出力は B に乗る（＝ B を覗き見／継続）。
 
 ## 8. コマンド（既存方針: Discord/Slack は `/ask` テキスト内の先頭 `/`）
@@ -83,18 +85,18 @@ interface RoomConfig {
 - 新規: `src/agent/room-manager.ts`。専用ファイルは作らず設定は `config.json`（`config/types.ts` に `roomConfig` 追加）。
 - `session-manager.ts`: `SessionMeta.room?` 追加、`SessionData.mode?` 追加。一覧表示に Room 反映。`listSessions` を Room フィルタ可能に。
 - `channel-sessions.ts`: `ConversationStore` を RoomManager 参照へ置換（Discord/Slack の per-channel キーは廃止 or Room へ集約）。
-- `interaction-server.ts` / `slack-bot.ts`: swap 先を RoomManager に。受信開始時の auto-resume。
+- `interaction-server.ts` / `slack-bot.ts`: アクティブ化先を RoomManager に。受信開始時の auto-resume。
 - `repl.ts`: 起動時の Room A バインド、`/room` コマンド追加（completer/help/README の 4 点セット）、`/clear`/`/status` の Room 対応表示。
 - `index.ts`: 起動時に RoomManager 初期化。
 
 ## 10. 未決事項（レビューで確認したい）
-1. **複数サーフェスが同一 Room を指す場合の同時実行**（解決済み・方針変更）: **ロックは採らない**。Claude Code と同じく「受信順に積んで FIFO 処理」する（§13）。AgentLoop は単一インスタンスで run は同時実行できないため、**受信順グローバル FIFO キュー** に統一し、各ジョブが自分の Room に swap して順に処理する。これにより同一 Room／別 Room とも到着順に直列化され、ロック不要。既存の per-surface `ChannelRunQueue` はこの統一キューに置き換える（2026-06-13 ユーザー指摘）。
+1. **複数サーフェスが同一 Room を指す場合の同時実行**（解決済み・方針変更）: **ロックは採らない**。Claude Code と同じく「受信順に積んで FIFO 処理」する（§13）。AgentLoop は単一インスタンスで run は同時実行できないため、**受信順グローバル FIFO キュー** に統一し、各ジョブが自分の Room をアクティブ化して順に処理する。これにより同一 Room／別 Room とも到着順に直列化され、ロック不要。既存の per-surface `ChannelRunQueue` はこの統一キューに置き換える（2026-06-13 ユーザー指摘）。
 2. **Discord の複数チャンネル**（解決済み）: 全チャンネル → Room B 集約で確定。別チャンネルの発話が同じ B に混ざるのは許容。チャンネル毎 Room は将来拡張（2026-06-13 ユーザー合意）。
-3. **mode の永続化**: `SessionData.mode?` を追加して保存（解決済み・採用）。goal-seek 中の Room を保存/復元するため。
+3. **mode の永続化**: ~~`SessionData.mode?` を追加して保存~~ → **永続化しない**に変更（2026-06-14 レビュー反映）。goal-seek は必ず goal slot を伴うため、`restoreSession()` が `goal` の有無からモードを一意に導出する（単一情報源）。mode を別途保存すると goal と二重管理になり drift しうるため、フィールドは削除した。goal が無ければ `forward` へ明示リセットするため、goal-seek の Room から forward の Room へアクティブ化を切り替えてもモードが取り残されない。
 4. **設定の置き場所**（解決済み）: 専用 rooms.json は**作らない**。bindings / autoResume は `config.json`、currentSessionId は保存せず `meta.room` から導出。理由: currentSessionId はターン毎には変わらず低頻度、かつ Room↔セッションの紐付けはセッション側が正本。二重管理・ファイル分散を避ける（2026-06-13 ユーザー合意）。
 
 ## 11. 受信順 FIFO キューと処理中の追加入力（Claude Code 方式）
-- **受信順グローバル FIFO**: 全サーフェス（REPL/Discord/Slack）の入力を、受信（イベント受付）タイミングの順で 1 本のキューに積む。各エントリは `{ surface, roomId, message, replyHandle }`。単一ワーカーが FIFO で取り出し、`roomId` の `ConversationState` に swap → run → 保存 → 応答。ロック不要。既存 `ChannelRunQueue`/`waitForAgentIdle` はこのキューへ統合。
+- **受信順グローバル FIFO**: 全サーフェス（REPL/Discord/Slack）の入力を、受信（イベント受付）タイミングの順で 1 本のキューに積む。各エントリは `{ surface, roomId, message, replyHandle }`。単一ワーカーが FIFO で取り出し、`roomId` の `ConversationState` をアクティブ化 → run → 保存 → 応答。ロック不要。既存 `ChannelRunQueue`/`waitForAgentIdle` はこのキューへ統合。
 - **処理中の追加入力**:
   - Discord/Slack: 既にイベント駆動でキューに積まれる（現状動作を統一キューへ移行するだけ）。
   - REPL: 現状は run 中に入力できない（入力ループが processInput を await）。**run と入力受付を分離**し、run 中に打ったテキストはキューへ積む（Claude Code 同様）。表示は「キュー投入」をフィードバック。ESC/Ctrl+C の既存挙動は維持。

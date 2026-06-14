@@ -9,10 +9,13 @@
  * - 旧来の揮発な per-surface 会話ストア(in-memory)を置き換える。 PC 再起動でリモート会話が
  *   消えないよう、 各 Room の最後の会話はディスクから resume できる。
  *
+ * 用語: 「Room のアクティブ化(activate)」= 単一 AgentLoop にある Room の会話(履歴/ToDo/Goal)を
+ * ロードして操作対象にすること。 borrow-run-return は runInRoom が担う。
+ *
  * 重要な不変条件:
  * - AgentLoop は単一インスタンス。 同時に 1 Room しかロードできない(currentAgentRoom)。
- * - 受信順グローバル FIFO キュー(room-run-queue.ts)が run を直列化している前提で swap する
- *   (run 実行中に swap してはならない)。
+ * - 受信順グローバル FIFO キュー(room-run-queue.ts)が run を直列化している前提でアクティブ化する
+ *   (run 実行中にアクティブ Room を切り替えてはならない)。
  * - agent の「resting room」 = REPL の binding。 背景ジョブ(Discord/Slack)は対象 Room を
  *   borrow して run し、 終わったら resting room へ restore して返す。
  */
@@ -84,7 +87,7 @@ export class RoomManager {
   moveSurface(surface: Surface, room: RoomId): void {
     this.config.roomConfig!.bindings[surface] = room;
     saveConfig(this.config);
-    if (surface === "repl") this.swapAgentTo(room);
+    if (surface === "repl") this.activateRoom(room);
   }
 
   // ─── startup ───
@@ -134,7 +137,7 @@ export class RoomManager {
    */
   async runInRoom<T>(room: RoomId, fn: () => Promise<T>): Promise<T> {
     const resting = this.currentAgentRoom ?? this.restingRoom();
-    this.swapAgentTo(room);
+    this.activateRoom(room);
     try {
       const result = await fn();
       // run 後の状態を保存(ターン毎永続化)。
@@ -142,7 +145,7 @@ export class RoomManager {
       this.activeSessionId.set(room, this.agent.getCurrentSessionId());
       return result;
     } finally {
-      if (resting !== room) this.swapAgentTo(resting);
+      if (resting !== room) this.activateRoom(resting);
     }
   }
 
@@ -185,13 +188,13 @@ export class RoomManager {
     });
   }
 
-  // ─── 内部: swap ───
+  // ─── 内部: アクティブ Room の切り替え (activate) ───
 
   /**
-   * agent を指定 Room のセッションに載せ替える。 現 Room を保存してから対象をロードする。
-   * run 実行中に呼んではならない(キューで直列化されている前提)。
+   * 指定 Room のセッションを agent にロードして「アクティブ Room」にする。 現 Room を保存して
+   * から対象をロードする。 run 実行中に呼んではならない(キューで直列化されている前提)。
    */
-  private swapAgentTo(room: RoomId): void {
+  private activateRoom(room: RoomId): void {
     if (this.currentAgentRoom === room) return;
     if (this.currentAgentRoom !== null) {
       this.agent.saveCurrentSession();

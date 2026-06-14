@@ -5,8 +5,6 @@ import type { Message } from "../providers/base-provider.js";
 import type { TodoItem } from "../tools/definitions/todo-write.js";
 import type { GoalDefinition, EvaluationRecord } from "./goal-slot.js";
 import type { RoomId } from "./room-types.js";
-// 型のみ参照 (実行時 import なし) なので agent-loop との循環には影響しない。
-import type { AgentMode } from "./agent-loop.js";
 
 const SESSION_DIR = path.join(os.homedir(), ".localllm", "sessions");
 
@@ -40,11 +38,9 @@ export interface SessionData {
   messages: Message[];
   todos?: TodoItem[];
   goal?: SessionGoalSnapshot | null;
-  /**
-   * 会話の paradigm モード (forward / goal-seek)。 docs/room-model-design.md §10-3。
-   * goal-seek 中の Room を保存/復元するために永続化する。 旧ファイルは undefined。
-   */
-  mode?: AgentMode;
+  // 注: paradigm モード (forward / goal-seek) は永続化しない。 goal-seek は必ず goal slot を
+  // 伴うため、 restoreSession() が goal の有無からモードを一意に導出する (単一情報源)。
+  // docs/room-model-design.md §10-3。
 }
 
 function ensureDir(): void {

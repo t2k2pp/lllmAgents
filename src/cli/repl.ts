@@ -3475,9 +3475,15 @@ export class REPL {
         // (Discord/Slack と到着順に直列化)。 Phase 1 ではここで await する
         // (run 中の追加入力対応は Phase 1.5)。 RoomManager 未注入時は直接実行 (後方互換)。
         if (this.roomQueue && this.roomManager) {
-          await this.roomQueue.enqueue(() =>
+          const { position, result } = this.roomQueue.enqueue(() =>
             this.roomManager!.runInRoom(this.roomManager!.bindingFor("repl"), runBody),
-          ).result;
+          );
+          // M-2: 他サーフェス(Discord/Slack)のジョブが先行していると黙って待つことになるため、
+          // Discord/Slack の「N 番目に追加」と対称に待機件数をフィードバックする。
+          if (position > 0) {
+            console.log(chalk.dim(`  ⏳ 他サーフェスのジョブ ${position} 件の完了を待っています...`));
+          }
+          await result;
         } else {
           await runBody();
         }
@@ -3515,6 +3521,37 @@ export class REPL {
       if (interruptedByEsc) {
         console.log(chalk.dim("  プロンプトに戻ります"));
       }
+    }
+  }
+
+  /**
+   * H-1: Room 状態 (履歴/goal/todos の差し替え = アクティブ Room の切り替え/clear) に触れる
+   * REPL コマンドを、 メッセージ run と同じ受信順グローバル FIFO キューに乗せて直列化する。
+   *
+   * 背景ジョブ (Discord/Slack) は同一 AgentLoop を borrow して実行する。 その実行中の隙に
+   * REPL からアクティブ Room の切り替え/clear が割り込むと、 実行中の会話を壊し「run 中に
+   * アクティブ Room を切り替えてはならない」不変条件 (docs/room-model-design.md §10-1,
+   * room-manager.ts) を破る。 キューに乗せることで
+   * 背景ジョブの完了を待ってから実行される。 roomQueue 未注入時 (後方互換) は直接実行。
+   *
+   * handleCommand には switch を囲う catch が無く、 ここで reject すると REPL ループごと落ちる。
+   * 失敗 (例: セッション保存のディスクエラー) はログして false を返し、 REPL を止めない
+   * (「save 失敗で REPL を止めない」既存方針に合わせる)。
+   */
+  private async runRoomMutation(job: () => void | Promise<void>): Promise<boolean> {
+    try {
+      if (this.roomQueue) {
+        if (this.roomQueue.pending > 0) {
+          console.log(chalk.dim(`  ⏳ 他サーフェスのジョブ ${this.roomQueue.pending} 件の完了を待っています...`));
+        }
+        await this.roomQueue.enqueue(async () => { await job(); }).result;
+      } else {
+        await job();
+      }
+      return true;
+    } catch (e) {
+      console.error(chalk.red(`  Room 操作に失敗しました: ${e instanceof Error ? e.message : String(e)}`));
+      return false;
     }
   }
 
@@ -3557,7 +3594,11 @@ export class REPL {
     const onData = (chunk: Buffer): void => {
       for (let i = 0; i < chunk.length; i++) {
         const b = chunk[i];
-        if (b === 0x1b || b === 0x03) { bytes = []; return; } // ESC / Ctrl+C は interrupt-watcher
+        // ESC (0x1b) / Ctrl+C (0x03) は interrupt-watcher が扱う。 ここでは触らない。
+        // M-3: ESC は単独中断にも矢印キー等のエスケープシーケンス先頭にもなる。 どちらも
+        // この chunk の残りは type-ahead 対象外なので break で読み飛ばすが、 蓄積済みの bytes は
+        // 保持する (矢印キー 1 回で入力中の行が消える旧バグを防ぐ)。
+        if (b === 0x1b || b === 0x03) break;
         if (b === 0x0d || b === 0x0a) {
           const text = Buffer.from(bytes).toString("utf8").trim();
           bytes = [];
@@ -3569,7 +3610,14 @@ export class REPL {
           }
           continue;
         }
-        if (b === 0x7f || b === 0x08) { bytes.pop(); continue; } // backspace
+        if (b === 0x7f || b === 0x08) {
+          // L-1: UTF-8 を考慮して 1 コードポイント分削る (マルチバイトを 1 バイトだけ
+          // 削ってバッファを壊さない)。 echo は無いが確定行が文字化けしないようにする。
+          const cps = [...Buffer.from(bytes).toString("utf8")];
+          cps.pop();
+          bytes = [...Buffer.from(cps.join(""), "utf8")];
+          continue;
+        }
         if (b >= 0x20) bytes.push(b); // 印字 ASCII + マルチバイト先頭/継続 (>=0x80)
       }
     };
@@ -3630,13 +3678,25 @@ export class REPL {
       case "/clear": {
         // docs/todo-goal-lifecycle.md §2.2 — session 境界の責任主体。
         // 履歴・goal-slot・todos を一括リセット (cross-contamination 阻止)。
-        // Room モデル: agent は resting room (= 現在の Room) をロードしているため、
-        // これは「今いる Room の会話」だけをクリアする (他 Room には影響しない)。
-        this.agent.getHistory().clear();
-        this.agent.exitGoalSeek("abort");
-        clearTodos();
-        const clearedRoom = this.roomManager?.current();
-        console.log(chalk.dim(`  会話履歴・ToDo・Goal slot をクリアしました${clearedRoom ? ` (Room ${clearedRoom})` : ""}。`));
+        // H-1: 背景ジョブと衝突しないよう受信順キューに乗せ、 REPL の Room をアクティブ化してから
+        // クリアする。 旧実装は agent が「今ロードしている Room」を消すため、 Discord/Slack の
+        // ジョブ実行中は誤って相手の会話を消していた (docs/room-model-review.md H-1)。
+        const replRoom = this.roomManager?.bindingFor("repl");
+        const cleared = await this.runRoomMutation(async () => {
+          const doClear = (): void => {
+            this.agent.getHistory().clear();
+            this.agent.exitGoalSeek("abort");
+            clearTodos();
+          };
+          if (this.roomManager && replRoom) {
+            await this.roomManager.runInRoom(replRoom, async () => doClear());
+          } else {
+            doClear();
+          }
+        });
+        if (cleared) {
+          console.log(chalk.dim(`  会話履歴・ToDo・Goal slot をクリアしました${replRoom ? ` (Room ${replRoom})` : ""}。`));
+        }
         break;
       }
 
@@ -3657,10 +3717,15 @@ export class REPL {
         if (sub === "resume") {
           const target = args[1] ? normalizeRoomId(args[1]) : (this.roomManager.current() ?? null);
           if (!target) { console.log(chalk.yellow("  使い方: /room resume [A|B|C]")); break; }
-          const ok = this.roomManager.resumeRoom(target);
-          console.log(ok
-            ? chalk.dim(`  Room ${target} の最後の会話を再開しました。`)
-            : chalk.yellow(`  Room ${target} に保存された会話がありません。`));
+          // H-1: resumeRoom は現 Room なら restoreSession で履歴を差し替える (= アクティブ Room の
+          // 再ロード)。 背景ジョブと衝突しないようキューで直列化する。
+          let found = false;
+          const done = await this.runRoomMutation(() => { found = this.roomManager!.resumeRoom(target); });
+          if (done) {
+            console.log(found
+              ? chalk.dim(`  Room ${target} の最後の会話を再開しました。`)
+              : chalk.yellow(`  Room ${target} に保存された会話がありません。`));
+          }
           break;
         }
         if (sub === "autoresume") {
@@ -3680,9 +3745,13 @@ export class REPL {
           console.log(chalk.yellow("  不明な引数です。 /room [A|B|C] | /room resume [A|B|C] | /room autoresume <on|off> [A|B|C]"));
           break;
         }
-        this.roomManager.moveSurface("repl", room);
-        console.log(chalk.dim(`  REPL を Room ${room} に移動しました。`));
-        this.printRoomStatus();
+        // H-1: moveSurface("repl", ...) は agent のアクティブ Room を即切り替える。 背景ジョブと
+        // 衝突しないようキューで直列化する。
+        const moved = await this.runRoomMutation(() => this.roomManager!.moveSurface("repl", room));
+        if (moved) {
+          console.log(chalk.dim(`  REPL を Room ${room} に移動しました。`));
+          this.printRoomStatus();
+        }
         break;
       }
 

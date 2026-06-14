@@ -7,7 +7,7 @@
  * 載せ替えて実行する。 コマンドの意味は全サーフェス共通 (別物を作らない):
  *   /help /clear /context /status /todo /room
  *
- * 状態を読む/変えるコマンドは RoomManager.runInRoom で対象 Room に swap して実行する
+ * 状態を読む/変えるコマンドは RoomManager.runInRoom で対象 Room をアクティブ化して実行する
  * (= 「今しゃべっている Room」 に対して効く)。
  */
 
@@ -68,7 +68,7 @@ export async function runChannelCommand(
   if (!KNOWN.includes(cmd)) {
     return `未対応のコマンド: \`/${cmd}\`\n\n${HELP}`;
   }
-  // swap 不要 (Room 横断の表示系) は即返す。
+  // アクティブ化不要 (Room 横断の表示系) は即返す。
   if (cmd === "help") return HELP;
   if (cmd === "room") return buildRoomText(deps);
 
