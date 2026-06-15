@@ -42,7 +42,7 @@
 
 ## 実装順
 
-P1 `5.5` ログタグ（検証土台）→ P2 `5.2` Bot Token 配信 → P3 `5.3` 権限ポリシー → P4 `5.4` stuck-loop 遮断 → P5 `5.1` 実行コンテキスト化（最大の構造変更）→ P6 `5.6` 配達抽象。別トラック: H-1 切り分け。
+**P1 `5.5` ログタグ（検証土台）= 実装済み**（`llm-logger.ts` に LogContext/setContext、`agent-loop.ts` で roomId=session.meta.room / surface=currentSource を注入、`tests/agent/llm-logger.test.ts`）→ P2 `5.2` Bot Token 配信 → P3 `5.3` 権限ポリシー → P4 `5.4` stuck-loop 遮断 → P5 `5.1` 実行コンテキスト化（最大の構造変更）→ P6 `5.6` 配達抽象。別トラック: H-1 切り分け。
 
 ## 決定が要る（実装ブロッカー）
 

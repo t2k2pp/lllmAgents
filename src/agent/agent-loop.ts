@@ -391,6 +391,13 @@ export class AgentLoop {
     // チェックポイントは resume を跨いで安定な session.meta.id で採番する (H1)
     this.checkpointManager.rebind(this.session.meta.id);
     this.llmLogger = new LLMLogger(agentId, sessionId);
+    // 5.5: 各ログレコードに roomId(現セッションの Room)/surface(発信面) を注入する。
+    // 単一 AgentLoop を全 Room/面で共有するため、 これが無いと事後解析で REPL/Discord/Slack や
+    // どの Room の run かを判別できない (docs/async-surface-permission-delivery-design.md R-4)。
+    this.llmLogger.setContext(() => ({
+      roomId: this.session.meta.room,
+      surface: this.currentSource,
+    }));
     this.intentClassifier = new IntentClassifier(provider, model);
     this.evaluator = new Evaluator(secondLLMManager, provider, model);
     // セカンドLLMにもセッションIDを共有（ログファイル名の統一用）

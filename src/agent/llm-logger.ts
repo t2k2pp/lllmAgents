@@ -12,7 +12,18 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 
-export interface LLMRequestLog {
+/**
+ * 全レコード共通の文脈タグ (docs/async-surface-permission-delivery-design.md R-4/5.5)。
+ * roomId = この run がロードしている Room (A/B/C)。 surface = 発信面 (cli/discord/slack)。
+ * 単一 AgentLoop を全 Room/面で共有するため、 これが無いと「この run は REPL か Discord か /
+ * どの Room か」を事後解析で判別できない。 書き込み時に AgentLoop の状態から注入する。
+ */
+export interface LogContext {
+  roomId?: string;
+  surface?: string;
+}
+
+export interface LLMRequestLog extends LogContext {
   ts: string;
   turn: number;
   agentId: string;
@@ -22,7 +33,7 @@ export interface LLMRequestLog {
   tools?: unknown[];
 }
 
-export interface LLMResponseLog {
+export interface LLMResponseLog extends LogContext {
   ts: string;
   turn: number;
   agentId: string;
@@ -43,7 +54,7 @@ export interface LLMResponseLog {
  * セッション resume 時にツール往復を再生するために必要。
  * input は JSON.parse 試行、失敗時は raw string を入れる。
  */
-export interface LLMToolResultLog {
+export interface LLMToolResultLog extends LogContext {
   ts: string;
   turn: number;
   agentId: string;
@@ -63,6 +74,8 @@ export class LLMLogger {
   private readonly filePath: string;
   private turn: number = 0;
   private requestStartMs: number = 0;
+  /** 書き込み時に roomId/surface を引くプロバイダ (AgentLoop が設定)。 5.5。 */
+  private contextProvider?: () => LogContext;
 
   constructor(
     private readonly agentId: string = "main",
@@ -77,6 +90,11 @@ export class LLMLogger {
     const sid = sessionId ?? new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const safeName = agentId.replace(/[^a-zA-Z0-9_-]/g, "_");
     this.filePath = path.join(logsDir, `${sid}_${safeName}.jsonl`);
+  }
+
+  /** roomId/surface を書き込み時に引くためのプロバイダを設定する (5.5)。 */
+  setContext(provider: () => LogContext): void {
+    this.contextProvider = provider;
   }
 
   /** ターン番号をインクリメント（LLM呼び出し前に呼ぶ） */
@@ -162,7 +180,10 @@ export class LLMLogger {
 
   private write(entry: LLMLogEntry): void {
     try {
-      fs.appendFileSync(this.filePath, JSON.stringify(entry) + "\n", "utf-8");
+      // roomId/surface を書き込み時に注入 (undefined は JSON.stringify が省く＝旧挙動と互換)。
+      const ctx = this.contextProvider?.() ?? {};
+      const enriched = { ...entry, roomId: ctx.roomId, surface: ctx.surface };
+      fs.appendFileSync(this.filePath, JSON.stringify(enriched) + "\n", "utf-8");
     } catch {
       // ログ書き込み失敗はサイレントに無視（本体処理に影響させない）
     }
