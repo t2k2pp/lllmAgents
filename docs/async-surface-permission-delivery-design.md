@@ -2,7 +2,7 @@
 
 実装エージェント向けの作業仕様。状態: ドラフト・未実装（本書合意後に着手）。
 再現/H-1切り分け用ログ: `~/.localllm/logs/sessions/2026-06-14T00-18-05_main.jsonl` / セッション `mqci53z7-cg4k.json`(room=B)。
-関連: `room-model-design.md` `channel-interaction-bridge-design.md` `goal-seek-mode-design.md`。原則: [[feedback_no_workarounds]]（前提を変える根本側で。対症療法・プロンプト打ち消しはしない）。
+関連: `room-model-design.md` `channel-interaction-bridge-design.md` `goal-seek-mode-design.md`。
 
 ## 確定原因 → 直す場所
 
@@ -38,7 +38,7 @@
 
 **H-1** turn-1 で「おはよう」に `game_smoke` PASS を捏造（thinking が架空の前スナップショットを主張、履歴は msgs=2）。
 層候補: vLLM prefix cache 跨ぎ漏れ / distill prior / 巨大 system プロンプト priming。
-切り分け: クリーンで `[system,"おはよう"]` 直 curl ×N / prefix cache ON-OFF / system 中立化で再現比較。層確定まで対策（特にプロンプト追記）を入れない。
+切り分け: クリーンで `[system,"おはよう"]` 直 curl ×N / prefix cache ON-OFF / system 中立化で再現比較。層を確定してから対策する。
 
 ## 実装順
 
