@@ -221,34 +221,34 @@ export class DiscordInteractionServer implements InteractionBridge {
           mcpManager: this.mcpManager,
           pending: this.roomQueue.pending,
         });
-        await this.sendFollowUp(token, text ?? "（コマンドを処理できませんでした）");
+        await this.postChannelMessage(channelId, text ?? "（コマンドを処理できませんでした）");
       });
       cmdResult.catch((e) => {
         logger.error("Discord channel command error:", e);
-        this.sendFollowUp(token, "❌ コマンド処理中にエラーが発生しました。").catch(() => {});
+        this.postChannelMessage(channelId, "❌ コマンド処理中にエラーが発生しました。").catch(() => {});
       });
       return;
     }
 
+    // 5.2: 受け付けを固定 ack で即返す (token は今は有効)。 実際の回答は Bot Token の
+    // チャンネルメッセージで後追い配信するため、 interaction token の 15 分失効に依存しない。
+    this.sendFollowUp(token, "🤖 受け付けました。処理してこのチャンネルに回答します。").catch(() => {});
+
     // 受信順グローバル FIFO キューに積む (docs/room-model-design.md §11)。 拒否せず並ばせる。
-    // 注意: interaction token は 15 分で失効するため、 長いキュー待ちでは応答できないことがある
     const { position, result } = this.roomQueue.enqueue(() =>
       this.processPrompt(prompt, token, userId, channelId),
     );
     if (position > 0) {
-      this.sendFollowUp(
-        token,
-        `⏳ キューに追加しました（前に ${position} 件）。待ち時間が 15 分を超えると応答できない場合があります。`,
-      ).catch(() => {});
+      this.postChannelMessage(channelId, `⏳ キューに追加しました（前に ${position} 件）。順番に処理します。`).catch(() => {});
     }
     result.catch((e) => {
       logger.error("Discord prompt processing error:", e);
-      this.sendFollowUp(token, "❌ 処理中にエラーが発生しました。").catch(() => {});
+      this.postChannelMessage(channelId, "❌ 処理中にエラーが発生しました。").catch(() => {});
     });
   }
 
   /** AgentLoop でプロンプトを処理し、Discord に結果を返す (受信順 FIFO キューで直列実行される) */
-  private async processPrompt(prompt: string, token: string, userId: string, _channelId: string): Promise<void> {
+  private async processPrompt(prompt: string, token: string, userId: string, channelId: string): Promise<void> {
     // AgentEventBus 購読で最終応答を受け取る (docs/agent-events-design.md §3.2)
     let completeEvent: import("../agent/agent-events.js").AgentEventMap["task_complete"] | null = null;
     const off = this.agentLoop.events.on("task_complete", (e) => {
@@ -278,18 +278,11 @@ export class DiscordInteractionServer implements InteractionBridge {
       const footer = e ? formatReportFooter(e) : null;
       if (footer) responseText += `\n${footer}`;
 
-      // Discord の 2000 文字制限に合わせて分割して送信。
-      // 第 1 チャンクは @original を上書き (進捗表示が回答に変わる)、
-      // 2 チャンク目以降は新規 follow-up (旧実装の同一メッセージ上書きバグを修正)
+      // 5.2: 最終応答は Bot Token のチャンネルメッセージで送る (interaction token は15分で失効し、
+      // ローカルLLMの長時間生成では必ず 401 になるため)。 2000 文字制限に合わせて分割。
       const chunks = splitMessage(responseText, DISCORD_MAX_LENGTH);
-      for (let i = 0; i < chunks.length; i++) {
-        if (i === 0) {
-          await this.sendFollowUp(token, chunks[i]);
-        } else {
-          await this.postFollowUp(token, { content: chunks[i] }).catch((err) => {
-            logger.error("Discord additional chunk failed:", err);
-          });
-        }
+      for (const chunk of chunks) {
+        await this.postChannelMessage(channelId, chunk);
       }
     } catch (e) {
       logger.error("AgentLoop processing error:", e);
@@ -553,6 +546,36 @@ export class DiscordInteractionServer implements InteractionBridge {
       throw new Error(`Discord follow-up failed: ${res.status} ${text}`);
     }
     return res.json();
+  }
+
+  /**
+   * Bot Token で通常のチャンネルメッセージを投稿する (5.2 / docs/async-surface-permission-delivery-design.md R-2)。
+   * interaction token (15分失効) と違い、 Bot Token は失効しない。 ローカルLLMの長時間生成では
+   * interaction follow-up が必ず 401 になるため、 最終応答はこちらで配信する。
+   */
+  private async postChannelMessage(channelId: string, content: string): Promise<void> {
+    const botToken = this.config.botToken;
+    if (!botToken) {
+      logger.warn("Discord botToken 未設定のためチャンネルメッセージを送信できません");
+      return;
+    }
+    const url = `${DISCORD_API}/channels/${channelId}/messages`;
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bot ${botToken}`,
+          "User-Agent": "lllmAgents/1.0",
+        },
+        body: JSON.stringify({ content }),
+      });
+      if (!res.ok) {
+        logger.error(`Discord channel message failed: ${res.status} ${await res.text()}`);
+      }
+    } catch (e) {
+      logger.error("Failed to post Discord channel message:", e);
+    }
   }
 
   /** follow-up メッセージを編集する (タイムアウト時のボタン除去用) */
