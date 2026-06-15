@@ -278,11 +278,14 @@ export class DiscordInteractionServer implements InteractionBridge {
       const footer = e ? formatReportFooter(e) : null;
       if (footer) responseText += `\n${footer}`;
 
-      // 5.2: 最終応答は Bot Token のチャンネルメッセージで送る (interaction token は15分で失効し、
-      // ローカルLLMの長時間生成では必ず 401 になるため)。 2000 文字制限に合わせて分割。
-      const chunks = splitMessage(responseText, DISCORD_MAX_LENGTH);
-      for (const chunk of chunks) {
-        await this.postChannelMessage(channelId, chunk);
+      // 5.2/5.6: 最終応答は Bot Token のチャンネルメッセージで送る (interaction token は15分で
+      // 失効し、 ローカルLLMの長時間生成では必ず 401 になるため)。 2000 文字を超える長い応答
+      // (コード全文など) は 14 通の分割スパムにせず、 ファイル添付で1つにまとめて配達する
+      // (Q4: 「貼り付けて利用」。 受信側はダウンロードできる)。
+      if (responseText.length > DISCORD_MAX_LENGTH) {
+        await this.postChannelFile(channelId, "response.md", responseText, "📄 応答が長いため、全文をファイルで添付します。");
+      } else {
+        await this.postChannelMessage(channelId, responseText);
       }
     } catch (e) {
       logger.error("AgentLoop processing error:", e);
@@ -575,6 +578,43 @@ export class DiscordInteractionServer implements InteractionBridge {
       }
     } catch (e) {
       logger.error("Failed to post Discord channel message:", e);
+    }
+  }
+
+  /**
+   * Bot Token でチャンネルにファイルを添付投稿する (P6 / 5.6, R-5)。
+   * 2000 文字を超える応答 (例: コード全文) を 14 通の分割スパムで送ると、 受信側で切れたり
+   * 「貼り付けて利用」しづらい。 大容量はファイル1つで配達し、 受信側はダウンロードして使える。
+   */
+  private async postChannelFile(channelId: string, filename: string, content: string, message: string): Promise<void> {
+    const botToken = this.config.botToken;
+    if (!botToken) {
+      logger.warn("Discord botToken 未設定のためファイル添付を送信できません");
+      return;
+    }
+    const url = `${DISCORD_API}/channels/${channelId}/messages`;
+    try {
+      const form = new FormData();
+      form.append("payload_json", JSON.stringify({ content: message.slice(0, DISCORD_MAX_LENGTH) }));
+      form.append("files[0]", new Blob([content], { type: "text/plain" }), filename);
+      const res = await fetch(url, {
+        method: "POST",
+        // Content-Type は fetch が multipart boundary 付きで自動設定する (手動指定しない)。
+        headers: { "Authorization": `Bot ${botToken}`, "User-Agent": "lllmAgents/1.0" },
+        body: form,
+      });
+      if (!res.ok) {
+        logger.error(`Discord file message failed: ${res.status} ${await res.text()}`);
+        // 添付に失敗したら本文を分割送信にフォールバック (silent loss を避ける)。
+        for (const chunk of splitMessage(content, DISCORD_MAX_LENGTH)) {
+          await this.postChannelMessage(channelId, chunk);
+        }
+      }
+    } catch (e) {
+      logger.error("Failed to post Discord file:", e);
+      for (const chunk of splitMessage(content, DISCORD_MAX_LENGTH)) {
+        await this.postChannelMessage(channelId, chunk);
+      }
     }
   }
 
