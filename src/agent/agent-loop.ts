@@ -195,6 +195,12 @@ export class AgentLoop {
   /** Ctrl+C などによる中断フラグ */
   private _aborted = false;
   /**
+   * P4 (docs/async-surface-permission-delivery-design.md 5.4): サーキットブレーカ。
+   * 同一ツールが同一エラーで繰り返し失敗 (特に 401/認証/権限の恒久失敗) したら run を打ち切り、
+   * 正直に報告する。 警告だけ出して回し続ける旧挙動 (徹夜暴走の一因) を是正する。
+   */
+  private _circuitBreak: { tool: string; error: string } | null = null;
+  /**
    * 進行中 LLM 呼び出しの AbortController。 abort() で HTTP 接続ごと切断する。
    * フラグ (_aborted) だけだとクライアントが読むのをやめるだけでサーバ側の生成が
    * 走り続け、 後続リクエストが詰まる (llama.cpp はシングルスロット直列処理)。
@@ -469,6 +475,7 @@ export class AgentLoop {
     this.currentSource = options?.source ?? "cli";
     this.isProcessing = true;
     this._aborted = false;
+    this._circuitBreak = null;
     this.runStats = {
       startMs: Date.now(),
       iterations: 0,
@@ -590,6 +597,24 @@ export class AgentLoop {
       }
       // 中断チェック
       if (this._aborted) {
+        // P4 (5.4): サーキットブレーカ起因の中断は、 generic な中断でなく「何が・なぜ恒久的に
+        // 失敗したか」を最終応答として正直に届ける (silent な打ち切りにしない)。
+        // cast 必須: _circuitBreak は別メソッド(maybeDetectStuckLoop)で設定されるため、
+        // run() のフロー解析では null に絞り込まれてしまう。 宣言型に戻して判定する。
+        const cb = this._circuitBreak as { tool: string; error: string } | null;
+        if (cb) {
+          this._circuitBreak = null;
+          const report =
+            `⛔ ${cb.tool} が同じエラーで繰り返し失敗したため、処理を打ち切りました。\n` +
+            `エラー: ${cb.error.slice(0, 300)}\n` +
+            `待っても直らない種類の失敗の可能性が高いです。原因（権限/接続/設定）を解消してから再依頼してください。`;
+          console.log(chalk.red("\n  " + report.replace(/\n/g, "\n  ")));
+          this.history.addAssistantMessage(report);
+          this.runStats.finalText = report;
+          this.events.emit("assistant_text", { text: report, final: true });
+          this.purgeEphemeralAtSpanEnd("circuit_break");
+          return;
+        }
         console.log(chalk.yellow("\n  (処理を中断しました)"));
         // 中断ターンを履歴上で可視化する。 これが無いと「応答の無い user メッセージ」 が
         // 残り、 再送信のたびに同文が重複蓄積してモデルを混乱させる (2026-06-12 ログで実証)。
@@ -1857,8 +1882,18 @@ export class AgentLoop {
     garbage_response: "error",
     empty_response_giveup: "error",
     llm_call_unsuccessful: "error",
+    circuit_break: "error",
     max_iterations: "max_iterations",
   };
+
+  /**
+   * P4: 「待っても直らない」恒久失敗か (401/認証/権限/forbidden 等)。 これらはリトライが
+   * 無意味なので早期に打ち切る (一過性の通信断などはリトライが有効なので含めない)。
+   */
+  private static isPermanentToolError(error: string): boolean {
+    const e = (error ?? "").toLowerCase();
+    return /\b401\b|\b403\b|invalid webhook token|unauthorized|forbidden|認証|権限確認がタイムアウト|permission denied/.test(e);
+  }
 
   /**
    * P0-A: ツール失敗を sliding window で追跡し、 同じ (signature, error) が
@@ -1869,6 +1904,8 @@ export class AgentLoop {
    * docs/agent-loop-efficiency-review.md §4.2 参照。
    */
   private static readonly FAILURE_WINDOW = 10;
+  /** P4: 一過性失敗でも同一失敗がこの回数続いたら run を打ち切る。 恒久失敗は2回目で打ち切る。 */
+  private static readonly STUCK_ABORT_THRESHOLD = 5;
   private maybeDetectStuckLoop(toolCall: ToolCall, errorMsg: string): void {
     const iteration = this.currentIteration;
     const signature = `${toolCall.function.name}:${toolCall.function.arguments ?? ""}`;
@@ -1882,6 +1919,20 @@ export class AgentLoop {
     );
     this.recentFailures.push({ iteration, signature, error: trimmedErr });
     if (prior.length === 0) return; // 初回失敗 → 通常通り
+
+    const occurrences = prior.length + 1;
+    // P4 (5.4): サーキットブレーカ。 恒久失敗 (401/認証/権限) は 2 回目で、 一過性でも同一失敗が
+    // STUCK_ABORT_THRESHOLD 回続いたら run を打ち切る。 助言注入だけで回し続ける旧挙動を是正。
+    const permanent = AgentLoop.isPermanentToolError(trimmedErr);
+    if (permanent || occurrences >= AgentLoop.STUCK_ABORT_THRESHOLD) {
+      this._circuitBreak = { tool: toolCall.function.name, error: trimmedErr };
+      this._aborted = true; // 進行中の生成も止め、 ループ先頭の中断チェックで報告して終了する
+      console.log(chalk.red(
+        `\n  ⛔ stuck-loop 打ち切り: ${toolCall.function.name} が${permanent ? "恒久エラーで" : `${occurrences}回`}失敗。 処理を中断します。`,
+      ));
+      this.notice("error", `stuck-loop 打ち切り: ${toolCall.function.name} (${permanent ? "恒久失敗" : `${occurrences}回`})`);
+      return;
+    }
 
     // 直近 window 内に同じ失敗が既にあった → 学習されていない兆候
     // Phase D-2: T3 では decision-tree mode で binary 二択を提示する。
