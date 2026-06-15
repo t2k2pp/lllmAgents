@@ -150,6 +150,14 @@ export interface SecurityConfig {
   discordAutoApproveTools: string[];
   /** Slack経由のリクエストで自動許可するツール（インタラクティブ確認なし） */
   slackAutoApproveTools: string[];
+  /**
+   * 背景サーフェス(Discord/Slack)の autorun (docs/async-surface-permission-delivery-design.md 5.3)。
+   * 非同期面では人が15分以内に確認できず、同期ボタン確認(失効 interaction token で必ず401)が
+   * 成立しない。 true: deny/サンドボックス/危険コマンドの安全ガードを通過したツールを自動許可。
+   * false: 従来のブリッジ確認に退避(対話可能な環境向け。 既定は未指定=true)。
+   */
+  discordAutorun?: boolean;
+  slackAutorun?: boolean;
   /** Claude Code 互換のパターンベース権限ルール（ツール名リストより優先） */
   rules?: SecurityRuleConfig;
   streamCommandOutput?: boolean;

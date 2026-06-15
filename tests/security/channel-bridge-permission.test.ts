@@ -57,11 +57,31 @@ describe("interaction-bridge-registry", () => {
 });
 
 describe("checkToolPermission (channel + bridge)", () => {
-  it("ブリッジ未登録なら従来の headless 拒否", async () => {
-    const pm = new PermissionManager(mkConfig());
+  it("autorun 無効 + ブリッジ未登録なら headless 拒否", async () => {
+    const pm = new PermissionManager(mkConfig({ slackAutorun: false }));
     const r = await pm.checkToolPermission("file_write", { file_path: `${process.cwd()}/a.txt`, content: "x" }, "slack");
     expect(r.allowed).toBe(false);
     expect(r.reason).toContain("Slack経由では");
+  });
+
+  // 5.3: 背景面 autorun (既定 ON)
+  it("autorun(既定) は安全ガード通過の未許可ツールをブリッジ無しで自動許可", async () => {
+    const { bridge, calls } = mkBridge("deny");
+    setInteractionBridge("slack", bridge);
+    const pm = new PermissionManager(mkConfig()); // autorun 未指定=true
+    const r = await pm.checkToolPermission("file_write", { file_path: `${process.cwd()}/a.txt`, content: "x" }, "slack");
+    expect(r.allowed).toBe(true);
+    expect(calls.length).toBe(0); // 同期ボタン確認を呼ばない (失効トークンに依存しない)
+  });
+
+  it("autorun でも deny ルール / サンドボックス外 / 危険block は覆せない", async () => {
+    const pmDeny = new PermissionManager(mkConfig({ rules: { allow: [], deny: ["bash(rm *)"], ask: [] } }));
+    expect((await pmDeny.checkToolPermission("bash", { command: "rm -rf /tmp/x" }, "slack")).allowed).toBe(false);
+
+    const pm = new PermissionManager(mkConfig());
+    const outside = process.platform === "win32" ? "C:\\Windows\\evil.txt" : "/etc/evil.txt";
+    expect((await pm.checkToolPermission("file_write", { file_path: outside, content: "x" }, "slack")).allowed).toBe(false);
+    expect((await pm.checkToolPermission("bash", { command: "rm -rf /" }, "slack")).allowed).toBe(false);
   });
 
   it("INHERENTLY_SAFE はブリッジ無しでも許可", async () => {
@@ -82,7 +102,7 @@ describe("checkToolPermission (channel + bridge)", () => {
   it("allow_once: 許可され、同一パラメータの再実行は確認なし", async () => {
     const { bridge, calls } = mkBridge("allow_once");
     setInteractionBridge("slack", bridge);
-    const pm = new PermissionManager(mkConfig());
+    const pm = new PermissionManager(mkConfig({ slackAutorun: false }));
     const params = { file_path: `${process.cwd()}/a.txt`, content: "x" };
 
     const r1 = await pm.checkToolPermission("file_write", params, "slack");
@@ -104,7 +124,7 @@ describe("checkToolPermission (channel + bridge)", () => {
   it("allow_session: 同ツールは以後確認なし (チャネル別)", async () => {
     const { bridge, calls } = mkBridge("allow_session");
     setInteractionBridge("slack", bridge);
-    const pm = new PermissionManager(mkConfig());
+    const pm = new PermissionManager(mkConfig({ slackAutorun: false, discordAutorun: false }));
     const r1 = await pm.checkToolPermission("bash", { command: "echo a" }, "slack");
     expect(r1.allowed).toBe(true);
     expect(calls.length).toBe(1);
@@ -121,7 +141,7 @@ describe("checkToolPermission (channel + bridge)", () => {
   it("deny: 拒否され、対話を促す理由文が返る", async () => {
     const { bridge } = mkBridge("deny");
     setInteractionBridge("slack", bridge);
-    const pm = new PermissionManager(mkConfig());
+    const pm = new PermissionManager(mkConfig({ slackAutorun: false }));
     const r = await pm.checkToolPermission("bash", { command: "echo a" }, "slack");
     expect(r.allowed).toBe(false);
     expect(r.reason).toContain("拒否しました");
@@ -133,7 +153,7 @@ describe("checkToolPermission (channel + bridge)", () => {
       throw new Error("権限確認がタイムアウトしました (300s)");
     });
     setInteractionBridge("slack", bridge);
-    const pm = new PermissionManager(mkConfig());
+    const pm = new PermissionManager(mkConfig({ slackAutorun: false }));
     const r = await pm.checkToolPermission("bash", { command: "echo a" }, "slack");
     expect(r.allowed).toBe(false);
     expect(r.reason).toContain("タイムアウト");
@@ -171,7 +191,7 @@ describe("checkToolPermission (channel + bridge)", () => {
   it("warn レベルの危険コマンドは確認文に警告を併記してブリッジへ", async () => {
     const { bridge, calls } = mkBridge("allow_once");
     setInteractionBridge("discord", bridge);
-    const pm = new PermissionManager(mkConfig());
+    const pm = new PermissionManager(mkConfig({ discordAutorun: false }));
     // git push --force は warn 想定 (block ではない)。 ルール定義に依存するため
     // 「ブリッジに到達して許可された」ことだけを検証する
     const r = await pm.checkToolPermission("bash", { command: "git push --force origin feature-x" }, "discord");

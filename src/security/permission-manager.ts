@@ -86,6 +86,8 @@ export class PermissionManager {
   private requireApproval: Set<string>;
   private discordAutoApprove: Set<string>;
   private slackAutoApprove: Set<string>;
+  private discordAutorun: boolean = true;
+  private slackAutorun: boolean = true;
   private rules: SecurityRuleConfig;
   // Session-level approvals: "tool:paramsHash" → approved
   private sessionApprovals = new Set<string>();
@@ -119,7 +121,15 @@ export class PermissionManager {
     this.requireApproval = new Set(securityConfig.requireApprovalTools);
     this.discordAutoApprove = new Set(securityConfig.discordAutoApproveTools ?? []);
     this.slackAutoApprove = new Set(securityConfig.slackAutoApproveTools ?? []);
+    // 5.3: 背景面の autorun。 未指定は true (非同期面では同期確認が成立しないため既定で autorun)。
+    this.discordAutorun = securityConfig.discordAutorun ?? true;
+    this.slackAutorun = securityConfig.slackAutorun ?? true;
     this.rules = securityConfig.rules ?? { allow: [], deny: [], ask: [] };
+  }
+
+  /** 背景面 (discord/slack) の autorun が有効か。 5.3。 */
+  private channelAutorun(source: RequestSource): boolean {
+    return source === "discord" ? this.discordAutorun : this.slackAutorun;
   }
 
   // --- ルール管理 ---
@@ -281,15 +291,6 @@ export class PermissionManager {
       return { allowed: true };
     }
 
-    // ブリッジ未登録 → 従来の headless 拒否
-    const bridge = getInteractionBridge(source);
-    if (!bridge?.requestPermission) {
-      return {
-        allowed: false,
-        reason: `${label}経由では ${toolName} は許可されていません（/permission ${source}-add ${toolName} で追加可能）`,
-      };
-    }
-
     // 「今回のみ」承認キャッシュ (同一パラメータの再実行)
     const cacheKey = `${source}:${toolName}:${hashParams(params)}`;
     if (this.channelSessionApprovals.has(cacheKey)) {
@@ -307,6 +308,21 @@ export class PermissionManager {
         }
         warning = `⚠ ${dangerousRule.message}\n`;
       }
+    }
+
+    // 5.3 (R-2 権限側): 非同期面は人が15分以内に確認できず、同期ボタン確認は失効 interaction
+    // token 経由で必ず 401 になる (徹夜暴走の権限側の原因)。 ここに到達 = deny/サンドボックス/
+    // 危険コマンド(block) は通過済み。 autorun ならその安全ガードを根拠に自動許可する。
+    if (this.channelAutorun(source)) {
+      return { allowed: true };
+    }
+    // autorun 無効時のみ、 従来のブリッジ確認に退避する (対話可能な環境向け)。 ブリッジが無ければ拒否。
+    const bridge = getInteractionBridge(source);
+    if (!bridge?.requestPermission) {
+      return {
+        allowed: false,
+        reason: `${label}経由では ${toolName} は許可されていません（autorun 無効・確認手段なし。/permission ${source}-add ${toolName} で追加可能）`,
+      };
     }
 
     // ブリッジ確認 (既存 _permissionQueue で 1 件ずつ直列化)
