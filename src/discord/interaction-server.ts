@@ -211,6 +211,9 @@ export class DiscordInteractionServer implements InteractionBridge {
 
     // 先頭が "/" ならチャネルコマンド (clear/context/status/todo/help/room) として処理する
     // (docs/room-model-design.md §8)。 意味は全サーフェス共通で、 Discord は Room B に効く。
+    // コマンドは短時間で終わる (15分 token 失効は無関係) ため、 結果は deferred の @original を
+    // 編集して返す。 別メッセージ (postChannelMessage) にすると deferred の「考え中...」が
+    // 宙ぶらりんで残ってしまう (案1)。
     if (prompt.trim().startsWith("/")) {
       const { result: cmdResult } = this.roomQueue.enqueue(async () => {
         const text = await runChannelCommand(prompt, {
@@ -221,11 +224,20 @@ export class DiscordInteractionServer implements InteractionBridge {
           mcpManager: this.mcpManager,
           pending: this.roomQueue.pending,
         });
-        await this.postChannelMessage(channelId, text ?? "（コマンドを処理できませんでした）");
+        const out = text ?? "（コマンドを処理できませんでした）";
+        // @original (deferred) は 2000 字制限。 /context・/todo 等で超える場合は @original を
+        // 畳んでからファイル添付で全文を配達する (silent loss と「考え中...」残りの両方を回避)。
+        if (out.length > DISCORD_MAX_LENGTH) {
+          await this.sendFollowUp(token, "📄 出力が長いため、全文をファイルで添付します。");
+          await this.postChannelFile(channelId, "output.md", out, "📄 コマンド出力");
+        } else {
+          await this.sendFollowUp(token, out);
+        }
       });
       cmdResult.catch((e) => {
         logger.error("Discord channel command error:", e);
-        this.postChannelMessage(channelId, "❌ コマンド処理中にエラーが発生しました。").catch(() => {});
+        // エラー時も @original を畳んで「考え中...」を残さない。
+        this.sendFollowUp(token, "❌ コマンド処理中にエラーが発生しました。").catch(() => {});
       });
       return;
     }

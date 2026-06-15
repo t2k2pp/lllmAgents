@@ -45,6 +45,7 @@
 実装状況（2026-06-16）:
 - **P1 `5.5` ログタグ = 済**（`llm-logger.ts` LogContext/setContext、`agent-loop.ts` で roomId=session.meta.room / surface=currentSource を注入。A/B/C・cli/discord/slack に分岐なし。`tests/agent/llm-logger.test.ts`）。
 - **P2 `5.2` Bot Token 配信 = 済**（`interaction-server.ts` postChannelMessage で channels/{id}/messages 送信。3秒 defer ack 維持＋@original 固定 ack。Slack は元々 bot token 配信で対象外）。
+  - **P2-fix（2026-06-16）**: チャネルコマンド（`/clear` `/context` `/status` `/todo` `/help` `/room`）は結果を別チャンネルメッセージで返していたため deferred ack（@original）が「考え中...」のまま残っていた。コマンドは短時間（15分 token 失効は無関係）なので結果を `sendFollowUp` で @original に編集して返すよう修正。出力が 2000 字を超える場合は @original を畳んでファイル添付で全文配達（silent loss と placeholder 残りの両方を回避）。
 - **P3 `5.3` 権限ポリシー = 済**（`permission-manager.ts` 背景面 autorun。SecurityConfig.discord/slackAutorun 既定 true。deny/サンドボックス/危険block 通過を根拠に自動許可、doomed ボタン廃止。autorun 無効時のみ従来ブリッジ）。
 - **P4 `5.4` stuck-loop 遮断 = 済**（`agent-loop.ts` _circuitBreak。恒久失敗(401/認証/権限)=2回目、一過性=5回で run 打ち切り＋正直報告）。
 - **P5 `5.1` 実行コンテキスト化 = 案B採用により実質充足**（権限は checkToolPermission が currentSource を毎回読む／ログは P1 が決定時に読む＝決定時点で実行コンテキストを引いている。doomed ループは P3/P4 で消滅。案A 専用の「走行中 run の live re-source」は対象外＝未実装）。
