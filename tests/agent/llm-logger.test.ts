@@ -55,6 +55,22 @@ describe("LLMLogger 文脈タグ (roomId/surface)", () => {
     }
   });
 
+  it("Room C / slack も同じ経路で記録される (3面に分岐なし)", () => {
+    const sid = "ctxC-" + Math.random().toString(36).slice(2);
+    const logger = new LLMLogger("main", sid);
+    logger.setContext(() => ({ roomId: "C", surface: "slack" }));
+    logger.nextTurn();
+    logger.logRequest([], "m");
+    logger.logToolResult({
+      toolCallId: "t1", toolName: "bash", rawArguments: "{}",
+      output: "", success: true, durationMs: 1,
+    });
+    for (const e of readEntries(logger)) {
+      expect(e.roomId).toBe("C");
+      expect(e.surface).toBe("slack");
+    }
+  });
+
   it("プロバイダは書き込み時に評価される (run 中の Room/surface 変化を追従)", () => {
     const sid = "ctx2-" + Math.random().toString(36).slice(2);
     const logger = new LLMLogger("main", sid);
