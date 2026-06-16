@@ -77,6 +77,9 @@ export class ToolExecutor {
         success: false,
         output: "",
         error: permission.reason ?? "Permission denied",
+        // 権限拒否は同一 params で再試行しても結論が変わらない = 恒久失敗。 circuit-breaker が
+        // エラー文言の substring 一致に頼らず確実に早期打ち切りできるよう構造化して伝える。
+        errorKind: "permanent",
         abortExecution: permission.abortExecution,
       };
     }

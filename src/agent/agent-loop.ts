@@ -4,6 +4,7 @@ import { AgentEventBus, type TaskOutcome } from "./agent-events.js";
 import { getInteractionBridge } from "./interaction-bridge-registry.js";
 import { HarnessState, enrichToolResult } from "./harness-intervention.js";
 import { formatSelfCheck, rephraseUserIntent } from "./self-check-messages.js";
+import { isLikelyPermanentToolError } from "./tool-error-classification.js";
 import { globalTokenTracker } from "../cost/token-tracker.js";
 import { globalCostCalculator } from "../cost/cost-calculator.js";
 import { select } from "@inquirer/prompts";
@@ -599,11 +600,8 @@ export class AgentLoop {
       if (this._aborted) {
         // P4 (5.4): サーキットブレーカ起因の中断は、 generic な中断でなく「何が・なぜ恒久的に
         // 失敗したか」を最終応答として正直に届ける (silent な打ち切りにしない)。
-        // cast 必須: _circuitBreak は別メソッド(maybeDetectStuckLoop)で設定されるため、
-        // run() のフロー解析では null に絞り込まれてしまう。 宣言型に戻して判定する。
-        const cb = this._circuitBreak as { tool: string; error: string } | null;
+        const cb = this.takeCircuitBreak();
         if (cb) {
-          this._circuitBreak = null;
           const report =
             `⛔ ${cb.tool} が同じエラーで繰り返し失敗したため、処理を打ち切りました。\n` +
             `エラー: ${cb.error.slice(0, 300)}\n` +
@@ -1887,12 +1885,14 @@ export class AgentLoop {
   };
 
   /**
-   * P4: 「待っても直らない」恒久失敗か (401/認証/権限/forbidden 等)。 これらはリトライが
-   * 無意味なので早期に打ち切る (一過性の通信断などはリトライが有効なので含めない)。
+   * P4: サーキットブレーカの中断理由を読み取り、 同時に消費 (null クリア) する。
+   * メソッド戻り値は宣言型なので、 run() の「先頭で null 代入 → 別メソッドで設定」という
+   * フローでも型が `null` に絞り込まれず、 cast 無しで判定できる。
    */
-  private static isPermanentToolError(error: string): boolean {
-    const e = (error ?? "").toLowerCase();
-    return /\b401\b|\b403\b|invalid webhook token|unauthorized|forbidden|認証|権限確認がタイムアウト|permission denied/.test(e);
+  private takeCircuitBreak(): { tool: string; error: string } | null {
+    const cb = this._circuitBreak;
+    this._circuitBreak = null;
+    return cb;
   }
 
   /**
@@ -1906,7 +1906,11 @@ export class AgentLoop {
   private static readonly FAILURE_WINDOW = 10;
   /** P4: 一過性失敗でも同一失敗がこの回数続いたら run を打ち切る。 恒久失敗は2回目で打ち切る。 */
   private static readonly STUCK_ABORT_THRESHOLD = 5;
-  private maybeDetectStuckLoop(toolCall: ToolCall, errorMsg: string): void {
+  private maybeDetectStuckLoop(
+    toolCall: ToolCall,
+    errorMsg: string,
+    errorKind?: "permanent" | "transient",
+  ): void {
     const iteration = this.currentIteration;
     const signature = `${toolCall.function.name}:${toolCall.function.arguments ?? ""}`;
     // window 外の古いエントリを除去
@@ -1923,7 +1927,9 @@ export class AgentLoop {
     const occurrences = prior.length + 1;
     // P4 (5.4): サーキットブレーカ。 恒久失敗 (401/認証/権限) は 2 回目で、 一過性でも同一失敗が
     // STUCK_ABORT_THRESHOLD 回続いたら run を打ち切る。 助言注入だけで回し続ける旧挙動を是正。
-    const permanent = AgentLoop.isPermanentToolError(trimmedErr);
+    // 恒久判定は構造化フラグ (権限拒否等は errorKind="permanent") を優先し、 無ければ外部 HTTP
+    // 由来のエラー文字列ヒューリスティックで補う。
+    const permanent = errorKind === "permanent" || isLikelyPermanentToolError(trimmedErr);
     if (permanent || occurrences >= AgentLoop.STUCK_ABORT_THRESHOLD) {
       this._circuitBreak = { tool: toolCall.function.name, error: trimmedErr };
       this._aborted = true; // 進行中の生成も止め、 ループ先頭の中断チェックで報告して終了する
@@ -2270,7 +2276,7 @@ export class AgentLoop {
     // P0-A: 失敗時に sliding-window で「同じ轍」 を検出して self-check 注入
     if (!result.success) {
       const errMsg = (result.error ?? result.output ?? "").toString();
-      this.maybeDetectStuckLoop(toolCall, errMsg);
+      this.maybeDetectStuckLoop(toolCall, errMsg, result.errorKind);
     }
     // P1-A/B: bash 累積時間と plan/todo 過多を観測
     this.maybeWarnBashCumulative(toolCall, toolDurationMs);
@@ -2398,7 +2404,7 @@ export class AgentLoop {
         // P0-A: 並列ルートでも同じ sliding-window 失敗検出を適用
         if (!result.success) {
           const errMsg = (result.error ?? result.output ?? "").toString();
-          this.maybeDetectStuckLoop(toolCall, errMsg);
+          this.maybeDetectStuckLoop(toolCall, errMsg, result.errorKind);
         }
         // P1-A/B: 並列ルートでも bash 累積時間 / plan/todo 過多を観測
         this.maybeWarnBashCumulative(toolCall, durationMs);

@@ -5,6 +5,11 @@ export interface ToolResult {
   success: boolean;
   output: string;
   error?: string;
+  /**
+   * 失敗の種別 (P4 circuit-breaker 用)。 "permanent" = 同一 params で再試行しても結論が
+   * 変わらない恒久失敗 (権限拒否等)。 未指定 = 不明 (エラー文字列ヒューリスティックで判定)。
+   */
+  errorKind?: "permanent" | "transient";
   abortExecution?: boolean;
   /** ユーザー向け表示データ（LLMには送らない）。file_edit/file_writeのdiff表示等に使用 */
   userDisplay?: {
