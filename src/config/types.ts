@@ -179,7 +179,7 @@ export interface DiscordConfig {
   botToken?: string;        // Bot トークン (Gateway 接続・コマンド登録・follow-up 送信)
   interactionPort?: number; // [未使用] 旧 Endpoint 方式の HTTP ポート。 Gateway 方式移行で不要 (後方互換のため型に残す)
   listenEnabled?: boolean;  // 起動時に受信 (Gateway 接続) を自動開始するか
-  /** コマンド・確認ボタンを受け付けるユーザー ID。 未設定/空 = 全員 (確認ボタンは常に依頼者のみ) */
+  /** コマンド・確認ボタンを受け付けるユーザー ID。 未設定/空 = 全員拒否 (fail-closed, proposal §6)。 利用には設定が必須 */
   allowedUserIds?: string[];
   /** 権限確認ボタンのタイムアウト秒 (デフォルト 300。 ask_user はこの 2 倍) */
   interactionTimeoutSec?: number;
@@ -190,7 +190,7 @@ export interface SlackConfig {
   webhookUrl: string;         // 通知用Incoming Webhook URL
   botToken?: string;          // xoxb- Bot Token (Bolt用)
   appToken?: string;          // xapp- App-Level Token (Socket Mode用)
-  /** メッセージ・確認ボタンを受け付けるユーザー ID。 未設定/空 = 全員 (確認ボタンは常に依頼者のみ) */
+  /** メッセージ・確認ボタンを受け付けるユーザー ID。 未設定/空 = 全員拒否 (fail-closed, proposal §6)。 利用には設定が必須 */
   allowedUserIds?: string[];
   /** 権限確認ボタンのタイムアウト秒 (デフォルト 300。 ask_user はこの 2 倍) */
   interactionTimeoutSec?: number;

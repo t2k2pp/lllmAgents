@@ -93,6 +93,14 @@ export class DiscordInteractionServer implements InteractionBridge {
       throw new Error("Bot Token が未設定です。/integrations の Discord 連携メニューから設定してください。");
     }
 
+    // proposal §6 / fail-closed: allowedUserIds 未設定だと誰も受け付けない。 silent dead-bot を避けるため警告する。
+    if (!this.config.allowedUserIds || this.config.allowedUserIds.length === 0) {
+      console.warn(
+        "  [警告] discord.allowedUserIds が未設定です。 fail-closed のため誰のメッセージ・コマンドも受け付けません。\n" +
+        "         config の discord.allowedUserIds に許可するユーザー ID を設定してください。",
+      );
+    }
+
     this.gateway = new DiscordGatewayClient({
       botToken: this.config.botToken,
       onInteraction: (interaction) => void this.dispatchInteraction(interaction),
@@ -170,7 +178,9 @@ export class DiscordInteractionServer implements InteractionBridge {
 
   private isUserAllowed(userId: string): boolean {
     const allow = this.config.allowedUserIds;
-    if (!allow || allow.length === 0) return true;
+    // proposal §6: チャネル経由の受付は user ID allowlist を必須とする (fail-closed)。
+    // 未設定/空 = 誰も受け付けない。 start() で起動時警告を出す。
+    if (!allow || allow.length === 0) return false;
     return allow.includes(userId);
   }
 

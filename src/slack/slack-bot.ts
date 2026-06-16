@@ -103,6 +103,14 @@ export class SlackBot implements InteractionBridge {
       throw new Error("botToken と appToken が必要です（Socket Mode）");
     }
 
+    // proposal §6 / fail-closed: allowedUserIds 未設定だと誰も受け付けない。 silent dead-bot を避けるため警告する。
+    if (!this.config.allowedUserIds || this.config.allowedUserIds.length === 0) {
+      console.warn(
+        "  [警告] slack.allowedUserIds が未設定です。 fail-closed のため誰のメッセージも受け付けません。\n" +
+        "         config の slack.allowedUserIds に許可するユーザー ID を設定してください。",
+      );
+    }
+
     // Dynamic import to avoid requiring @slack/bolt when not in slack mode
     const { App, LogLevel } = await import("@slack/bolt");
 
@@ -161,7 +169,9 @@ export class SlackBot implements InteractionBridge {
 
   private isUserAllowed(userId: string): boolean {
     const allow = this.config.allowedUserIds;
-    if (!allow || allow.length === 0) return true;
+    // proposal §6: チャネル経由の受付は user ID allowlist を必須とする (fail-closed)。
+    // 未設定/空 = 誰も受け付けない。 start() で起動時警告を出す。
+    if (!allow || allow.length === 0) return false;
     return allow.includes(userId);
   }
 

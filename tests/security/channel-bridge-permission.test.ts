@@ -1,6 +1,14 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { SecurityConfig } from "../../src/config/types.js";
 import { PermissionManager } from "../../src/security/permission-manager.js";
+
+// 5.3 / proposal §2.5: 背景面 bash autorun は OS 封じ込めゲートを持つ。 封じ込め判定をモックして
+// 「封じ込め下のみ自動許可 / 未確立なら正直拒否」を検証する。 既定は false (非 macOS CI と同じ)。
+vi.mock("../../src/security/containment.js", () => ({
+  isBashNetworkContained: vi.fn(() => false),
+}));
+import { isBashNetworkContained } from "../../src/security/containment.js";
+
 import {
   setInteractionBridge,
   getInteractionBridge,
@@ -42,6 +50,7 @@ function mkBridge(decision: PermissionDecision | (() => Promise<PermissionDecisi
 
 beforeEach(() => {
   clearInteractionBridges();
+  vi.mocked(isBashNetworkContained).mockReturnValue(false); // 既定: 封じ込め無し
 });
 
 describe("interaction-bridge-registry", () => {
@@ -196,6 +205,46 @@ describe("checkToolPermission (channel + bridge)", () => {
     // 「ブリッジに到達して許可された」ことだけを検証する
     const r = await pm.checkToolPermission("bash", { command: "git push --force origin feature-x" }, "discord");
     expect(calls.length).toBe(1);
+    expect(r.allowed).toBe(true);
+  });
+
+  // 5.3 / proposal §2.5: bash autorun は OS 封じ込めゲートを持つ
+  it("autorun(既定) でも bash は封じ込め未確立なら自動実行せず正直拒否", async () => {
+    vi.mocked(isBashNetworkContained).mockReturnValue(false);
+    const pm = new PermissionManager(mkConfig()); // autorun 未指定=true
+    const r = await pm.checkToolPermission("bash", { command: "echo hi" }, "discord");
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toContain("封じ込め");
+    expect(r.reason).toContain("/permission discord-add bash");
+  });
+
+  it("封じ込め下なら安全な bash は autorun 自動許可", async () => {
+    vi.mocked(isBashNetworkContained).mockReturnValue(true);
+    const pm = new PermissionManager(mkConfig());
+    const r = await pm.checkToolPermission("bash", { command: "echo hi" }, "discord");
+    expect(r.allowed).toBe(true);
+  });
+
+  it("封じ込め下でも破壊的 bash (force push) は autorun 拒否", async () => {
+    vi.mocked(isBashNetworkContained).mockReturnValue(true);
+    const pm = new PermissionManager(mkConfig());
+    // feature ブランチへの force push は warn (block ではない) が破壊的 = autorun スコープ外。
+    const r = await pm.checkToolPermission("bash", { command: "git push --force origin feature-x" }, "discord");
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toContain("自動実行できません");
+  });
+
+  it("エスケープハッチ: autoApproveTools に bash を明示追加すれば封じ込め無しでも許可", async () => {
+    vi.mocked(isBashNetworkContained).mockReturnValue(false);
+    const pm = new PermissionManager(mkConfig({ discordAutoApproveTools: ["bash"] }));
+    const r = await pm.checkToolPermission("bash", { command: "echo hi" }, "discord");
+    expect(r.allowed).toBe(true);
+  });
+
+  it("autorun(既定) の sandbox 内 file_write は封じ込め非依存で許可 (bash 以外はゲートしない)", async () => {
+    vi.mocked(isBashNetworkContained).mockReturnValue(false);
+    const pm = new PermissionManager(mkConfig());
+    const r = await pm.checkToolPermission("file_write", { file_path: `${process.cwd()}/a.txt`, content: "x" }, "discord");
     expect(r.allowed).toBe(true);
   });
 });

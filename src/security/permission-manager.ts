@@ -312,9 +312,32 @@ export class PermissionManager {
 
     // 5.3 (R-2 権限側): 非同期面は人が15分以内に確認できず、同期ボタン確認は失効 interaction
     // token 経由で必ず 401 になる (徹夜暴走の権限側の原因)。 ここに到達 = deny/サンドボックス/
-    // 危険コマンド(block) は通過済み。 autorun ならその安全ガードを根拠に自動許可する。
+    // 危険コマンド(block) は通過済み。 autorun なら自動許可するが、
+    // proposal §2.5「封じ込めの保証を確認削減に交換する」に従い、 CLI autorun と同じ
+    // checkAutorunPermission ロジック (破壊的→拒否 / sandbox パス検査 / 読取・browser・web→許可) を
+    // 適用し、 bash は OS 封じ込め (isBashNetworkContained) が成立している面でのみ自動実行する。
     if (this.channelAutorun(source)) {
-      return { allowed: true };
+      // bash は封じ込め必須。 背景面はライブな対話フォールバックが無い (token 失効) ため、
+      // 封じ込めが無ければ silent block でなく正直な理由つきで拒否する。
+      if (toolName === "bash" && !isBashNetworkContained()) {
+        return {
+          allowed: false,
+          reason:
+            `${label}経由の bash は OS 封じ込め (sandbox) が未確立のため自動実行しません。` +
+            `封じ込めを有効化するか、 /permission ${source}-add bash で明示許可してください。`,
+        };
+      }
+      const autorunResult = this.checkAutorunPermission(toolName, params);
+      if (autorunResult !== null) {
+        return autorunResult;
+      }
+      // null = autorun スコープ外 (破壊的コマンド等)。 背景面は確認手段が無いので正直に拒否する。
+      return {
+        allowed: false,
+        reason:
+          `${label}経由では ${toolName} を自動実行できません (破壊的操作または確認が必要な操作)。` +
+          `/permission ${source}-add ${toolName} で明示許可してください。`,
+      };
     }
     // autorun 無効時のみ、 従来のブリッジ確認に退避する (対話可能な環境向け)。 ブリッジが無ければ拒否。
     const bridge = getInteractionBridge(source);

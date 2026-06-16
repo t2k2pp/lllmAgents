@@ -29,7 +29,7 @@
 
 - **5.1 (R-1)** 単一 sticky `currentSource` を廃し、権限/配信の解決時に「この run の実行コンテキスト（Room/面/ポリシー）」を都度引く。→ 決定1。
 - **5.2 (R-2 配信)** 返信を Bot Token `channels/{channelId}/messages` に統一。3秒 defer ack は維持（`interaction-server.ts:201-202`）。進捗はメッセージ PATCH。→ 決定4。
-- **5.3 (R-2 権限)** 背景面は同期確認を廃し Room 単位の事前承認ポリシー。未許可操作はブロック待ちでなく「正直に中断・報告」。サンドボックス/deny は維持。→ 決定2,3。
+- **5.3 (R-2 権限)** 背景面は同期確認を廃し autorun ポリシー。未許可操作はブロック待ちでなく「正直に中断・報告」。サンドボックス/deny は維持。`bash` は OS 封じ込めゲート、受付は user ID allowlist 必須（fail-closed）。→ 決定2,3。
 - **5.4 (R-3)** 同一(tool,error)が `FAILURE_WINDOW` 反復で run を打ち切り原因つきで報告。恒久失敗（401/認証/権限）は早期 abort。
 - **5.5 (R-4)** 各 jsonl レコードに `roomId`/`surface` を付与（5.1 と同じ情報源）。
 - **5.6 (R-5)** 配達をサーフェス能力で選択（添付優先→分割）。実配達結果（成功/失効/切捨）をツール結果でモデルへ返す。
@@ -47,6 +47,7 @@
 - **P2 `5.2` Bot Token 配信 = 済**（`interaction-server.ts` postChannelMessage で channels/{id}/messages 送信。3秒 defer ack 維持＋@original 固定 ack。Slack は元々 bot token 配信で対象外）。
   - **P2-fix（2026-06-16）**: チャネルコマンド（`/clear` `/context` `/status` `/todo` `/help` `/room`）は結果を別チャンネルメッセージで返していたため deferred ack（@original）が「考え中...」のまま残っていた。コマンドは短時間（15分 token 失効は無関係）なので結果を `sendFollowUp` で @original に編集して返すよう修正。出力が 2000 字を超える場合は @original を畳んでファイル添付で全文配達（silent loss と placeholder 残りの両方を回避）。
 - **P3 `5.3` 権限ポリシー = 済**（`permission-manager.ts` 背景面 autorun。SecurityConfig.discord/slackAutorun 既定 true。deny/サンドボックス/危険block 通過を根拠に自動許可、doomed ボタン廃止。autorun 無効時のみ従来ブリッジ）。
+  - **P3-hardening（2026-06-16）**: レビューで fail-open 連鎖を検出し是正。(A) 背景面 autorun を CLI と同じ `checkAutorunPermission` 経由に統一し、`bash` は `isBashNetworkContained()`（OS 封じ込め）が成立する面でのみ自動実行。封じ込め未確立 or 破壊的コマンドは silent block でなく正直拒否（proposal §2.5「封じ込めの保証を確認削減に交換」を厳守）。明示 `discord/slackAutoApproveTools` への `bash` 追加が唯一の opt-in。(B) `isUserAllowed` を fail-open→fail-closed に変更（proposal §6「allowlist 必須」）。`allowedUserIds` 空時は起動時に警告を出し silent dead-bot を回避。`tests/security/channel-bridge-permission.test.ts` に封じ込めゲート/破壊的拒否/opt-in を追加。
 - **P4 `5.4` stuck-loop 遮断 = 済**（`agent-loop.ts` _circuitBreak。恒久失敗(401/認証/権限)=2回目、一過性=5回で run 打ち切り＋正直報告）。
 - **P5 `5.1` 実行コンテキスト化 = 案B採用により実質充足**（権限は checkToolPermission が currentSource を毎回読む／ログは P1 が決定時に読む＝決定時点で実行コンテキストを引いている。doomed ループは P3/P4 で消滅。案A 専用の「走行中 run の live re-source」は対象外＝未実装）。
 - **P6 `5.6` 配達抽象 = 一部済**（大容量応答をファイル添付で配達＝済。「配達結果を run に feedback するループ」は P2 で配達が確実に成功するようになったため優先度低＝未実装）。
@@ -55,7 +56,7 @@
 ## 決定が要る（実装ブロッカー）
 
 1. 走行中 run() を REPL が救出できるようにするか。案A=実行中 run の配達先/権限を差し替え可 / 案B=触らず明示中断→REPL source で再開。
-2. 背景面 auto-approve の既定範囲（`file_write`/`bash` をサンドボックス内限定で許可する等）。
+2. ~~背景面 auto-approve の既定範囲~~ → **確定（2026-06-16, P3-hardening）**: file 操作・読取・browser/web は sandbox パス検査内で autorun 許可。`bash` は OS 封じ込め（`isBashNetworkContained()`）成立時のみ自動実行し、未確立なら正直拒否。破壊的コマンドは封じ込め下でも autorun スコープ外として拒否。封じ込め無しで bash が要る場合は明示 allowlist で opt-in。
 3. 「恒久失敗」判定（401/認証/権限恒久を即 abort 対象に含めるか）。
 4. 進捗表示をメッセージ PATCH 更新にするか追記型にするか。
 
