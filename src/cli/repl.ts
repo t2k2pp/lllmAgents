@@ -744,7 +744,8 @@ export class REPL {
           console.log(chalk.yellow("  ⚠ アクティブなプロファイルがありません。/image use <name> で選択してください。"));
         }
       }
-      console.log(chalk.dim("  使い方: /image on|off | setup <type> | use <name> | list | remove <name> | test | gen <prompt>"));
+      console.log(chalk.dim("  使い方: /image on|off | setup [type] | use <name> | list | remove <name> | test | gen <prompt>"));
+      console.log(chalk.dim("  ヒント: /image setup を引数なしで実行するとバックエンド候補 (Azure / SD-WebUI / ComfyUI) から選べます。"));
       console.log();
     };
 
@@ -758,7 +759,7 @@ export class REPL {
 
       case "on": {
         if (ig.profiles.length === 0) {
-          console.log(chalk.yellow("  プロファイルがありません。先に /image setup <azure|sd-webui|comfyui> で追加してください。"));
+          console.log(chalk.yellow("  プロファイルがありません。先に /image setup で追加してください (引数なしで候補から選択)。"));
           break;
         }
         ig.enabled = true;
@@ -792,9 +793,30 @@ export class REPL {
           "comfyui": "comfyui",
           "comfy": "comfyui",
         };
-        const providerType = typeMap[type];
+        let providerType: ImageProviderType | undefined = typeMap[type];
+        if (!providerType && !type) {
+          // 引数なし → プロバイダー候補メニューを提示して選んでもらう
+          try {
+            providerType = await select<ImageProviderType>({
+              message: "画像生成バックエンドを選択してください:",
+              choices: [
+                new Separator("── クラウド ──"),
+                { name: "Azure OpenAI GPT Images (gpt-image 系)", value: "azure-image" },
+                new Separator("── ローカル / セルフホスト ──"),
+                { name: "Stable Diffusion WebUI (AUTOMATIC1111)", value: "sd-webui" },
+                { name: "ComfyUI (ワークフローテンプレート対応)", value: "comfyui" },
+              ],
+            });
+          } catch (e) {
+            if (e instanceof Error && e.message.includes("User force closed")) {
+              console.log(chalk.yellow("\n  セットアップを中止しました。"));
+              break;
+            }
+            throw e;
+          }
+        }
         if (!providerType) {
-          console.log(chalk.yellow("  使い方: /image setup <azure|sd-webui|comfyui>"));
+          console.log(chalk.yellow("  使い方: /image setup [azure|sd-webui|comfyui]  (引数なしで候補から選択)"));
           break;
         }
         await this.setupImageProfile(providerType);
@@ -878,7 +900,7 @@ export class REPL {
       }
 
       default: {
-        console.log(chalk.yellow("  使い方: /image [on|off|setup <type>|use <name>|list|remove <name>|test|gen <prompt>]"));
+        console.log(chalk.yellow("  使い方: /image [on|off|setup [type]|use <name>|list|remove <name>|test|gen <prompt>]"));
         break;
       }
     }

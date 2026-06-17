@@ -276,7 +276,7 @@ export const BUILTIN_IMAGE_PRICING: Record<string, Record<Quality, number>> = {
 |---|---|
 | `/image` | 状態表示（enabled / active / profiles 一覧 / ツール登録状態） |
 | `/image on` / `off` | 機能トグル + ツール即時 register/unregister + saveConfig |
-| `/image setup <azure\|sd-webui\|comfyui>` | 対話ウィザードで profile 追加（/model setup と同じ inquirer 流儀、Azure は endpoint 正規化 + apiKey 保護入力） |
+| `/image setup [azure\|sd-webui\|comfyui]` | 対話ウィザードで profile 追加（/model setup と同じ inquirer 流儀、Azure は endpoint 正規化 + apiKey 保護入力）。**引数なしで実行するとバックエンド候補メニューから選択**（2026-06-17 — 引数必須でプロバイダー名を知らないと辿り着けない問題を解消）。プロバイダー名の直接指定はメニューを飛ばすショートカット |
 | `/image use <name>` | アクティブ profile 切替 + saveConfig |
 | `/image list` | profiles 一覧（active マーク付き） |
 | `/image remove <name>` | profile 削除（active だった場合は active クリア） |
