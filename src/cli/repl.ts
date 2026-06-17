@@ -744,7 +744,7 @@ export class REPL {
           console.log(chalk.yellow("  ⚠ アクティブなプロファイルがありません。/image use <name> で選択してください。"));
         }
       }
-      console.log(chalk.dim("  使い方: /image on|off | setup [type] | use <name> | list | remove <name> | test | gen <prompt>"));
+      console.log(chalk.dim("  使い方: /image on|off | setup [type] | set | use <name> | list | remove <name> | test | gen <prompt>"));
       console.log(chalk.dim("  ヒント: /image setup を引数なしで実行するとバックエンド候補 (Azure / SD-WebUI / ComfyUI) から選べます。"));
       console.log();
     };
@@ -864,6 +864,66 @@ export class REPL {
         break;
       }
 
+      case "set": {
+        const active = this.imageService.getActiveProfile();
+        if (!active) {
+          console.log(chalk.yellow("  アクティブなプロファイルがありません。/image use <name> で選択してください。"));
+          break;
+        }
+        // getActiveProfile() の戻り値は複製の可能性があるため、保存対象は ig.profiles 内の実体を掴む
+        const profile = ig.profiles.find((p) => p.name === active.name);
+        if (!profile) {
+          console.log(chalk.red(`  プロファイル "${active.name}" が config 内に見つかりません。`));
+          break;
+        }
+
+        // ① 品質を先に選ぶ (Azure のみ意味を持つ。ローカルは品質課金なしのためスキップ)
+        if (profile.providerType === "azure-image") {
+          const quality = await select({
+            message: `既定品質を選択 (現在: ${profile.defaultQuality ?? "medium"}):`,
+            choices: [
+              { name: "low (約$0.006/枚)", value: "low" },
+              { name: "medium (約$0.05/枚) — 推奨", value: "medium" },
+              { name: "high (約$0.21/枚)", value: "high" },
+            ],
+            default: profile.defaultQuality ?? "medium",
+          });
+          profile.defaultQuality = quality as "low" | "medium" | "high";
+        } else {
+          console.log(chalk.dim(`  (${profile.providerType} は品質課金がないため解像度のみ設定します)`));
+        }
+
+        // ② 選んだ品質を踏まえて解像度を選ぶ (正方形 / 横長 / 縦長 / カスタム)
+        const presets = ["1024x1024", "1536x1024", "1024x1536"];
+        const currentSize = profile.defaultSize ?? "1024x1024";
+        const sizeChoice = await select({
+          message: `既定解像度を選択 (現在: ${currentSize}):`,
+          choices: [
+            { name: "正方形    1024x1024", value: "1024x1024" },
+            { name: "横長      1536x1024", value: "1536x1024" },
+            { name: "縦長      1024x1536", value: "1024x1536" },
+            { name: "カスタム  (WxH を入力)", value: "custom" },
+          ],
+          default: presets.includes(currentSize) ? currentSize : "custom",
+        });
+        let size = sizeChoice;
+        if (sizeChoice === "custom") {
+          size = (await input({
+            message: "解像度 WxH (例: 1024x1024):",
+            default: presets.includes(currentSize) ? "1024x1024" : currentSize,
+            validate: (v: string) =>
+              /^\d{2,5}x\d{2,5}$/i.test(v.trim()) || "WxH 形式で入力してください (例: 1024x1024)",
+          })).trim().toLowerCase();
+        }
+        profile.defaultSize = size;
+
+        this.config.imageGen = ig;
+        saveConfig(this.config);
+        const qLabel = profile.providerType === "azure-image" ? `品質=${profile.defaultQuality} / ` : "";
+        console.log(chalk.green(`  ✓ "${profile.name}" の既定を更新しました (${qLabel}解像度=${profile.defaultSize})。API Key は変更していません。`));
+        break;
+      }
+
       case "test": {
         const active = this.imageService.getActiveProfile();
         if (!active) {
@@ -900,7 +960,7 @@ export class REPL {
       }
 
       default: {
-        console.log(chalk.yellow("  使い方: /image [on|off|setup [type]|use <name>|list|remove <name>|test|gen <prompt>]"));
+        console.log(chalk.yellow("  使い方: /image [on|off|setup [type]|set|use <name>|list|remove <name>|test|gen <prompt>]"));
         break;
       }
     }
@@ -965,6 +1025,7 @@ export class REPL {
 
       profile.model = (await input({
         message: "Deployment 名 (例: gpt-image-2):",
+        default: "gpt-image-2",
         validate: (v: string) => v.trim().length > 0 || "deployment 名は必須です",
       })).trim();
 

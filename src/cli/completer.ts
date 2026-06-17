@@ -123,6 +123,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/image on", description: "画像生成機能を有効化 (image_generate ツール登録)" },
   { command: "/image off", description: "画像生成機能を無効化 (ツール解除)" },
   { command: "/image setup", description: "プロファイル追加 (azure | sd-webui | comfyui)", needsArg: true },
+  { command: "/image set", description: "既定の品質・解像度を変更 (API Key は触らず対話選択)" },
   { command: "/image use", description: "アクティブプロファイルを切替", needsArg: true },
   { command: "/image list", description: "プロファイル一覧を表示" },
   { command: "/image remove", description: "プロファイルを削除", needsArg: true },

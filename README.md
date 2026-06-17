@@ -101,7 +101,7 @@ $ npm start
 | `/skills` | 利用可能なスキル一覧 |
 | `/status` | 全体ステータス（モデル・コンテキスト・タスク等） |
 | `/cost` | セッションのトークン使用量・コスト表示（画像生成コスト含む） |
-| `/image` | 画像生成の設定・実行 (`on` / `off` / `setup <azure\|sd-webui\|comfyui>` / `use <name>` / `list` / `test` / `gen <prompt>`) |
+| `/image` | 画像生成の設定・実行 (`on` / `off` / `setup <azure\|sd-webui\|comfyui>` / `set` (既定の品質・解像度のみ変更) / `use <name>` / `list` / `test` / `gen <prompt>`) |
 | `/autorun` | Autorunモード切替（非破壊操作の自動許可） |
 | `/compress-input` | 入力圧縮モード切替（project指示/メモが閾値超過時に意図保持で圧縮、縮まなければ原文、既定OFF） |
 | `/parallel` | 並列ツール実行数の設定 |

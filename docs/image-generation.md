@@ -277,6 +277,7 @@ export const BUILTIN_IMAGE_PRICING: Record<string, Record<Quality, number>> = {
 | `/image` | 状態表示（enabled / active / profiles 一覧 / ツール登録状態） |
 | `/image on` / `off` | 機能トグル + ツール即時 register/unregister + saveConfig |
 | `/image setup [azure\|sd-webui\|comfyui]` | 対話ウィザードで profile 追加（/model setup と同じ inquirer 流儀、Azure は endpoint 正規化 + apiKey 保護入力）。**引数なしで実行するとバックエンド候補メニューから選択**（2026-06-17 — 引数必須でプロバイダー名を知らないと辿り着けない問題を解消）。プロバイダー名の直接指定はメニューを飛ばすショートカット |
+| `/image set` | アクティブ profile の既定 `defaultQuality` / `defaultSize` のみを対話選択で更新（**API Key は再入力しない**）。①品質を先に選び（Azure のみ。low/medium/high）→ ②解像度を選ぶ（正方形 1024x1024 / 横長 1536x1024 / 縦長 1024x1536 / カスタム WxH） |
 | `/image use <name>` | アクティブ profile 切替 + saveConfig |
 | `/image list` | profiles 一覧（active マーク付き） |
 | `/image remove <name>` | profile 削除（active だった場合は active クリア） |
