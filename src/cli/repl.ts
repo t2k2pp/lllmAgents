@@ -42,7 +42,7 @@ import { formatTaskReport } from "../agent/task-reporter.js";
 import { maybePromoteToGoal, extractAcceptanceCriteria } from "../agent/goal-promotion.js";
 import { DiscordInteractionServer } from "../discord/interaction-server.js";
 import { registerAskCommand } from "../discord/slash-commands.js";
-import { select, input, password, confirm, checkbox } from "@inquirer/prompts";
+import { select, input, password, confirm, checkbox, Separator } from "@inquirer/prompts";
 import { CredentialVault } from "../security/credential-vault.js";
 import { AzureFoundryProvider } from "../providers/azure-foundry.js";
 import { AzureAnthropicProvider } from "../providers/azure-anthropic.js";
@@ -3319,6 +3319,35 @@ export class REPL {
    * /model setup (引数なし or "local") — ローカル系LLMの対話ウィザード。
    * npm run setup と同じプロンプト体系で provider/host/port/model/ctx/特性 を一括再設定する。
    */
+  /**
+   * `/model setup` を引数なしで実行したときに、 セットアップ対象プロバイダーを
+   * 候補一覧から選んでもらう。 選択された provider キー (ローカルは "local") を返す。
+   * Ctrl+C は呼び出し側で "User force closed" として catch される。
+   */
+  private async chooseSetupProvider(): Promise<string | null> {
+    const choice = await select<string>({
+      message: "セットアップする LLM を選択してください:",
+      pageSize: 20,
+      choices: [
+        new Separator("── ローカル / セルフホスト ──"),
+        { name: "ローカルLLM (ollama / lmstudio / llamacpp / vllm)", value: "local" },
+        new Separator("── クラウド: Anthropic Claude ──"),
+        { name: "Anthropic API (Claude 直接, ANTHROPIC_API_KEY)", value: "anthropic" },
+        { name: "Claude Code CLI (claude login, tool calling 不可)", value: "claude-cli" },
+        { name: "Claude Agent SDK (claude login, tool calling 対応)", value: "claude-agent-sdk" },
+        new Separator("── クラウド: Google ──"),
+        { name: "Google AI Studio (Gemini, GEMINI_API_KEY)", value: "gemini" },
+        new Separator("── クラウド: Azure ──"),
+        { name: "Azure Claude — Anthropic Messages API", value: "azure-anthropic" },
+        { name: "Azure OpenAI — Chat Completions API", value: "azure-openai" },
+        { name: "Azure OpenAI — Responses API (gpt-5 / codex 系)", value: "azure-gpt" },
+        { name: "Azure Claude — OpenAI 互換ルート", value: "azure-claude" },
+        { name: "Azure AI Foundry (Kimi / Mistral 等)", value: "azure-foundry" },
+      ],
+    });
+    return choice ?? null;
+  }
+
   private async handleModelSetupLocal(): Promise<void> {
     const cur = this.config.mainLLM;
     const isCloud = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic"]
@@ -4791,9 +4820,26 @@ export class REPL {
             console.log(chalk.green(`  実行時に反映しました。`));
           }
         } else if (args[0] === "setup") {
-          const targetProvider = args[1]?.trim();
-          if (!targetProvider || targetProvider === "local") {
-            // 引数なし or "local" → ローカル系ウィザード (npm run setup と同等の流れ)
+          let targetProvider = args[1]?.trim();
+          if (!targetProvider) {
+            // 引数なし → プロバイダー候補メニューを提示して選んでもらう
+            try {
+              const picked = await this.chooseSetupProvider();
+              if (!picked) {
+                console.log(chalk.yellow("  セットアップを中止しました。"));
+                return;
+              }
+              targetProvider = picked;
+            } catch (e) {
+              if (e instanceof Error && e.message.includes("User force closed")) {
+                console.log(chalk.yellow("\n  セットアップを中止しました。"));
+                return;
+              }
+              throw e;
+            }
+          }
+          if (targetProvider === "local") {
+            // "local" → ローカル系ウィザード (npm run setup と同等の流れ)
             await this.handleModelSetupLocal();
           } else if (
             targetProvider === "azure-openai" ||

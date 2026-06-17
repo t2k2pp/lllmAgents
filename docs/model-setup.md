@@ -29,8 +29,11 @@ llamacpp で複数モデルを別ポートで起動する運用 (8080 以外を�
 ## 方針
 
 1. **REPL から設定ウィザードを呼び出せるようにする** — `/model setup` (引数なし) で
-   `npm run setup` 相当のローカル系再設定フローを起動。 既存の `/model setup azure-*`
-   と同じ命名体系。
+   プロバイダー候補メニューを表示し、ローカル系/クラウド系 (Anthropic/Gemini/Azure)
+   を選んでセットアップフローを起動。 `local` を選べば `npm run setup` 相当のローカル系
+   再設定フローへ。 `/model setup azure-*` 等の直接指定はメニューを飛ばすショートカット
+   として維持 (2026-06-17 — 当初は引数なし=ローカル固定だったが、クラウド系に辿り着け
+   ないとの指摘を受けメニュー化)。
 2. **表記揺れを解消する** — wizard が「ホスト or IP」 + 「ポート」 を別々に聞く以上、
    REPL 側も同じ単位で設定できるべき。 `/model url` (URL一括) は誤解を招くので
    `/model host <IPまたはホスト名>` + `/model port <番号>` に分離。
@@ -41,8 +44,9 @@ llamacpp で複数モデルを別ポートで起動する運用 (8080 以外を�
 
 | コマンド | 役割 |
 |---------|-----|
-| `/model setup` | ローカル系LLMをウィザードで再設定 (provider/host/port/model 一括) |
-| `/model setup azure-foundry` 他 | Azure 系の対話セットアップ (既存) |
+| `/model setup` | **プロバイダー候補メニュー**を表示し、ローカル/クラウド (Anthropic/Gemini/Azure) を選んでセットアップ (2026-06-17)。 `local` 選択でローカル系ウィザードへ |
+| `/model setup local` | ローカル系LLMをウィザードで再設定 (provider/host/port/model 一括) |
+| `/model setup azure-foundry` 他 | Azure 系の対話セットアップ (既存。 直接プロバイダー指定でメニューを飛ばせる) |
 | `/model setup anthropic` | Anthropic API (api.anthropic.com) を対話セットアップ (2026-05-18) |
 | `/model setup claude-cli` | Claude Code CLI (`claude -p`) を対話セットアップ (2026-05-18)。 詳細: `docs/claude-providers.md` |
 | `/model setup gemini` | Google AI Studio (Gemini API) を対話セットアップ (2026-05-24)。 詳細: `docs/gemini-aistudio-provider.md` |
