@@ -1,5 +1,8 @@
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
 import type { ImageService } from "../../image/image-service.js";
+import type { Config } from "../../config/types.js";
+import { sendDiscordFiles } from "../../utils/discord.js";
+import * as logger from "../../utils/logger.js";
 
 /**
  * image_generate ツール: テキストプロンプトから画像を生成してファイル保存する。
@@ -7,8 +10,10 @@ import type { ImageService } from "../../image/image-service.js";
  *
  * 登録ゲート: config.imageGen.enabled かつ active profile があるときのみ登録
  * (browser ゲートと同型。無効時はツールが見えない＝エージェントが無駄試行しない)。
+ *
+ * config は Discord 自動添付の判定に使う (ライブ参照: /discord 切替が即反映される)。
  */
-export function createImageGenerateTool(imageService: ImageService): ToolHandler {
+export function createImageGenerateTool(imageService: ImageService, config: Config): ToolHandler {
   return {
     name: "image_generate",
     definition: {
@@ -80,6 +85,10 @@ export function createImageGenerateTool(imageService: ImageService): ToolHandler
           outputPath,
         );
 
+        // Discord 自動添付 (ベストエフォート: 失敗してもツールは成功扱い)。
+        // 設定はライブ参照し、有効時のみ生成画像を webhook に添付する。
+        await maybeSendToDiscord(config, prompt, result);
+
         const lines = [
           `画像を生成しました (${result.providerType} / ${result.model}):`,
           ...result.savedPaths.map((p) => `  ${p}`),
@@ -92,4 +101,33 @@ export function createImageGenerateTool(imageService: ImageService): ToolHandler
       }
     },
   };
+}
+
+/** プロンプトを添付メッセージ用に短く切り詰める */
+function truncatePrompt(prompt: string, max = 300): string {
+  const oneLine = prompt.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? oneLine.slice(0, max - 1) + "…" : oneLine;
+}
+
+/**
+ * 生成画像を Discord webhook に添付する (ベストエフォート)。
+ * 有効条件: discord.enabled && webhookUrl があり、attachGeneratedImages が false でない。
+ * 失敗は警告ログのみ (画像生成自体は成功しているため、ツール結果には影響させない)。
+ */
+async function maybeSendToDiscord(
+  config: Config,
+  prompt: string,
+  result: { savedPaths: string[]; providerType: string; model: string },
+): Promise<void> {
+  const dc = config.discord;
+  if (!dc?.enabled || !dc.webhookUrl) return;
+  if (dc.attachGeneratedImages === false) return;
+  if (result.savedPaths.length === 0) return;
+
+  try {
+    const caption = `🖼 画像を生成しました (${result.providerType}/${result.model})\nprompt: ${truncatePrompt(prompt)}`;
+    await sendDiscordFiles(dc.webhookUrl, caption, result.savedPaths, dc.maxAttachmentMb);
+  } catch (e) {
+    logger.warn(`Discord への画像添付でエラー (無視して続行): ${e}`);
+  }
 }

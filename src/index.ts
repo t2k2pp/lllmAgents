@@ -218,7 +218,7 @@ async function main(): Promise<void> {
   const imageService = new ImageService(config, sharedPassphrase);
   if (config.imageGen) {
     if (imageService.isEnabled()) {
-      toolRegistry.register(createImageGenerateTool(imageService));
+      toolRegistry.register(createImageGenerateTool(imageService, config));
     } else {
       console.log(
         chalk.dim("ℹ 画像生成機能 (image_generate) は無効: /image on または /image setup で有効化"),

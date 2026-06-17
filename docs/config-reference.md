@@ -370,8 +370,12 @@ API キー不要 (claude CLI 側の `claude login` 済みセッションを再�
 |------|-----|------|
 | `enabled` | boolean | 通知の有効/無効 |
 | `webhookUrl` | string | Discord Webhook URL |
+| `attachGeneratedImages` | boolean | `image_generate` で生成した画像を webhook に自動添付するか（未設定/`true`=添付、`false`=無効）。docs/image-generation.md |
+| `maxAttachmentMb` | number | 添付画像の目標サイズ上限（MB、デフォルト 8）。超過する画像はコードで自動縮小してから添付する（オリジナルは無加工） |
 
 CLI からは `/integrations` (短縮: `/intg`) → Discord の picker で対話設定 (canonical)。 旧 `/discord url <URL>` → `/discord enable` → `/discord test` も dispatcher 互換のため動作する。
+
+生成画像の自動添付: `enabled` かつ `webhookUrl` 設定済みで `attachGeneratedImages` が `false` でなければ、`image_generate` の完了ごとに生成画像を Discord へ添付投稿する。サイズ上限を超える画像は「リサイズ優先 → 必要時のみ JPEG 変換」でコード側が自動縮小する（生成 AI には縮小させない）。
 
 ### Slash Command受信（オプション）
 

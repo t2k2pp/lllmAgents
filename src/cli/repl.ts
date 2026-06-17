@@ -711,7 +711,7 @@ export class REPL {
     const registered = registry.get("image_generate") !== undefined;
     const shouldRegister = this.imageService.isEnabled();
     if (shouldRegister && !registered) {
-      registry.register(createImageGenerateTool(this.imageService));
+      registry.register(createImageGenerateTool(this.imageService, this.config));
     } else if (!shouldRegister && registered) {
       registry.unregister("image_generate");
     }

@@ -183,6 +183,17 @@ export interface DiscordConfig {
   allowedUserIds?: string[];
   /** 権限確認ボタンのタイムアウト秒 (デフォルト 300。 ask_user はこの 2 倍) */
   interactionTimeoutSec?: number;
+  /**
+   * image_generate で生成した画像を webhook に自動添付するか (既定 true)。
+   * false で添付を無効化 (テキスト通知は従来どおり)。docs/image-generation.md
+   */
+  attachGeneratedImages?: boolean;
+  /**
+   * 添付画像の目標サイズ上限 (MB、既定 8)。これを超える画像はコードで自動縮小してから
+   * 添付する (オリジナルは無加工)。Discord のアップロード上限はサーバの boost で変わるため、
+   * 安全側の既定値を採用している。
+   */
+  maxAttachmentMb?: number;
 }
 
 export interface SlackConfig {
