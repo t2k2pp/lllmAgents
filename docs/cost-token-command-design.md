@@ -150,6 +150,17 @@ window=全ファイルを `timestamp >= windowStartAt` で抽出、session=in-me
 | `/cost today` \| `yesterday` \| `month` \| `lastmonth` \| `all` \| `session` \| `YYYY-MM-DD` \| `YYYY-MM` | サマリを指定期間で |
 | `/cost reset` | windowStartAt をリセット（履歴 jsonl は消さない。過去は `/cost all` や日付指定で参照可） |
 | `/cost export [csv\|jsonl] [period]` | `~/.localllm/usage/exports/` に出力 |
+| `/cost rate <円>` | 為替レート（1ドルあたりの円）を設定。以降コスト表示が **円のみ** に切り替わる |
+| `/cost rate` | 現在の為替レートを表示（未設定ならドル表示中の旨） |
+| `/cost rate off` | 為替レートをリセットし **ドル表示** に戻す（`reset` / `none` / `0` も同義） |
+
+### 5.0.1 為替レート（ドル⇔円の表示切替）
+
+- 設定値は `config.jpyPerUsd`（1ドルあたりの円。任意項目、`saveConfig` で永続化）。
+- **表示はどちらか一方**。レート設定時は円のみ（`¥1,234`、`Math.round(usd * jpyPerUsd)` を桁区切り表示）、
+  未設定時は従来どおりドルのみ（`$0.1234`）。両方併記はしない。整形は `cost-view.ts` の
+  `fmtMoney(usd, jpyPerUsd?)` に一元化し、`/cost` 各表示とセッション終了サマリの estimated 行で共有する。
+- 単価列（`単価(in/out $/M)`）は USD 据え置き。レート設定時は cost 列ヘッダのみ `cost(¥)` と明示する。
 
 ### 5.1 表示モック（`/cost models`）
 
@@ -168,7 +179,7 @@ window=全ファイルを `timestamp >= windowStartAt` で抽出、session=in-me
 ## 6. 補完（completer.ts）
 
 `BUILTIN_COMMAND_DEFS` に `/cost`（と `/token`）を追加。`/status` 集約の注記は残しつつ
-「`/cost` は詳細表示として復活」を明記。サブコマンド（models/providers/reset/export/today/
+「`/cost` は詳細表示として復活」を明記。サブコマンド（models/providers/reset/export/rate/today/
 month/all/session）は `/loop` 等と同様にサブコマンド補完を実装（completer のサブコマンド機構に追従）。
 
 ## 7. 実装フェーズ

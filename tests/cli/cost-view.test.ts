@@ -40,6 +40,16 @@ describe("cost-view formatSummary", () => {
     expect(out).toContain("$0.1000"); // grand cost
     expect(out).toContain("(90%)"); // gpt-5.4 のコスト比
   });
+
+  it("jpyPerUsd 指定時はドルを出さず円のみ表示する", () => {
+    const records = [
+      rec({ model: "gpt-5.4", estimatedCostUsd: 0.09, inputTokens: 1000, outputTokens: 100 }),
+      rec({ model: "gemini-3-flash", estimatedCostUsd: 0.01, inputTokens: 500, outputTokens: 50 }),
+    ];
+    const out = text(formatSummary(SESSION, records, 150));
+    expect(out).toContain("¥15"); // grand 0.10 USD * 150 = ¥15
+    expect(out).not.toContain("$0.1000"); // ドルは併記しない
+  });
 });
 
 describe("cost-view formatModels", () => {
@@ -56,6 +66,15 @@ describe("cost-view formatModels", () => {
     expect(out).toContain("単価未登録: totally-fake-model-xyz");
     expect(out).toContain("算出: cost =");
     expect(out).toContain("合計");
+  });
+
+  it("jpyPerUsd 指定時は cost 列ヘッダが cost(¥) になり円表示する", () => {
+    const out = text(
+      formatModels(SESSION, [rec({ model: "gpt-5.4", estimatedCostUsd: 0.02 })], 150),
+    );
+    expect(out).toContain("cost(¥)");
+    expect(out).toContain("¥3"); // 0.02 USD * 150 = ¥3
+    expect(out).toContain("2.50 / 15.00"); // 単価列は USD 据え置き
   });
 });
 

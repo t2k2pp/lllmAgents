@@ -396,6 +396,12 @@ export interface Config {
   imageGen?: ImageGenConfig;
   /** true: テキストをリアルタイムにストリーミング表示。false(デフォルト): スピナー+完了後Markdownレンダリング */
   streamingDisplay?: boolean;
+  /**
+   * コスト表示の日本円換算レート (1ドルあたりの円)。未設定ならドルのみ表示。
+   * 設定すると /cost 表示やセッション終了サマリのコストが円のみ表示に切り替わる。
+   * REPL `/cost rate <数値>` で設定、`/cost rate off` でリセット。
+   */
+  jpyPerUsd?: number;
   /** ツールの最大並列実行数（デフォルト: 3）。vLLM KVキャッシュやリソースに合わせて調整 */
   maxParallelTools?: number;
   /** 自律実行モード（再起動後も維持） */

@@ -22,6 +22,17 @@ function fmtUsd(n: number): string {
   return "$" + n.toFixed(4);
 }
 
+/**
+ * コスト金額を整形する。 jpyPerUsd (1ドルあたりの円) が設定されていれば「円のみ」、
+ * 未設定ならドルのみを返す (どちらか一方。 設計: docs/cost-token-command-design.md)。
+ */
+export function fmtMoney(usd: number, jpyPerUsd?: number): string {
+  if (jpyPerUsd && jpyPerUsd > 0) {
+    return "¥" + Math.round(usd * jpyPerUsd).toLocaleString();
+  }
+  return fmtUsd(usd);
+}
+
 function fmtDate(iso?: string): string {
   if (!iso) return "(記録なし)";
   const d = new Date(iso);
@@ -73,6 +84,7 @@ function windowHeaderLine(agg: UsageAggregate): string {
 export function formatSummary(
   period: PeriodSpec,
   sessionRecords: readonly TokenUsageRecord[],
+  jpyPerUsd?: number,
 ): string[] {
   const agg = aggregate(period, "model", sessionRecords);
   const g = agg.grand;
@@ -89,7 +101,7 @@ export function formatSummary(
   out.push(
     chalk.dim(
       `  Requests: ${g.recordCount}  /  in=${fmtTok(g.inputTokens)}  out=${fmtTok(g.outputTokens)}` +
-        `  cached=${fmtTok(g.cachedTokens)}  /  estimated: ${chalk.white(fmtUsd(g.costUsd))}`,
+        `  cached=${fmtTok(g.cachedTokens)}  /  estimated: ${chalk.white(fmtMoney(g.costUsd, jpyPerUsd))}`,
     ),
   );
   const top = agg.rows.slice(0, 3);
@@ -97,7 +109,7 @@ export function formatSummary(
     out.push(chalk.dim("  上位モデル:"));
     for (const r of top) {
       const pct = g.costUsd > 0 ? Math.round((r.costUsd / g.costUsd) * 100) : 0;
-      out.push(chalk.dim(`    ${r.key.padEnd(20)} ${fmtUsd(r.costUsd)}  (${pct}%)`));
+      out.push(chalk.dim(`    ${r.key.padEnd(20)} ${fmtMoney(r.costUsd, jpyPerUsd)}  (${pct}%)`));
     }
   }
   // 画像生成 (slot="image") があれば枚数とコストを別行で表示 (docs/image-generation.md §6.3)
@@ -105,7 +117,7 @@ export function formatSummary(
     const bySlot = aggregate(period, "slot", sessionRecords);
     const imageRow = bySlot.rows.find((r) => r.key === "image");
     if (imageRow) {
-      out.push(chalk.dim(`  画像生成: ${imageRow.imageCount}枚  ${fmtUsd(imageRow.costUsd)}`));
+      out.push(chalk.dim(`  画像生成: ${imageRow.imageCount}枚  ${fmtMoney(imageRow.costUsd, jpyPerUsd)}`));
     }
   }
   if (agg.unpricedModels.length > 0) {
@@ -115,7 +127,7 @@ export function formatSummary(
   return out;
 }
 
-function modelRow(r: UsageRow): string[] {
+function modelRow(r: UsageRow, jpyPerUsd?: number): string[] {
   const price = modelUnitPrice(r.key);
   // 表内セルは色を付けない (chalk の ANSI が getDisplayWidth の桁計算を崩すため)。 強調は下の警告行で行う。
   const unit = price ? `${price.input.toFixed(2)} / ${price.output.toFixed(2)}` : "未登録 ⚠";
@@ -125,7 +137,7 @@ function modelRow(r: UsageRow): string[] {
     fmtTok(r.inputTokens),
     fmtTok(r.outputTokens),
     fmtTok(r.cachedTokens),
-    fmtUsd(r.costUsd),
+    fmtMoney(r.costUsd, jpyPerUsd),
     unit,
   ];
 }
@@ -134,6 +146,7 @@ function modelRow(r: UsageRow): string[] {
 export function formatModels(
   period: PeriodSpec,
   sessionRecords: readonly TokenUsageRecord[],
+  jpyPerUsd?: number,
 ): string[] {
   const agg = aggregate(period, "model", sessionRecords);
   const out: string[] = [];
@@ -142,16 +155,18 @@ export function formatModels(
     out.push(chalk.dim("  この期間の記録はありません。"));
     return out;
   }
-  const header = ["model", "req", "in", "out", "cached", "cost", "単価(in/out $/M)"];
+  // 単価列は USD 据え置き。 cost 列のみレート設定時に円表示になるためヘッダで明示する。
+  const costHeader = jpyPerUsd && jpyPerUsd > 0 ? "cost(¥)" : "cost";
+  const header = ["model", "req", "in", "out", "cached", costHeader, "単価(in/out $/M)"];
   const right = [false, true, true, true, true, true, false];
-  const rows = agg.rows.map(modelRow);
+  const rows = agg.rows.map((r) => modelRow(r, jpyPerUsd));
   rows.push([
     "合計",
     String(agg.grand.recordCount),
     fmtTok(agg.grand.inputTokens),
     fmtTok(agg.grand.outputTokens),
     fmtTok(agg.grand.cachedTokens),
-    fmtUsd(agg.grand.costUsd),
+    fmtMoney(agg.grand.costUsd, jpyPerUsd),
     "",
   ]);
   out.push(...renderTable(header, rows, right));
@@ -168,10 +183,11 @@ export function formatModels(
   return out;
 }
 
-function axisTable(agg: UsageAggregate, title: string): string[] {
+function axisTable(agg: UsageAggregate, title: string, jpyPerUsd?: number): string[] {
   const out: string[] = [];
   out.push(chalk.dim(`  ── ${title} ──`));
-  const header = ["key", "req", "in", "out", "cached", "cost"];
+  const costHeader = jpyPerUsd && jpyPerUsd > 0 ? "cost(¥)" : "cost";
+  const header = ["key", "req", "in", "out", "cached", costHeader];
   const right = [false, true, true, true, true, true];
   const rows = agg.rows.map((r) => [
     r.key,
@@ -179,7 +195,7 @@ function axisTable(agg: UsageAggregate, title: string): string[] {
     fmtTok(r.inputTokens),
     fmtTok(r.outputTokens),
     fmtTok(r.cachedTokens),
-    fmtUsd(r.costUsd),
+    fmtMoney(r.costUsd, jpyPerUsd),
   ]);
   out.push(...renderTable(header, rows, right));
   return out;
@@ -189,6 +205,7 @@ function axisTable(agg: UsageAggregate, title: string): string[] {
 export function formatProviders(
   period: PeriodSpec,
   sessionRecords: readonly TokenUsageRecord[],
+  jpyPerUsd?: number,
 ): string[] {
   const byProvider = aggregate(period, "provider", sessionRecords);
   const bySlot = aggregate(period, "slot", sessionRecords);
@@ -198,8 +215,8 @@ export function formatProviders(
     out.push(chalk.dim("  この期間の記録はありません。"));
     return out;
   }
-  out.push(...axisTable(byProvider, "provider 別"));
+  out.push(...axisTable(byProvider, "provider 別", jpyPerUsd));
   out.push("");
-  out.push(...axisTable(bySlot, "slot 別 (main / second / vision / image)"));
+  out.push(...axisTable(bySlot, "slot 別 (main / second / vision / image)", jpyPerUsd));
   return out;
 }

@@ -117,6 +117,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/cost all", description: "全期間の使用量サマリ" },
   { command: "/cost reset", description: "計測窓をリセット (履歴 jsonl は保持)" },
   { command: "/cost export", description: "使用量を jsonl/csv で出力 (例: /cost export csv all)", needsArg: true },
+  { command: "/cost rate", description: "為替レート設定でコストを円表示 (例: /cost rate 150)。 /cost rate off でドル表示に戻す", needsArg: true },
   { command: "/token", description: "/cost の alias (token / コスト可視化)" },
   // /image: 画像生成 (Azure GPT Images / SD WebUI / ComfyUI)。設計: docs/image-generation.md
   { command: "/image", description: "画像生成の状態表示 (機能トグル / プロファイル一覧)" },

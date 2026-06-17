@@ -6,7 +6,7 @@ import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";
 import { bashTool } from "../tools/definitions/bash.js";
 import { globalTokenTracker } from "../cost/token-tracker.js";
 import { resetWindow, exportUsage, resolvePeriod, type PeriodSpec } from "../cost/usage-store.js";
-import { formatSummary, formatModels, formatProviders } from "./cost-view.js";
+import { formatSummary, formatModels, formatProviders, fmtMoney } from "./cost-view.js";
 import { displayHelp, type SkillSummary } from "./renderer.js";
 import { estimateMessageTokens } from "../agent/token-counter.js";
 import {
@@ -6237,7 +6237,7 @@ export class REPL {
 
         // ─── Cost ───
         console.log(chalk.dim("\n  ── Cost ──"));
-        console.log(chalk.dim(`  Requests: ${tok.recordCount}  /  tokens in=${tok.totalInputTokens.toLocaleString()}  out=${tok.totalOutputTokens.toLocaleString()}  /  estimated: $${tok.totalCostUsd.toFixed(4)}`));
+        console.log(chalk.dim(`  Requests: ${tok.recordCount}  /  tokens in=${tok.totalInputTokens.toLocaleString()}  out=${tok.totalOutputTokens.toLocaleString()}  /  estimated: ${fmtMoney(tok.totalCostUsd, this.config.jpyPerUsd)}`));
 
         // ─── Tasks ───
         if (todoSummary.includes("pending") || todoSummary.includes("in_progress")) {
@@ -6257,7 +6257,7 @@ export class REPL {
       case "/token": {
         const lower = args.map((a) => a.toLowerCase());
         const a0 = lower[0] ?? "";
-        const subs = ["models", "model", "providers", "provider", "reset", "export"];
+        const subs = ["models", "model", "providers", "provider", "reset", "export", "rate"];
         const sub = subs.includes(a0) ? a0 : "";
         // 期間トークンを引数のどこからでも拾う (session/window/all/today/yesterday/month/lastmonth/YYYY-MM-DD/YYYY-MM)。
         // 無指定なら window (計測窓)。
@@ -6267,6 +6267,41 @@ export class REPL {
           if (p) { period = p; break; }
         }
         const sessionRecords = globalTokenTracker.getRecords();
+
+        if (sub === "rate") {
+          // 為替レート (1ドルあたりの円) の設定/表示/リセット。
+          // 設定時は /cost 表示やセッション終了サマリのコストが円のみ表示に切り替わる。
+          const arg = lower[1] ?? "";
+          if (arg === "") {
+            // 引数なし: 現在のレートを表示
+            if (this.config.jpyPerUsd && this.config.jpyPerUsd > 0) {
+              console.log(chalk.green(`\n  現在の為替レート: 1ドル = ${this.config.jpyPerUsd}円 (コストは円表示)`));
+              console.log(chalk.dim("  ドル表示に戻す: /cost rate off    変更: /cost rate <円>\n"));
+            } else {
+              console.log(chalk.dim("\n  為替レート未設定 (コストはドル表示中)。"));
+              console.log(chalk.dim("  円表示にする: /cost rate <円>  例) /cost rate 150\n"));
+            }
+            break;
+          }
+          if (arg === "off" || arg === "reset" || arg === "none" || arg === "0") {
+            // リセット: ドル表示に戻す
+            delete this.config.jpyPerUsd;
+            saveConfig(this.config);
+            console.log(chalk.green("\n  為替レートをリセットしました。 コストはドル表示に戻ります。\n"));
+            break;
+          }
+          const rate = Number(arg);
+          if (!Number.isFinite(rate) || rate <= 0) {
+            console.log(chalk.red(`\n  無効な値: ${args[1] ?? ""}`));
+            console.log(chalk.dim("  1ドルあたりの円を正の数で指定してください。 例) /cost rate 150\n"));
+            break;
+          }
+          this.config.jpyPerUsd = rate;
+          saveConfig(this.config);
+          console.log(chalk.green(`\n  為替レートを 1ドル = ${rate}円 に設定しました。 コストを円表示します。`));
+          console.log(chalk.dim("  ドル表示に戻す: /cost rate off\n"));
+          break;
+        }
 
         if (sub === "reset") {
           const ts = resetWindow();
@@ -6290,13 +6325,14 @@ export class REPL {
           break;
         }
 
+        const jpyPerUsd = this.config.jpyPerUsd;
         let lines: string[];
         if (sub === "models" || sub === "model") {
-          lines = formatModels(period, sessionRecords);
+          lines = formatModels(period, sessionRecords, jpyPerUsd);
         } else if (sub === "providers" || sub === "provider") {
-          lines = formatProviders(period, sessionRecords);
+          lines = formatProviders(period, sessionRecords, jpyPerUsd);
         } else {
-          lines = formatSummary(period, sessionRecords);
+          lines = formatSummary(period, sessionRecords, jpyPerUsd);
         }
         for (const l of lines) console.log(l);
         console.log();
