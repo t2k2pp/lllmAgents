@@ -224,6 +224,28 @@ export interface ImageProvider {
 - セキュリティ: `output_path` は `PermissionManager` の書込確認対象
   （file_write と同等の扱い。autoApproveTools に `image_generate` を追加すれば自動許可）
 
+### 5.1 Discord への自動添付
+
+`config.discord.enabled && webhookUrl` 設定済みで `config.discord.attachGeneratedImages`
+が `false` でなければ、`image_generate` の完了ごとに生成画像を Discord webhook へ添付投稿する。
+
+- 実装: `src/tools/definitions/image-generate.ts` の `maybeSendToDiscord()` →
+  `src/utils/discord.ts` の `sendDiscordFiles()`。`config` をツールに渡してライブ参照する
+  （`/discord` 切替が即反映）。
+- 送信方式: webhook の JSON エンドポイント (`httpPost`) は使えないため、`fetch` + `FormData`
+  + `Blob` で `multipart/form-data`（`payload_json` + `files[n]`）を組み立てる。
+- ベストエフォート: 添付の失敗は警告ログのみ。画像生成自体は成功しているのでツール結果には
+  影響させない。
+- **サイズ自動縮小** (`src/utils/image-attachment.ts` `prepareForDiscord()`):
+  - Discord のアップロード上限を超える画像は **コードで** 自動縮小する（生成 AI には縮小させない）。
+  - 方針は「リサイズ優先 → 必要時のみ JPEG 変換」。リサイズは透過と PNG 形式を保てるためまず試し、
+    最小寸法でも PNG が目標超なら JPEG（品質を 85→70→55→40 と段階的に低下）へ。判定は実バイト数で行う。
+  - 上限は `config.discord.maxAttachmentMb`（既定 8MB、安全マージン 0.9 を掛けた値が目標）。
+  - **オリジナルは無加工**。縮小版は OS の一時ディレクトリに生成し、送信後（成功・失敗・例外いずれでも）
+    必ず破棄する。
+  - 縮小ライブラリは **Jimp**（純 JS）。単一 exe (postject SEA) にバンドルするため、ネイティブ依存の
+    sharp 等は採用しない。
+
 ## 6. コスト統合
 
 ### 6.1 記録
