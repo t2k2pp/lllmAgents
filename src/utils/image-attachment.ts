@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Jimp } from "jimp";
+import { createRequire } from "node:module";
 import * as logger from "./logger.js";
 
 /**
@@ -24,6 +24,49 @@ const RESIZE_STEPS = [2048, 1536, 1280, 1024, 768];
 const JPEG_QUALITY_STEPS = [85, 70, 55, 40];
 /** 実バイト数の目標に対する安全マージン (上限ギリギリを避ける) */
 const SAFETY_RATIO = 0.9;
+
+/**
+ * jimp の遅延ロード。
+ * SEA (exe) ビルドでは jimp が esbuild の external に指定されバンドルに含まれない。
+ * playwright と同じく createRequire で node_modules から読む。
+ * jimp が見つからなければ null を返す (呼び出し側でフォールバック)。
+ */
+let _jimpModule: typeof import("jimp") | null | undefined;
+async function loadJimp(): Promise<typeof import("jimp") | null> {
+  if (_jimpModule !== undefined) return _jimpModule;
+
+  // 1) ESM import を試す (通常の tsx/node 実行)
+  try {
+    const mod = await import("jimp");
+    _jimpModule = mod;
+    return mod;
+  } catch {
+    // fallthrough
+  }
+
+  // 2) createRequire で探す (SEA / CJS バンドル)
+  const roots = [
+    path.join(os.homedir(), ".localllm"),
+    process.cwd(),
+  ];
+  for (const root of roots) {
+    try {
+      const req = createRequire(path.join(root, "node_modules", "x"));
+      const mod = req("jimp") as typeof import("jimp");
+      _jimpModule = mod;
+      return mod;
+    } catch {
+      // fallthrough
+    }
+  }
+
+  logger.warn(
+    "jimp が見つかりません。画像の自動縮小は無効です (オリジナルをそのまま添付します)。" +
+    "npm install jimp で導入できます。",
+  );
+  _jimpModule = null;
+  return null;
+}
 
 export interface PreparedAttachment {
   /** 添付に使うファイルの絶対パス (オリジナル or 一時縮小版) */
@@ -70,6 +113,13 @@ export async function prepareForDiscord(
   if (originalSize <= maxBytes) {
     return { path: filePath, isTemp: false };
   }
+
+  // jimp が使えない場合はオリジナルをそのまま返す
+  const jimpMod = await loadJimp();
+  if (!jimpMod) {
+    return { path: filePath, isTemp: false };
+  }
+  const { Jimp } = jimpMod;
 
   const target = Math.floor(maxBytes * SAFETY_RATIO);
 
@@ -136,3 +186,4 @@ export async function prepareForDiscord(
   // 縮小できなかった場合はオリジナルを返す
   return { path: filePath, isTemp: false };
 }
+

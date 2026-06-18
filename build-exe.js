@@ -42,7 +42,11 @@ async function build() {
       'chromium-bidi',
       'chromium-bidi/*',
       'playwright',
-      'playwright-core'
+      'playwright-core',
+      // jimp v1.x は内部で @jimp/wasm-* (WASM バイナリ) を使い esbuild で解決不能。
+      // playwright と同じく外部化し、実行時に createRequire で node_modules から読む。
+      'jimp',
+      '@jimp/*'
     ],
     define: {
       'import.meta.url': 'import_meta_url'
