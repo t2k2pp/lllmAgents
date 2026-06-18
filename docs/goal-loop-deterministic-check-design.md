@@ -1,8 +1,8 @@
 # Goal Loop（決定的検証ゲート型ループ）設計書
 
-> **ステータス**: ドラフト（提案 / レビュー前）
+> **ステータス**: Phase 1 実装済み
 > **作成日**: 2026-06-18
-> **種別**: 機能追加の提案（本書時点では**実装なし**。承認後に Phase 1 実装へ）
+> **種別**: 機能追加（`/goal-loop` コマンド）。Phase 1 実装は本書に追従済み
 > **発端**: Zenn 記事「Write Loops Not Prompts — Goal Loop」(kenimo49) の思想を取り込めないか、という検討依頼
 > **関連**:
 > - 既存パラダイム: `docs/goal-seek-mode-design.md`
@@ -180,15 +180,32 @@ N 到達 → 中断報告（最後の exit code / stderr を提示）
 
 ---
 
-## 8. スコープと今後
+## 8. Phase 1 実装メモ（本書からの決定事項）
 
-- 本書は**提案のみ**。コード変更・新規ソース・commit は本タスクでは行わない。
-- 承認後、Phase 1（§4.4 のファイル群）を別タスクで実装し、本書を実装に合わせて更新する。
-- 将来拡張候補: 複数 check コマンドの AND/OR、check 成功後に LLM レビューを 1 回挟む「決定的ゲート → 主観レビュー」の二段ゲート、`/goal-loop` の結果を task-report 通知へ連携。
+実装時に確定した設計判断（§4 の方針に対する具体化）:
+
+- **コマンド**: `/goal-loop [N] --check "<cmd>" <タスク>`。`N` 既定 8（範囲 1–50）。`--check` はクォート/単語いずれも受理。`getMode()==="goal-seek"` 中は拒否。
+- **反復間のコンテキスト**: `/try` と異なり**履歴をリセットしない**（継続）。理由 = 「検証を通すまで直す」用途では、エージェントが直前に何を編集したかの文脈が次反復で有用。goal は slot で保持され圧縮耐性があるため肥大は圧縮で吸収する。記事の「反復ごとリセット」とはここで意図的に分岐（将来 `--reset` オプション化候補）。
+- **停止条件**: (1) check exit 0 / (2) `N` 到達 / (3) Ctrl+C・Esc で `isAborted()` / (4) **同一失敗出力が 3 回連続**したら打ち切り（無限ループ防止）。いずれも silent でなく明示ログを出す（`goal-seek-mode-design.md §3.6` の no-silent-exit を踏襲）。Phase 1 では (4) を ask_user でなく自動打ち切りにした（非TTY/パイプでも止まるため）。
+- **check 実行**: `src/goal-loop/check-runner.ts`。非 Windows は `detached:true` で process group を作り、timeout 時は group ごと SIGKILL（shell だけ kill すると `sleep` 等の子が orphan 化し close が遅延する事故を回避）。timeout は exit 124 として扱う。stdout/stderr は末尾 4000 字に切り詰め。
+- **状態注入**: `appendEvaluation()` に決定的レコード（passed=exit0, gap_hint=失敗出力末尾）を積み、`buildGoalSlotSection()` 経由で system prompt に注入。加えて 2 反復目以降は retry プロンプトに失敗出力末尾を明示同梱。
+- **goal-slot**: `GoalDefinition.check_command?` を追加。設定時は `buildGoalSlotSection()` が「検証コマンド (ground-truth ゲート)」行を描画。通常 `/goal-seek` では undefined で無影響。
+
+### 実装ファイル
+- 新規: `src/goal-loop/check-runner.ts`, `src/goal-loop/goal-loop-runner.ts`, `tests/goal-loop/check-runner.test.ts`
+- 変更: `src/agent/goal-slot.ts`（`check_command?` 追加 + 描画）, `src/cli/repl.ts`（import + `case "/goal-loop"`）, `src/cli/completer.ts` / `src/cli/renderer.ts`（補完・ヘルプ登録）
+
+### 検証状況
+- `tsc --noEmit` パス。`tests/goal-loop/check-runner.test.ts` 4 件パス（exit0 / 非0 / stdout・stderr 捕捉 / timeout=124）。
+- フル E2E（実エージェントが check を通すまで反復）は LLM プロバイダ設定が必要なため、本コミット環境（未設定コンテナ）では未実施。`docs/lllmagents-test` スキルに従い、プロバイダ設定済み環境で `sandbox/` の「修正するまで `npm test` が exit 1」題材で確認すること。
+
+## 9. 今後
+
+- 将来拡張候補: 複数 check コマンドの AND/OR、check 成功後に LLM レビューを 1 回挟む「決定的ゲート → 主観レビュー」の二段ゲート、反復ごとコンテキストリセットの `--reset` オプション、同一失敗打ち切りを ask_user に切替えるオプション、`/goal-loop` の結果を task-report 通知へ連携。
 
 ---
 
-## 9. 参考
+## 10. 参考
 
 記事概念の確認元（記事本体は HTTP 403 で取得不可、二次情報で確認）:
 - Firecrawl "Loop Engineering" — https://www.firecrawl.dev/blog/loop-engineering
@@ -197,8 +214,9 @@ N 到達 → 中断報告（最後の exit code / stderr を提示）
 
 ---
 
-## 10. 変更履歴
+## 11. 変更履歴
 
 | 日付 | 内容 |
 |---|---|
 | 2026-06-18 | 初版ドラフト。思想差の明確化（§2）を主軸に、`/goal-loop`（決定的検証ゲート型ループ）を提案 |
+| 2026-06-18 | Phase 1 実装。`src/goal-loop/`（check-runner / goal-loop-runner）、`/goal-loop` コマンド、goal-slot 拡張、ユニットテスト追加。§8 に実装メモを反映 |

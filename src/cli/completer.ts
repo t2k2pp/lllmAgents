@@ -52,6 +52,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/skills toggle", description: "個別スキルの有効/無効切替", needsArg: true },
   { command: "/try", description: "試行錯誤モード: 自動的に評価・改善を繰り返す", needsArg: true },
   { command: "/try 3", description: "最大3回試行（デフォルト）", needsArg: true },
+  { command: "/goal-loop", description: "決定的検証ゲート型ループ: --check の exit 0 まで反復 (例: --check \"npm test\")", needsArg: true },
   { command: "/stream", description: "ストリーミング表示モードの確認/切り替え (引数なしで対話 toggle)" },
   // ── Model / Second LLM コマンド (docs/model-registry.md) ──
   // Phase 3 (2026-05-27): 個別編集系のコマンドは /models Edit に統合された。

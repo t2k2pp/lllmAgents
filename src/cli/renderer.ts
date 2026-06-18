@@ -87,6 +87,7 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/autorun")}         自律実行モード切替（作業フォルダ内の削除以外を自動承認）
     ${chalk.cyan("/compress-input")}  入力圧縮モード切替（project指示/メモが閾値超過時に意図保持で圧縮、既定OFF）
     ${chalk.cyan("/try [N] <プロンプト>")}  試行錯誤モード: 評価付きで最大N回自動リトライ（デフォルト3回）
+    ${chalk.cyan("/goal-loop [N] --check \"<cmd>\" <タスク>")}  決定的検証ゲート型ループ: cmd が exit 0 になるまで反復（既定8回）
     ${chalk.cyan("/loop [間隔] <プロンプト>")}  指定間隔でプロンプトを繰り返し実行
     ${chalk.cyan("/loop list")}      アクティブなループ一覧
     ${chalk.cyan("/loop stop [id|all]")}  ループを停止

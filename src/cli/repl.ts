@@ -22,6 +22,7 @@ import { listSessions, loadSession, getLatestSession } from "../agent/session-ma
 import { normalizeRoomId } from "../agent/room-types.js";
 import { loadMemory, saveMemory } from "../agent/memory.js";
 import { resolveAtMentions, printMentionFeedback } from "./input-resolver.js";
+import { runGoalLoop } from "../goal-loop/goal-loop-runner.js";
 import {
   InteractiveInput,
   SIGINT_SIGNAL,
@@ -4557,6 +4558,78 @@ export class REPL {
           if (!trySucceeded && !this.agent.isAborted()) {
             console.log(chalk.yellow(`\n  ${tryMaxAttempts}回試行しましたがファイルが作成されませんでした\n`));
           }
+        } finally {
+          this.agentBusy = false;
+        }
+        break;
+      }
+
+      case "/goal-loop": {
+        // 決定的検証ゲート型ループ。設計: docs/goal-loop-deterministic-check-design.md
+        // /try (LLM スコア) や /goal-seek (LLM 判定) と異なり、検証コマンドの exit code を
+        // ハーネス自身が握る (記事「Write Loops Not Prompts」の思想)。
+        const rawArgs = args.join(" ").trim();
+        if (!rawArgs) {
+          console.log(chalk.dim("  使用方法: /goal-loop [最大反復数] --check \"<検証コマンド>\" <タスク>"));
+          console.log(chalk.dim("  例: /goal-loop 8 --check \"npm test\" 失敗しているテストを通るように修正して"));
+          console.log(chalk.dim("  検証コマンドが exit 0 になるまで反復 (反復数省略時は 8 / Ctrl+C で中断)"));
+          console.log(chalk.dim("  関連: /loop=時間反復 / /goal-seek=LLM判定で合格まで / /try=LLMスコアで再試行"));
+          break;
+        }
+
+        // 先頭が数字なら最大反復数
+        let glMax = 8;
+        let glRest = rawArgs;
+        const glNumMatch = glRest.match(/^(\d+)\s+/);
+        if (glNumMatch) {
+          const n = parseInt(glNumMatch[1], 10);
+          if (n > 0 && n <= 50) {
+            glMax = n;
+            glRest = glRest.slice(glNumMatch[0].length);
+          }
+        }
+
+        // --check "<cmd>" を取り出す (クォート / 単語いずれも対応)
+        let glCheck = "";
+        const glCheckMatch = glRest.match(/--check\s+(?:"([^"]+)"|'([^']+)'|(\S+))/);
+        if (glCheckMatch) {
+          glCheck = (glCheckMatch[1] ?? glCheckMatch[2] ?? glCheckMatch[3] ?? "").trim();
+          glRest =
+            (glRest.slice(0, glCheckMatch.index) +
+              glRest.slice((glCheckMatch.index ?? 0) + glCheckMatch[0].length)).trim();
+        }
+
+        if (!glCheck) {
+          console.log(chalk.yellow("  --check \"<検証コマンド>\" が必要です。"));
+          console.log(chalk.dim("  例: /goal-loop --check \"npm test\" テストを通して"));
+          break;
+        }
+        const glPrompt = glRest.trim();
+        if (!glPrompt) {
+          console.log(chalk.yellow("  タスク記述が必要です。"));
+          break;
+        }
+        if (this.agent.getMode() === "goal-seek") {
+          console.log(chalk.yellow("  既に Goal Seek mode 中です。先に /exit-goal-seek を実行してください。"));
+          break;
+        }
+
+        const { resolved: glResolved, mentions: glMentions } = resolveAtMentions(glPrompt);
+        if (glMentions.length > 0) printMentionFeedback(glMentions);
+        // goal-loop はテキスト駆動 (検証コマンドがゲート)。画像メンション展開時は素のテキストを使う。
+        const glPromptText = typeof glResolved === "string" ? glResolved : glPrompt;
+
+        this.agentBusy = true;
+        try {
+          console.log(chalk.cyan(`\n  ┌─ goal-loop (最大${glMax}反復) ─── Ctrl+C で中断可 ───`));
+          console.log(chalk.dim(`  │ タスク: ${glPrompt.slice(0, 64)}${glPrompt.length > 64 ? "..." : ""}`));
+          console.log(chalk.dim(`  │ 検証 : ${glCheck}  (exit 0 で完了)`));
+          console.log(chalk.cyan(`  └${"─".repeat(50)}\n`));
+
+          await runGoalLoop(
+            { prompt: glPromptText, checkCommand: glCheck, maxIterations: glMax, cwd: process.cwd() },
+            this.agent,
+          );
         } finally {
           this.agentBusy = false;
         }

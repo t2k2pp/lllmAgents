@@ -17,6 +17,12 @@ export interface GoalDefinition {
   created_at: number;
   /** goal 入口時の register (style 連動の記録用) */
   register_at_creation: string;
+  /**
+   * goal-loop (決定的検証ゲート型ループ) でのみ設定される検証コマンド。
+   * 設定時は exit 0 が達成条件。通常の /goal-seek では undefined。
+   * 設計: docs/goal-loop-deterministic-check-design.md
+   */
+  check_command?: string;
 }
 
 export interface EvaluationRecord {
@@ -113,6 +119,11 @@ export function buildGoalSlotSection(): string {
   lines.push(`## Acceptance Criteria (全項目を満たすまで作業継続)`);
   for (let i = 0; i < _goal.acceptance_criteria.length; i++) {
     lines.push(`${i + 1}. ${_goal.acceptance_criteria[i]}`);
+  }
+  if (_goal.check_command) {
+    lines.push("");
+    lines.push(`## 検証コマンド (ground-truth ゲート)`);
+    lines.push(`\`${_goal.check_command}\` が exit 0 になることが達成条件 (ハーネスが毎反復実行する)。`);
   }
 
   const latest = getLatestEvaluation();
