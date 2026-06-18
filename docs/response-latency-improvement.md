@@ -5,6 +5,8 @@
 > 位置づけ: `docs/agent-loop-efficiency-review.md` は **反復回数（マルチステップタスクの総ターン数）削減** を扱う。
 > 本書はそれを補完し、**1ターンあたりの遅延・補助LLM往復・体感待ち時間** をカバーする。
 > 作成日: 2026-06-18 / ステータス: 提案（実装は別タスク）
+> 関連: Lever B(プロンプトキャッシュ)/Lever C(安定プレフィクス) は **コスト削減**(品質・速度不変)として
+> 先行実装した。実装設計は **[docs/prompt-cache-cost-reduction.md](prompt-cache-cost-reduction.md)** を参照。
 
 ---
 

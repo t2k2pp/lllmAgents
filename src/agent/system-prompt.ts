@@ -180,11 +180,11 @@ No access outside the sandbox. Block dangerous commands (rm -rf, etc.). No hardc
   }
 
   // Environment info
-  const now = new Date();
-  const localDatetime = now.toLocaleString("ja-JP", {
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-  });
+  // 注: 「現在日時」 は **意図的にここへ含めない**。 秒単位で変化する値を system prompt の
+  // 前方に置くと、 プロンプトキャッシュ (Anthropic の cache_control / GPT・Gemini の自動キャッシュ /
+  // ローカル LLM の KV 前方一致) が毎ターン無効化され、 入力コスト・TTFT が悪化する
+  // (docs/prompt-cache-cost-reduction.md)。 現在日時はキャッシュ境界より後ろの動的サフィクス
+  // (agent-loop の composeQuasiSystemPrompt) で注入する。 ここに置くのは session 内で安定な値のみ。
   parts.push(`
 # Environment
 - Platform: ${process.platform}
@@ -192,8 +192,7 @@ No access outside the sandbox. Block dangerous commands (rm -rf, etc.). No hardc
 - Working directory: ${process.cwd()}
 - Git: ${gitInfo.isGitRepo ? `yes (branch: ${gitInfo.branch ?? "unknown"})` : "no"}
 - Node.js: ${process.version}
-- Home directory: ${os.homedir()}
-- Current datetime: ${localDatetime}`);
+- Home directory: ${os.homedir()}`);
 
   // ブラウザ機能が無効な環境では、その事実をエージェントに知らせる。
   // → 無いツールを試して失敗を繰り返さない / 検証できないのに「動く」と偽らない（緑の嘘防止）。

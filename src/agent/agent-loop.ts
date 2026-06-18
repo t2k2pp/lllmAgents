@@ -854,29 +854,41 @@ export class AgentLoop {
                   this.lastPromptTokens = chunk.usage.promptTokens ?? this.lastPromptTokens;
                   tokensIn = chunk.usage.promptTokens;
                   tokensOut = chunk.usage.completionTokens;
-                  // プロンプトキャッシュヒット分 (provider が報告すれば) を割引単価で計上。
-                  // 報告が無い (=0) なら従来どおり全額。 docs/cost-token-command-design.md §3
-                  const cachedTokens = chunk.usage.cachedTokens ?? 0;
-                  const cost = globalCostCalculator.calculateForModelWithCache(
-                    this.model,
-                    chunk.usage.promptTokens ?? 0,
-                    chunk.usage.completionTokens ?? 0,
-                    cachedTokens,
-                  );
+                  const promptTokens = chunk.usage.promptTokens ?? 0;
+                  const outputTokens = chunk.usage.completionTokens ?? 0;
+                  const cacheRead = chunk.usage.cachedTokens ?? 0;
+                  // cacheCreationTokens の有無でセマンティクスを判別 (docs/prompt-cache-cost-reduction.md):
+                  //   - 定義あり = Anthropic 系。 promptTokens(=input_tokens) は cached を含まない非キャッシュ残。
+                  //     読込 0.1× + 書込 1.25× で内訳計上。 表示用 inputTokens は総入力 = 非キャッシュ残+読込+書込。
+                  //   - 定義なし = OpenAI 系。 promptTokens(=prompt_tokens) は cached を内包。 従来の控除計算。
+                  const cacheCreation = chunk.usage.cacheCreationTokens;
+                  let cost: number;
+                  let recordedInput: number;
+                  if (cacheCreation !== undefined) {
+                    cost = globalCostCalculator.calculateForModelWithCacheBreakdown(
+                      this.model, promptTokens, outputTokens, cacheRead, cacheCreation,
+                    );
+                    recordedInput = promptTokens + cacheRead + cacheCreation;
+                  } else {
+                    cost = globalCostCalculator.calculateForModelWithCache(
+                      this.model, promptTokens, outputTokens, cacheRead,
+                    );
+                    recordedInput = promptTokens;
+                  }
                   globalTokenTracker.record({
                     timestamp: new Date().toISOString(),
                     provider: this.provider.providerType,
                     model: this.model,
                     slot: "main",
-                    inputTokens: chunk.usage.promptTokens ?? 0,
-                    outputTokens: chunk.usage.completionTokens ?? 0,
-                    cachedTokens,
+                    inputTokens: recordedInput,
+                    outputTokens,
+                    cachedTokens: cacheRead,
                     estimatedCostUsd: cost,
                     sessionId: this.session.meta.id
                   });
                   // A-6: run 単位の累計 (task_complete の完了報告用)
-                  this.runStats.tokensIn += chunk.usage.promptTokens ?? 0;
-                  this.runStats.tokensOut += chunk.usage.completionTokens ?? 0;
+                  this.runStats.tokensIn += recordedInput;
+                  this.runStats.tokensOut += outputTokens;
                   this.runStats.costUsd += cost;
                 }
                 stopWaitingSpinner();
@@ -2774,15 +2786,24 @@ export class AgentLoop {
    *
    * 注: register / mode 表示 は今後追加候補 (Phase 1 試験的)。 現状は省略。
    */
-  private composeQuasiSystemPrompt(base: string): string {
-    const parts: string[] = [base];
+  private composeQuasiSystemPrompt(base: string): { stable: string; dynamic: string } {
+    const dynamicParts: string[] = [];
+    // 現在日時: 旧版は buildSystemPrompt (base) の Environment 節に置いていたが、
+    // 秒変化する値が stable プレフィクスに混じるとプロンプトキャッシュが毎ターン壊れる
+    // (docs/prompt-cache-cost-reduction.md)。 キャッシュ境界より後ろの dynamic 側へ移設。
+    const now = new Date();
+    const localDatetime = now.toLocaleString("ja-JP", {
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+    });
+    dynamicParts.push(`# Current datetime\n${localDatetime}`);
     if (this.currentMode === "goal-seek") {
       const goalSection = buildGoalSlotSection();
-      if (goalSection) parts.push(goalSection);
+      if (goalSection) dynamicParts.push(goalSection);
     }
     const todoSection = buildTodoSection();
-    if (todoSection) parts.push(todoSection);
-    return parts.join("\n\n");
+    if (todoSection) dynamicParts.push(todoSection);
+    return { stable: base, dynamic: dynamicParts.join("\n\n") };
   }
 
   setContextWindow(value: number): void {

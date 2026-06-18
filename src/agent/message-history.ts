@@ -21,12 +21,25 @@ export type AssistantMessageCallback = (content: string, toolCalls?: ToolCall[])
  */
 /**
  * 準システムプロンプト composer の signature。
- * AgentLoop が basePrompt + Goal section + ToDo section + mode info 等を結合する関数を渡す。
+ * AgentLoop が basePrompt + Goal section + ToDo section + datetime 等を結合する関数を渡す。
  * 毎 getMessages() 呼出で呼ばれて fresh な system prompt を作る (動的合成)。
+ *
+ * 返り値を { stable, dynamic } の 2 分割にしているのはプロンプトキャッシュ最適化のため
+ * (docs/prompt-cache-cost-reduction.md):
+ *   - stable: session 内で不変な base (identity / rules / skills / project / memory)。
+ *     getMessages() はこれを **先頭の** system メッセージとして返し、 Anthropic 系プロバイダは
+ *     ここに cache_control を付ける (= tools+system がキャッシュされる)。
+ *   - dynamic: 毎ターン変わる部分 (現在日時 / goal / todo)。 キャッシュ境界より後ろの
+ *     2 つ目の system メッセージとして返す。
+ * 文字列を返す旧シグネチャも後方互換で受理し、 その場合は全量を stable 扱いにする。
  *
  * docs/strategic-todo-design.md §2.2 / §3.1 参照。
  */
-export type SystemPromptComposer = (basePrompt: string) => string;
+export interface ComposedSystemPrompt {
+  stable: string;
+  dynamic: string;
+}
+export type SystemPromptComposer = (basePrompt: string) => string | ComposedSystemPrompt;
 
 export class MessageHistory {
   private messages: Message[] = [];
@@ -66,10 +79,28 @@ export class MessageHistory {
   }
 
   getMessages(): Message[] {
-    // 準システムプロンプト: composer があれば毎回再合成、 無ければ既存挙動 (base のみ)
-    const finalSystemContent = this.composer ? this.composer(this.systemPrompt) : this.systemPrompt;
+    // 準システムプロンプト: composer があれば毎回再合成、 無ければ既存挙動 (base のみ)。
+    // プロンプトキャッシュ最適化のため stable / dynamic を別々の system メッセージとして返す
+    // (docs/prompt-cache-cost-reduction.md)。 stable = キャッシュ対象、 dynamic = 毎ターン変化。
+    let stable: string;
+    let dynamic = "";
+    if (this.composer) {
+      const composed = this.composer(this.systemPrompt);
+      if (typeof composed === "string") {
+        stable = composed; // 旧シグネチャ後方互換: 全量を stable 扱い
+      } else {
+        stable = composed.stable;
+        dynamic = composed.dynamic;
+      }
+    } else {
+      stable = this.systemPrompt;
+    }
+    const systemMessages: Message[] = [{ role: "system", content: stable }];
+    if (dynamic.trim().length > 0) {
+      systemMessages.push({ role: "system", content: dynamic });
+    }
     return [
-      { role: "system", content: finalSystemContent },
+      ...systemMessages,
       // 思考保全: assistant.thinking がある場合は content の先頭に inline 化して送信。
       // provider に未対応フィールドを渡さないために thinking フィールド自体は除外。
       //
