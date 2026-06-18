@@ -5284,9 +5284,11 @@ export class REPL {
           const dBotName = this.interactionServer?.botUser;
           const dAppId = d?.applicationId ? chalk.dim(d.applicationId) : chalk.yellow("未設定");
           const dToken = d?.botToken ? chalk.green("設定済み") : chalk.yellow("未設定");
+          const dAttach = (d?.attachGeneratedImages ?? true) !== false;
           console.log(chalk.bold("\n  === Discord 連携の状態 ==="));
           console.log(chalk.dim(`  通知 (Webhook): ${dEnabled ? chalk.green("オン") : chalk.yellow("オフ")}`));
           console.log(chalk.dim(`  Webhook URL:    ${dUrl}`));
+          console.log(chalk.dim(`  生成画像の添付: ${dAttach ? chalk.green("オン") : chalk.yellow("オフ")}`));
           console.log(chalk.dim(`  Bot 接続:       ${dListening ? chalk.green(`接続中${dBotName ? ` (${dBotName})` : ""}`) : chalk.yellow("停止中")}`));
           console.log(chalk.dim(`  Application ID: ${dAppId}`));
           console.log(chalk.dim(`  Bot Token:      ${dToken}`));
@@ -5453,9 +5455,29 @@ export class REPL {
               console.log(chalk.yellow(`  許可ユーザーから ${id} を削除しました。`));
             }
           }
+        } else if (subCmd === "images") {
+          // 生成画像の Discord 自動添付 ON/OFF (docs/image-generation.md §5.1)
+          if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
+          const action = args[1];
+          if (!action) {
+            const on = this.config.discord.attachGeneratedImages !== false;
+            console.log(chalk.dim(`  生成画像の自動添付: ${on ? chalk.green("オン") : chalk.yellow("オフ")} (既定: オン)`));
+            console.log(chalk.dim("  切替: /discord images on | off"));
+          } else if (action === "on") {
+            this.config.discord.attachGeneratedImages = true;
+            saveConfig(this.config);
+            console.log(chalk.green("  ✅ 生成画像を Discord に自動添付します。"));
+          } else if (action === "off") {
+            this.config.discord.attachGeneratedImages = false;
+            saveConfig(this.config);
+            console.log(chalk.yellow("  生成画像の自動添付をオフにしました (通知テキストは従来どおり)。"));
+          } else {
+            console.log(chalk.yellow("  使い方: /discord images [on|off]"));
+          }
         } else {
           console.log(chalk.yellow("  使い方: /discord <サブコマンド>"));
           console.log(chalk.dim("  通知系:    status | enable | disable | url <URL> | test"));
+          console.log(chalk.dim("  画像添付:  images [on|off]"));
           console.log(chalk.dim("  受信設定:  app-id <id> | bot-token <トークン>"));
           console.log(chalk.dim("  コマンド:  register [サーバーID]"));
           console.log(chalk.dim("  受信:      listen start | listen stop | listen auto-start [off]"));
