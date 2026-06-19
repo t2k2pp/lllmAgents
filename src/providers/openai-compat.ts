@@ -40,6 +40,12 @@ interface SSEUsage {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  /**
+   * プロンプトキャッシュ読込トークン (OpenAI/vLLM)。 prompt_tokens の **内数**。
+   * クラウド OpenAI / 一部 vLLM は自動キャッシュし `prompt_tokens_details.cached_tokens` で返す
+   * (docs/prompt-cache-cost-reduction.md)。
+   */
+  prompt_tokens_details?: { cached_tokens?: number };
 }
 
 interface SSEChunk {
@@ -220,9 +226,13 @@ export class OpenAICompatProvider implements LLMProvider {
 
           // ストリームからusage情報を抽出
           if (chunk.usage) {
+            // 自動プロンプトキャッシュのヒット分 (cached_tokens は prompt_tokens の内数)。
+            // 報告があればコスト計算で割引単価に回す (docs/prompt-cache-cost-reduction.md)。
+            const cached = chunk.usage.prompt_tokens_details?.cached_tokens;
             lastUsage = {
               promptTokens: chunk.usage.prompt_tokens,
               completionTokens: chunk.usage.completion_tokens,
+              ...(typeof cached === "number" && cached > 0 ? { cachedTokens: cached } : {}),
             };
           }
 

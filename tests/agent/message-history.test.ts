@@ -186,3 +186,39 @@ describe("MessageHistory.purgeEphemeral — span 境界での揮発メッセー�
   });
 });
 
+describe("MessageHistory.getMessages — system の stable/dynamic 分割 (プロンプトキャッシュ)", () => {
+  it("composer 未設定なら system は 1 メッセージ (後方互換)", () => {
+    const h = new MessageHistory("BASE");
+    h.addUserMessage("U1");
+    const msgs = h.getMessages();
+    expect(msgs.filter((m) => m.role === "system").length).toBe(1);
+    expect(msgs[0].content).toBe("BASE");
+  });
+
+  it("composer が {stable,dynamic} を返すと system が 2 メッセージに分かれる (stable が先頭=キャッシュ対象)", () => {
+    const h = new MessageHistory("BASE");
+    h.setSystemPromptComposer((base) => ({ stable: base, dynamic: "DT/GOAL/TODO" }));
+    h.addUserMessage("U1");
+    const msgs = h.getMessages();
+    const sys = msgs.filter((m) => m.role === "system");
+    expect(sys.length).toBe(2);
+    expect(sys[0].content).toBe("BASE");       // 安定 base = キャッシュ対象 (先頭)
+    expect(sys[1].content).toBe("DT/GOAL/TODO"); // 動的 = キャッシュ境界より後ろ
+  });
+
+  it("dynamic が空文字なら system は 1 メッセージのまま", () => {
+    const h = new MessageHistory("BASE");
+    h.setSystemPromptComposer((base) => ({ stable: base, dynamic: "   " }));
+    const sys = h.getMessages().filter((m) => m.role === "system");
+    expect(sys.length).toBe(1);
+  });
+
+  it("文字列を返す旧シグネチャ composer は全量 stable 扱い (1 メッセージ)", () => {
+    const h = new MessageHistory("BASE");
+    h.setSystemPromptComposer((base) => `${base}\n\nEXTRA`);
+    const sys = h.getMessages().filter((m) => m.role === "system");
+    expect(sys.length).toBe(1);
+    expect(sys[0].content).toBe("BASE\n\nEXTRA");
+  });
+});
+

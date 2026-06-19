@@ -76,6 +76,39 @@ describe("CostCalculator", () => {
     });
   });
 
+  describe("calculateWithCacheBreakdown (Anthropic セマンティクス)", () => {
+    const pricing: ModelPricing = {
+      inputPerMToken: 2.00,
+      outputPerMToken: 10.00,
+      cachedInputPerMToken: 0.20, // 0.1×
+    };
+
+    it("非キャッシュ残・読込(0.1×)・書込(1.25×)・出力を別々に課金する", () => {
+      // input(非キャッシュ残)=100K, read=800K, creation=100K, output=50K
+      const cost = calc.calculateWithCacheBreakdown(100_000, 50_000, 800_000, 100_000, pricing);
+      // 100K*2.0/1M = 0.20
+      // 800K*0.20/1M = 0.16
+      // 100K*(2.0*1.25)/1M = 100K*2.5/1M = 0.25
+      // 50K*10.0/1M = 0.50
+      // total = 1.11
+      expect(cost).toBeCloseTo(1.11, 5);
+    });
+
+    it("読込ばかりの定常ターンは入力課金が激減する", () => {
+      // 全量がキャッシュ読込(input残=0, creation=0)
+      const cached = calc.calculateWithCacheBreakdown(0, 0, 1_000_000, 0, pricing);
+      const full = calc.calculate(1_000_000, 0, pricing);
+      expect(cached).toBeCloseTo(0.20, 5); // 1M*0.2/1M
+      expect(cached).toBeLessThan(full * 0.11); // 約 1/10
+    });
+
+    it("calculateForModelWithCacheBreakdown: 実Claude ID(ハイフン)で割引が効く", () => {
+      // claude-sonnet-4-6: input 3.0 / cached 0.30。 全量読込 1M なら 1M*0.30/1M = 0.30
+      const cost = calc.calculateForModelWithCacheBreakdown("claude-sonnet-4-6", 0, 0, 1_000_000, 0);
+      expect(cost).toBeCloseTo(0.30, 5);
+    });
+  });
+
   describe("calculateReferencesCosts", () => {
     it("参考モデルのコストを算出", () => {
       const refs = calc.calculateReferencesCosts(10_000, 5_000, ["gemini-3-flash", "gpt-5.2"]);

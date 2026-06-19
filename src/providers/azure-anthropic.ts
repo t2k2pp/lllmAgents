@@ -46,6 +46,11 @@ interface AzureAnthropicConfig {
   anthropicVersion?: string;
   /** デフォルト max_tokens (Anthropic は必須フィールド)。 ChatParams.maxTokens で上書き可 */
   defaultMaxTokens?: number;
+  /**
+   * プロンプトキャッシュ (コスト削減)。 docs/prompt-cache-cost-reduction.md
+   * 既定 enabled=true。 system+tools と会話履歴に cache_control を付与し入力課金を 0.1× に下げる。
+   */
+  promptCache?: { enabled?: boolean; ttl?: "5m" | "1h" };
 }
 
 const DEFAULT_ANTHROPIC_VERSION = "2023-06-01";
@@ -169,13 +174,13 @@ export class AzureAnthropicProvider implements LLMProvider {
   private buildRequestBody(
     params: ChatParams & { tools?: ToolDefinition[] },
   ): Record<string, unknown> {
-    // 1. system messages を抽出してトップレベル system に集約
+    // 1. system messages を抽出してトップレベル system に集約。
+    // system[0] = 安定 base (MessageHistory が stable/dynamic を別メッセージで返す)。
     const systemMessages = params.messages.filter((m) => m.role === "system");
     const nonSystem = params.messages.filter((m) => m.role !== "system");
-    const systemText = systemMessages
+    const systemBlocksText = systemMessages
       .map((m) => (typeof m.content === "string" ? m.content : ""))
-      .filter((s) => s.length > 0)
-      .join("\n\n");
+      .filter((s) => s.length > 0);
 
     // 2. user/assistant/tool messages を Anthropic 形式に変換
     const anthMessages = convertOpenAIMessagesToAnthropic(nonSystem);
@@ -185,13 +190,34 @@ export class AzureAnthropicProvider implements LLMProvider {
     // 同時に 1 未満は不正なため最低 1 を保証。
     const clampedMaxTokens = Math.max(1, Math.min(requestedMaxTokens, MODEL_OUTPUT_HARD_LIMIT));
 
+    // プロンプトキャッシュ (docs/prompt-cache-cost-reduction.md)。 既定 ON。
+    const cacheEnabled = this.config.promptCache?.enabled !== false;
+    const cacheControl: Record<string, unknown> | undefined = cacheEnabled
+      ? (this.config.promptCache?.ttl === "1h"
+          ? { type: "ephemeral", ttl: "1h" }
+          : { type: "ephemeral" })
+      : undefined;
+
     const body: Record<string, unknown> = {
       model: this.config.model,
       max_tokens: clampedMaxTokens,
       messages: anthMessages,
       stream: params.stream,
     };
-    if (systemText) body.system = systemText;
+    // system: キャッシュ ON のときは text ブロック配列にし、 先頭(安定 base)に cache_control を付与。
+    // レンダリング順は tools → system なので、 system[0] の breakpoint で tools+system[0] がキャッシュされる。
+    // 末尾 (dynamic = 現在日時/goal/todo) はキャッシュ境界より後ろなので毎ターン再処理 (=正しい)。
+    if (systemBlocksText.length > 0) {
+      if (cacheControl) {
+        body.system = systemBlocksText.map((text, i) => {
+          const block: Record<string, unknown> = { type: "text", text };
+          if (i === 0) block.cache_control = cacheControl;
+          return block;
+        });
+      } else {
+        body.system = systemBlocksText.join("\n\n");
+      }
+    }
     if (params.temperature !== undefined) body.temperature = params.temperature;
     if (params.top_p !== undefined) body.top_p = params.top_p;
     if (params.top_k !== undefined) body.top_k = params.top_k;
@@ -201,6 +227,13 @@ export class AzureAnthropicProvider implements LLMProvider {
         description: t.function.description,
         input_schema: t.function.parameters,
       }));
+    }
+
+    // 会話履歴のローリング breakpoint: 最後のメッセージの最終ブロックに cache_control を付与。
+    // これで履歴プレフィクスが毎ターン読込 (0.1×) され、 新規分のみ書込になる。
+    // 最小キャッシュ長 (Opus/Haiku 4096 / Sonnet 2048 tok) 未満は無音で非キャッシュ = 無害。
+    if (cacheControl && anthMessages.length > 0) {
+      applyCacheControlToLastBlock(anthMessages[anthMessages.length - 1], cacheControl);
     }
 
     return body;
@@ -252,11 +285,31 @@ interface AnthropicContentBlock {
   tool_use_id?: string;
   content?: string | AnthropicContentBlock[];
   source?: { type: "base64" | "url"; media_type?: string; data?: string; url?: string };
+  /** プロンプトキャッシュ breakpoint (docs/prompt-cache-cost-reduction.md) */
+  cache_control?: Record<string, unknown>;
 }
 
 interface AnthropicMessage {
   role: "user" | "assistant";
   content: string | AnthropicContentBlock[];
+}
+
+/**
+ * メッセージの「最終 content ブロック」 に cache_control を付与する (ローリング履歴キャッシュ用)。
+ * content が文字列の場合は単一 text ブロックの配列に変換してから付与する。 空文字列はスキップ。
+ */
+function applyCacheControlToLastBlock(
+  msg: AnthropicMessage,
+  cacheControl: Record<string, unknown>,
+): void {
+  if (typeof msg.content === "string") {
+    if (msg.content.length === 0) return;
+    msg.content = [{ type: "text", text: msg.content, cache_control: cacheControl }];
+    return;
+  }
+  if (Array.isArray(msg.content) && msg.content.length > 0) {
+    msg.content[msg.content.length - 1].cache_control = cacheControl;
+  }
 }
 
 /**
@@ -395,6 +448,10 @@ async function* parseAnthropicStream(
   const toolUses = new Map<number, { id: string; name: string; partialJson: string }>();
   let promptTokens = 0;
   let completionTokens = 0;
+  // プロンプトキャッシュ usage (docs/prompt-cache-cost-reduction.md)。
+  // input_tokens(=promptTokens) はこれら 2 つを **含まない** 非キャッシュ残。
+  let cacheReadTokens = 0;
+  let cacheCreationTokens = 0;
   let stopReason: string | undefined;
 
   try {
@@ -429,9 +486,18 @@ async function* parseAnthropicStream(
 
         switch (eventName) {
           case "message_start": {
-            const m = (data.message ?? {}) as { usage?: { input_tokens?: number; output_tokens?: number } };
+            const m = (data.message ?? {}) as {
+              usage?: {
+                input_tokens?: number;
+                output_tokens?: number;
+                cache_read_input_tokens?: number;
+                cache_creation_input_tokens?: number;
+              };
+            };
             promptTokens = m.usage?.input_tokens ?? 0;
             completionTokens = m.usage?.output_tokens ?? 0;
+            cacheReadTokens = m.usage?.cache_read_input_tokens ?? 0;
+            cacheCreationTokens = m.usage?.cache_creation_input_tokens ?? 0;
             break;
           }
           case "content_block_start": {
@@ -485,8 +551,15 @@ async function* parseAnthropicStream(
           }
           case "message_delta": {
             const delta = (data.delta ?? {}) as { stop_reason?: string };
-            const usage = (data.usage ?? {}) as { output_tokens?: number };
+            const usage = (data.usage ?? {}) as {
+              output_tokens?: number;
+              cache_read_input_tokens?: number;
+              cache_creation_input_tokens?: number;
+            };
             if (typeof usage.output_tokens === "number") completionTokens = usage.output_tokens;
+            // 一部応答は message_delta 側で cache usage を確定させる (あれば上書き)
+            if (typeof usage.cache_read_input_tokens === "number") cacheReadTokens = usage.cache_read_input_tokens;
+            if (typeof usage.cache_creation_input_tokens === "number") cacheCreationTokens = usage.cache_creation_input_tokens;
             if (delta.stop_reason) stopReason = delta.stop_reason;
             break;
           }
@@ -494,7 +567,9 @@ async function* parseAnthropicStream(
             yield {
               type: "done",
               finishReason: mapAnthropicStopReason(stopReason),
-              usage: { promptTokens, completionTokens },
+              // cacheCreationTokens を必ず載せる (undefined でないこと) ことで、 コスト計算側が
+              // 「Anthropic セマンティクス (promptTokens は非キャッシュ残)」 と判別できる。
+              usage: { promptTokens, completionTokens, cachedTokens: cacheReadTokens, cacheCreationTokens },
             };
             break;
           }

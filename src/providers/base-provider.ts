@@ -70,7 +70,19 @@ export interface VisionChatParams extends ChatParams {
 export interface TokenUsage {
   promptTokens: number;
   completionTokens: number;
+  /**
+   * キャッシュ読込トークン数 (cache hit)。
+   * - Anthropic 系: `cache_read_input_tokens`。 promptTokens(=input_tokens) には含まれない内数外。
+   * - OpenAI 系: `prompt_tokens_details.cached_tokens`。 promptTokens(=prompt_tokens) の内数。
+   * セマンティクス差はコスト計算側で cacheCreationTokens の有無により分岐する。
+   */
   cachedTokens?: number;
+  /**
+   * キャッシュ書込トークン数 (cache write, 1.25× 課金)。 Anthropic 系のみ報告
+   * (`cache_creation_input_tokens`)。 このフィールドの有無で「Anthropic セマンティクス
+   * (promptTokens は非キャッシュ残)」 か「OpenAI セマンティクス (promptTokens は cached を内包)」 を判別する。
+   */
+  cacheCreationTokens?: number;
 }
 
 export interface ChatChunk {

@@ -28,10 +28,15 @@ export const BUILTIN_PRICING: Record<string, ModelPricing> = {
   "gpt-4o":      { inputPerMToken: 5.00,  outputPerMToken: 15.00, cachedInputPerMToken: 2.50 },
   "gpt-4o-mini": { inputPerMToken: 0.15,  outputPerMToken: 0.60,  cachedInputPerMToken: 0.075 },
 
-  // --- Claude (Azure AI Foundry / Vertex AI Model Garden) ---
-  "claude-opus-4.6":    { inputPerMToken: 5.00,  outputPerMToken: 25.00 },
-  "claude-sonnet-4.6":  { inputPerMToken: 3.00,  outputPerMToken: 15.00 },
-  "claude-haiku-4.5":   { inputPerMToken: 1.00,  outputPerMToken: 5.00 },
+  // --- Claude (Anthropic API / Azure AI Foundry / Vertex AI Model Garden) ---
+  // キーは実モデルID (ハイフン表記) に統一。 getModelPricing は前方一致するため
+  // "claude-sonnet-4-6" は "claude-sonnet-4-6..." 系にもマッチする。
+  // cachedInputPerMToken = 入力の 0.1× (プロンプトキャッシュ読込)。 書込 1.25× は計算側で係数処理。
+  "claude-opus-4-8":    { inputPerMToken: 5.00,  outputPerMToken: 25.00, cachedInputPerMToken: 0.50 },
+  "claude-opus-4-7":    { inputPerMToken: 5.00,  outputPerMToken: 25.00, cachedInputPerMToken: 0.50 },
+  "claude-opus-4-6":    { inputPerMToken: 5.00,  outputPerMToken: 25.00, cachedInputPerMToken: 0.50 },
+  "claude-sonnet-4-6":  { inputPerMToken: 3.00,  outputPerMToken: 15.00, cachedInputPerMToken: 0.30 },
+  "claude-haiku-4-5":   { inputPerMToken: 1.00,  outputPerMToken: 5.00,  cachedInputPerMToken: 0.10 },
 };
 
 const PRICING_FILE = path.join(os.homedir(), ".localllm", "pricing.json");

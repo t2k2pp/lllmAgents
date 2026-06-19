@@ -325,6 +325,19 @@ export interface FeaturesConfig {
    * - "on": プローブ結果に関わらず登録（デバッグ用。未準備なら実行時に誘導エラー）。
    */
   browser?: "auto" | "on" | "off";
+  /**
+   * プロンプトキャッシュ (コスト削減)。 docs/prompt-cache-cost-reduction.md
+   * Anthropic 系プロバイダ (anthropic / azure-anthropic) で system+tools と会話履歴に
+   * cache_control を付与し、 入力課金を読込分 0.1× に下げる。 GPT/Gemini は自動キャッシュ
+   * のため本フラグに関係なく安定プレフィクス化の恩恵を受ける (cache_control 不要)。
+   * - enabled(既定 true): cache_control を付与する。 false で従来どおり無印。
+   * - ttl(既定 "5m"): ephemeral キャッシュの TTL。 長く間欠的なセッションは "1h" を選べる
+   *   (書込 2× だが TTL が長い)。
+   */
+  promptCache?: {
+    enabled?: boolean;
+    ttl?: "5m" | "1h";
+  };
 }
 
 /**

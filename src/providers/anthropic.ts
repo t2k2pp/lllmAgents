@@ -23,6 +23,8 @@ interface AnthropicProviderConfig {
   defaultMaxTokens?: number;
   /** Anthropic API バージョン (デフォルト: 2023-06-01) */
   anthropicVersion?: string;
+  /** プロンプトキャッシュ (コスト削減)。 docs/prompt-cache-cost-reduction.md。 既定 ON */
+  promptCache?: { enabled?: boolean; ttl?: "5m" | "1h" };
 }
 
 const ANTHROPIC_API_BASE = "https://api.anthropic.com";
@@ -37,6 +39,7 @@ export class AnthropicProvider extends AzureAnthropicProvider {
       model: config.model,
       anthropicVersion: config.anthropicVersion,
       defaultMaxTokens: config.defaultMaxTokens,
+      promptCache: config.promptCache,
     });
   }
 

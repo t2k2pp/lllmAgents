@@ -16,6 +16,17 @@ import { ClaudeCliProvider } from "./claude-cli.js";
 import { ClaudeAgentSdkProvider } from "./claude-agent-sdk.js";
 import { GeminiProvider } from "./gemini.js";
 import { CredentialVault } from "../security/credential-vault.js";
+import { loadConfig } from "../config/config-manager.js";
+
+/** プロンプトキャッシュ設定を config から解決 (既定 ON)。 docs/prompt-cache-cost-reduction.md */
+function resolvePromptCache(): { enabled?: boolean; ttl?: "5m" | "1h" } {
+  try {
+    const pc = loadConfig().features?.promptCache;
+    return { enabled: pc?.enabled ?? true, ttl: pc?.ttl ?? "5m" };
+  } catch {
+    return { enabled: true, ttl: "5m" };
+  }
+}
 
 /**
  * LLMEndpoint / SecondLLMEndpoint 共通の Provider ファクトリ。
@@ -88,6 +99,7 @@ function createProviderFromEndpoint(
           endpoint: endpoint.endpoint,
           apiKey: anthToken,
           model: endpoint.model,
+          promptCache: resolvePromptCache(),
         });
       }
 
@@ -119,6 +131,7 @@ function createProviderFromEndpoint(
         return new AnthropicProvider({
           apiKey: token,
           model: endpoint.model,
+          promptCache: resolvePromptCache(),
         });
       }
 
