@@ -2627,15 +2627,26 @@ export class REPL {
             { name: "受信を開始する (Discord からの呼び出しを受け付ける)", value: "listen-start" },
             { name: "受信を停止する", value: "listen-stop" },
             { name: "起動時に受信を自動開始するか切り替える", value: "auto-start-toggle" },
+            { name: "利用を許可するユーザーを表示する (許可ユーザーリスト)", value: "users" },
+            { name: "許可ユーザーを追加する (Discord ユーザー ID)", value: "user-add" },
+            { name: "許可ユーザーを削除する", value: "user-remove" },
             { name: chalk.dim("前のメニューに戻る"), value: "back" },
           ],
-          pageSize: 12,
+          pageSize: 15,
         });
       } catch { return; }
       if (action === "back") return;
 
       if (["enable", "disable", "test"].includes(action)) {
         await this.handleCommand(`/discord ${action}`);
+      } else if (action === "users") {
+        await this.handleCommand("/discord users");
+      } else if (action === "user-add" || action === "user-remove") {
+        try {
+          const val = await input({ message: "Discord ユーザー ID を入力 (空欄で取り消し):" });
+          if (!val.trim()) { console.log(chalk.dim("  取り消しました。")); continue; }
+          await this.handleCommand(`/discord ${action} ${val.trim()}`);
+        } catch { /* cancel */ }
       } else if (action === "register") {
         // サーバーID を聞いてから登録 (空欄なら全サーバー向け = 反映に最大 1 時間)
         try {
@@ -2682,14 +2693,26 @@ export class REPL {
             { name: "テスト通知を送ってみる", value: "test" },
             { name: "Bot Token を設定する (xoxb- で始まる文字列)", value: "bot-token" },
             { name: "App-Level Token を設定する (xapp- で始まる文字列)", value: "app-token" },
+            { name: "利用を許可するユーザーを表示する (許可ユーザーリスト)", value: "users" },
+            { name: "許可ユーザーを追加する (Slack ユーザー ID。例: U01234567)", value: "user-add" },
+            { name: "許可ユーザーを削除する", value: "user-remove" },
             { name: chalk.dim("前のメニューに戻る"), value: "back" },
           ],
+          pageSize: 12,
         });
       } catch { return; }
       if (action === "back") return;
 
       if (["enable", "disable", "test"].includes(action)) {
         await this.handleCommand(`/slack ${action}`);
+      } else if (action === "users") {
+        await this.handleCommand("/slack users");
+      } else if (action === "user-add" || action === "user-remove") {
+        try {
+          const val = await input({ message: "Slack ユーザー ID を入力 (例: U01234567、空欄で取り消し):" });
+          if (!val.trim()) { console.log(chalk.dim("  取り消しました。")); continue; }
+          await this.handleCommand(`/slack ${action} ${val.trim()}`);
+        } catch { /* cancel */ }
       } else {
         // url / bot-token / app-token
         const fieldLabel: Record<string, string> = {
@@ -6240,31 +6263,8 @@ export class REPL {
         }
         break;
 
-      case "/skills": {
-        if (!this.skillRegistry) {
-          console.log(
-            chalk.dim("  スキルシステムが初期化されていません。"),
-          );
-          break;
-        }
-        const skills = this.skillRegistry.list();
-        if (skills.length === 0) {
-          console.log(chalk.dim("  利用可能なスキルはありません。"));
-        } else {
-          console.log(chalk.dim("  利用可能なスキル:"));
-          for (const s of skills) {
-            const tag = s.builtIn
-              ? chalk.dim("[builtin]")
-              : chalk.dim("[custom]");
-            console.log(
-              chalk.dim(
-                `    ${chalk.cyan(s.trigger)}  ${s.description}  ${tag}`,
-              ),
-            );
-          }
-        }
-        break;
-      }
+      // 旧 /skills 一覧表示 case はここにあったが、上部の case "/skills" (status/on/off/toggle 版) と
+      // 重複し到達不能な dead code だったため削除 (cleanup 2026-06-20)。スキル一覧は /skills status で表示。
 
       case "/status": {
         // 2026-05-28: /metrics / /cost / /capability を /status に集約 (Phase optimize #4)。

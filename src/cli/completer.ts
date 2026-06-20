@@ -155,13 +155,11 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/knowledge search", description: "ナレッジ検索", needsArg: true },
   { command: "/knowledge open", description: "フォルダを開く" },
   // /integrations (Phase optimize #3、 2026-05-28): Discord / Slack / Chatlog / Search を 1 picker に集約。
-  // 旧 4 系統は dispatcher 互換維持、 補完候補からは [非推奨] alias 1 件ずつのみ残す。
+  // 旧 4 系統 (/discord /slack /chatlog /search) は dispatcher 互換のため case 本体を残すが、
+  // /integrations の各サブメニューが内部呼び出しする実装専用とし、補完候補からは除外する
+  // (cleanup 2026-06-20: 統廃合済みのため [非推奨] alias を補完から削除)。
   { command: "/integrations", description: "外部統合 (Discord / Slack / Chatlog / Search) を 1 画面で設定" },
   { command: "/intg", description: "/integrations の短縮形" },
-  { command: "/discord", description: "[非推奨] Discord 単体設定。 /integrations 推奨" },
-  { command: "/slack", description: "[非推奨] Slack 単体設定。 /integrations 推奨" },
-  { command: "/chatlog", description: "[非推奨] Chatlog 単体設定。 /integrations 推奨" },
-  { command: "/search", description: "[非推奨] Search 単体設定。 /integrations 推奨" },
   // /search のサブコマンド (duckduckgo / ddg / test / status) は /integrations 配下に集約済み
   { command: "/loop", description: "プロンプトを定期実行 (例: /loop 5m /pr-review)", needsArg: true },
   { command: "/loop status", description: "アクティブなループ一覧 + 停止 picker (旧 /loop list の発展形)" },

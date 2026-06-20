@@ -260,15 +260,17 @@ describe("createCommandMenuProvider", () => {
     expect(provider("intg").map((i) => i.label)).toContain("/intg");
   });
 
-  it("旧 /discord /slack /chatlog /search のサブコマンドは補完から除外 (dispatcher 互換は維持)", () => {
+  it("旧 /discord /slack /chatlog /search は補完から完全除外 (dispatcher 互換は維持)", () => {
+    // cleanup 2026-06-20 (docs/integrations-command-cleanup.md): /integrations へ統廃合済みのため
+    // 旧 4 系統の [非推奨] alias も補完候補から削除。dispatcher の case は内部実装として残置。
     const provider = createCommandMenuProvider();
     const allLabels = provider("").map((i) => i.label);
-    // 残存する [非推奨] alias 1 件
-    expect(allLabels).toContain("/discord");
-    expect(allLabels).toContain("/slack");
-    expect(allLabels).toContain("/chatlog");
-    expect(allLabels).toContain("/search");
-    // 個別サブは除外済み
+    // トップレベル alias も含めて補完には出ない
+    expect(allLabels).not.toContain("/discord");
+    expect(allLabels).not.toContain("/slack");
+    expect(allLabels).not.toContain("/chatlog");
+    expect(allLabels).not.toContain("/search");
+    // 個別サブも従来どおり除外済み
     expect(allLabels).not.toContain("/discord url");
     expect(allLabels).not.toContain("/discord listen start");
     expect(allLabels).not.toContain("/slack url");
@@ -276,6 +278,8 @@ describe("createCommandMenuProvider", () => {
     expect(allLabels).not.toContain("/chatlog vault");
     expect(allLabels).not.toContain("/search searxng");
     expect(allLabels).not.toContain("/search duckduckgo");
+    // 代替の /integrations は残る
+    expect(allLabels).toContain("/integrations");
   });
 
   it("/loop の主要サブコマンドは引き続き補完候補に出る (B-2 統合後)", () => {
