@@ -170,6 +170,21 @@ export interface ContextConfig {
   maxHistoryMessages: number;
 }
 
+/**
+ * 待機リスト1件。 未許可ユーザーがチャネル経由でアクセスした際に記録される。
+ * id は Discord の数値ユーザー ID (snowflake)。 username は表示確認用 (承認時の取り違え防止)。
+ */
+export interface PendingUser {
+  id: string;
+  username?: string;
+  /** 最初にアクセスした ISO 時刻 */
+  firstSeen: string;
+  /** 直近のアクセス ISO 時刻 */
+  lastSeen: string;
+  /** アクセス試行回数 */
+  attempts: number;
+}
+
 export interface DiscordConfig {
   enabled: boolean;
   webhookUrl: string;
@@ -181,6 +196,12 @@ export interface DiscordConfig {
   listenEnabled?: boolean;  // 起動時に受信 (Gateway 接続) を自動開始するか
   /** コマンド・確認ボタンを受け付けるユーザー ID。 未設定/空 = 全員拒否 (fail-closed, proposal §6)。 利用には設定が必須 */
   allowedUserIds?: string[];
+  /**
+   * 未許可ユーザーが /ask を試みた際に自動で記録される待機リスト。
+   * REPL の /integrations Discord メニュー or `/discord approve <ID>` で allowedUserIds へ移す。
+   * 許可リストへの手入力 (数値 ID のタイプミスが起きやすい) を不要にするための仕組み。
+   */
+  pendingUsers?: PendingUser[];
   /** 権限確認ボタンのタイムアウト秒 (デフォルト 300。 ask_user はこの 2 倍) */
   interactionTimeoutSec?: number;
   /**

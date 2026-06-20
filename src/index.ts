@@ -519,7 +519,7 @@ async function main(): Promise<void> {
     }
     // Room モデル: --background は REPL なしで Discord(Room B) を resting room とする。
     roomManager.initBackgroundSurface("discord");
-    const server = new DiscordInteractionServer(discord, agent, roomManager, roomQueue, skillRegistry, mcpManager);
+    const server = new DiscordInteractionServer(discord, agent, roomManager, roomQueue, skillRegistry, mcpManager, () => saveConfig(config));
     try {
       await server.start();
       console.log(`  [Background Mode] Discord に接続しました${server.botUser ? ` (Bot: ${server.botUser})` : ""}`);
