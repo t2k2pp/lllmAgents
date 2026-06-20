@@ -2,6 +2,7 @@
 
 import chalk from "chalk";
 import { configExists, loadConfig, saveConfig } from "./config/config-manager.js";
+import { setDisplayJpyRate } from "./cost/money-format.js";
 import { reconcileSlotsFromConfig } from "./config/model-registry.js";
 import { runSetupWizard } from "./config/setup-wizard.js";
 import { createProvider } from "./providers/provider-factory.js";
@@ -96,6 +97,11 @@ async function main(): Promise<void> {
   }
 
   const config = loadConfig();
+
+  // コスト表示の日本円換算レート (/cost rate) をプロセス全体で共有する。
+  // Discord/Slack 通知や画像生成コストなど config を直接参照できない箇所も
+  // このモジュール状態を見て円/ドルを切り替える (cost/money-format.ts)。
+  setDisplayJpyRate(config.jpyPerUsd);
 
   if (!config.mainLLM.model) {
     console.error("Model not configured. Run: localllm --setup");

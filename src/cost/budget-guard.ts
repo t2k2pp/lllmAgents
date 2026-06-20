@@ -1,4 +1,5 @@
 import type { BudgetConfig } from "../config/types.js";
+import { formatMoney } from "./money-format.js";
 
 export type BudgetStatus =
   | { status: "ok" }
@@ -19,7 +20,7 @@ export class BudgetGuard {
     if (currentTotalCostUsd >= limitUsd * stopThreshold) {
       return {
         status: "exceeded",
-        message: `予算上限の${Math.round(stopThreshold * 100)}%に到達しました ($${currentTotalCostUsd.toFixed(4)} / $${limitUsd.toFixed(2)})。セカンドLLMの利用を停止します。`,
+        message: `予算上限の${Math.round(stopThreshold * 100)}%に到達しました (${formatMoney(currentTotalCostUsd)} / ${formatMoney(limitUsd)})。セカンドLLMの利用を停止します。`,
       };
     }
 
@@ -30,7 +31,7 @@ export class BudgetGuard {
         status: "warning",
         usedPercent,
         remainingUsd,
-        message: `予算の${Math.round(usedPercent)}%を使用しました ($${currentTotalCostUsd.toFixed(4)} / $${limitUsd.toFixed(2)})。残り: $${remainingUsd.toFixed(4)}`,
+        message: `予算の${Math.round(usedPercent)}%を使用しました (${formatMoney(currentTotalCostUsd)} / ${formatMoney(limitUsd)})。残り: ${formatMoney(remainingUsd)}`,
       };
     }
 

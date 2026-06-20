@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { getDisplayWidth } from "./interactive-input.js";
+import { formatMoney } from "../cost/money-format.js";
 import type { TokenUsageRecord } from "../cost/token-tracker.js";
 import {
   aggregate,
@@ -18,20 +19,12 @@ function fmtTok(n: number): string {
   return n.toLocaleString();
 }
 
-function fmtUsd(n: number): string {
-  return "$" + n.toFixed(4);
-}
-
 /**
  * コスト金額を整形する。 jpyPerUsd (1ドルあたりの円) が設定されていれば「円のみ」、
  * 未設定ならドルのみを返す (どちらか一方。 設計: docs/cost-token-command-design.md)。
+ * 実体は cost/money-format.ts の共通整形に委譲する (Discord/Slack 通知と共通化)。
  */
-export function fmtMoney(usd: number, jpyPerUsd?: number): string {
-  if (jpyPerUsd && jpyPerUsd > 0) {
-    return "¥" + Math.round(usd * jpyPerUsd).toLocaleString();
-  }
-  return fmtUsd(usd);
-}
+export const fmtMoney = formatMoney;
 
 function fmtDate(iso?: string): string {
   if (!iso) return "(記録なし)";

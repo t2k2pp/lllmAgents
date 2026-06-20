@@ -158,8 +158,13 @@ window=全ファイルを `timestamp >= windowStartAt` で抽出、session=in-me
 
 - 設定値は `config.jpyPerUsd`（1ドルあたりの円。任意項目、`saveConfig` で永続化）。
 - **表示はどちらか一方**。レート設定時は円のみ（`¥1,234`、`Math.round(usd * jpyPerUsd)` を桁区切り表示）、
-  未設定時は従来どおりドルのみ（`$0.1234`）。両方併記はしない。整形は `cost-view.ts` の
-  `fmtMoney(usd, jpyPerUsd?)` に一元化し、`/cost` 各表示とセッション終了サマリの estimated 行で共有する。
+  未設定時は従来どおりドルのみ（`$0.1234`）。両方併記はしない。整形は `cost/money-format.ts` の
+  `formatMoney(usd, jpyPerUsd?)` に一元化する（`cost-view.ts` の `fmtMoney` はこれへの委譲）。
+- **適用範囲はコスト金額の全表示**。`/cost` 各表示・セッション終了サマリの estimated 行に加え、
+  Discord/Slack 通知（`task-reporter.ts` の `formatStatsLine` フッター/レポート）、画像生成の
+  推定コスト、予算ガード（`budget-guard.ts`）の警告メッセージも円表示になる。
+  これらは `config` を直接参照できないため、`formatMoney` がモジュール状態として現在のレートを保持する
+  （`setDisplayJpyRate(rate)`）。起動時（`index.ts` の `loadConfig` 後）と `/cost rate` 変更時に更新する。
 - 単価列（`単価(in/out $/M)`）は USD 据え置き。レート設定時は cost 列ヘッダのみ `cost(¥)` と明示する。
 
 ### 5.1 表示モック（`/cost models`）

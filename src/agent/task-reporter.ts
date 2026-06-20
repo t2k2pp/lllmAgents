@@ -9,6 +9,7 @@
  * - silent 欠損禁止: 0 件・$0 はそのまま見せる (隠さない)
  */
 
+import { formatMoney } from "../cost/money-format.js";
 import type { AgentEventMap, TaskOutcome } from "./agent-events.js";
 
 type TaskCompleteEvent = AgentEventMap["task_complete"];
@@ -42,14 +43,17 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-/** 統計の 1 行サマリ (例: "⏱ 2分34秒 · 🔧 12 tools · 📝 3 files · 💰 $0.0123") */
+/**
+ * 統計の 1 行サマリ (例: "⏱ 2分34秒 · 🔧 12 tools · 📝 3 files · 🪙 in 12.3K/out 4.5K ($0.0123)")。
+ * コスト金額は `/cost rate` の表示レート設定時は円表示になる (formatMoney がモジュール状態を参照)。
+ */
 export function formatStatsLine(e: TaskCompleteEvent): string {
   const parts = [`⏱ ${formatDuration(e.durationMs)}`, `🔧 ${e.toolsExecuted} tools`];
   if (e.filesChanged.length > 0) {
     parts.push(`📝 ${e.filesChanged.length} files`);
   }
   if (e.tokensIn > 0 || e.tokensOut > 0) {
-    const cost = e.costUsd > 0 ? ` ($${e.costUsd.toFixed(4)})` : "";
+    const cost = e.costUsd > 0 ? ` (${formatMoney(e.costUsd)})` : "";
     parts.push(`🪙 in ${formatTokens(e.tokensIn)}/out ${formatTokens(e.tokensOut)}${cost}`);
   }
   return parts.join(" · ");

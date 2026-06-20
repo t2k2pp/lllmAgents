@@ -1,10 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   formatDuration,
   formatStatsLine,
   formatReportFooter,
   formatTaskReport,
 } from "../../src/agent/task-reporter.js";
+import { setDisplayJpyRate } from "../../src/cost/money-format.js";
 import type { AgentEventMap } from "../../src/agent/agent-events.js";
 
 type E = AgentEventMap["task_complete"];
@@ -48,6 +49,24 @@ describe("formatStatsLine", () => {
     const line = formatStatsLine(mkEvent({ costUsd: 0 }));
     expect(line).not.toContain("$");
     expect(line).toContain("in 12.3K");
+  });
+
+  describe("為替レート設定時 (/cost rate) は円表示にする", () => {
+    afterEach(() => setDisplayJpyRate(undefined));
+
+    it("Discord/Slack 通知のコストも円表示になる", () => {
+      setDisplayJpyRate(150);
+      const line = formatStatsLine(mkEvent({ costUsd: 0.0123 }));
+      expect(line).toContain("¥2"); // 0.0123 * 150 ≈ 1.845 → 四捨五入で ¥2
+      expect(line).not.toContain("$");
+    });
+
+    it("レート解除でドル表示に戻る", () => {
+      setDisplayJpyRate(150);
+      setDisplayJpyRate(undefined);
+      const line = formatStatsLine(mkEvent({ costUsd: 0.0123 }));
+      expect(line).toContain("$0.0123");
+    });
   });
 });
 

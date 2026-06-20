@@ -7,6 +7,7 @@ import { bashTool } from "../tools/definitions/bash.js";
 import { globalTokenTracker } from "../cost/token-tracker.js";
 import { resetWindow, exportUsage, resolvePeriod, type PeriodSpec } from "../cost/usage-store.js";
 import { formatSummary, formatModels, formatProviders, fmtMoney } from "./cost-view.js";
+import { setDisplayJpyRate } from "../cost/money-format.js";
 import { displayHelp, type SkillSummary } from "./renderer.js";
 import { estimateMessageTokens } from "../agent/token-counter.js";
 import {
@@ -952,7 +953,7 @@ export class REPL {
           const result = await this.imageService.generateAndSave({ prompt }, outputPath);
           console.log(chalk.green(`  ✓ 生成しました (${result.providerType} / ${result.model}):`));
           for (const p of result.savedPaths) console.log(chalk.dim(`    ${p}`));
-          console.log(chalk.dim(result.costUsd > 0 ? `  推定コスト: $${result.costUsd.toFixed(4)}` : "  コスト: $0 (ローカル生成)"));
+          console.log(chalk.dim(result.costUsd > 0 ? `  推定コスト: ${fmtMoney(result.costUsd, this.config.jpyPerUsd)}` : "  コスト: $0 (ローカル生成)"));
           for (const w of result.warnings) console.log(chalk.yellow(`  ⚠ ${w}`));
         } catch (e) {
           console.log(chalk.red(`  生成に失敗しました: ${e instanceof Error ? e.message : String(e)}`));
@@ -6468,6 +6469,7 @@ export class REPL {
           if (arg === "off" || arg === "reset" || arg === "none" || arg === "0") {
             // リセット: ドル表示に戻す
             delete this.config.jpyPerUsd;
+            setDisplayJpyRate(undefined);
             saveConfig(this.config);
             console.log(chalk.green("\n  為替レートをリセットしました。 コストはドル表示に戻ります。\n"));
             break;
@@ -6479,6 +6481,7 @@ export class REPL {
             break;
           }
           this.config.jpyPerUsd = rate;
+          setDisplayJpyRate(rate);
           saveConfig(this.config);
           console.log(chalk.green(`\n  為替レートを 1ドル = ${rate}円 に設定しました。 コストを円表示します。`));
           console.log(chalk.dim("  ドル表示に戻す: /cost rate off\n"));

@@ -2,6 +2,7 @@ import type { ToolHandler, ToolResult } from "../tool-registry.js";
 import type { ImageService } from "../../image/image-service.js";
 import type { Config } from "../../config/types.js";
 import { sendDiscordFiles } from "../../utils/discord.js";
+import { formatMoney } from "../../cost/money-format.js";
 import * as logger from "../../utils/logger.js";
 
 /**
@@ -92,7 +93,7 @@ export function createImageGenerateTool(imageService: ImageService, config: Conf
         const lines = [
           `画像を生成しました (${result.providerType} / ${result.model}):`,
           ...result.savedPaths.map((p) => `  ${p}`),
-          result.costUsd > 0 ? `推定コスト: $${result.costUsd.toFixed(4)}` : "コスト: $0 (ローカル生成)",
+          result.costUsd > 0 ? `推定コスト: ${formatMoney(result.costUsd)}` : "コスト: $0 (ローカル生成)",
           ...result.warnings.map((w) => `⚠ ${w}`),
         ];
         return { success: true, output: lines.join("\n") };
