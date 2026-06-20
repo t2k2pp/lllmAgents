@@ -380,7 +380,7 @@ export class REPL {
       return;
     }
     try {
-      this.interactionServer = new DiscordInteractionServer(d, this.agent, this.roomManager, this.roomQueue, this.skillRegistry, this.mcpManager);
+      this.interactionServer = new DiscordInteractionServer(d, this.agent, this.roomManager, this.roomQueue, this.skillRegistry, this.mcpManager, () => saveConfig(this.config));
       await this.interactionServer.start();
       const botName = this.interactionServer.botUser;
       console.log(chalk.green(`  ✅ Discord に接続し、呼び出しの受信を開始しました${botName ? ` (Bot: ${botName})` : ""}`));
@@ -2628,11 +2628,12 @@ export class REPL {
             { name: "受信を停止する", value: "listen-stop" },
             { name: "起動時に受信を自動開始するか切り替える", value: "auto-start-toggle" },
             { name: "利用を許可するユーザーを表示する (許可ユーザーリスト)", value: "users" },
+            { name: "待機リストから利用申請を承認する (タイピング不要・推奨)", value: "waitlist" },
             { name: "許可ユーザーを追加する (Discord ユーザー ID)", value: "user-add" },
             { name: "許可ユーザーを削除する", value: "user-remove" },
             { name: chalk.dim("前のメニューに戻る"), value: "back" },
           ],
-          pageSize: 15,
+          pageSize: 16,
         });
       } catch { return; }
       if (action === "back") return;
@@ -2641,6 +2642,8 @@ export class REPL {
         await this.handleCommand(`/discord ${action}`);
       } else if (action === "users") {
         await this.handleCommand("/discord users");
+      } else if (action === "waitlist") {
+        await this.discordWaitlistApprove();
       } else if (action === "user-add" || action === "user-remove") {
         try {
           const val = await input({ message: "Discord ユーザー ID を入力 (空欄で取り消し):" });
@@ -2676,6 +2679,44 @@ export class REPL {
         } catch { /* cancel */ }
       }
     }
+  }
+
+  /** 待機リストから利用申請を select で選んで承認/却下する (ID のタイピング不要) */
+  private async discordWaitlistApprove(): Promise<void> {
+    const pending = this.config.discord?.pendingUsers ?? [];
+    if (pending.length === 0) {
+      console.log(chalk.dim("  待機リストは空です。未許可ユーザーが Discord から /ask を試みると自動で記録されます。"));
+      return;
+    }
+    let id: string;
+    try {
+      id = await select({
+        message: "承認する利用申請を選んでください:",
+        choices: [
+          ...pending.map((u) => ({
+            name: `${u.username ?? "(名前不明)"} (ID: ${u.id}) — 試行 ${u.attempts} 回`,
+            value: u.id,
+          })),
+          { name: chalk.dim("取り消す"), value: "__cancel__" },
+        ],
+        pageSize: 15,
+      });
+    } catch { return; }
+    if (id === "__cancel__") { console.log(chalk.dim("  取り消しました。")); return; }
+
+    let act: string;
+    try {
+      act = await select({
+        message: "この申請をどうしますか?",
+        choices: [
+          { name: "承認する (許可ユーザーに追加)", value: "approve" },
+          { name: "却下する (待機リストから削除)", value: "reject" },
+          { name: chalk.dim("取り消す"), value: "__cancel__" },
+        ],
+      });
+    } catch { return; }
+    if (act === "__cancel__") { console.log(chalk.dim("  取り消しました。")); return; }
+    await this.handleCommand(`/discord ${act} ${id}`);
   }
 
   /** /integrations → Slack 編集サブメニュー (旧 /slack と互換) */
@@ -5468,14 +5509,59 @@ export class REPL {
             if (!id) {
               console.log(chalk.yellow(`  使い方: /discord ${subCmd} <DiscordユーザーID>`));
             } else if (subCmd === "user-add") {
+              if (!/^\d{15,21}$/.test(id)) {
+                // 失敗の典型: ユーザー名 (osia4782 等) を入れてしまう。 ID は数値 snowflake。
+                console.log(chalk.yellow(`  ⚠ "${id}" は Discord ユーザー ID の形式 (15〜21桁の数字) ではありません。`));
+                console.log(chalk.dim("    ユーザー名ではなく数値の ID を指定してください (一致せず利用できません)。"));
+                console.log(chalk.dim("    ID 入力が面倒な場合は、相手に Discord から /ask を一度実行してもらい、"));
+                console.log(chalk.dim("    待機リスト (/discord waitlist) から承認する方法が確実です。"));
+              }
               if (!list.includes(id)) list.push(id);
               this.config.discord.allowedUserIds = list;
+              // 許可したユーザーは待機リストから取り除く。
+              if (this.config.discord.pendingUsers) {
+                this.config.discord.pendingUsers = this.config.discord.pendingUsers.filter((u) => u.id !== id);
+              }
               saveConfig(this.config);
               console.log(chalk.green(`  許可ユーザーに ${id} を追加しました (${list.length} 名)。`));
             } else {
               this.config.discord.allowedUserIds = list.filter((u) => u !== id);
               saveConfig(this.config);
               console.log(chalk.yellow(`  許可ユーザーから ${id} を削除しました。`));
+            }
+          }
+        } else if (subCmd === "waitlist" || subCmd === "approve" || subCmd === "reject") {
+          // 待機リスト: 未許可ユーザーのアクセスを自動記録 → ここで承認/却下する
+          if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
+          const pending = this.config.discord.pendingUsers ?? [];
+          if (subCmd === "waitlist") {
+            if (pending.length === 0) {
+              console.log(chalk.dim("  待機リスト: なし (未許可ユーザーが /ask を試みると自動で記録されます)"));
+            } else {
+              console.log(chalk.bold("  待機リスト (利用申請):"));
+              for (const u of pending) {
+                console.log(chalk.dim(
+                  `    - ${u.username ?? "(名前不明)"} (ID: ${u.id})  ` +
+                  `試行 ${u.attempts} 回 / 最終 ${u.lastSeen.replace("T", " ").slice(0, 16)}`,
+                ));
+              }
+              console.log(chalk.dim("  承認: /discord approve <ID>  却下: /discord reject <ID>"));
+            }
+          } else {
+            const id = args[1];
+            if (!id) {
+              console.log(chalk.yellow(`  使い方: /discord ${subCmd} <DiscordユーザーID>`));
+            } else if (subCmd === "approve") {
+              const allow = this.config.discord.allowedUserIds ?? [];
+              if (!allow.includes(id)) allow.push(id);
+              this.config.discord.allowedUserIds = allow;
+              this.config.discord.pendingUsers = pending.filter((u) => u.id !== id);
+              saveConfig(this.config);
+              console.log(chalk.green(`  ✅ ${id} を許可しました (許可ユーザー ${allow.length} 名)。`));
+            } else {
+              this.config.discord.pendingUsers = pending.filter((u) => u.id !== id);
+              saveConfig(this.config);
+              console.log(chalk.yellow(`  待機リストから ${id} を削除しました。`));
             }
           }
         } else if (subCmd === "images") {
@@ -5505,6 +5591,7 @@ export class REPL {
           console.log(chalk.dim("  コマンド:  register [サーバーID]"));
           console.log(chalk.dim("  受信:      listen start | listen stop | listen auto-start [off]"));
           console.log(chalk.dim("  認可:      user-add <ID> | user-remove <ID> | users"));
+          console.log(chalk.dim("  待機リスト: waitlist | approve <ID> | reject <ID>"));
         }
         break;
       }

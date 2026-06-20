@@ -83,6 +83,11 @@ export class DiscordInteractionServer implements InteractionBridge {
     /** /context・/status のコンテキスト内訳に使う (任意)。 */
     private skillRegistry?: import("../skills/skill-registry.js").SkillRegistry,
     private mcpManager?: import("../mcp/mcp-manager.js").MCPManager,
+    /**
+     * 待機リスト更新時に config を永続化するコールバック。
+     * server は DiscordConfig 参照しか持たないため、 full Config を保存する手段を外から受け取る。
+     */
+    private persistConfig?: () => void,
   ) {}
 
   /** Gateway に接続して受信を開始する */
@@ -188,6 +193,39 @@ export class DiscordInteractionServer implements InteractionBridge {
     return (interaction.member?.user?.id ?? interaction.user?.id ?? "") as string;
   }
 
+  /**
+   * 未許可ユーザーのアクセスを待機リストに記録する。
+   * 数値ユーザー ID を自動で控えるので、 管理者は REPL から承認するだけでよく、
+   * 許可リストに長い ID を手入力する (タイプミスしやすい) 必要がなくなる。
+   */
+  private recordPendingUser(userId: string, username?: string): void {
+    if (!userId) return;
+    // 既に許可済みなら記録不要 (allowlist 変更直後の取りこぼし対策)。
+    if (this.config.allowedUserIds?.includes(userId)) return;
+
+    const now = new Date().toISOString();
+    const list = this.config.pendingUsers ?? (this.config.pendingUsers = []);
+    const existing = list.find((u) => u.id === userId);
+    if (existing) {
+      existing.lastSeen = now;
+      existing.attempts += 1;
+      if (username) existing.username = username;
+    } else {
+      list.push({ id: userId, username, firstSeen: now, lastSeen: now, attempts: 1 });
+      // 新規申請は REPL 操作者にすぐ気付いてもらう。
+      console.log(
+        `\n  [Discord] 🔔 利用申請: ${username ?? "(名前不明)"} (ID: ${userId})\n` +
+        "           承認するには /integrations の Discord 連携メニュー → 待機リスト、" +
+        "または /discord approve " + userId,
+      );
+    }
+    try {
+      this.persistConfig?.();
+    } catch (e) {
+      logger.error("Discord 待機リストの保存に失敗しました:", e);
+    }
+  }
+
   // ─── スラッシュコマンド ───
 
   /** /ask コマンドを処理する */
@@ -200,10 +238,17 @@ export class DiscordInteractionServer implements InteractionBridge {
 
     const userId = DiscordInteractionServer.extractUserId(interaction);
     if (!this.isUserAllowed(userId)) {
+      const uname = interaction.member?.user?.username ?? interaction.user?.username ?? undefined;
+      this.recordPendingUser(userId, uname);
       // flags 64 = ephemeral (本人にのみ見える)
       await this.respondInteraction(interaction, {
         type: 4,
-        data: { content: "⛔ このボットの利用は許可されていません（allowedUserIds 設定）。", flags: 64 },
+        data: {
+          content:
+            "⛔ このボットの利用はまだ許可されていません。\n" +
+            "管理者に利用申請を記録しました。承認されると利用できるようになります。",
+          flags: 64,
+        },
       });
       return;
     }
