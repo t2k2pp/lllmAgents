@@ -55,14 +55,26 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/goal-loop", description: "決定的検証ゲート型ループ: --check の exit 0 まで反復 (例: --check \"npm test\")", needsArg: true },
   { command: "/stream", description: "ストリーミング表示モードの確認/切り替え (引数なしで対話 toggle)" },
   // ── Model / Second LLM コマンド (docs/model-registry.md) ──
-  // Phase 3 (2026-05-27): 個別編集系のコマンドは /models Edit に統合された。
-  //   - /model setup <provider> の各バリアントは /models Add new... の wizard へ集約 → 補完から除外
-  //   - /model host / port / url / provider / temperature / top_p / top_k / rep_penalty / description
-  //     等の個別編集は /models Edit から行う → 補完から除外 (dispatcher は互換のため残存)
-  //   - 残すのは: /model (状態表示), /model info, /model list, /model context, /model setup
+  // Phase 3 (2026-05-27): 個別編集系を /models Edit wizard に集約した。
+  // 2026-06-21: discoverability 優先で main-slot の編集系サブコマンドを補完に復活
+  //   （second/vision は description 等が補完に出るのに main だけ非対称だった漏れの解消）。
+  //   - dispatcher (repl.ts の /model ハンドラ) は元から全サブコマンドを処理している。
+  //   - 補完に出すのは現在値表示も兼ねる編集系: description / temperature / top_p / top_k /
+  //     rep_penalty / host / port / provider（bare で現在値、引数で更新）。
+  //   - 除外: /model url（dispatcher 内で非推奨明示）、ip（host の alias）。
+  //   - 個別編集をまとめて行う集約 UI は引き続き /models Edit。
+  //   - /model setup <provider> の各バリアントは /models Add new... の wizard へ集約 → 補完から除外。
   { command: "/model", description: "main / second / 他 slot の状態を 1 画面で表示 (詳細編集は /models)" },
   { command: "/model list", description: "main slot の利用可能モデル一覧から選択" },
   { command: "/model context", description: "main slot のコンテキスト長を変更 (例: 128k)", needsArg: true },
+  { command: "/model description", description: "main slot の特性説明 (サブエージェント選択の材料)", needsArg: true },
+  { command: "/model temperature", description: "main slot の temperature (0〜2、推論重視は低め)", needsArg: true },
+  { command: "/model top_p", description: "main slot の top_p (0〜1、1.0で無効化)", needsArg: true },
+  { command: "/model top_k", description: "main slot の top_k (整数、Ollama系で有効)", needsArg: true },
+  { command: "/model rep_penalty", description: "main slot の repetition penalty (1.0で中立、>1で繰り返し抑制)", needsArg: true },
+  { command: "/model host", description: "main slot の接続先ホスト/IP を変更", needsArg: true },
+  { command: "/model port", description: "main slot の接続先ポートを変更", needsArg: true },
+  { command: "/model provider", description: "main slot のプロバイダ種別を変更 (ローカル系。クラウドは setup へ誘導)", needsArg: true },
   { command: "/model setup", description: "main slot の新規セットアップ wizard (プロバイダ選択は wizard 内で)" },
   // /model second 系 (docs/model-registry.md §4.1)
   { command: "/model second", description: "second slot の状態表示・サブコマンド (旧 /second)" },
