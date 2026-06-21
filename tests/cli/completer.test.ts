@@ -213,21 +213,31 @@ describe("createCommandMenuProvider", () => {
     expect(labels).not.toContain("/second context");
   });
 
-  it("Phase 3: 個別編集系コマンドは補完候補から除外 (dispatcher 互換は維持)", () => {
+  it("main-slot /model 編集系サブコマンドは補完候補に出る (2026-06-21 discoverability 復活)", () => {
+    // dispatcher は元から処理しているのに second/vision だけ補完に出ていた非対称を解消。
+    // bare で現在値表示・引数で更新できる編集系を補完に載せる (docs/model-registry.md)。
+    const provider = createCommandMenuProvider();
+    const allLabels = provider("").map((i) => i.label);
+    expect(allLabels).toContain("/model description");
+    expect(allLabels).toContain("/model temperature");
+    expect(allLabels).toContain("/model top_p");
+    expect(allLabels).toContain("/model top_k");
+    expect(allLabels).toContain("/model rep_penalty");
+    expect(allLabels).toContain("/model provider");
+    expect(allLabels).toContain("/model host");
+    expect(allLabels).toContain("/model port");
+    // 編集系は needsArg: true (選択後に引数入力を続けるため末尾スペース付与)
+    const desc = provider("model description").find((i) => i.label === "/model description");
+    expect(desc?.value).toBe("/model description ");
+  });
+
+  it("非推奨/集約済みコマンドは引き続き補完候補から除外 (dispatcher 互換は維持)", () => {
     // docs/model-registry.md §4.1 — /models Edit に統合済み
     const provider = createCommandMenuProvider();
     const allLabels = provider("").map((i) => i.label);
-    // 旧 /model 個別編集
-    expect(allLabels).not.toContain("/model temperature");
-    expect(allLabels).not.toContain("/model top_p");
-    expect(allLabels).not.toContain("/model top_k");
-    expect(allLabels).not.toContain("/model rep_penalty");
+    // /model url は dispatcher 内で非推奨明示 → 補完には出さない
     expect(allLabels).not.toContain("/model url");
-    expect(allLabels).not.toContain("/model provider");
-    expect(allLabels).not.toContain("/model host");
-    expect(allLabels).not.toContain("/model port");
-    expect(allLabels).not.toContain("/model description");
-    // 旧 /second 個別編集
+    // 旧 /second 個別編集 (/model second へ集約済み)
     expect(allLabels).not.toContain("/second model");
     expect(allLabels).not.toContain("/second url");
     expect(allLabels).not.toContain("/second provider");
