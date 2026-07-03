@@ -136,7 +136,9 @@
 
 ## 4. 保守性 — コード構造とドキュメント
 
-### [PR-10] repl.ts (6,705行) / agent-loop.ts (3,233行) の god module 化 【優先度: 中】
+### [PR-10] repl.ts (6,705行) / agent-loop.ts (3,233行) の god module 化 【優先度: 中】 — 🔶 レジストリ基盤+実証移設済み (2026-07-04)
+
+> 実装: `src/cli/commands/` に「1コマンド=1ファイル (name/summary/completions/handler)」のレジストリを新設 (`types.ts` / `registry.ts`)。repl.ts の handleCommand は switch の前にレジストリを引き、登録コマンドは新方式でディスパッチ。補完 (completer.ts) と /help (renderer.ts displayHelp) はレジストリから自動合成 → 登録コマンドについて4箇所チェックリストは原理的に不要 (README のみ手動)。実証移設: `/parallel` `/autorun` `/loglevel` の3コマンド (旧 case は削除)。`add-repl-command` スキルを新方式の手順に全面改訂。テスト: `tests/cli/command-registry.test.ts`。**残 (漸進)**: 既存 switch コマンドの移設は「触るついで」に継続。agent-loop.ts の責務分割は未着手 (候補洗い出しから)。
 
 **現状**: 全コマンドのハンドラ・補完・ヘルプが repl.ts に同居している。「新コマンド追加は4箇所を揃える」という人力チェックリスト ([[feedback_new_command_checklist]]) が必要なこと自体が、構造が分散を強制している証拠。
 
@@ -217,7 +219,7 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 | | PR-07 | Biome 導入 | 中 | ✅ 2026-07-04 |
 | | PR-03 | config の zod 検証 | 中 | ✅ 2026-07-04 |
 | | PR-12 | CHANGELOG+リリースタグ+バージョン埋め込み | 小 | ✅ 2026-07-04 |
-| **P3: 構造改善** | PR-10 | コマンドレジストリ方式への漸進移行 | 大 (漸進) |
+| **P3: 構造改善** | PR-10 | コマンドレジストリ方式への漸進移行 | 大 (漸進) | 🔶 基盤+3コマンド移設 2026-07-04 |
 | | PR-11 | docs 索引+status ヘッダ+issues.md 棚卸し | 中 |
 | | PR-15 | ログローテーション | 小 | ✅ 2026-07-04 |
 | **P4: 配布成熟** | PR-13 | 署名方針の決定と初回警告の案内整備 | 小〜中 |

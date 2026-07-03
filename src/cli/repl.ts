@@ -28,6 +28,7 @@ import { InteractiveInput, SIGINT_SIGNAL } from "./interactive-input.js";
 import { interruptWatcher } from "./interrupt-watcher.js";
 import { progressIndicator } from "./progress-indicator.js";
 import { createCommandMenuProvider, createFileMenuProvider } from "./completer.js";
+import { getCommandRegistry, getRegistryHelpEntries } from "./commands/registry.js";
 import { parseTokenCount } from "../config/types.js";
 import type { Config, LLMEndpoint, SecondLLMEndpoint, SecondLLMProviderType } from "../config/types.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
@@ -83,7 +84,6 @@ import { secondLLMAgentTool, setSecondLLMManager } from "../tools/definitions/se
 import { federatedDelegateTool, setFederatedSecondLLMManager } from "../tools/definitions/federated-delegate.js";
 import { buildLLMProfiles } from "../agent/llm-profiles.js";
 import { createProvider } from "../providers/provider-factory.js";
-import { getOpsLogger, setOpsLogLevel, parseOpsLogLevel } from "../utils/ops-logger.js";
 import { getSubAgentManager } from "../tools/definitions/task.js";
 import { DEFAULT_PORTS } from "../config/types.js";
 import type { ProviderType } from "../config/types.js";
@@ -4118,6 +4118,20 @@ export class REPL {
       }
     }
 
+    // コマンドレジストリ (PR-10)。新規コマンドはレジストリ側に追加し、
+    // 下の switch の case は触るついでにレジストリへ移設していく。
+    const registered = getCommandRegistry().get(command);
+    if (registered) {
+      return await registered.handler(
+        {
+          agent: this.agent,
+          config: this.config,
+          saveConfig: () => saveConfig(this.config),
+        },
+        args,
+      );
+    }
+
     switch (command) {
       case "/help": {
         const helpSkills: SkillSummary[] | undefined = this.skillRegistry
@@ -4126,7 +4140,7 @@ export class REPL {
               description: s.description,
             }))
           : undefined;
-        displayHelp(helpSkills);
+        displayHelp(helpSkills, getRegistryHelpEntries());
         break;
       }
 
@@ -6432,19 +6446,7 @@ export class REPL {
         break;
       }
 
-      case "/parallel": {
-        const n = parseInt(args[0], 10);
-        if (isNaN(n)) {
-          console.log(chalk.dim(`  現在の並列実行上限: ${this.agent.getMaxParallelTools()}`));
-          console.log(chalk.dim("  変更: /parallel <数値>"));
-        } else {
-          this.agent.setMaxParallelTools(n);
-          this.config.maxParallelTools = this.agent.getMaxParallelTools();
-          saveConfig(this.config);
-          console.log(chalk.green(`  並列実行上限を ${this.agent.getMaxParallelTools()} に設定しました (設定に保存)`));
-        }
-        break;
-      }
+      // /parallel は src/cli/commands/parallel.ts へ移設 (PR-10)
 
       case "/knowledge": {
         const subCmd = args[0];
@@ -6641,39 +6643,7 @@ export class REPL {
         break;
       }
 
-      case "/autorun": {
-        const permissions = this.agent.getPermissions();
-        const subArg = args[0];
-        if (subArg === "on") {
-          permissions.setAutorunMode(true);
-          this.config.autorunMode = true;
-          saveConfig(this.config);
-          console.log(chalk.green("  自律実行モード ON (設定に保存)"));
-          console.log(chalk.dim("  作業フォルダ内の操作は削除以外すべて自動承認されます"));
-          console.log(chalk.dim("  中断: Ctrl+C / 停止: /autorun off"));
-        } else if (subArg === "off") {
-          permissions.setAutorunMode(false);
-          this.config.autorunMode = false;
-          saveConfig(this.config);
-          console.log(chalk.yellow("  自律実行モード OFF (設定に保存)"));
-        } else {
-          const current = permissions.isAutorunMode();
-          if (current) {
-            permissions.setAutorunMode(false);
-            this.config.autorunMode = false;
-            saveConfig(this.config);
-            console.log(chalk.yellow("  自律実行モード OFF (設定に保存)"));
-          } else {
-            permissions.setAutorunMode(true);
-            this.config.autorunMode = true;
-            saveConfig(this.config);
-            console.log(chalk.green("  自律実行モード ON (設定に保存)"));
-            console.log(chalk.dim("  作業フォルダ内の操作は削除以外すべて自動承認されます"));
-            console.log(chalk.dim("  中断: Ctrl+C / 停止: /autorun off"));
-          }
-        }
-        break;
-      }
+      // /autorun は src/cli/commands/autorun.ts へ移設 (PR-10)
 
       case "/compress-input": {
         // opt-in 入力圧縮モード。 docs/input-compression-design.md
@@ -6829,24 +6799,7 @@ export class REPL {
         break;
       }
 
-      case "/loglevel": {
-        const opsLogger = getOpsLogger();
-        const filePath = opsLogger.getFilePath();
-        if (args.length === 0) {
-          console.log(chalk.dim(`  運用ログ level: ${opsLogger.getLevel()}`));
-          console.log(chalk.dim(`  出力先: ${filePath ?? "(disabled)"}`));
-          console.log(chalk.dim("  変更: /loglevel [trace|debug|info|warn|error]"));
-        } else {
-          const level = parseOpsLogLevel(args[0]);
-          if (!level) {
-            console.log(chalk.yellow("  無効な level。 trace|debug|info|warn|error から選択してください。"));
-            break;
-          }
-          setOpsLogLevel(level);
-          console.log(chalk.dim(`  運用ログ level を ${level} に変更しました (このセッションのみ)`));
-        }
-        break;
-      }
+      // /loglevel は src/cli/commands/loglevel.ts へ移設 (PR-10)
 
       case "/remember": {
         const text = args.join(" ");

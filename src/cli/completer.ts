@@ -10,8 +10,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { CompleterResult } from "node:readline";
 import type { MenuItem, MenuProvider } from "./interactive-input.js";
+import { getRegistryCompletions } from "./commands/registry.js";
 
 // ─── コマンド定義（説明付き） ────────────────────────────
+//
+// 注: レジストリ登録コマンド (src/cli/commands/ — PR-10) の候補は
+// getRegistryCompletions() から自動合成されるため、この配列には旧 switch 方式の
+// コマンドだけを列挙する。新規コマンドはレジストリ側に追加すること。
 
 interface CommandDef {
   command: string;
@@ -136,7 +141,6 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/continue", description: "[非推奨] /resume latest の alias" },
   { command: "/memory", description: "メモリ表示" },
   { command: "/remember", description: "メモリに追記", needsArg: true },
-  { command: "/loglevel", description: "運用ログのレベル確認・変更 (trace/debug/info/warn/error)" },
   { command: "/diff", description: "git diff" },
   { command: "/plan", description: "プランモード" },
   { command: "/skills", description: "スキル一覧" },
@@ -191,12 +195,10 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/image remove", description: "プロファイルを削除", needsArg: true },
   { command: "/image test", description: "アクティブバックエンドへの疎通確認 (Azure は設定検証のみ)" },
   { command: "/image gen", description: "ダイレクト画像生成 (例: /image gen a red dragon, pixel art)", needsArg: true },
-  { command: "/autorun", description: "Autorunモード切り替え（非破壊操作の自動許可）" },
   {
     command: "/compress-input",
     description: "入力圧縮モード切替（project指示/メモが閾値超過時に意図保持圧縮、既定OFF）",
   },
-  { command: "/parallel", description: "並列ツール実行数の確認・変更", needsArg: true },
   {
     command: "/status",
     description: "セッション状態を 1 画面で表示 (slot / context / capability / metrics / cost / tasks)",
@@ -250,6 +252,12 @@ export function createCommandMenuProvider(
 ): MenuProvider {
   const allDefs: CommandDef[] = [
     ...BUILTIN_COMMAND_DEFS,
+    // レジストリ登録コマンド (PR-10) の候補を自動合成
+    ...getRegistryCompletions().map((c) => ({
+      command: c.command,
+      description: c.description,
+      needsArg: c.needsArg,
+    })),
     ...skillTriggers.map((s) => ({
       command: s.trigger,
       description: s.description,
@@ -319,7 +327,10 @@ export function createFileMenuProvider(cwd: string = process.cwd()): MenuProvide
 
 // ─── readline completer（フォールバック用） ──────────────
 
-const BUILTIN_COMMANDS = BUILTIN_COMMAND_DEFS.map((d) => d.command);
+const BUILTIN_COMMANDS = [
+  ...BUILTIN_COMMAND_DEFS.map((d) => d.command),
+  ...getRegistryCompletions().map((c) => c.command),
+];
 
 export interface CompleterOptions {
   skillTriggers?: string[];

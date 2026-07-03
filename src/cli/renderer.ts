@@ -32,7 +32,17 @@ export interface SkillSummary {
   description: string;
 }
 
-export function displayHelp(skills?: SkillSummary[]): void {
+export interface RegistryHelpEntry {
+  name: string;
+  summary: string;
+}
+
+export function displayHelp(skills?: SkillSummary[], registryEntries?: RegistryHelpEntry[]): void {
+  // レジストリ登録コマンド (src/cli/commands/ — PR-10) の行は自動生成する。
+  // ここに手書きで行を足すのは旧 switch 方式のコマンドだけ。
+  const registrySection = (registryEntries ?? [])
+    .map((e) => `    ${chalk.cyan(e.name.padEnd(15))} ${e.summary}`)
+    .join("\n");
   let skillSection: string;
   if (skills && skills.length > 0) {
     const lines = skills
@@ -86,7 +96,6 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/queue")}          受信順キューの待ち状況 (/queue clear で type-ahead 破棄)
     ${chalk.cyan("/memory")}         自動メモリ表示
     ${chalk.cyan("/remember <text>")} メモリに追記
-    ${chalk.cyan("/loglevel [lv]")}  運用ログのレベル変更 (trace/debug/info/warn/error)
     ${chalk.cyan("/diff")}           git diff表示
     ${chalk.cyan("/plan")}           プランモードに入る
     ${chalk.cyan("/skills")}         利用可能なスキル一覧
@@ -96,13 +105,13 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/cost")}           LLM 使用量・コストの可視化 (画像生成コスト含む)
     ${chalk.cyan("/image")}          画像生成 (on/off/setup <azure|sd-webui|comfyui>/use/list/test/gen <prompt>)
     ${chalk.cyan("/knowledge")}      Obsidianナレッジベース (vault設定/検索/一覧)
-    ${chalk.cyan("/autorun")}         自律実行モード切替（作業フォルダ内の削除以外を自動承認）
     ${chalk.cyan("/compress-input")}  入力圧縮モード切替（project指示/メモが閾値超過時に意図保持で圧縮、既定OFF）
     ${chalk.cyan("/try [N] <プロンプト>")}  試行錯誤モード: 評価付きで最大N回自動リトライ（デフォルト3回）
     ${chalk.cyan('/goal-loop [N] --check "<cmd>" <タスク>')}  決定的検証ゲート型ループ: cmd が exit 0 になるまで反復（既定8回）
     ${chalk.cyan("/loop [間隔] <プロンプト>")}  指定間隔でプロンプトを繰り返し実行
     ${chalk.cyan("/loop list")}      アクティブなループ一覧
     ${chalk.cyan("/loop stop [id|all]")}  ループを停止
+${registrySection}
 ${skillSection}
   ${chalk.bold("入力:")}
     Shift+Enter  改行を挿入（マルチライン入力）
