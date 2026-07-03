@@ -1,0 +1,9 @@
+# EOL を環境の core.autocrlf 任せにしない (PR-07)。
+# Windows の CI runner は autocrlf=true で checkout するため、LF 前提の
+# biome format 検査が CRLF 化された作業ツリーで全ファイル fail していた。
+# テキストはリポジトリ内 LF・checkout も LF に固定する。
+* text=auto eol=lf
+
+# Windows バッチファイルだけは CRLF でないと誤動作する (goto ラベル等)
+*.bat text eol=crlf
+*.cmd text eol=crlf
