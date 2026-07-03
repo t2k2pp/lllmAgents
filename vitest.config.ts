@@ -9,5 +9,13 @@ export default defineConfig({
     // 他のユニットテストを timeout させる。vitest.e2e.config.ts で直列に回す。
     exclude: [...configDefaults.exclude, "tests/e2e/**"],
     testTimeout: 10_000,
+    // カバレッジは可視化のみ (閾値ゲートは設けない)。docs/production-readiness.md PR-09。
+    // repl.ts / agent-loop.ts など巨大ファイルの素通し箇所を特定する材料にする。
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.ts"],
+      reporter: ["text-summary", "html"],
+      reportsDirectory: "./coverage",
+    },
   },
 });

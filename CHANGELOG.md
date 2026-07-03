@@ -8,6 +8,7 @@
 
 - ログ・セッションの世代管理: 起動時に古い ops/LLM I/O ログ (既定30日) とセッション (既定100件超過分) を告知つきで削除。`logging.retention` で調整可能 (PR-15)
 - シークレット分離: API キー・Bot/App トークン・Webhook URL を `~/.localllm/credentials.json` (自ユーザーのみ) へ分離。旧 config.json からは初回起動時に自動移行 (PR-04 方針2)
+- カバレッジ可視化: `npm run test:coverage` と CI レポート出力 (閾値ゲートなし) (PR-09)
 
 ## [0.4.0] - 2026-07-04
 

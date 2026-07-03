@@ -42,8 +42,9 @@ jobs:
       # tsc --noEmit + biome check (format 差分はエラー、lint は既存違反ルールを warn 運用 — PR-07)
       - name: Type check & lint
         run: npm run lint
-      - name: Test
-        run: npm test
+      # カバレッジは可視化のみで閾値ゲートは無い (PR-09)。サマリがログに出る。
+      - name: Test (with coverage report)
+        run: npm run test:coverage
       # アプリ全体をモック LLM + 非TTYパイプモードで起動する E2E スモーク (PR-08)。
       # CPU 競合 flake を避けるためユニットテストと分離して直列実行する。
       - name: E2E smoke test

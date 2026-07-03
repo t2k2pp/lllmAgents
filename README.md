@@ -414,6 +414,9 @@ npm run test:all
 # ウォッチモード
 npm run test:watch
 
+# カバレッジ計測 (text サマリ + ./coverage/ に HTML レポート)
+npm run test:coverage
+
 # 型チェック + Biome (format 検査 / lint)
 npm run lint
 
