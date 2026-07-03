@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!!**/dist", "!sandbox", "!.localllm"]
+    "includes": ["**", "!!**/dist", "!sandbox", "!.localllm", "!.claude"]
   },
   "formatter": {
     "enabled": true,
