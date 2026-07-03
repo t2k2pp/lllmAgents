@@ -454,7 +454,8 @@ CLIコマンド `/parallel <N>` で実行時に変更可能。
 
 | パス | 内容 |
 |------|------|
-| `~/.localllm/config.json` | 設定ファイル（本ドキュメント） |
+| `~/.localllm/config.json` | 設定ファイル（本ドキュメント）。シークレットは含まない |
+| `~/.localllm/credentials.json` | API キー・Bot/App トークン・Webhook URL（自ユーザーのみ読み書き可。config.json と同じ構造の部分オブジェクト） |
 | `~/.localllm/sessions/` | セッション履歴 |
 | `~/.localllm/memory/MEMORY.md` | 永続メモリ |
 | `~/.localllm/plans/` | プランモードの計画書 |

@@ -69,9 +69,9 @@
 
 ## 2. セキュリティ — 秘密情報と依存関係
 
-### [PR-04] シークレットが平文 config.json に保存される 【優先度: 高】 — 🔶 一部実装済み (2026-07-04: 方針1+3)
+### [PR-04] シークレットが平文 config.json に保存される 【優先度: 高】 — ✅ 実装済み (2026-07-04: 方針1+2+3。方針4 は見送り)
 
-> 実装: `hardenFilePermissions` (POSIX chmod 600 / Windows icacls 自ユーザーのみ) を saveConfig で config.json と .bak に適用 (icacls 適用を実機確認済み)。表示系は `src/utils/mask.ts` (maskWebhookUrl) を追加し、`/discord`・`/slack` の status と url 設定時エコーをマスク化 (Bot/App トークンは元から「設定済み」表示のみ)。**残**: credentials.json への分離 (方針2)、キーチェーン統合 (方針4)。
+> 実装: 方針1+3 = `hardenFilePermissions` (POSIX chmod 600 / Windows icacls 自ユーザーのみ) を saveConfig で適用、表示系は `src/utils/mask.ts` (maskWebhookUrl) でマスク化。方針2 = `src/config/credentials.ts` で API キー・Bot/App トークン・Webhook URL を `~/.localllm/credentials.json` (権限強制) に分離。読み込み時マージ・保存時分離で config-manager に透過統合し、呼び出し側は従来どおり config.mainLLM.apiKey 等を読み書きするだけ。旧形式 (config.json 内シークレット) は初回 loadConfig で自動分離して告知。credentials.json 破損時は .broken-<ts> 退避+告知 (silent 上書き防止)。imageGen.profiles の apiKey は index 対応 (両ファイルは同一 saveConfig で常に一緒に書かれるため不整合しない)。テスト: `tests/config/credentials.test.ts`。**方針4 (OS キーチェーン) は見送りを確定**: SEA exe にネイティブ依存 (keytar 等) を同梱するコストと、credentials.json + 権限強制で得られる保護の差分が見合わない。組織配布など要件が変わったら再検討。
 
 **現状**: API キー、Discord Bot トークン、Slack トークン (xoxb/xapp) がすべて `~/.localllm/config.json` に平文で入る。ファイルパーミッションの強制 (POSIX 0600) も無い。入力時の `mask: "*"` (repl.ts) はあるが、保存後の保護が無い。
 
@@ -208,7 +208,7 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 |---|---|---|---|---|
 | **P1: 守り** | PR-01 | グローバル例外ハンドラ+クラッシュログ | 小 | ✅ 2026-07-04 |
 | | PR-02 | アトミック書き込み+config 破損リカバリ | 小 | ✅ 2026-07-04 |
-| | PR-04 | シークレットのパーミッション強制+表示マスク統一 | 小〜中 | 🔶 方針1+3 済 |
+| | PR-04 | シークレットのパーミッション強制+表示マスク統一 | 小〜中 | ✅ 2026-07-04 (方針4は見送り確定) |
 | | PR-05 | npm audit fix + CI audit ゲート + Dependabot | 小 | ✅ 2026-07-04 |
 | | PR-06 | Windows CI 追加 | 小 | ✅ 2026-07-04 |
 | **P2: 品質の網** | PR-08 | E2E スモークテスト (モック LLM+パイプモード) | 中 | ✅ 2026-07-04 |
