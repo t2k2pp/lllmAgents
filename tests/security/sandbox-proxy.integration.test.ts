@@ -164,7 +164,8 @@ describe("SandboxProxy 拒否パス (integration)", () => {
     }
   });
 
-  it("unix ソケット listen でも同じ allowlist 判定が効く (Linux ブリッジ土台)", async () => {
+  // unix ソケット + chmod は POSIX 前提 (Windows は fail-closed で listen 不可) → skip
+  it.skipIf(process.platform === "win32")("unix ソケット listen でも同じ allowlist 判定が効く (Linux ブリッジ土台)", async () => {
     proxy = mkProxy([]); // 全未許可・deny
     const sock = join(tmpdir(), `lllm-proxy-test-${process.pid}.sock`);
     await proxy.ensureUnixSocket(sock);

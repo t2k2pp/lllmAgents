@@ -1,0 +1,17 @@
+# 依存パッケージのセキュリティ更新を週次で自動 PR 化する (docs/production-readiness.md PR-05)
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # 通常のバージョン追従 PR はノイズになるのでセキュリティ更新のみ受け取る
+    open-pull-requests-limit: 5
+    groups:
+      security-updates:
+        applies-to: security-updates
+        patterns: ["*"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

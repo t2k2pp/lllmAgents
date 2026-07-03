@@ -14,7 +14,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # windows-latest: 主開発環境かつ exe 配布ターゲット。Windows 固有コード
+        # (git bash 検出 / icacls / SEA ビルド) の回帰を検出する (PR-06)。
+        # サンドボックス統合テストは Windows では skip される設計 (WSL 前提)。
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -40,3 +43,7 @@ jobs:
         run: npm run lint
       - name: Test
         run: npm test
+      # 実行時依存の既知脆弱性 (High 以上) で fail させる (PR-05)。
+      # devDependencies はビルド時のみ使うため対象外 (--omit=dev)。
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high

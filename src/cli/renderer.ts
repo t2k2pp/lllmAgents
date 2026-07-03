@@ -1,10 +1,11 @@
 import chalk from "chalk";
 
 import type { SecondLLMConfig } from "../config/types.js";
+import { APP_VERSION } from "../version.js";
 
 export function displayWelcome(model: string, baseUrl: string | undefined, providerType: string, contextWindow: number, skillCount: number, secondLlmConfig?: SecondLLMConfig): void {
   const ctxLabel = contextWindow >= 1000 ? `${Math.round(contextWindow / 1000)}K` : `${contextWindow}`;
-  console.log(chalk.bold(`\n  LocalLLM Agent v0.3.0`));
+  console.log(chalk.bold(`\n  LocalLLM Agent v${APP_VERSION}`));
   // クラウド系 (Azure/Vertex) は baseUrl を持たないため、 endpoint 部分を省略
   const location = baseUrl ? ` @ ${baseUrl}` : "";
   console.log(chalk.dim(`  Model: ${model}${location} (${providerType})`));

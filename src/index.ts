@@ -57,9 +57,14 @@ import { ChatLogger } from "./agent/chat-logger.js";
 import { createSessionId } from "./agent/llm-logger.js";
 import { initOpsLogger, getOpsLogger, parseOpsLogLevel } from "./utils/ops-logger.js";
 import { shutdownHttpClient } from "./utils/http-client.js";
+import { installCrashHandlers, setCrashContext } from "./utils/crash-handler.js";
 import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "./providers/utils/context-length.js";
 
 async function main(): Promise<void> {
+  // 未捕捉例外での即死時にセッション保存・端末復元・クラッシュログを行う
+  // (docs/production-readiness.md PR-01)。最初に登録する。
+  installCrashHandlers();
+
   const args = process.argv.slice(2);
 
   // イベントリスナーのメモリリーク警告対策 (inquirer等が多用されるため)
@@ -427,6 +432,7 @@ async function main(): Promise<void> {
     mainModel: config.mainLLM.model,
     provider: config.mainLLM.providerType,
   });
+  setCrashContext({ sessionId });
 
   const agent = new AgentLoop(
     provider,
@@ -447,6 +453,9 @@ async function main(): Promise<void> {
     secondLLMManager,
     llmProfiles,
   );
+
+  // クラッシュ時の緊急セッション保存 (agent 確定後に登録)。saveCurrentSession は同期処理。
+  setCrashContext({ saveSession: () => agent.saveCurrentSession() });
 
   // opt-in 入力圧縮モード: 有効時のみ、起動時に一度だけ project指示/メモを圧縮 (閾値超過時)。
   // docs/input-compression-design.md

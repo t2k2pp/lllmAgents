@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { writeFileAtomic } from "../utils/atomic-file.js";
 import type { Message } from "../providers/base-provider.js";
 import type { TodoItem } from "../tools/definitions/todo-write.js";
 import type { GoalDefinition, EvaluationRecord } from "./goal-slot.js";
@@ -85,13 +86,20 @@ export function saveSession(session: SessionData): void {
   }
 
   const filePath = path.join(SESSION_DIR, `${session.meta.id}.json`);
-  fs.writeFileSync(filePath, JSON.stringify(session, null, 2), "utf-8");
+  // 書き込み途中のプロセス死でセッションが破損しないようアトミックに書く (PR-02)
+  writeFileAtomic(filePath, JSON.stringify(session, null, 2));
 }
 
 export function loadSession(id: string): SessionData | null {
   const filePath = path.join(SESSION_DIR, `${id}.json`);
   if (!fs.existsSync(filePath)) return null;
-  return JSON.parse(fs.readFileSync(filePath, "utf-8"));
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf-8"));
+  } catch {
+    // 破損セッションは黙って無視せず告知して null を返す (呼び出し元は未存在と同じ扱い)
+    console.error(`セッションファイルが壊れているため読み込めませんでした: ${filePath}`);
+    return null;
+  }
 }
 
 export function listSessions(limit = 20, room?: RoomId): SessionMeta[] {

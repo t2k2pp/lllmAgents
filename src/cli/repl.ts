@@ -53,6 +53,7 @@ import { AzureOpenAIProvider } from "../providers/azure-openai.js";
 import { AzureClaudeProvider } from "../providers/azure-claude.js";
 import { saveConfig } from "../config/config-manager.js";
 import { isWindows, isMacOS } from "../utils/platform.js";
+import { maskWebhookUrl } from "../utils/mask.js";
 import { detectWsl } from "../security/wsl.js";
 import { configureSandboxProxy, getSandboxProxy } from "../security/sandbox-proxy.js";
 import { addDomain, removeDomain, resolveAllowedDomains, domainAllowed } from "../security/net-allowlist.js";
@@ -5344,7 +5345,7 @@ export class REPL {
         if (!subCmd || subCmd === "status") {
           const d = this.config.discord;
           const dEnabled = d?.enabled ?? false;
-          const dUrl = d?.webhookUrl || "未設定";
+          const dUrl = d?.webhookUrl ? maskWebhookUrl(d.webhookUrl) : "未設定";
           const dListening = this.interactionServer?.running ?? false;
           const dBotName = this.interactionServer?.botUser;
           const dAppId = d?.applicationId ? chalk.dim(d.applicationId) : chalk.yellow("未設定");
@@ -5385,7 +5386,7 @@ export class REPL {
             this.config.discord.webhookUrl = urlStr;
             saveConfig(this.config);
             console.log(chalk.green(`  ✅ Discord Webhook URL を設定しました。`));
-            console.log(chalk.dim(`  URL: ${urlStr}`));
+            console.log(chalk.dim(`  URL: ${maskWebhookUrl(urlStr)}`));
             console.log(chalk.dim("  「テスト通知を送ってみる」で動作確認できます。"));
           }
         } else if (subCmd === "test") {
@@ -5602,7 +5603,7 @@ export class REPL {
         if (!subCmd || subCmd === "status") {
           const s = this.config.slack;
           const sEnabled = s?.enabled ?? false;
-          const sUrl = s?.webhookUrl || "未設定";
+          const sUrl = s?.webhookUrl ? maskWebhookUrl(s.webhookUrl) : "未設定";
           const sBotToken = s?.botToken ? chalk.green("設定済み") : chalk.yellow("未設定");
           const sAppToken = s?.appToken ? chalk.green("設定済み") : chalk.yellow("未設定");
           console.log(chalk.bold("\n  === Slack 連携の状態 ==="));
@@ -5639,7 +5640,7 @@ export class REPL {
             this.config.slack.webhookUrl = urlStr;
             saveConfig(this.config);
             console.log(chalk.green(`  Slack Webhook URL を設定しました。`));
-            console.log(chalk.dim(`  URL: ${urlStr}`));
+            console.log(chalk.dim(`  URL: ${maskWebhookUrl(urlStr)}`));
             console.log(chalk.dim("  「テスト通知を送ってみる」で動作確認できます。"));
           }
         } else if (subCmd === "test") {

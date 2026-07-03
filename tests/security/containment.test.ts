@@ -41,7 +41,9 @@ describe("isBashNetworkContained (Phase 3 ゲート)", () => {
     resetActiveProcessSandbox(); // config キャッシュを破棄して各ケースの h を反映させる
   });
 
-  it("macOS + proxy + fs + 既定 → true", () => {
+  // 実物 ProcessSandbox が fs を返す環境 (darwin=sandbox-exec / linux=bwrap) が前提。
+  // Windows ネイティブは effective level が常に none のため封じ込め自体が対象外 → skip。
+  it.skipIf(process.platform === "win32")("macOS + proxy + fs + 既定 → true", () => {
     expect(isBashNetworkContained()).toBe(true);
   });
   it("autoAllowBashWhenContained=false（オプトアウト） → false", () => {
@@ -71,7 +73,8 @@ describe("reconcileSandboxProxy (D: proxy ライフサイクル単一窓口)", (
     h.isMacOS = true;
     resetActiveProcessSandbox();
   });
-  it("fs + macOS は proxy を止めない（要るので維持）", () => {
+  // fs 維持の判定も実物 ProcessSandbox の effective level に依存 → Windows は skip (上と同じ理由)
+  it.skipIf(process.platform === "win32")("fs + macOS は proxy を止めない（要るので維持）", () => {
     const stop = vi.fn();
     h.level = "fs";
     h.proxy = { stop };

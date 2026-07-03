@@ -19,7 +19,7 @@
  */
 
 import { existsSync, writeFileSync, realpathSync, mkdtempSync, rmSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { homedir, tmpdir, platform } from "node:os";
 
 /**
@@ -160,8 +160,10 @@ function findTool(...paths: string[]): string | null {
  * あえて含めない（fs レベルは開発を止めない方針）。
  */
 export function defaultSecretDenyDirs(home: string): string[] {
-  return [".ssh", ".aws", ".gnupg", ".kube", ".docker", join(".config", "gcloud")].map((p) =>
-    join(home, p),
+  // Seatbelt/bwrap プロファイル専用 (Windows ネイティブでは使わない) なので、
+  // どの OS でテストしても同じ結果になるよう POSIX 区切りで組み立てる。
+  return [".ssh", ".aws", ".gnupg", ".kube", ".docker", posix.join(".config", "gcloud")].map((p) =>
+    posix.join(home, p),
   );
 }
 

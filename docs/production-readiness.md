@@ -28,7 +28,9 @@
 
 ## 1. 信頼性 — クラッシュ・データ破損への耐性
 
-### [PR-01] グローバル例外ハンドラが無い 【優先度: 高】
+### [PR-01] グローバル例外ハンドラが無い 【優先度: 高】 — ✅ 実装済み (2026-07-04)
+
+> 実装: `src/utils/crash-handler.ts` (installCrashHandlers/setCrashContext/writeCrashLog)、`src/index.ts` で起動直後に登録。緊急保存→端末復元→`~/.localllm/logs/crash/crash-<ts>.log`→日本語案内→exit 1 を実機確認済み。
 
 **現状**: `src/index.ts` に `process.on("uncaughtException")` / `unhandledRejection` の登録が無い。`main().catch()` は起動時の失敗しか拾えない。
 
@@ -42,7 +44,9 @@
 2. クラッシュログは `~/.localllm/logs/crash/<timestamp>.log` にスタックトレース+バージョン+直近の ops ログ数行を書く。「このファイルを添えて報告してください」と案内する
 3. [[feedback_no_silent_loss]] の原則どおり、握りつぶして継続はしない。後始末して明示的に落ちる
 
-### [PR-02] config.json / セッション JSON の書き込みが非アトミック 【優先度: 高】
+### [PR-02] config.json / セッション JSON の書き込みが非アトミック 【優先度: 高】 — ✅ 実装済み (2026-07-04)
+
+> 実装: `src/utils/atomic-file.ts` (writeFileAtomic)。saveConfig/saveSession を移行し、loadConfig は破損時に `.broken-<ts>` 退避→`.bak` 復元→既定値の順でフォールバック (すべて告知)。loadSession もパース失敗を告知して null を返す。破損→退避→.bak 復元の一連を実機確認済み。
 
 **現状**: `saveConfig()` (`src/config/config-manager.ts:75`) と `saveSession()` (`src/agent/session-manager.ts:74`) は `fs.writeFileSync` で直接上書きする。書き込み途中でプロセスが死ぬと (クラッシュ、taskkill、電源断) ファイルが半端な JSON になる。
 
@@ -63,7 +67,9 @@
 
 ## 2. セキュリティ — 秘密情報と依存関係
 
-### [PR-04] シークレットが平文 config.json に保存される 【優先度: 高】
+### [PR-04] シークレットが平文 config.json に保存される 【優先度: 高】 — 🔶 一部実装済み (2026-07-04: 方針1+3)
+
+> 実装: `hardenFilePermissions` (POSIX chmod 600 / Windows icacls 自ユーザーのみ) を saveConfig で config.json と .bak に適用 (icacls 適用を実機確認済み)。表示系は `src/utils/mask.ts` (maskWebhookUrl) を追加し、`/discord`・`/slack` の status と url 設定時エコーをマスク化 (Bot/App トークンは元から「設定済み」表示のみ)。**残**: credentials.json への分離 (方針2)、キーチェーン統合 (方針4)。
 
 **現状**: API キー、Discord Bot トークン、Slack トークン (xoxb/xapp) がすべて `~/.localllm/config.json` に平文で入る。ファイルパーミッションの強制 (POSIX 0600) も無い。入力時の `mask: "*"` (repl.ts) はあるが、保存後の保護が無い。
 
@@ -75,7 +81,9 @@
 3. **表示系の点検**: `/status` `/integrations` `/model` 等でトークンを表示する箇所を洗い出し、`xoxb-***abc` 形式の末尾数文字マスクに統一する
 4. OS キーチェーン (Windows Credential Manager / macOS Keychain) 統合は exe 配布と相性を検証してから判断する (SEA バイナリでネイティブ依存を増やすコストと見合うか)
 
-### [PR-05] 依存パッケージに High 脆弱性が放置されている 【優先度: 高】
+### [PR-05] 依存パッケージに High 脆弱性が放置されている 【優先度: 高】 — ✅ 実装済み (2026-07-04)
+
+> 実装: `npm audit fix` で実行時依存の脆弱性 0 件を確認 (lockfile のみ更新)。CI に `npm audit --omit=dev --audit-level=high` ゲート、`.github/dependabot.yml` で npm/actions の週次セキュリティ更新を追加。devDependencies に esbuild の Low 1件が残るが breaking 更新が必要なため見送り (dev 専用・開発サーバー機能は未使用)。
 
 **現状**: `npm audit --omit=dev` で **High 複数件** (axios: プロキシ資格情報漏洩ほか8件 / form-data: CRLF injection / hono: Windows パストラバーサル / brace-expansion: DoS)。いずれも `npm audit fix` で修復可能な範囲。CI に audit ゲートが無いため、今後も静かに溜まる。
 
@@ -84,7 +92,9 @@
 2. CI に `npm audit --omit=dev --audit-level=high` ステップを追加し、High 以上で fail させる
 3. Dependabot (`.github/dependabot.yml`) で週次のセキュリティ更新 PR を自動化する
 
-### [PR-06] Windows の CI が無い 【優先度: 高】
+### [PR-06] Windows の CI が無い 【優先度: 高】 — ✅ 実装済み (2026-07-04)
+
+> 実装: ci.yml マトリクスに windows-latest を追加 (型チェック+テスト+audit)。Windows で失敗していた既存4テストを整理: `defaultSecretDenyDirs` は POSIX プロファイル専用のため `posix.join` に修正 (全 OS で同一結果)、封じ込め/unix ソケットの3件は POSIX 前提の環境依存テストとして win32 skip を明示。Windows ローカルで 839 passed / 0 failed を確認。exe ビルドスモークは未着手 (P2 以降)。
 
 **現状**: CI マトリクスは ubuntu / macos のみ。**主開発環境も exe 配布ターゲットも Windows なのに、Windows 経路が CI で一度も検証されない**。git bash 検出、パス区切り、icacls、SEA ビルドなど Windows 固有コードが多いプロジェクトなので、これは基準線とのずれが大きい。
 
@@ -184,13 +194,13 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 
 「壊れたときにデータを失わない・漏らさない」を最優先に置く。
 
-| フェーズ | 項目 | 内容 | 規模感 |
-|---|---|---|---|
-| **P1: 守り** | PR-01 | グローバル例外ハンドラ+クラッシュログ | 小 |
-| | PR-02 | アトミック書き込み+config 破損リカバリ | 小 |
-| | PR-04 | シークレットのパーミッション強制+表示マスク統一 | 小〜中 |
-| | PR-05 | npm audit fix + CI audit ゲート + Dependabot | 小 |
-| | PR-06 | Windows CI 追加 | 小 |
+| フェーズ | 項目 | 内容 | 規模感 | 状況 |
+|---|---|---|---|---|
+| **P1: 守り** | PR-01 | グローバル例外ハンドラ+クラッシュログ | 小 | ✅ 2026-07-04 |
+| | PR-02 | アトミック書き込み+config 破損リカバリ | 小 | ✅ 2026-07-04 |
+| | PR-04 | シークレットのパーミッション強制+表示マスク統一 | 小〜中 | 🔶 方針1+3 済 |
+| | PR-05 | npm audit fix + CI audit ゲート + Dependabot | 小 | ✅ 2026-07-04 |
+| | PR-06 | Windows CI 追加 | 小 | ✅ 2026-07-04 |
 | **P2: 品質の網** | PR-08 | E2E スモークテスト (モック LLM+パイプモード) | 中 |
 | | PR-07 | Biome 導入 | 中 |
 | | PR-03 | config の zod 検証 | 中 |
