@@ -1,6 +1,6 @@
 {
   "name": "localllm-agents",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Multi-Agent System for Local LLMs (Ollama, LM Studio, llama.cpp, vLLM)",
   "type": "module",
   "main": "dist/index.js",

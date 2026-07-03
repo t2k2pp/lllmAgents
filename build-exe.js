@@ -27,8 +27,18 @@ fs.writeFileSync(
 `,
 );
 
+// コミットハッシュを exe に埋め込む (src/version.ts の __APP_COMMIT__ を置換)。
+// 配布 exe の起動バナー・--version・クラッシュログから中身を特定するため (PR-12)。
+const appCommit = (() => {
+  try {
+    return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+  } catch {
+    return "unknown";
+  }
+})();
+
 async function build() {
-  console.log("[1/5] Bundling application with esbuild...");
+  console.log(`[1/5] Bundling application with esbuild... (commit ${appCommit})`);
   await esbuild.build({
     entryPoints: ["src/index.ts"],
     bundle: true,
@@ -53,6 +63,7 @@ async function build() {
     ],
     define: {
       "import.meta.url": "import_meta_url",
+      __APP_COMMIT__: JSON.stringify(appCommit),
     },
     inject: [shimPath],
   });

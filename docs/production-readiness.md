@@ -153,7 +153,9 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 2. `docs/README.md` を索引として作り、正典 (external_design / internal_design / security_assessment / config-reference) と機能別設計書を分類する
 3. issues.md の10件を棚卸しし、解消済みはその旨追記、残件は本ドキュメントか GitHub Issues に移行する
 
-### [PR-12] バージョン管理・変更履歴が無い 【優先度: 中】
+### [PR-12] バージョン管理・変更履歴が無い 【優先度: 中】 — ✅ 実装済み (2026-07-04)
+
+> 実装: CHANGELOG.md 導入 (v0.3.0 以降の主要変更を初回ロールアップエントリで開始、以後 Unreleased に追記)。バージョンを 0.4.0 へ bump し `v0.4.0` タグを付与。コミットハッシュは `src/version.ts` の `getAppCommit()` で解決 (優先順: build-exe.js の esbuild define 埋め込み → git rev-parse (dev) → "unknown") し、起動バナー・新設の `--version` フラグ・クラッシュログ (PR-01) に表示。リリース手順: package.json / src/version.ts / CHANGELOG.md を更新 → コミット → `v<version>` タグ → push --tags。
 
 **現状**: version は 0.3.0 のまま大量の機能が積まれている。CHANGELOG が無く、git タグも作業用 (pre-goal-seek-mode 等) のみでリリースタグが無い。配布した exe のバージョンから中身を特定できない。
 
@@ -210,7 +212,7 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 | **P2: 品質の網** | PR-08 | E2E スモークテスト (モック LLM+パイプモード) | 中 | ✅ 2026-07-04 |
 | | PR-07 | Biome 導入 | 中 | ✅ 2026-07-04 |
 | | PR-03 | config の zod 検証 | 中 | ✅ 2026-07-04 |
-| | PR-12 | CHANGELOG+リリースタグ+バージョン埋め込み | 小 |
+| | PR-12 | CHANGELOG+リリースタグ+バージョン埋め込み | 小 | ✅ 2026-07-04 |
 | **P3: 構造改善** | PR-10 | コマンドレジストリ方式への漸進移行 | 大 (漸進) |
 | | PR-11 | docs 索引+status ヘッダ+issues.md 棚卸し | 中 |
 | | PR-15 | ログローテーション | 小 |

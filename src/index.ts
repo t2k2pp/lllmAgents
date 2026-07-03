@@ -72,6 +72,13 @@ async function main(): Promise<void> {
 
   const args = process.argv.slice(2);
 
+  // バージョン表示 (PR-12)。不具合報告用に「バージョン+コミット」を1行で出す。
+  if (args.includes("--version")) {
+    const { getVersionString } = await import("./version.js");
+    console.log(`localllm ${getVersionString()}`);
+    process.exit(0);
+  }
+
   // イベントリスナーのメモリリーク警告対策 (inquirer等が多用されるため)
   process.stdin.setMaxListeners(100);
   process.stdout.setMaxListeners(100);

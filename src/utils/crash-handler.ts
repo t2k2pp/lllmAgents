@@ -11,7 +11,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { APP_VERSION } from "../version.js";
+import { APP_VERSION, getAppCommit } from "../version.js";
 
 const CRASH_LOG_DIR = path.join(os.homedir(), ".localllm", "logs", "crash");
 
@@ -37,7 +37,7 @@ export function formatCrashReport(kind: string, err: unknown, ctx: CrashContext 
   const lines = [
     `LocalLLM Agent crash report`,
     `time: ${new Date().toISOString()}`,
-    `version: ${APP_VERSION}`,
+    `version: ${APP_VERSION} (${getAppCommit()})`,
     `node: ${process.version}`,
     `platform: ${process.platform} ${os.release()}`,
     `kind: ${kind}`,
