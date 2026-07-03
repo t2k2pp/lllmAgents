@@ -261,6 +261,12 @@ export const configSchema = z
             path: z.string(),
           })
           .partial(),
+        retention: z
+          .object({
+            logMaxAgeDays: z.number(),
+            sessionMaxCount: z.number(),
+          })
+          .partial(),
       })
       .partial(),
     modelCapabilities: z.record(z.string(), modelCapabilityOverrideSchema),

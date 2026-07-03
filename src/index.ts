@@ -63,6 +63,7 @@ import { createSessionId } from "./agent/llm-logger.js";
 import { initOpsLogger, getOpsLogger, parseOpsLogLevel } from "./utils/ops-logger.js";
 import { shutdownHttpClient } from "./utils/http-client.js";
 import { installCrashHandlers, setCrashContext } from "./utils/crash-handler.js";
+import { applyLogRetention } from "./utils/log-rotation.js";
 import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "./providers/utils/context-length.js";
 
 async function main(): Promise<void> {
@@ -447,6 +448,21 @@ async function main(): Promise<void> {
     provider: config.mainLLM.providerType,
   });
   setCrashContext({ sessionId });
+
+  // 古いログ・セッションの世代管理 (PR-15)。削除したら1行で告知する
+  try {
+    const retention = applyLogRetention(config.logging?.retention);
+    for (const notice of retention.notices) {
+      console.log(chalk.gray(notice));
+      getOpsLogger().info("retention", notice, {
+        deletedLogs: retention.deletedLogs,
+        deletedSessions: retention.deletedSessions,
+      });
+    }
+  } catch (e) {
+    // 掃除の失敗で起動を止めない
+    getOpsLogger().warn("retention", "log retention failed", { error: String(e) });
+  }
 
   const agent = new AgentLoop(
     provider,

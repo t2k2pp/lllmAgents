@@ -443,6 +443,8 @@ CLIコマンド `/knowledge vault <path>` でも設定可能。設定すると�
 | `maxParallelTools` | number | 3 | ツールの最大同時実行数。vLLMのKVキャッシュやリソースに合わせて調整 |
 | `notifications.minDurationSec` | number | 0 | この秒数未満で完了したタスクは webhook 完了通知を送らない（docs/task-report-notification-design.md） |
 | `goalSeek.autoPropose` | boolean | true | 複雑なタスクで Goal Seek 昇格を自動提案する（docs/goal-promotion-design.md） |
+| `logging.retention.logMaxAgeDays` | number | 30 | 起動時にこの日数より古い ops / LLM I/O ログを削除する。`0` で無制限（docs/production-readiness.md PR-15） |
+| `logging.retention.sessionMaxCount` | number | 100 | セッション履歴を新しい順にこの件数まで保持し、超過分を起動時に削除する。`0` で無制限 |
 
 CLIコマンド `/parallel <N>` で実行時に変更可能。
 
@@ -458,4 +460,6 @@ CLIコマンド `/parallel <N>` で実行時に変更可能。
 | `~/.localllm/plans/` | プランモードの計画書 |
 | `~/.localllm/hooks/` | ユーザーグローバルフック |
 | `~/.localllm/rules/` | ユーザーグローバルルール |
-| `~/.localllm/llm-logs/` | LLM I/Oログ (JSONL形式) |
+| `~/.localllm/logs/sessions/` | LLM I/Oログ (JSONL形式) |
+| `~/.localllm/logs/ops/` | 運用ログ (JSONL形式) |
+| `~/.localllm/logs/crash/` | クラッシュログ |

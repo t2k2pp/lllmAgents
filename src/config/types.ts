@@ -269,9 +269,22 @@ export interface OpsLogConfig {
   path?: string;
 }
 
+/**
+ * ログ・セッションの世代管理 (docs/production-readiness.md PR-15)。
+ * 起動時に一度だけ適用する。削除時は件数を1行表示する (黙って消さない)。
+ */
+export interface LogRetentionConfig {
+  /** ops / LLM I/O ログの保持日数。0 で無制限。既定 30 */
+  logMaxAgeDays?: number;
+  /** セッション JSON の保持件数 (新しい順)。0 で無制限。既定 100 */
+  sessionMaxCount?: number;
+}
+
 export interface LoggingConfig {
   /** 運用ログ設定 */
   ops?: OpsLogConfig;
+  /** ログ・セッションの世代管理 (PR-15) */
+  retention?: LogRetentionConfig;
 }
 
 /**

@@ -184,7 +184,9 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 
 ## 6. 運用性 — ログとトラブルシュート
 
-### [PR-15] ログのローテーション・保持期限が無い 【優先度: 中】
+### [PR-15] ログのローテーション・保持期限が無い 【優先度: 中】 — ✅ 実装済み (2026-07-04)
+
+> 実装: `src/utils/log-rotation.ts` (applyLogRetention)。起動時に一度、`logs/ops/*.jsonl` と `logs/sessions/*.jsonl` (LLM I/O) は保持日数超過分を削除 (既定30日)、`sessions/*.json` は新しい順に保持件数超過分を削除 (既定100件)。config は `logging.retention.{logMaxAgeDays, sessionMaxCount}` (0で無制限、checkpoints.retention と同じ流儀)。削除時は「N件削除しました」を1行表示+opsログ記録 (silent削除禁止)。掃除の失敗は起動を止めない。テスト: `tests/utils/log-rotation.test.ts`。
 
 **現状**: `~/.localllm/logs/ops/<sid>.jsonl` と LLM I/O ログ、`~/.localllm/sessions/` はセッションごとに増える一方で、削除・上限の仕組みが無い。LLM I/O ログはプロンプト全文を含むため肥大が速い。
 
