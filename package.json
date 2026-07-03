@@ -31,7 +31,7 @@
     "marked": "^15.0.6",
     "marked-terminal": "^7.3.0",
     "ora": "^8.1.1",
-    "playwright": "^1.50.1",
+    "playwright": "^1.61.1",
     "undici": "^7.3.0",
     "zod": "^4.4.3"
   },
