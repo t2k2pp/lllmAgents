@@ -9,9 +9,7 @@ import type { ReplCommandDef } from "./types.js";
 export const loglevelCommand: ReplCommandDef = {
   name: "/loglevel",
   summary: "運用ログのレベル確認・変更 (trace/debug/info/warn/error)",
-  completions: [
-    { command: "/loglevel", description: "運用ログのレベル確認・変更 (trace/debug/info/warn/error)" },
-  ],
+  completions: [{ command: "/loglevel", description: "運用ログのレベル確認・変更 (trace/debug/info/warn/error)" }],
   handler(_ctx, args) {
     const opsLogger = getOpsLogger();
     const filePath = opsLogger.getFilePath();
