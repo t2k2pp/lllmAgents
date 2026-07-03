@@ -19,7 +19,8 @@
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:all": "vitest run && vitest run --config vitest.e2e.config.ts",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit",
+    "lint": "tsc --noEmit && biome check .",
+    "format": "biome format --write .",
     "analyze:loop": "node scripts/analyze-loop.mjs"
   },
   "dependencies": {
@@ -38,6 +39,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.2",
     "@types/inquirer": "^9.0.7",
     "@types/node": "^22.13.5",
     "@vercel/ncc": "^0.38.4",

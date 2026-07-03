@@ -414,8 +414,11 @@ npm run test:all
 # ウォッチモード
 npm run test:watch
 
-# 型チェック
+# 型チェック + Biome (format 検査 / lint)
 npm run lint
+
+# コード整形 (Biome)
+npm run format
 ```
 
 ## 必要環境

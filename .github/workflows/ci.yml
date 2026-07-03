@@ -39,7 +39,8 @@ jobs:
         if: runner.os == 'Linux'
         # キーが無い旧カーネル（＝制限自体が無い）では失敗扱いにしない
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-      - name: Type check
+      # tsc --noEmit + biome check (format 差分はエラー、lint は既存違反ルールを warn 運用 — PR-07)
+      - name: Type check & lint
         run: npm run lint
       - name: Test
         run: npm test

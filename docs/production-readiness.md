@@ -104,7 +104,9 @@
 
 ## 3. 品質保証 — テスト・静的解析
 
-### [PR-07] Lint が型チェックのみで、コード規約の自動強制が無い 【優先度: 中】
+### [PR-07] Lint が型チェックのみで、コード規約の自動強制が無い 【優先度: 中】 — ✅ 実装済み (2026-07-04)
+
+> 実装: @biomejs/biome 2.5 を導入 (`biome.json`: スペース2/幅120/ダブルクォート、vcs.useIgnoreFile=true、sandbox/.localllm 除外、assist=off)。format は 212 ファイルへ一括適用を独立コミットで実施 (blame 汚染を1コミットに隔離)。lint は recommended プリセットで開始し、既存コードで error になった 5 ルール (noControlCharactersInRegex / useIterableCallbackReturn / noShadowRestrictedNames / noAssignInExpressions / noImplicitAnyLet) を biome.json で warn へ明示降格 = 「段階的に締める」対象リストとして可視化。`npm run lint` = tsc + biome check (format 差分はエラーで CI fail)、`npm run format` 追加。警告 242 件/情報 101 件は残存 (今後の縮減対象)。
 
 **現状**: `npm run lint` = `tsc --noEmit`。ESLint / Prettier / Biome が無い。未使用コード、`console.log` 直書き、import 順などは人力レビュー頼み。41,000行の規模では回らない。
 
@@ -204,7 +206,7 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 | | PR-05 | npm audit fix + CI audit ゲート + Dependabot | 小 | ✅ 2026-07-04 |
 | | PR-06 | Windows CI 追加 | 小 | ✅ 2026-07-04 |
 | **P2: 品質の網** | PR-08 | E2E スモークテスト (モック LLM+パイプモード) | 中 | ✅ 2026-07-04 |
-| | PR-07 | Biome 導入 | 中 |
+| | PR-07 | Biome 導入 | 中 | ✅ 2026-07-04 |
 | | PR-03 | config の zod 検証 | 中 |
 | | PR-12 | CHANGELOG+リリースタグ+バージョン埋め込み | 小 |
 | **P3: 構造改善** | PR-10 | コマンドレジストリ方式への漸進移行 | 大 (漸進) |
