@@ -65,7 +65,7 @@ function runCommand(
         resolve({
           stdout: stdout?.toString() ?? "",
           stderr: stderr?.toString() ?? "",
-          code: error?.code ?? (child.exitCode ?? 0),
+          code: error?.code ?? child.exitCode ?? 0,
         });
       },
     );
@@ -122,10 +122,7 @@ export class HookManager {
    * Run all matching PreToolUse hooks.
    * If any hook command exits with a non-zero code, execution is blocked.
    */
-  async runPreToolHooks(
-    toolName: string,
-    params: Record<string, unknown>,
-  ): Promise<PreHookResult> {
+  async runPreToolHooks(toolName: string, params: Record<string, unknown>): Promise<PreHookResult> {
     const matching = this.getMatching("PreToolUse", toolName, params);
     if (matching.length === 0) return { proceed: true };
 
@@ -151,11 +148,7 @@ export class HookManager {
   /**
    * Run all matching PostToolUse hooks.
    */
-  async runPostToolHooks(
-    toolName: string,
-    params: Record<string, unknown>,
-    result: ToolResult,
-  ): Promise<void> {
+  async runPostToolHooks(toolName: string, params: Record<string, unknown>, result: ToolResult): Promise<void> {
     const matching = this.getMatching("PostToolUse", toolName, params);
     if (matching.length === 0) return;
 
@@ -166,10 +159,7 @@ export class HookManager {
       const out = await runCommand(hook.command, env);
 
       if (out.code !== 0) {
-        logger.warn(
-          `Post-hook failed: ${hook.description ?? hook.command}`,
-          out.stderr || out.stdout,
-        );
+        logger.warn(`Post-hook failed: ${hook.description ?? hook.command}`, out.stderr || out.stdout);
       }
     }
   }
@@ -191,10 +181,7 @@ export class HookManager {
       const out = await runCommand(hook.command, env);
 
       if (out.code !== 0) {
-        logger.warn(
-          `Session hook failed: ${hook.description ?? hook.command}`,
-          out.stderr || out.stdout,
-        );
+        logger.warn(`Session hook failed: ${hook.description ?? hook.command}`, out.stderr || out.stdout);
       }
     }
   }
@@ -229,11 +216,7 @@ export class HookManager {
   }
 
   /** Get hooks matching a given type, tool name, and params. */
-  private getMatching(
-    type: HookType,
-    toolName: string,
-    params: Record<string, unknown>,
-  ): HookDefinition[] {
+  private getMatching(type: HookType, toolName: string, params: Record<string, unknown>): HookDefinition[] {
     return this.hooks.filter((hook) => {
       if (hook.type !== type) return false;
 
@@ -255,11 +238,7 @@ export class HookManager {
   }
 
   /** Build environment variables for hook commands. */
-  private buildEnv(
-    toolName: string,
-    params: Record<string, unknown>,
-    result?: ToolResult,
-  ): Record<string, string> {
+  private buildEnv(toolName: string, params: Record<string, unknown>, result?: ToolResult): Record<string, string> {
     const env: Record<string, string> = {
       TOOL_NAME: toolName,
     };

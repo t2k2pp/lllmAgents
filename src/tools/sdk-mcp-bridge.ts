@@ -121,9 +121,7 @@ export function buildLllmAgentsMcpServer(
           },
         };
         const result = await executor.execute(toolCall, source);
-        const text = result.success
-          ? result.output || ""
-          : result.error || result.output || "Tool execution failed";
+        const text = result.success ? result.output || "" : result.error || result.output || "Tool execution failed";
         return {
           content: [{ type: "text" as const, text }],
           isError: !result.success,

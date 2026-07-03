@@ -6,8 +6,8 @@ describe("CostCalculator", () => {
   const calc = new CostCalculator();
 
   const samplePricing: ModelPricing = {
-    inputPerMToken: 1.00,   // $1 per 1M input tokens
-    outputPerMToken: 5.00,  // $5 per 1M output tokens
+    inputPerMToken: 1.0, // $1 per 1M input tokens
+    outputPerMToken: 5.0, // $5 per 1M output tokens
   };
 
   describe("calculate", () => {
@@ -30,9 +30,9 @@ describe("CostCalculator", () => {
 
   describe("calculateWithCache", () => {
     const pricingWithCache: ModelPricing = {
-      inputPerMToken: 2.00,
-      outputPerMToken: 10.00,
-      cachedInputPerMToken: 0.50,
+      inputPerMToken: 2.0,
+      outputPerMToken: 10.0,
+      cachedInputPerMToken: 0.5,
     };
 
     it("キャッシュヒット分は低い単価で計算", () => {
@@ -64,7 +64,8 @@ describe("CostCalculator", () => {
     });
 
     it("キャッシュ加味で大幅に安くなる (250万入力の実例)", () => {
-      const inTok = 2_557_113, outTok = 10_842;
+      const inTok = 2_557_113,
+        outTok = 10_842;
       const noCache = calc.calculateForModelWithCache("gpt-5.4", inTok, outTok, 0);
       const cached80 = calc.calculateForModelWithCache("gpt-5.4", inTok, outTok, Math.round(inTok * 0.8));
       expect(noCache).toBeCloseTo(6.55, 1); // 表示されていた値
@@ -78,9 +79,9 @@ describe("CostCalculator", () => {
 
   describe("calculateWithCacheBreakdown (Anthropic セマンティクス)", () => {
     const pricing: ModelPricing = {
-      inputPerMToken: 2.00,
-      outputPerMToken: 10.00,
-      cachedInputPerMToken: 0.20, // 0.1×
+      inputPerMToken: 2.0,
+      outputPerMToken: 10.0,
+      cachedInputPerMToken: 0.2, // 0.1×
     };
 
     it("非キャッシュ残・読込(0.1×)・書込(1.25×)・出力を別々に課金する", () => {
@@ -98,14 +99,14 @@ describe("CostCalculator", () => {
       // 全量がキャッシュ読込(input残=0, creation=0)
       const cached = calc.calculateWithCacheBreakdown(0, 0, 1_000_000, 0, pricing);
       const full = calc.calculate(1_000_000, 0, pricing);
-      expect(cached).toBeCloseTo(0.20, 5); // 1M*0.2/1M
+      expect(cached).toBeCloseTo(0.2, 5); // 1M*0.2/1M
       expect(cached).toBeLessThan(full * 0.11); // 約 1/10
     });
 
     it("calculateForModelWithCacheBreakdown: 実Claude ID(ハイフン)で割引が効く", () => {
       // claude-sonnet-4-6: input 3.0 / cached 0.30。 全量読込 1M なら 1M*0.30/1M = 0.30
       const cost = calc.calculateForModelWithCacheBreakdown("claude-sonnet-4-6", 0, 0, 1_000_000, 0);
-      expect(cost).toBeCloseTo(0.30, 5);
+      expect(cost).toBeCloseTo(0.3, 5);
     });
   });
 

@@ -36,10 +36,10 @@ function realpathSafe(p: string): string {
 }
 
 export type ProcessSandboxLevel =
-  | "none"        // OS-level sandboxing なし（アプリレベルのみ）
-  | "fs"          // ファイルシステム書込のみ隔離（ネットワークは許可）
-  | "network"     // ネットワーク名前空間隔離のみ
-  | "full";       // ネットワーク + ファイルシステム隔離（bwrap / sandbox-exec が必要）
+  | "none" // OS-level sandboxing なし（アプリレベルのみ）
+  | "fs" // ファイルシステム書込のみ隔離（ネットワークは許可）
+  | "network" // ネットワーク名前空間隔離のみ
+  | "full"; // ネットワーク + ファイルシステム隔離（bwrap / sandbox-exec が必要）
 
 // ProcessSandboxConfig は config/types.ts を正典とする（型の二重定義による drift を防止）。
 export type { ProcessSandboxConfig } from "../config/types.js";
@@ -200,11 +200,16 @@ export function buildBwrapArgs(
 ): string[] {
   const args: string[] = [
     // Read-only bind mount of root filesystem
-    "--ro-bind", "/", "/",
+    "--ro-bind",
+    "/",
+    "/",
     // Essential virtual filesystems
-    "--dev", "/dev",
-    "--proc", "/proc",
-    "--tmpfs", "/tmp",
+    "--dev",
+    "/dev",
+    "--proc",
+    "/proc",
+    "--tmpfs",
+    "/tmp",
     // New session (prevents ptrace from parent)
     "--new-session",
   ];
@@ -252,10 +257,15 @@ export function buildBwrapAllowlistArgs(
   readBackDirs: string[] = [],
 ): string[] {
   const args: string[] = [
-    "--ro-bind", "/", "/",
-    "--dev", "/dev",
-    "--proc", "/proc",
-    "--tmpfs", "/tmp",
+    "--ro-bind",
+    "/",
+    "/",
+    "--dev",
+    "/dev",
+    "--proc",
+    "/proc",
+    "--tmpfs",
+    "/tmp",
     "--new-session",
     "--unshare-net", // ネット隔離（直結遮断）。 通信は socat→unix ソケット→ホストproxy のみ
   ];
@@ -442,10 +452,10 @@ export class ProcessSandbox {
    */
   private computeSecretProtection(): { deny: string[]; allowBack: string[] } {
     const home = homedir();
-    const deny = [...defaultSecretDenyDirs(home), appSecretDir(home)]
+    const deny = [...defaultSecretDenyDirs(home), appSecretDir(home)].filter((d) => existsSync(d)).map(realpathSafe);
+    const allowBack = appSecretReadBackDirs(home)
       .filter((d) => existsSync(d))
       .map(realpathSafe);
-    const allowBack = appSecretReadBackDirs(home).filter((d) => existsSync(d)).map(realpathSafe);
     return { deny, allowBack };
   }
 
@@ -466,7 +476,14 @@ export class ProcessSandbox {
       // fs + プロキシ + socat/ip があれば「ネット allowlist 強制」経路（2b-2）。
       if (level === "fs" && proxyPort && socketPath && this.socat && this.ip) {
         const args = buildBwrapAllowlistArgs(
-          command, existing, masks, socketPath, proxyPort, this.socat, this.ip, readBack,
+          command,
+          existing,
+          masks,
+          socketPath,
+          proxyPort,
+          this.socat,
+          this.ip,
+          readBack,
         );
         return { shell: this.bwrap, args };
       }
@@ -494,7 +511,7 @@ export class ProcessSandbox {
     command: string,
     writeDirs: string[],
     level: ProcessSandboxLevel,
-    proxyPort?: number
+    proxyPort?: number,
   ): WrappedCommand {
     const realWrite = writeDirs.map(realpathSafe);
     const { deny: masks, allowBack } = this.computeSecretProtection();
@@ -509,7 +526,11 @@ export class ProcessSandbox {
       shell: this.sandboxExec!,
       args: ["-f", profilePath, "/bin/sh", "-c", command],
       cleanup: () => {
-        try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+        try {
+          rmSync(dir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
       },
     };
   }

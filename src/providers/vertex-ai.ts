@@ -16,7 +16,10 @@ export class VertexAIProvider extends OpenAICompatProvider {
     // However, the exact endpoint depends on the model.
     // For Gemini: https://${region}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${region}/publishers/google/models/${model}:streamGenerateContent
     // For now we map to the base OpenAICompatProvider but we will override methods if need be.
-    super("vertex-ai", `https://${config.region}-aiplatform.googleapis.com/v1beta1/projects/${config.projectId}/locations/${config.region}/endpoints/openapi`);
+    super(
+      "vertex-ai",
+      `https://${config.region}-aiplatform.googleapis.com/v1beta1/projects/${config.projectId}/locations/${config.region}/endpoints/openapi`,
+    );
   }
 
   private getAccessToken(): string {
@@ -45,7 +48,7 @@ export class VertexAIProvider extends OpenAICompatProvider {
   protected async getRequestHeaders(): Promise<Record<string, string>> {
     const token = this.getAccessToken();
     return {
-      Authorization: `Bearer ${token}`
+      Authorization: `Bearer ${token}`,
     };
   }
 }

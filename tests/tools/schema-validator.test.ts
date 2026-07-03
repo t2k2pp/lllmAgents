@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  validateAgainstSchema,
-  formatValidationError,
-} from "../../src/tools/schema-validator.js";
+import { validateAgainstSchema, formatValidationError } from "../../src/tools/schema-validator.js";
 
 describe("validateAgainstSchema — required", () => {
   it("必須フィールドあり → valid", () => {
@@ -49,18 +46,12 @@ describe("validateAgainstSchema — required", () => {
 
 describe("validateAgainstSchema — type", () => {
   it("string 期待 → string なら valid", () => {
-    const r = validateAgainstSchema(
-      { properties: { x: { type: "string" } } },
-      { x: "foo" },
-    );
+    const r = validateAgainstSchema({ properties: { x: { type: "string" } } }, { x: "foo" });
     expect(r.valid).toBe(true);
   });
 
   it("string 期待 → number なら invalid", () => {
-    const r = validateAgainstSchema(
-      { properties: { x: { type: "string" } } },
-      { x: 42 },
-    );
+    const r = validateAgainstSchema({ properties: { x: { type: "string" } } }, { x: 42 });
     expect(r.valid).toBe(false);
     expect(r.errors[0].kind).toBe("type-mismatch");
     expect(r.errors[0].expected).toBe("string");
@@ -68,35 +59,23 @@ describe("validateAgainstSchema — type", () => {
   });
 
   it("array 期待 → array なら valid", () => {
-    const r = validateAgainstSchema(
-      { properties: { items: { type: "array" } } },
-      { items: [1, 2, 3] },
-    );
+    const r = validateAgainstSchema({ properties: { items: { type: "array" } } }, { items: [1, 2, 3] });
     expect(r.valid).toBe(true);
   });
 
   it("array 期待 → object なら invalid", () => {
-    const r = validateAgainstSchema(
-      { properties: { items: { type: "array" } } },
-      { items: { a: 1 } },
-    );
+    const r = validateAgainstSchema({ properties: { items: { type: "array" } } }, { items: { a: 1 } });
     expect(r.valid).toBe(false);
     expect(r.errors[0].actual).toBe("object");
   });
 
   it("integer 期待 → number でも valid (柔軟性)", () => {
-    const r = validateAgainstSchema(
-      { properties: { n: { type: "integer" } } },
-      { n: 42 },
-    );
+    const r = validateAgainstSchema({ properties: { n: { type: "integer" } } }, { n: 42 });
     expect(r.valid).toBe(true);
   });
 
   it("boolean 期待 → 文字列なら invalid (strict)", () => {
-    const r = validateAgainstSchema(
-      { properties: { flag: { type: "boolean" } } },
-      { flag: "true" },
-    );
+    const r = validateAgainstSchema({ properties: { flag: { type: "boolean" } } }, { flag: "true" });
     expect(r.valid).toBe(false);
   });
 });
@@ -120,10 +99,7 @@ describe("validateAgainstSchema — enum", () => {
   });
 
   it("型違反のときは enum チェックを skip", () => {
-    const r = validateAgainstSchema(
-      { properties: { reason: { type: "string", enum: ["a", "b"] } } },
-      { reason: 42 },
-    );
+    const r = validateAgainstSchema({ properties: { reason: { type: "string", enum: ["a", "b"] } } }, { reason: 42 });
     // 型エラーだけで enum エラーは出さない
     expect(r.errors).toHaveLength(1);
     expect(r.errors[0].kind).toBe("type-mismatch");

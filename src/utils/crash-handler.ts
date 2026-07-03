@@ -33,7 +33,7 @@ export function setCrashContext(ctx: CrashContext): void {
 
 /** クラッシュレポート本文を組み立てる (テスト可能な純関数)。 */
 export function formatCrashReport(kind: string, err: unknown, ctx: CrashContext = {}): string {
-  const stack = err instanceof Error ? err.stack ?? err.message : String(err);
+  const stack = err instanceof Error ? (err.stack ?? err.message) : String(err);
   const lines = [
     `LocalLLM Agent crash report`,
     `time: ${new Date().toISOString()}`,
@@ -67,10 +67,14 @@ export function writeCrashLog(kind: string, err: unknown, dir: string = CRASH_LO
 function restoreTerminal(): void {
   try {
     if (process.stdin.isTTY) process.stdin.setRawMode?.(false);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   try {
     process.stdout.write("\x1b[?25h\x1b[0m\n");
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 function handleFatal(kind: string, err: unknown): void {
@@ -82,14 +86,16 @@ function handleFatal(kind: string, err: unknown): void {
   try {
     context.saveSession?.();
     sessionSaved = !!context.saveSession;
-  } catch { /* 保存失敗でも後続の後始末は続ける */ }
+  } catch {
+    /* 保存失敗でも後続の後始末は続ける */
+  }
 
   restoreTerminal();
 
   const logPath = writeCrashLog(kind, err);
 
   try {
-    const stack = err instanceof Error ? err.stack ?? err.message : String(err);
+    const stack = err instanceof Error ? (err.stack ?? err.message) : String(err);
     console.error(`\n予期しないエラーで終了します (${kind})。`);
     console.error(stack);
     if (sessionSaved) {
@@ -99,7 +105,9 @@ function handleFatal(kind: string, err: unknown): void {
       console.error(`詳細ログ: ${logPath}`);
       console.error(`不具合報告の際はこのファイルを添えてください。`);
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   process.exit(1);
 }

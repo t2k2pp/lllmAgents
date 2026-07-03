@@ -52,7 +52,12 @@ afterAll(() => {
 describe("model-registry: signature / name", () => {
   it("endpointSignature は接続情報のみから決まり、 サンプリングパラメータは含めない", () => {
     const a = endpointSignature({ providerType: "ollama", model: "qwen3-32b", baseUrl: "http://h:11434" });
-    const b = endpointSignature({ providerType: "ollama", model: "qwen3-32b", baseUrl: "http://h:11434", temperature: 0.5 });
+    const b = endpointSignature({
+      providerType: "ollama",
+      model: "qwen3-32b",
+      baseUrl: "http://h:11434",
+      temperature: 0.5,
+    });
     expect(a).toBe(b);
   });
 
@@ -100,7 +105,12 @@ describe("model-registry: CRUD", () => {
     const e1 = recordEntry({ providerType: "ollama", model: "qwen3-32b", baseUrl: "http://h:11434" })!;
     // わずかに時間を空けて 2 回目
     await new Promise((r) => setTimeout(r, 10));
-    const e2 = recordEntry({ providerType: "ollama", model: "qwen3-32b", baseUrl: "http://h:11434", temperature: 0.7 })!;
+    const e2 = recordEntry({
+      providerType: "ollama",
+      model: "qwen3-32b",
+      baseUrl: "http://h:11434",
+      temperature: 0.7,
+    })!;
     expect(e2.id).toBe(e1.id);
     expect(listEntries()).toHaveLength(1);
     expect(e2.endpoint.temperature).toBe(0.7);
@@ -251,7 +261,7 @@ describe("model-registry: reconcileSlotsFromConfig (起動時マイグレーシ�
       secondLLM: null,
     } as any);
 
-    expect(listEntries()).toHaveLength(1);  // 重複追加されない
+    expect(listEntries()).toHaveLength(1); // 重複追加されない
     expect(getSlot("main")).toBe(listEntries()[0].id);
   });
 
@@ -294,22 +304,29 @@ describe("model-registry: 旧 llm-profiles.json からの移行", () => {
     // 旧形式のファイルを作る
     const legacyPath = _legacyProfilesFilePath();
     fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
-    fs.writeFileSync(legacyPath, JSON.stringify({
-      profiles: [
+    fs.writeFileSync(
+      legacyPath,
+      JSON.stringify(
         {
-          id: "abc12345",  // 旧 8 文字 hex
-          name: "anthropic:claude-sonnet-4-6",
-          endpoint: { providerType: "anthropic", model: "claude-sonnet-4-6" },
-          createdAt: "2026-05-18T00:00:00.000Z",
-          lastUsedAt: "2026-05-18T00:00:00.000Z",
+          profiles: [
+            {
+              id: "abc12345", // 旧 8 文字 hex
+              name: "anthropic:claude-sonnet-4-6",
+              endpoint: { providerType: "anthropic", model: "claude-sonnet-4-6" },
+              createdAt: "2026-05-18T00:00:00.000Z",
+              lastUsedAt: "2026-05-18T00:00:00.000Z",
+            },
+          ],
         },
-      ],
-    }, null, 2));
+        null,
+        2,
+      ),
+    );
 
     // 初回 read で移行が起こる
     const list = listEntries();
     expect(list).toHaveLength(1);
-    expect(list[0].id).toBe("abc12345");  // 旧 id 温存
+    expect(list[0].id).toBe("abc12345"); // 旧 id 温存
 
     // 新ファイルが作られている
     expect(fs.existsSync(_registryFilePath())).toBe(true);

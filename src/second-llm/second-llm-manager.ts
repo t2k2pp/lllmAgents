@@ -7,22 +7,13 @@ import { createSecondLLMProvider } from "../providers/provider-factory.js";
 import { LLMLogger } from "../agent/llm-logger.js";
 import { resolveCapability } from "../agent/capability-tier.js";
 import { getOpsLogger } from "../utils/ops-logger.js";
-import {
-  HarnessState,
-  enrichToolResult,
-  buildSubAgentStrategyPrompt,
-} from "../agent/harness-intervention.js";
+import { HarnessState, enrichToolResult, buildSubAgentStrategyPrompt } from "../agent/harness-intervention.js";
 import type { SecondLLMConfig, SecondLLMEndpoint } from "../config/types.js";
 import type { LLMProvider, Message, ToolCall } from "../providers/base-provider.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager } from "../security/permission-manager.js";
-import {
-  ROOT_ANCESTORS,
-  extendAncestors,
-  excludedToolsFor,
-  type AncestorTypes,
-} from "../agent/delegation-context.js";
+import { ROOT_ANCESTORS, extendAncestors, excludedToolsFor, type AncestorTypes } from "../agent/delegation-context.js";
 
 // D1 (2026-04-30): EXCLUDED_TOOLS のハードコードは廃止。
 // 代わりに `excludedToolsFor(extendAncestors(parentAncestors, "second"))` で動的に決定する。
@@ -30,11 +21,7 @@ import {
 // sub から呼ばれた second は parent={sub, second} → task も除外 (孫からの異種起動禁止)。
 
 /** Evaluatorに許可する読み取り専用ツール */
-const EVALUATOR_ALLOWED_TOOLS = [
-  "file_read",
-  "grep",
-  "glob",
-];
+const EVALUATOR_ALLOWED_TOOLS = ["file_read", "grep", "glob"];
 
 // ─── サンプリング・ループ上限の既定値 (ID-020 / ID-021: 2026-04-30 切り出し) ───
 //
@@ -100,7 +87,7 @@ export class SecondLLMManager {
       this.endpoint = config.endpoint;
       this.provider = createSecondLLMProvider(this.endpoint, passphrase);
     }
-    
+
     // Setup DelegationGuard
     this.delegationGuard = new DelegationGuard({
       maxConsecutiveDelegations: 5,
@@ -158,13 +145,17 @@ export class SecondLLMManager {
     const ep = this.endpoint;
     const defaults = this.config?.samplingDefaults;
     const configDefault =
-      mode === "consult" ? defaults?.consultTemperature
-      : mode === "agent" ? defaults?.agentTemperature
-      : defaults?.evaluatorTemperature;
+      mode === "consult"
+        ? defaults?.consultTemperature
+        : mode === "agent"
+          ? defaults?.agentTemperature
+          : defaults?.evaluatorTemperature;
     const hardcodedFallback =
-      mode === "consult" ? DEFAULT_TEMPERATURE_CONSULT
-      : mode === "agent" ? DEFAULT_TEMPERATURE_AGENT
-      : DEFAULT_TEMPERATURE_EVALUATOR;
+      mode === "consult"
+        ? DEFAULT_TEMPERATURE_CONSULT
+        : mode === "agent"
+          ? DEFAULT_TEMPERATURE_AGENT
+          : DEFAULT_TEMPERATURE_EVALUATOR;
     return {
       temperature: ep?.temperature ?? configDefault ?? hardcodedFallback,
       ...(ep?.top_p !== undefined && { top_p: ep.top_p }),
@@ -184,11 +175,7 @@ export class SecondLLMManager {
    * runAsEvaluator の最大反復回数 (params で上書き可能、 次に config、 最後に既定 10)。
    */
   private resolveEvaluatorIterations(paramOverride?: number): number {
-    return (
-      paramOverride
-      ?? this.config?.iterationLimits?.maxEvaluatorIterations
-      ?? DEFAULT_MAX_EVALUATOR_ITERATIONS
-    );
+    return paramOverride ?? this.config?.iterationLimits?.maxEvaluatorIterations ?? DEFAULT_MAX_EVALUATOR_ITERATIONS;
   }
 
   async consult(prompt: string, parentAncestors: AncestorTypes = ROOT_ANCESTORS): Promise<string> {
@@ -216,7 +203,7 @@ export class SecondLLMManager {
         `- ツール実行はできない。 純粋な推論で回答`;
       const messages: Message[] = [
         { role: "system", content: systemPrompt },
-        { role: "user", content: prompt }
+        { role: "user", content: prompt },
       ];
 
       log.nextTurn();
@@ -228,7 +215,7 @@ export class SecondLLMManager {
         model: this.endpoint.model,
         messages,
         ...this.resolveSampling("consult"),
-        stream: true
+        stream: true,
       });
 
       let responseText = "";
@@ -267,7 +254,7 @@ export class SecondLLMManager {
     // D1: 自分の ancestors = 親 ∪ {"second"}。 これに基づき除外ツールを決定
     const selfAncestors = extendAncestors(parentAncestors, "second");
     const excluded = excludedToolsFor(selfAncestors);
-    const toolDefs = this.toolRegistry.getDefinitions().filter(d => !excluded.has(d.function.name));
+    const toolDefs = this.toolRegistry.getDefinitions().filter((d) => !excluded.has(d.function.name));
     // D1: ToolExecutor 経由で task ツールが呼ばれた場合に正しい ancestors を伝播させるため、
     //     selfAncestors を ToolExecutor に渡す (= sub に伝播する祖先)
     const log = this.createLogger("second-llm-agent");
@@ -286,14 +273,11 @@ export class SecondLLMManager {
       // メインとセカンドで「同じ原則を共有する」 ことが目的 (非対称性の解消)。
       // Phase B-4: セカンドLLM 自身の能力ティアを解決して shared-principles に渡す。
       // セカンド側で T3 なら few-shot 風に短文化、 T1 なら concise が反映される。
-      const secondTier = resolveCapability(
-        this.endpoint.model,
-        this.endpoint.contextWindow ?? undefined,
-      ).tier;
+      const secondTier = resolveCapability(this.endpoint.model, this.endpoint.contextWindow ?? undefined).tier;
       const systemPrompt = buildSubAgentStrategyPrompt(secondTier);
       const messages: Message[] = [
         { role: "system", content: systemPrompt },
-        { role: "user", content: prompt }
+        { role: "user", content: prompt },
       ];
 
       const toolExecutor = new ToolExecutor(this.toolRegistry, this.permissions, undefined, selfAncestors);
@@ -314,7 +298,7 @@ export class SecondLLMManager {
           messages,
           tools: toolDefs,
           ...this.resolveSampling("agent"),
-          stream: true
+          stream: true,
         });
 
         let responseText = "";
@@ -364,9 +348,9 @@ export class SecondLLMManager {
 
         if (toolCalls.length > 0) {
           if (!responseText) {
-             messages.push({ role: "assistant", content: "", tool_calls: toolCalls });
+            messages.push({ role: "assistant", content: "", tool_calls: toolCalls });
           } else {
-             messages[messages.length - 1].tool_calls = toolCalls;
+            messages[messages.length - 1].tool_calls = toolCalls;
           }
 
           for (const tc of toolCalls) {
@@ -376,9 +360,7 @@ export class SecondLLMManager {
 
             try {
               const res = await toolExecutor.execute(tc);
-              const raw = res.success
-                ? (res.output ?? "")
-                : `Error: ${res.error ?? ""}\n${res.output ?? ""}`;
+              const raw = res.success ? (res.output ?? "") : `Error: ${res.error ?? ""}\n${res.output ?? ""}`;
               // Phase 5 第2ラウンド: セカンド側でも介入レイヤを通す。
               // 壁ドンループ警告 / Read→Edit 契約 / 連続委任ガード / 旧エラーガイダンスを適用。
               const enriched = enrichToolResult(tc, res.success, raw, harnessState);
@@ -416,18 +398,15 @@ export class SecondLLMManager {
    * 読み取り専用ツール（file_read, grep, glob）のみ使用可能。
    * ファイルパス一覧を渡し、Evaluator自身が必要な箇所を読んで評価する。
    */
-  async runAsEvaluator(params: {
-    systemPrompt: string;
-    userPrompt: string;
-    maxIterations?: number;
-  }): Promise<string> {
+  async runAsEvaluator(params: { systemPrompt: string; userPrompt: string; maxIterations?: number }): Promise<string> {
     if (!this.isAvailable() || !this.provider || !this.endpoint) {
       throw new Error("Second LLM is not configured or enabled.");
     }
     // Evaluatorは delegationGuard の対象外（独立したレビュープロセス）
 
-    const toolDefs = this.toolRegistry.getDefinitions()
-      .filter(d => EVALUATOR_ALLOWED_TOOLS.includes(d.function.name));
+    const toolDefs = this.toolRegistry
+      .getDefinitions()
+      .filter((d) => EVALUATOR_ALLOWED_TOOLS.includes(d.function.name));
     const log = this.createLogger("evaluator");
 
     const spinner = createSpinner(chalk.cyan("  Evaluator reviewing...")).start();
@@ -515,9 +494,7 @@ export class SecondLLMManager {
 
             try {
               const res = await toolExecutor.execute(tc);
-              const raw = res.success
-                ? (res.output ?? "")
-                : `Error: ${res.error ?? ""}\n${res.output ?? ""}`;
+              const raw = res.success ? (res.output ?? "") : `Error: ${res.error ?? ""}\n${res.output ?? ""}`;
               // Phase 5 第2ラウンド: Evaluator も介入レイヤを通す
               const enriched = enrichToolResult(tc, res.success, raw, harnessState);
               messages.push({ role: "tool", content: enriched, tool_call_id: tc.id });

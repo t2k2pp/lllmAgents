@@ -71,7 +71,10 @@ export class AzureImageProvider implements ImageProvider {
     };
 
     getOpsLogger().info("image", "azure-image generate", {
-      model: this.config.model, size, quality, n,
+      model: this.config.model,
+      size,
+      quality,
+      n,
     });
 
     const res = await fetch(this.generationsUrl(), {

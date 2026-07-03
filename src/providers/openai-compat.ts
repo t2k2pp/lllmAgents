@@ -102,9 +102,7 @@ export class OpenAICompatProvider implements LLMProvider {
     const models = await this.listModels();
     const found = models.find((m) => m.name === modelName);
     const ctxFromList = found?.contextLength ?? 0;
-    const contextLength = ctxFromList > 0
-      ? ctxFromList
-      : (inferContextLength(modelName) || FALLBACK_CONTEXT_WINDOW);
+    const contextLength = ctxFromList > 0 ? ctxFromList : inferContextLength(modelName) || FALLBACK_CONTEXT_WINDOW;
     return {
       name: modelName,
       size: found?.size ?? 0,
@@ -167,7 +165,9 @@ export class OpenAICompatProvider implements LLMProvider {
     try {
       const headers = await this.getRequestHeaders();
       if (process.env.LLM_DEBUG_HTTP) {
-        console.error(`[LLM_DEBUG_HTTP] POST ${chatUrl}  model=${body.model}  msgs=${(body.messages as unknown[])?.length}`);
+        console.error(
+          `[LLM_DEBUG_HTTP] POST ${chatUrl}  model=${body.model}  msgs=${(body.messages as unknown[])?.length}`,
+        );
       }
       streamBody = await httpPostStream(chatUrl, body, undefined, undefined, headers, params.signal);
     } catch (e) {
@@ -293,7 +293,8 @@ export class OpenAICompatProvider implements LLMProvider {
       if (err.name === "AbortError" || err.message.includes("abort")) {
         yield {
           type: "error",
-          error: "ストリーム読み取りタイムアウト: LLMサーバーから一定時間データが受信できませんでした。サーバーの状態を確認してください。",
+          error:
+            "ストリーム読み取りタイムアウト: LLMサーバーから一定時間データが受信できませんでした。サーバーの状態を確認してください。",
         };
       } else {
         yield { type: "error", error: err.message };
@@ -353,17 +354,17 @@ function sanitizeToolCallArgs(args: string): string {
 
   // Phase 1: 特殊トークンの汎用除去
   // <|...|> 形式のトークン全般 (例: <|im_start|>, <|eot_id|>, <|"|>, <|\"|>)
-  cleaned = cleaned.replace(/<\|[^<]*?\|>/g, '');
+  cleaned = cleaned.replace(/<\|[^<]*?\|>/g, "");
   // [INST], [/INST] 等のメタタグ
-  cleaned = cleaned.replace(/\[\/?INST\]/g, '');
+  cleaned = cleaned.replace(/\[\/?INST\]/g, "");
   // 残った <|...（閉じ |> がないもの）: <| + バックスラッシュ + 引用符 → 引用符に
   cleaned = cleaned.replace(/<\|\\"/g, '"');
   // <| + バックスラッシュ + 非引用符文字 → バックスラッシュごと除去
-  cleaned = cleaned.replace(/<\|\\(.)/g, '$1');
+  cleaned = cleaned.replace(/<\|\\(.)/g, "$1");
   // 残った <| → 除去
-  cleaned = cleaned.replace(/<\|/g, '');
+  cleaned = cleaned.replace(/<\|/g, "");
   // 孤立した |> → 除去
-  cleaned = cleaned.replace(/\|>/g, '');
+  cleaned = cleaned.replace(/\|>/g, "");
 
   try {
     JSON.parse(cleaned);
@@ -393,7 +394,7 @@ function sanitizeToolCallArgs(args: string): string {
   // Phase 3: JSON で無効なエスケープシーケンスの修復
   // 有効: \n \r \t \b \f \u \\ \/ \"  → それ以外の \X は \\X に（バックスラッシュを保持）
   // 例: \U → \\U (Windowsパス C:\Users 等を壊さない)、\p → \\p
-  cleaned = cleaned.replace(/\\([^nrtbfu\\/"])/g, '\\\\$1');
+  cleaned = cleaned.replace(/\\([^nrtbfu\\/"])/g, "\\\\$1");
 
   try {
     JSON.parse(cleaned);

@@ -103,11 +103,7 @@ describe("aggregate (session path / 非ディスク)", () => {
   });
 
   it("provider 別に集計する", () => {
-    const records = [
-      rec({ provider: "azure-gpt" }),
-      rec({ provider: "vertex-ai" }),
-      rec({ provider: "azure-gpt" }),
-    ];
+    const records = [rec({ provider: "azure-gpt" }), rec({ provider: "vertex-ai" }), rec({ provider: "azure-gpt" })];
     const agg = aggregate(SESSION, "provider", records);
     expect(agg.rows.find((r) => r.key === "azure-gpt")?.recordCount).toBe(2);
   });

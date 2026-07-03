@@ -11,14 +11,28 @@ import * as path from "node:path";
 type LangId = "ts" | "js" | "py" | "json" | "css" | "html" | "md" | "sh" | "unknown";
 
 const EXT_MAP: Record<string, LangId> = {
-  ".ts": "ts", ".tsx": "ts", ".mts": "ts",
-  ".js": "js", ".jsx": "js", ".mjs": "js",
-  ".py": "py", ".pyw": "py",
-  ".json": "json", ".jsonc": "json",
-  ".css": "css", ".scss": "css", ".less": "css",
-  ".html": "html", ".htm": "html", ".vue": "html", ".svelte": "html",
-  ".md": "md", ".mdx": "md",
-  ".sh": "sh", ".bash": "sh", ".zsh": "sh",
+  ".ts": "ts",
+  ".tsx": "ts",
+  ".mts": "ts",
+  ".js": "js",
+  ".jsx": "js",
+  ".mjs": "js",
+  ".py": "py",
+  ".pyw": "py",
+  ".json": "json",
+  ".jsonc": "json",
+  ".css": "css",
+  ".scss": "css",
+  ".less": "css",
+  ".html": "html",
+  ".htm": "html",
+  ".vue": "html",
+  ".svelte": "html",
+  ".md": "md",
+  ".mdx": "md",
+  ".sh": "sh",
+  ".bash": "sh",
+  ".zsh": "sh",
 };
 
 function detectLang(filePath: string): LangId {
@@ -53,9 +67,7 @@ function highlightLine(line: string, lang: LangId, baseColor: "red" | "green"): 
   // コメント行はdim表示
   const trimmed = line.trimStart();
   if (trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("/*") || trimmed.startsWith("*")) {
-    return baseColor === "red"
-      ? chalk.red.dim(line)
-      : chalk.green.dim(line);
+    return baseColor === "red" ? chalk.red.dim(line) : chalk.green.dim(line);
   }
 
   // 文字列リテラルを退避（予約語ハイライトが文字列内に適用されないように）
@@ -68,33 +80,25 @@ function highlightLine(line: string, lang: LangId, baseColor: "red" | "green"): 
   // 予約語ハイライト
   const kwPattern = KEYWORDS[lang] ?? KEYWORDS.js;
   processed = processed.replace(kwPattern, (kw) => {
-    return baseColor === "red"
-      ? chalk.red.bold(kw)
-      : chalk.green.bold(kw);
+    return baseColor === "red" ? chalk.red.bold(kw) : chalk.green.bold(kw);
   });
 
   // 型名（大文字始まり）のハイライト — TS/JSのみ
   if (lang === "ts" || lang === "js") {
     processed = processed.replace(TYPE_PATTERN, (match) => {
-      return baseColor === "red"
-        ? chalk.redBright(match)
-        : chalk.greenBright(match);
+      return baseColor === "red" ? chalk.redBright(match) : chalk.greenBright(match);
     });
   }
 
   // 文字列リテラルを復元（黄色系で表示）
   processed = processed.replace(/\x00STR(\d+)\x00/g, (_m, idx) => {
     const s = strings[parseInt(idx)];
-    return baseColor === "red"
-      ? chalk.red(chalk.italic(s))
-      : chalk.green(chalk.italic(s));
+    return baseColor === "red" ? chalk.red(chalk.italic(s)) : chalk.green(chalk.italic(s));
   });
 
   // 数値リテラル
   processed = processed.replace(/\b(\d+(?:\.\d+)?)\b/g, (num) => {
-    return baseColor === "red"
-      ? chalk.red(num)
-      : chalk.green(num);
+    return baseColor === "red" ? chalk.red(num) : chalk.green(num);
   });
 
   return processed;
@@ -103,23 +107,19 @@ function highlightLine(line: string, lang: LangId, baseColor: "red" | "green"): 
 function highlightJson(line: string, baseColor: "red" | "green"): string {
   const colorFn = baseColor === "red" ? chalk.red : chalk.green;
   // JSON キー
-  return line.replace(/"([^"]+)"\s*:/g, (_m, key) => {
-    return baseColor === "red"
-      ? chalk.red.bold(`"${key}"`) + ":"
-      : chalk.green.bold(`"${key}"`) + ":";
-  }).replace(/:\s*"([^"]*)"/g, (_m, val) => {
-    return `: ${colorFn.italic(`"${val}"`)}`;
-  });
+  return line
+    .replace(/"([^"]+)"\s*:/g, (_m, key) => {
+      return baseColor === "red" ? chalk.red.bold(`"${key}"`) + ":" : chalk.green.bold(`"${key}"`) + ":";
+    })
+    .replace(/:\s*"([^"]*)"/g, (_m, val) => {
+      return `: ${colorFn.italic(`"${val}"`)}`;
+    });
 }
 
 // ─── Diff生成 ──────────────────────────────────────────
 
 /** unified diff 風の行単位差分を生成する */
-export function generateLineDiff(
-  oldText: string,
-  newText: string,
-  lang: LangId = "unknown",
-): string[] {
+export function generateLineDiff(oldText: string, newText: string, lang: LangId = "unknown"): string[] {
   const oldLines = oldText.split("\n");
   const newLines = newText.split("\n");
 
@@ -148,20 +148,13 @@ export function generateLineDiff(
   return buildDiffOutput(commonStart, removedLines, addedLines, lang);
 }
 
-function buildDiffOutput(
-  startLine: number,
-  removedLines: string[],
-  addedLines: string[],
-  lang: LangId,
-): string[] {
+function buildDiffOutput(startLine: number, removedLines: string[], addedLines: string[], lang: LangId): string[] {
   const output: string[] = [];
 
   // ヘッダー: 変更位置
   const oldStart = startLine + 1;
   const newStart = startLine + 1;
-  output.push(
-    chalk.cyan(`@@ -${oldStart},${removedLines.length} +${newStart},${addedLines.length} @@`),
-  );
+  output.push(chalk.cyan(`@@ -${oldStart},${removedLines.length} +${newStart},${addedLines.length} @@`));
 
   // 削除行（シンタックスハイライト付き）
   for (const line of removedLines) {
@@ -182,12 +175,7 @@ function buildDiffOutput(
  * file_edit の変更を色付きで表示する。
  * old_string / new_string から直接diffを生成。
  */
-export function renderEditDiff(
-  filePath: string,
-  oldString: string,
-  newString: string,
-  occurrences: number,
-): void {
+export function renderEditDiff(filePath: string, oldString: string, newString: string, occurrences: number): void {
   const shortPath = shortenPath(filePath);
   const lang = detectLang(filePath);
   console.log(chalk.dim(`  ── ${shortPath} ──`));
@@ -206,11 +194,7 @@ export function renderEditDiff(
  * file_write の上書き変更を色付きで表示する。
  * 既存ファイルとの差分が大きすぎる場合はサマリーのみ。
  */
-export function renderWriteDiff(
-  filePath: string,
-  oldContent: string | null,
-  newContent: string,
-): void {
+export function renderWriteDiff(filePath: string, oldContent: string | null, newContent: string): void {
   const shortPath = shortenPath(filePath);
   const lang = detectLang(filePath);
 
@@ -256,6 +240,8 @@ function shortenPath(p: string): string {
       const rel = p.slice(cwd.length).replace(/^[\\/]+/, "");
       return rel || ".";
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return p;
 }

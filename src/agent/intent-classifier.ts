@@ -21,7 +21,7 @@ const CONVERSATION_ONLY_PATTERNS = [
 
 /** 明らかにタスクリクエストである入力 */
 const OBVIOUS_TASK_PATTERNS = [
-  /```[\s\S]+```/,           // コードブロック付き → 実装関連の可能性が高い
+  /```[\s\S]+```/, // コードブロック付き → 実装関連の可能性が高い
   /(?:を|して|に)(実装|作成|修正|変更|追加|削除|リファクタ|書き換え|直して)/,
   /(?:implement|create|fix|modify|add|delete|refactor|write|build)\s+/i,
 ];
@@ -115,7 +115,9 @@ function extractClassification<T extends string>(raw: string, validValues: T[]):
       if (type && validValues.includes(type as T)) {
         return type as T;
       }
-    } catch { /* fall through */ }
+    } catch {
+      /* fall through */
+    }
   }
   // 引用符付きの値を直接探す
   for (const v of validValues) {
@@ -149,9 +151,10 @@ export class IntentClassifier {
 
     // Step 2: LLM判定
     try {
-      const prompt = INTENT_CLASSIFY_PROMPT
-        .replace("{context}", recentContext.slice(-500) || "(なし)")
-        .replace("{input}", userMessage.slice(0, 300));
+      const prompt = INTENT_CLASSIFY_PROMPT.replace("{context}", recentContext.slice(-500) || "(なし)").replace(
+        "{input}",
+        userMessage.slice(0, 300),
+      );
 
       const gen = this.provider.chat({
         model: this.model,
@@ -190,8 +193,7 @@ export class IntentClassifier {
 
     // Step 2: LLM判定
     try {
-      const prompt = COMPLETION_CLASSIFY_PROMPT
-        .replace("{response}", assistantResponse.slice(-200));
+      const prompt = COMPLETION_CLASSIFY_PROMPT.replace("{response}", assistantResponse.slice(-200));
 
       const gen = this.provider.chat({
         model: this.model,

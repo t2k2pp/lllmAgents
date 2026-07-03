@@ -351,7 +351,9 @@ export class PermissionManager {
     // ブリッジ確認 (既存 _permissionQueue で 1 件ずつ直列化)
     let resolveQueue!: () => void;
     const prev = this._permissionQueue;
-    this._permissionQueue = new Promise<void>((r) => { resolveQueue = r; });
+    this._permissionQueue = new Promise<void>((r) => {
+      resolveQueue = r;
+    });
     await prev;
 
     try {
@@ -395,11 +397,7 @@ export class PermissionManager {
     toolName: string,
     params: Record<string, unknown>,
   ): { allowed: boolean; reason?: string } | null {
-    if (
-      toolName.startsWith("file_") ||
-      toolName === "glob" ||
-      toolName === "grep"
-    ) {
+    if (toolName.startsWith("file_") || toolName === "glob" || toolName === "grep") {
       const filePath = (params.path ?? params.file_path ?? params.pattern) as string | undefined;
       if (filePath && !this.sandbox.isPathAllowed(filePath)) {
         return { allowed: false, reason: `パス ${filePath} はサンドボックス外です` };
@@ -582,7 +580,9 @@ export class PermissionManager {
     // 並列ツール実行時でも確認を1件ずつ直列化する
     let resolveQueue!: () => void;
     const prev = this._permissionQueue;
-    this._permissionQueue = new Promise<void>((r) => { resolveQueue = r; });
+    this._permissionQueue = new Promise<void>((r) => {
+      resolveQueue = r;
+    });
     await prev;
 
     try {
@@ -635,17 +635,21 @@ export class PermissionManager {
   ): Promise<{ allowed: boolean; reason?: string; abortExecution?: boolean }> {
     process.stdout.write(
       `  1: 許可 (今回のみ)\n` +
-      `  2: 許可 (${toolName} をセッション中常に許可)\n` +
-      `  3: 許可 (${toolName} を設定に保存して常に許可)\n` +
-      `  4: 拒否\n` +
-      `  5: 中止\n` +
-      `選択 [1-5]: `,
+        `  2: 許可 (${toolName} をセッション中常に許可)\n` +
+        `  3: 許可 (${toolName} を設定に保存して常に許可)\n` +
+        `  4: 拒否\n` +
+        `  5: 中止\n` +
+        `選択 [1-5]: `,
     );
 
     const answer = await nonTTYReader.readLine();
 
     const actionMap: Record<string, string> = {
-      "1": "once", "2": "always", "3": "permanent", "4": "deny", "5": "abort",
+      "1": "once",
+      "2": "always",
+      "3": "permanent",
+      "4": "deny",
+      "5": "abort",
     };
     const action = actionMap[answer] ?? "abort";
     return this.resolvePermissionAction(action, toolName, params, cacheKey);
@@ -680,7 +684,9 @@ export class PermissionManager {
       if (this.onPermanentApprove) {
         this.onPermanentApprove(toolName);
       }
-      console.log(chalk.green(`  ✅ ${toolName} を設定に保存しました（/permission auto-remove ${toolName} で取り消し可能）`));
+      console.log(
+        chalk.green(`  ✅ ${toolName} を設定に保存しました（/permission auto-remove ${toolName} で取り消し可能）`),
+      );
     } else if (action === "always") {
       this.alwaysAllowTools.add(toolName);
     } else {
@@ -689,7 +695,6 @@ export class PermissionManager {
     }
     return { allowed: true };
   }
-
 }
 
 export function formatToolSummary(toolName: string, params: Record<string, unknown>): string {
@@ -711,9 +716,7 @@ export function formatToolSummary(toolName: string, params: Record<string, unkno
     case "web_search":
       return `検索: ${params.query}`;
     case "second_llm_agent":
-      return params.no_tools === true
-        ? `相談:\n${params.task}`
-        : `委任タスク:\n${params.task}`;
+      return params.no_tools === true ? `相談:\n${params.task}` : `委任タスク:\n${params.task}`;
     default:
       return JSON.stringify(params, null, 2);
   }

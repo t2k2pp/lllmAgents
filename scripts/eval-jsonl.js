@@ -111,12 +111,12 @@ function analyzeFile(file) {
     tokensOut: 0,
     tokensOutMax: 0,
     durationMsTotal: 0,
-    suspiciousMaxTokensHits: 0,        // tokensOut が API 上限に張り付いた疑い
-    suspiciousMaxTokensValues: {},      // 値ごと内訳
-    harnessMarkerCount: {},             // マーカーごと出現回数
+    suspiciousMaxTokensHits: 0, // tokensOut が API 上限に張り付いた疑い
+    suspiciousMaxTokensValues: {}, // 値ごと内訳
+    harnessMarkerCount: {}, // マーカーごと出現回数
     delegationCount: 0,
     delegationFailureCount: 0,
-    errorCategoryCount: {},             // RATE_LIMIT / AUTH / ...
+    errorCategoryCount: {}, // RATE_LIMIT / AUTH / ...
   };
   for (const m of HARNESS_MARKERS) stats.harnessMarkerCount[m] = 0;
 
@@ -124,7 +124,11 @@ function analyzeFile(file) {
   const lines = content.split("\n").filter((l) => l.trim());
   for (const line of lines) {
     let rec;
-    try { rec = JSON.parse(line); } catch { continue; }
+    try {
+      rec = JSON.parse(line);
+    } catch {
+      continue;
+    }
     if (rec.agentId && !stats.agentId) stats.agentId = rec.agentId;
     if (rec.model && !stats.model) stats.model = rec.model;
 
@@ -150,8 +154,7 @@ function analyzeFile(file) {
         // 出力上限張り付きの疑い検出: ぴったり既知の上限値と一致
         if (KNOWN_OUTPUT_LIMITS.includes(rec.tokensOut)) {
           stats.suspiciousMaxTokensHits++;
-          stats.suspiciousMaxTokensValues[rec.tokensOut] =
-            (stats.suspiciousMaxTokensValues[rec.tokensOut] ?? 0) + 1;
+          stats.suspiciousMaxTokensValues[rec.tokensOut] = (stats.suspiciousMaxTokensValues[rec.tokensOut] ?? 0) + 1;
         }
       }
       if (typeof rec.durationMs === "number") stats.durationMsTotal += rec.durationMs;
@@ -220,11 +223,15 @@ function render(perFile, totals) {
   out.push(`| LLM 呼び出し (request) | ${totals.requests} |`);
   out.push(`| LLM 応答 (response) | ${totals.responses} |`);
   out.push(`| ツール実行回数 | ${totals.toolResults} |`);
-  out.push(`| ツール成功 / 失敗 | ${totals.toolSuccesses} / ${totals.toolFailures} (失敗率 ${
-    totals.toolResults ? ((totals.toolFailures / totals.toolResults) * 100).toFixed(1) : "0.0"
-  }%) |`);
+  out.push(
+    `| ツール成功 / 失敗 | ${totals.toolSuccesses} / ${totals.toolFailures} (失敗率 ${
+      totals.toolResults ? ((totals.toolFailures / totals.toolResults) * 100).toFixed(1) : "0.0"
+    }%) |`,
+  );
   out.push(`| 入力トークン総計 | ${totals.tokensIn.toLocaleString()} |`);
-  out.push(`| 出力トークン総計 / 最大 | ${totals.tokensOut.toLocaleString()} / ${totals.tokensOutMax.toLocaleString()} |`);
+  out.push(
+    `| 出力トークン総計 / 最大 | ${totals.tokensOut.toLocaleString()} / ${totals.tokensOutMax.toLocaleString()} |`,
+  );
   out.push(`| LLM 応答時間総計 | ${fmtDuration(totals.durationMsTotal)} |`);
   out.push(`| 委任系呼び出し / 失敗 | ${totals.delegationCount} / ${totals.delegationFailureCount} |`);
   out.push("");
@@ -242,11 +249,12 @@ function render(perFile, totals) {
     for (const [val, cnt] of Object.entries(totals.suspiciousMaxTokensValues).sort(
       (a, b) => Number(a[0]) - Number(b[0]),
     )) {
-      const interp = Number(val) <= 8192
-        ? "**小さすぎる max_tokens**。 出力中途切れの強い疑い"
-        : Number(val) >= 32000
-        ? "API 上限張り付き。 タスクが長文だった可能性、 max_tokens 上限を確認"
-        : "中間値。 設定漏れの可能性";
+      const interp =
+        Number(val) <= 8192
+          ? "**小さすぎる max_tokens**。 出力中途切れの強い疑い"
+          : Number(val) >= 32000
+            ? "API 上限張り付き。 タスクが長文だった可能性、 max_tokens 上限を確認"
+            : "中間値。 設定漏れの可能性";
       out.push(`| ${val} | ${cnt} | ${interp} |`);
     }
   }

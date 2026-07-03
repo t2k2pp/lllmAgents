@@ -29,15 +29,30 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/room A", description: "REPL を Room A へ移動" },
   { command: "/room B", description: "REPL を Room B へ移動 (Discord 既定)" },
   { command: "/room C", description: "REPL を Room C へ移動 (Slack 既定)" },
-  { command: "/room resume", description: "現在の Room の最後の会話を再開 (/room resume A|B|C で指定)", needsArg: true },
-  { command: "/room autoresume", description: "現在の Room の自動 Resume を on/off (/room autoresume on|off [A|B|C])", needsArg: true },
+  {
+    command: "/room resume",
+    description: "現在の Room の最後の会話を再開 (/room resume A|B|C で指定)",
+    needsArg: true,
+  },
+  {
+    command: "/room autoresume",
+    description: "現在の Room の自動 Resume を on/off (/room autoresume on|off [A|B|C])",
+    needsArg: true,
+  },
   { command: "/queue", description: "受信順キューの待ち状況を表示" },
   { command: "/queue clear", description: "REPL の type-ahead 待機入力を破棄" },
-  { command: "/context", description: "コンテキスト使用状況 (System prompt / Memory / Skills / Tools / Messages 内訳)" },
+  {
+    command: "/context",
+    description: "コンテキスト使用状況 (System prompt / Memory / Skills / Tools / Messages 内訳)",
+  },
   { command: "/context system", description: "システムプロンプト本文の内訳をダンプ" },
   { command: "/context memory", description: "メモ・プロジェクト指示の本文をダンプ" },
   { command: "/context skills", description: "注入中スキル一覧 (trigger/description) をダンプ" },
-  { command: "/context tools", description: "ツール定義をトークン降順で一覧 (/context tools <name> で全文スキーマ)", needsArg: true },
+  {
+    command: "/context tools",
+    description: "ツール定義をトークン降順で一覧 (/context tools <name> で全文スキーマ)",
+    needsArg: true,
+  },
   { command: "/context messages", description: "会話履歴をメッセージ単位でダンプ" },
   { command: "/compact", description: "コンテキスト圧縮" },
   // /capability /metrics /cost は /status に集約 (Phase optimize #4、 2026-05-28)
@@ -52,7 +67,11 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/skills toggle", description: "個別スキルの有効/無効切替", needsArg: true },
   { command: "/try", description: "試行錯誤モード: 自動的に評価・改善を繰り返す", needsArg: true },
   { command: "/try 3", description: "最大3回試行（デフォルト）", needsArg: true },
-  { command: "/goal-loop", description: "決定的検証ゲート型ループ: --check の exit 0 まで反復 (例: --check \"npm test\")", needsArg: true },
+  {
+    command: "/goal-loop",
+    description: '決定的検証ゲート型ループ: --check の exit 0 まで反復 (例: --check "npm test")',
+    needsArg: true,
+  },
   { command: "/stream", description: "ストリーミング表示モードの確認/切り替え (引数なしで対話 toggle)" },
   // ── Model / Second LLM コマンド (docs/model-registry.md) ──
   // Phase 3 (2026-05-27): 個別編集系を /models Edit wizard に集約した。
@@ -71,10 +90,18 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/model temperature", description: "main slot の temperature (0〜2、推論重視は低め)", needsArg: true },
   { command: "/model top_p", description: "main slot の top_p (0〜1、1.0で無効化)", needsArg: true },
   { command: "/model top_k", description: "main slot の top_k (整数、Ollama系で有効)", needsArg: true },
-  { command: "/model rep_penalty", description: "main slot の repetition penalty (1.0で中立、>1で繰り返し抑制)", needsArg: true },
+  {
+    command: "/model rep_penalty",
+    description: "main slot の repetition penalty (1.0で中立、>1で繰り返し抑制)",
+    needsArg: true,
+  },
   { command: "/model host", description: "main slot の接続先ホスト/IP を変更", needsArg: true },
   { command: "/model port", description: "main slot の接続先ポートを変更", needsArg: true },
-  { command: "/model provider", description: "main slot のプロバイダ種別を変更 (ローカル系。クラウドは setup へ誘導)", needsArg: true },
+  {
+    command: "/model provider",
+    description: "main slot のプロバイダ種別を変更 (ローカル系。クラウドは setup へ誘導)",
+    needsArg: true,
+  },
   { command: "/model setup", description: "main slot の新規セットアップ wizard (プロバイダ選択は wizard 内で)" },
   // /model second 系 (docs/model-registry.md §4.1)
   { command: "/model second", description: "second slot の状態表示・サブコマンド (旧 /second)" },
@@ -83,7 +110,11 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/model second setup", description: "second slot の新規セットアップ wizard" },
   { command: "/model second list", description: "second slot の利用可能モデル一覧から選択" },
   { command: "/model second context", description: "second slot のコンテキスト長を変更 (例: 128k)", needsArg: true },
-  { command: "/model second description", description: "second slot の特性説明 (サブエージェント選択の材料)", needsArg: true },
+  {
+    command: "/model second description",
+    description: "second slot の特性説明 (サブエージェント選択の材料)",
+    needsArg: true,
+  },
   // /model vision 系 (docs/model-registry.md Phase 5) — 画像認識を含むマルチモーダル言語生成 AI を指定
   { command: "/model vision", description: "vision slot の状態表示 (画像認識を含むマルチモーダル言語生成 AI)" },
   { command: "/model vision setup", description: "vision slot の新規セットアップ wizard" },
@@ -92,7 +123,11 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/model vision description", description: "vision slot の特性説明", needsArg: true },
   { command: "/model vision clear", description: "vision slot を解除 (main LLM にフォールバック)" },
   { command: "/todo", description: "タスクリスト (active のみ / all=全件 / archive=完了済み削除)" },
-  { command: "/goal-seek", description: "Goal Seek mode 開始 — acceptance criteria を立て合格まで自律実行", needsArg: true },
+  {
+    command: "/goal-seek",
+    description: "Goal Seek mode 開始 — acceptance criteria を立て合格まで自律実行",
+    needsArg: true,
+  },
   { command: "/exit-goal-seek", description: "Goal Seek mode を抜ける (acceptance 未達成でも user 明示で中断)" },
   { command: "/resume", description: "セッション復元 (引数なしで picker / latest = 最新 / list = 一覧)" },
   { command: "/resume latest", description: "最新セッションを即復元 (旧 /continue)" },
@@ -112,7 +147,10 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/checkpoint restore", description: "指定番号のチェックポイントへ復元", needsArg: true },
   { command: "/checkpoint diff", description: "指定番号との差分サマリ", needsArg: true },
   { command: "/checkpoint clear", description: "今セッションのチェックポイント履歴を削除 (--all で全セッション)" },
-  { command: "/sandbox", description: "bash 封じ込めの状態 (Mac/Linux/WSL2内=processSandbox。Winネイティブは非対応→WSL2内起動を案内)" },
+  {
+    command: "/sandbox",
+    description: "bash 封じ込めの状態 (Mac/Linux/WSL2内=processSandbox。Winネイティブは非対応→WSL2内起動を案内)",
+  },
   { command: "/sandbox on", description: "bash 封じ込めを有効化 (Mac/Linux/WSL2内のOSサンドボックス)" },
   { command: "/sandbox off", description: "bash 封じ込めを無効化" },
   { command: "/sandbox status", description: "封じ込めレベル・ネット allowlist・自動許可・中継先を表示" },
@@ -120,8 +158,14 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/sandbox deny", description: "ネット allowlist からドメインを削除", needsArg: true },
   // /cost (詳細表示として復活、 2026-06-01): /status は要約のみ、 詳細は /cost 配下に集約。
   // 設計: docs/cost-token-command-design.md
-  { command: "/cost", description: "LLM 使用量サマリ (計測窓 / 合計 / 上位モデル)。 既定は計測窓 (/cost reset で区切り)" },
-  { command: "/cost models", description: "モデル別の token / コスト / 単価・算出根拠 (期間: today|month|all|session 追記可)" },
+  {
+    command: "/cost",
+    description: "LLM 使用量サマリ (計測窓 / 合計 / 上位モデル)。 既定は計測窓 (/cost reset で区切り)",
+  },
+  {
+    command: "/cost models",
+    description: "モデル別の token / コスト / 単価・算出根拠 (期間: today|month|all|session 追記可)",
+  },
   { command: "/cost providers", description: "provider 別 + slot (main/second/vision/image) 別の集計" },
   { command: "/cost today", description: "今日の使用量サマリ" },
   { command: "/cost yesterday", description: "昨日の使用量サマリ (任意日は /cost YYYY-MM-DD)" },
@@ -130,7 +174,11 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/cost all", description: "全期間の使用量サマリ" },
   { command: "/cost reset", description: "計測窓をリセット (履歴 jsonl は保持)" },
   { command: "/cost export", description: "使用量を jsonl/csv で出力 (例: /cost export csv all)", needsArg: true },
-  { command: "/cost rate", description: "為替レート設定でコストを円表示 (例: /cost rate 150)。 /cost rate off でドル表示に戻す", needsArg: true },
+  {
+    command: "/cost rate",
+    description: "為替レート設定でコストを円表示 (例: /cost rate 150)。 /cost rate off でドル表示に戻す",
+    needsArg: true,
+  },
   { command: "/token", description: "/cost の alias (token / コスト可視化)" },
   // /image: 画像生成 (Azure GPT Images / SD WebUI / ComfyUI)。設計: docs/image-generation.md
   { command: "/image", description: "画像生成の状態表示 (機能トグル / プロファイル一覧)" },
@@ -144,15 +192,24 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/image test", description: "アクティブバックエンドへの疎通確認 (Azure は設定検証のみ)" },
   { command: "/image gen", description: "ダイレクト画像生成 (例: /image gen a red dragon, pixel art)", needsArg: true },
   { command: "/autorun", description: "Autorunモード切り替え（非破壊操作の自動許可）" },
-  { command: "/compress-input", description: "入力圧縮モード切替（project指示/メモが閾値超過時に意図保持圧縮、既定OFF）" },
+  {
+    command: "/compress-input",
+    description: "入力圧縮モード切替（project指示/メモが閾値超過時に意図保持圧縮、既定OFF）",
+  },
   { command: "/parallel", description: "並列ツール実行数の確認・変更", needsArg: true },
-  { command: "/status", description: "セッション状態を 1 画面で表示 (slot / context / capability / metrics / cost / tasks)" },
+  {
+    command: "/status",
+    description: "セッション状態を 1 画面で表示 (slot / context / capability / metrics / cost / tasks)",
+  },
   // /second は /model second の alias として動作 (Phase 4)。 補完には alias のみ残す。
   { command: "/second", description: "[非推奨] /model second の alias。 新規には /model second を推奨" },
   { command: "/swap", description: "メインLLM ⇔ セカンドLLM を入れ替え (確認あり)" },
   { command: "/swap -y", description: "メインLLM ⇔ セカンドLLM を入れ替え (確認なし)" },
   { command: "/switch", description: "メインLLM ⇔ セカンドLLM を入れ替え (/swap と同じ)" },
-  { command: "/models", description: "Model Registry: 登録済モデル一覧 → Set as main/second / Edit / Duplicate / Delete / Add new" },
+  {
+    command: "/models",
+    description: "Model Registry: 登録済モデル一覧 → Set as main/second / Edit / Duplicate / Delete / Add new",
+  },
   { command: "/models list", description: "Model Registry の一覧表示のみ ([main]/[second] タグ付き)" },
   { command: "/models help", description: "/models の使い方を表示" },
   { command: "/profiles", description: "[非推奨] /models の alias。 旧 LLM プロファイル履歴コマンド" },
@@ -180,7 +237,6 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   // 補完候補からは外して 1 件に集約。
   { command: "/permission", description: "権限設定 (引数なしで picker: rules / auto / require / discord / slack)" },
 ];
-
 
 // ─── MenuProvider（InteractiveInput用ドロップダウン） ────
 
@@ -250,9 +306,7 @@ export function createCommandMenuProvider(
  * @ファイルパスのドロップダウン候補プロバイダーを生成。
  * partial は "@" の後の文字列（例: "src/cl" → src/cli/ がマッチ）
  */
-export function createFileMenuProvider(
-  cwd: string = process.cwd(),
-): MenuProvider {
+export function createFileMenuProvider(cwd: string = process.cwd()): MenuProvider {
   return (partial: string): MenuItem[] => {
     const paths = completeFilePath(partial, cwd);
     return paths.map((p) => ({
@@ -273,9 +327,7 @@ export interface CompleterOptions {
   cwd?: string;
 }
 
-export function createCompleter(
-  options: CompleterOptions = {},
-): (line: string) => CompleterResult {
+export function createCompleter(options: CompleterOptions = {}): (line: string) => CompleterResult {
   const { skillTriggers = [], cwd = process.cwd() } = options;
   const allCommands = [...BUILTIN_COMMANDS, ...skillTriggers];
   const toolNames = options.toolNames ?? [];
@@ -433,7 +485,7 @@ function completeFilePath(partial: string, cwd: string): string[] {
       continue;
     }
     // 浅いパス優先
-    const depth = (p.match(/\//g)?.length ?? 0);
+    const depth = p.match(/\//g)?.length ?? 0;
     score -= depth;
     // 同スコアならファイル優先（ディレクトリは末尾"/"分だけ僅かに減点）
     if (p.endsWith("/")) score -= 0.5;

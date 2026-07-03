@@ -60,7 +60,10 @@ function ipv6ToBigInt(v: string): bigint | null {
   let tailV4: bigint | null = null;
   const lastColon = s.lastIndexOf(":");
   if (lastColon >= 0 && s.slice(lastColon + 1).includes(".")) {
-    const o = s.slice(lastColon + 1).split(".").map(Number);
+    const o = s
+      .slice(lastColon + 1)
+      .split(".")
+      .map(Number);
     if (o.length !== 4 || o.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return null;
     tailV4 = (BigInt(o[0]) << 24n) | (BigInt(o[1]) << 16n) | (BigInt(o[2]) << 8n) | BigInt(o[3]);
     s = s.slice(0, lastColon + 1) + "0:0"; // 末尾2グループを 0 placeholder に（後で tailV4 を OR）
@@ -121,10 +124,7 @@ export function isBlockedAddress(ip: string): boolean {
  * ホスト名/IP を解決し、 接続先として安全な実IPを1つ返す（内部レンジは拒否＝例外）。
  * ホスト名は解決済みIPを「ピン留め」して返すことで、 authorize 後に別IPへ向く DNS rebinding を防ぐ。
  */
-async function resolvePinnedIp(
-  host: string,
-  isBlocked: (ip: string) => boolean = isBlockedAddress,
-): Promise<string> {
+async function resolvePinnedIp(host: string, isBlocked: (ip: string) => boolean = isBlockedAddress): Promise<string> {
   const h = host.replace(/^\[|\]$/g, ""); // IPv6 リテラルのブラケットを除去
   if (net.isIP(h)) {
     if (isBlocked(h)) throw new Error(`blocked internal address: ${h}`);
@@ -200,9 +200,7 @@ export class SandboxProxy {
 
   /** 今セッションで一時許可(once)した先（恒久化ナッジ用・W1）。 永続 allowlist にある物は除く。 */
   getSessionAllowedHosts(): string[] {
-    return [...this.sessionAllowed]
-      .filter((h) => !domainAllowed(h, this.deps.getAllowedDomains()))
-      .sort();
+    return [...this.sessionAllowed].filter((h) => !domainAllowed(h, this.deps.getAllowedDomains())).sort();
   }
 
   /** 今セッションで遮断した宛先ホスト一覧（W3）。 */
@@ -436,9 +434,7 @@ export class SandboxProxy {
     // （Host ヘッダとリクエストラインのドメイン不一致による allowlist 迂回を防ぐ）。
     let url: URL;
     try {
-      url = new URL(
-        (req.url ?? "").startsWith("http") ? req.url! : `http://${req.headers.host ?? ""}${req.url ?? ""}`,
-      );
+      url = new URL((req.url ?? "").startsWith("http") ? req.url! : `http://${req.headers.host ?? ""}${req.url ?? ""}`);
     } catch {
       res.writeHead(400);
       res.end();

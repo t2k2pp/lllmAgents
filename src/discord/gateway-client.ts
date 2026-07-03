@@ -100,7 +100,9 @@ export class DiscordGatewayClient {
     if (this.ws) {
       try {
         this.ws.close(1000);
-      } catch { /* already closed */ }
+      } catch {
+        /* already closed */
+      }
       this.ws = null;
     }
   }
@@ -109,9 +111,7 @@ export class DiscordGatewayClient {
 
   /** 接続先 URL を決めて WS を張る。resume=true なら前回セッションの再開を試みる */
   private async connect(resume: boolean): Promise<void> {
-    const url = resume && this.resumeGatewayUrl
-      ? this.resumeGatewayUrl
-      : await this.fetchGatewayUrl();
+    const url = resume && this.resumeGatewayUrl ? this.resumeGatewayUrl : await this.fetchGatewayUrl();
 
     return new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -182,11 +182,13 @@ export class DiscordGatewayClient {
     if (!res.ok) {
       const text = await res.text();
       if (res.status === 401) {
-        throw new Error("Bot Token が正しくありません (401)。/integrations の Discord 連携メニューから設定し直してください。");
+        throw new Error(
+          "Bot Token が正しくありません (401)。/integrations の Discord 連携メニューから設定し直してください。",
+        );
       }
       throw new Error(`Discord Gateway URL の取得に失敗しました: ${res.status} ${text}`);
     }
-    const data = await res.json() as { url: string };
+    const data = (await res.json()) as { url: string };
     return data.url;
   }
 
@@ -305,7 +307,9 @@ export class DiscordGatewayClient {
       try {
         // 1000/1001 以外で閉じると Discord はセッションを失効させないため Resume できる
         ws.close(4900 as any);
-      } catch { /* already closed */ }
+      } catch {
+        /* already closed */
+      }
     }
     this.scheduleReconnect(canResume, reason);
   }

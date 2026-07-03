@@ -14,10 +14,16 @@ export class DelegationGuard {
 
   checkDelegation(): { allowed: boolean; reason?: string } {
     if (this.totalCount >= this.config.maxTotalDelegations) {
-      return { allowed: false, reason: `Reached maximum total delegations per session (${this.config.maxTotalDelegations}).` };
+      return {
+        allowed: false,
+        reason: `Reached maximum total delegations per session (${this.config.maxTotalDelegations}).`,
+      };
     }
     if (this.consecutiveCount >= this.config.maxConsecutiveDelegations) {
-      return { allowed: false, reason: `Reached maximum consecutive delegations (${this.config.maxConsecutiveDelegations}).` };
+      return {
+        allowed: false,
+        reason: `Reached maximum consecutive delegations (${this.config.maxConsecutiveDelegations}).`,
+      };
     }
     return { allowed: true };
   }

@@ -41,7 +41,10 @@ let server: MockLLMServer;
 let targetFile: string;
 
 /** モックの canned 応答ルーティング (メッセージ内容で決定的に分岐) */
-function route(messages: ChatMessage[]): { text?: string; toolCalls?: Array<{ name: string; args: Record<string, unknown> }> } {
+function route(messages: ChatMessage[]): {
+  text?: string;
+  toolCalls?: Array<{ name: string; args: Record<string, unknown> }>;
+} {
   const last = messages[messages.length - 1];
   // ツール結果が返ってきた = file_write 実行後 → 完了報告してターン終了
   if (last?.role === "tool") {

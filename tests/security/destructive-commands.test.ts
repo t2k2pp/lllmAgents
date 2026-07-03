@@ -37,7 +37,16 @@ describe("isDestructiveCommand (正典リスト・自動許可から除外すべ
     }
   });
   it("再帰パーミッション/所有者・削除・上書き低レベル系を判定", () => {
-    for (const c of ["chmod -R 000 .", "chown -R root .", "rm file", "rm -rf dir", "shred x", "truncate -s 0 f", "dd if=/dev/zero of=x", "find . -delete"]) {
+    for (const c of [
+      "chmod -R 000 .",
+      "chown -R root .",
+      "rm file",
+      "rm -rf dir",
+      "shred x",
+      "truncate -s 0 f",
+      "dd if=/dev/zero of=x",
+      "find . -delete",
+    ]) {
       expect(isDestructiveCommand(c), c).toBe(true);
     }
   });

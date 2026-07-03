@@ -1,9 +1,5 @@
 import { OpenAICompatProvider } from "./openai-compat.js";
-import type {
-  ChatParams,
-  ChatWithToolsParams,
-  ChatChunk,
-} from "./base-provider.js";
+import type { ChatParams, ChatWithToolsParams, ChatChunk } from "./base-provider.js";
 import type { ModelInfo } from "../config/types.js";
 
 interface AzureClaudeConfig {
@@ -58,13 +54,14 @@ export class AzureClaudeProvider extends OpenAICompatProvider {
   }
 
   async listModels(): Promise<ModelInfo[]> {
-    return [{
-      name: this.azureConfig.deploymentName,
-      size: 0,
-      contextLength: 200000,
-      supportsVision: false,
-      supportsFunctionCalling: true
-    }];
+    return [
+      {
+        name: this.azureConfig.deploymentName,
+        size: 0,
+        contextLength: 200000,
+        supportsVision: false,
+        supportsFunctionCalling: true,
+      },
+    ];
   }
 }
-

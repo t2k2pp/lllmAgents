@@ -55,12 +55,14 @@ export class AzureOpenAIProvider extends OpenAICompatProvider {
   }
 
   async listModels(): Promise<ModelInfo[]> {
-    return [{
-      name: this.azureConfig.deploymentName,
-      size: 0,
-      contextLength: inferContextLength(this.azureConfig.deploymentName) || FALLBACK_CONTEXT_WINDOW,
-      supportsVision: false,
-      supportsFunctionCalling: true
-    }];
+    return [
+      {
+        name: this.azureConfig.deploymentName,
+        size: 0,
+        contextLength: inferContextLength(this.azureConfig.deploymentName) || FALLBACK_CONTEXT_WINDOW,
+        supportsVision: false,
+        supportsFunctionCalling: true,
+      },
+    ];
   }
 }

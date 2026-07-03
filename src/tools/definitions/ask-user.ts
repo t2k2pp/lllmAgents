@@ -34,8 +34,7 @@ export const askUserTool: ToolHandler = {
           },
           options: {
             type: "array",
-            description:
-              "選択肢のリスト（省略時は自由テキスト入力）。2〜4個推奨",
+            description: "選択肢のリスト（省略時は自由テキスト入力）。2〜4個推奨",
             items: {
               type: "object",
               properties: {
@@ -45,8 +44,7 @@ export const askUserTool: ToolHandler = {
                 },
                 description: {
                   type: "string",
-                  description:
-                    "この選択肢の意味・影響・トレードオフの説明",
+                  description: "この選択肢の意味・影響・トレードオフの説明",
                 },
               },
               required: ["label", "description"],
@@ -54,8 +52,7 @@ export const askUserTool: ToolHandler = {
           },
           multiSelect: {
             type: "boolean",
-            description:
-              "trueで複数選択可能。排他的でない選択肢に使う。デフォルトfalse",
+            description: "trueで複数選択可能。排他的でない選択肢に使う。デフォルトfalse",
           },
         },
         required: ["question"],
@@ -69,9 +66,7 @@ export const askUserTool: ToolHandler = {
 
     // 後方互換: string[] が来た場合は {label, description} に変換
     const options: AskUserOption[] | undefined = rawOptions
-      ? rawOptions.map((o) =>
-          typeof o === "string" ? { label: o, description: "" } : o,
-        )
+      ? rawOptions.map((o) => (typeof o === "string" ? { label: o, description: "" } : o))
       : undefined;
 
     const OTHER_LABEL = "その他（自由入力）";
@@ -90,12 +85,8 @@ export const askUserTool: ToolHandler = {
           };
         }
         // ボタンラベルは label のみ。 description は質問文に併記する
-        const descLines = (options ?? [])
-          .filter((o) => o.description)
-          .map((o) => `- ${o.label}: ${o.description}`);
-        const fullQuestion = descLines.length > 0
-          ? `${question}\n${descLines.join("\n")}`
-          : question;
+        const descLines = (options ?? []).filter((o) => o.description).map((o) => `- ${o.label}: ${o.description}`);
+        const fullQuestion = descLines.length > 0 ? `${question}\n${descLines.join("\n")}` : question;
         const res = await bridge.askUser({
           question: fullQuestion,
           choices: options?.map((o) => o.label),
@@ -124,9 +115,7 @@ function formatOptionDisplay(opt: AskUserOption, index: number): string {
 }
 
 function formatInquirerChoice(opt: AskUserOption): { name: string; value: string } {
-  const name = opt.description
-    ? `${opt.label} — ${opt.description}`
-    : opt.label;
+  const name = opt.description ? `${opt.label} — ${opt.description}` : opt.label;
   return { name, value: opt.label };
 }
 
@@ -152,9 +141,7 @@ async function executeNonTTY(
   if (multiSelect) {
     console.log("番号をカンマ区切りで入力してください（例: 1,3）:");
     const line = await nonTTYReader.readLine();
-    const indices = line
-      .split(",")
-      .map((s) => parseInt(s.trim(), 10) - 1);
+    const indices = line.split(",").map((s) => parseInt(s.trim(), 10) - 1);
     const selected: string[] = [];
     let hasOther = false;
     for (const idx of indices) {
@@ -204,10 +191,7 @@ async function executeTTY(
     return { success: true, output: answer };
   }
 
-  const choices = [
-    ...options.map(formatInquirerChoice),
-    { name: otherLabel, value: otherLabel },
-  ];
+  const choices = [...options.map(formatInquirerChoice), { name: otherLabel, value: otherLabel }];
 
   if (multiSelect) {
     const { answer } = await inquirer.prompt<{ answer: string[] }>([
@@ -222,9 +206,7 @@ async function executeTTY(
     const otherIdx = selected.indexOf(otherLabel);
     if (otherIdx !== -1) {
       selected.splice(otherIdx, 1);
-      const { text } = await inquirer.prompt<{ text: string }>([
-        { type: "input", name: "text", message: "回答:" },
-      ]);
+      const { text } = await inquirer.prompt<{ text: string }>([{ type: "input", name: "text", message: "回答:" }]);
       selected.push(text);
     }
     return { success: true, output: selected.join(", ") };
@@ -240,9 +222,7 @@ async function executeTTY(
   ]);
 
   if (answer === otherLabel) {
-    const { text } = await inquirer.prompt<{ text: string }>([
-      { type: "input", name: "text", message: "回答:" },
-    ]);
+    const { text } = await inquirer.prompt<{ text: string }>([{ type: "input", name: "text", message: "回答:" }]);
     return { success: true, output: text };
   }
   return { success: true, output: answer };

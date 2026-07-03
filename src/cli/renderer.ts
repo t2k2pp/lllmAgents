@@ -3,14 +3,23 @@ import chalk from "chalk";
 import type { SecondLLMConfig } from "../config/types.js";
 import { APP_VERSION } from "../version.js";
 
-export function displayWelcome(model: string, baseUrl: string | undefined, providerType: string, contextWindow: number, skillCount: number, secondLlmConfig?: SecondLLMConfig): void {
+export function displayWelcome(
+  model: string,
+  baseUrl: string | undefined,
+  providerType: string,
+  contextWindow: number,
+  skillCount: number,
+  secondLlmConfig?: SecondLLMConfig,
+): void {
   const ctxLabel = contextWindow >= 1000 ? `${Math.round(contextWindow / 1000)}K` : `${contextWindow}`;
   console.log(chalk.bold(`\n  LocalLLM Agent v${APP_VERSION}`));
   // クラウド系 (Azure/Vertex) は baseUrl を持たないため、 endpoint 部分を省略
   const location = baseUrl ? ` @ ${baseUrl}` : "";
   console.log(chalk.dim(`  Model: ${model}${location} (${providerType})`));
   if (secondLlmConfig && secondLlmConfig.enabled && secondLlmConfig.endpoint) {
-    console.log(chalk.dim(`  Second LLM: ${secondLlmConfig.endpoint.model} (${secondLlmConfig.endpoint.providerType})`));
+    console.log(
+      chalk.dim(`  Second LLM: ${secondLlmConfig.endpoint.model} (${secondLlmConfig.endpoint.providerType})`),
+    );
   }
   console.log(chalk.dim(`  Context: ${ctxLabel} tokens | Skills: ${skillCount}`));
   console.log(chalk.dim(`  CWD: ${process.cwd()}`));
@@ -26,10 +35,12 @@ export interface SkillSummary {
 export function displayHelp(skills?: SkillSummary[]): void {
   let skillSection: string;
   if (skills && skills.length > 0) {
-    const lines = skills.map((s) => {
-      const padded = `/${s.name}`.padEnd(20);
-      return `    ${chalk.cyan(padded)} ${s.description}`;
-    }).join("\n");
+    const lines = skills
+      .map((s) => {
+        const padded = `/${s.name}`.padEnd(20);
+        return `    ${chalk.cyan(padded)} ${s.description}`;
+      })
+      .join("\n");
     skillSection = `\n  ${chalk.bold("スキル (直接呼び出し可能):")}\n${lines}\n`;
   } else {
     skillSection = `
@@ -88,7 +99,7 @@ export function displayHelp(skills?: SkillSummary[]): void {
     ${chalk.cyan("/autorun")}         自律実行モード切替（作業フォルダ内の削除以外を自動承認）
     ${chalk.cyan("/compress-input")}  入力圧縮モード切替（project指示/メモが閾値超過時に意図保持で圧縮、既定OFF）
     ${chalk.cyan("/try [N] <プロンプト>")}  試行錯誤モード: 評価付きで最大N回自動リトライ（デフォルト3回）
-    ${chalk.cyan("/goal-loop [N] --check \"<cmd>\" <タスク>")}  決定的検証ゲート型ループ: cmd が exit 0 になるまで反復（既定8回）
+    ${chalk.cyan('/goal-loop [N] --check "<cmd>" <タスク>')}  決定的検証ゲート型ループ: cmd が exit 0 になるまで反復（既定8回）
     ${chalk.cyan("/loop [間隔] <プロンプト>")}  指定間隔でプロンプトを繰り返し実行
     ${chalk.cyan("/loop list")}      アクティブなループ一覧
     ${chalk.cyan("/loop stop [id|all]")}  ループを停止

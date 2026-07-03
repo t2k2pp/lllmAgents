@@ -59,7 +59,9 @@ export class OllamaProvider extends OpenAICompatProvider {
     const models: ModelInfo[] = [];
     for (const tag of res.data.models) {
       const family = tag.details?.family ?? "";
-      const isVision = VISION_FAMILIES.some((v) => tag.name.toLowerCase().includes(v) || family.toLowerCase().includes(v));
+      const isVision = VISION_FAMILIES.some(
+        (v) => tag.name.toLowerCase().includes(v) || family.toLowerCase().includes(v),
+      );
 
       let contextLength = inferContextLength(tag.name) || FALLBACK_CONTEXT_WINDOW;
       try {

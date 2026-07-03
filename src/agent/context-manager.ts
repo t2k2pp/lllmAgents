@@ -52,7 +52,9 @@ export class ContextManager {
     const messages = history.getMessages();
     const tokens = estimateMessageTokens(messages);
     const limit = this.contextWindow * this.threshold;
-    logger.debug(`Context usage: ${tokens}/${this.contextWindow} tokens (${Math.round((tokens / this.contextWindow) * 100)}%)`);
+    logger.debug(
+      `Context usage: ${tokens}/${this.contextWindow} tokens (${Math.round((tokens / this.contextWindow) * 100)}%)`,
+    );
     return tokens > limit;
   }
 

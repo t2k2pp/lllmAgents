@@ -59,10 +59,7 @@ describe("resolveAtMentions", () => {
   });
 
   it("複数の@メンションを同時に解決する", () => {
-    const { resolved, mentions } = resolveAtMentions(
-      "@hello.ts と @config.json を比較して",
-      tmpDir,
-    );
+    const { resolved, mentions } = resolveAtMentions("@hello.ts と @config.json を比較して", tmpDir);
     expect(mentions).toHaveLength(2);
     expect(mentions[0].type).toBe("file");
     expect(mentions[1].type).toBe("file");
@@ -85,10 +82,7 @@ describe("resolveAtMentions", () => {
   });
 
   it("同じパスが複数回出ても1回だけ展開する", () => {
-    const { resolved, mentions } = resolveAtMentions(
-      "@hello.ts の1行目と @hello.ts の2行目",
-      tmpDir,
-    );
+    const { resolved, mentions } = resolveAtMentions("@hello.ts の1行目と @hello.ts の2行目", tmpDir);
     expect(mentions).toHaveLength(1);
     // attachmentは1つだけ
     const fileHeaders = resolved.match(/--- File: hello\.ts ---/g);

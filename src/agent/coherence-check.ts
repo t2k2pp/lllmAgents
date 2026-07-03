@@ -66,11 +66,7 @@ export interface CoherenceCheckResult {
  * @param text 直前 LLM 応答の text 内容
  * @param hasResponseComplete response_complete tool が呼ばれていたか
  */
-export function checkCoherence(
-  thinking: string,
-  text: string,
-  hasResponseComplete: boolean,
-): CoherenceCheckResult {
+export function checkCoherence(thinking: string, text: string, hasResponseComplete: boolean): CoherenceCheckResult {
   // 続き signal を thinking から検出
   let continuationHit: string | undefined;
   for (const pat of CONTINUATION_PATTERNS) {

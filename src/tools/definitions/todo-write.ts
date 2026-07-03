@@ -51,10 +51,7 @@ function isActive(t: TodoItem): boolean {
 
 function renderTodoLine(t: TodoItem, idx: number): string {
   const icon =
-    t.status === "completed" ? "[x]"
-    : t.status === "in_progress" ? "[>]"
-    : t.status === "blocked" ? "[!]"
-    : "[ ]";
+    t.status === "completed" ? "[x]" : t.status === "in_progress" ? "[>]" : t.status === "blocked" ? "[!]" : "[ ]";
   return `${idx + 1}. ${icon} ${t.content} (id: ${t.id})`;
 }
 
@@ -142,7 +139,7 @@ export const todoAppendTool: ToolHandler = {
         "リセットしたい場合は先に `todo_delete` で対象を削除してから append する (= 意図的な 2 段)。 " +
         "\n\n[使わない場面 — これらに ToDo は過剰。 そのまま実行 / 即答する]\n" +
         "- 1-2 ステップで終わる軽量タスク\n" +
-        "- 会話・遊び・一発回答 (じゃんけん / 占い / サイコロ / 雑談 / \"どう思う?\" / \"教えて\")\n" +
+        '- 会話・遊び・一発回答 (じゃんけん / 占い / サイコロ / 雑談 / "どう思う?" / "教えて")\n' +
         "- ファイルも検証も伴わないタスク\n" +
         "= explore レジスター相当のものに todo_append を作るのは過剰。 1-3 文でそのまま答えること。",
       parameters: {
@@ -172,16 +169,21 @@ export const todoAppendTool: ToolHandler = {
   async execute(params: Record<string, unknown>): Promise<ToolResult> {
     const items = params.items;
     if (!Array.isArray(items)) {
-      return { success: false, output: "", error: "items パラメータが配列ではありません。 items: [{content, status}] の形式で渡してください。" };
+      return {
+        success: false,
+        output: "",
+        error: "items パラメータが配列ではありません。 items: [{content, status}] の形式で渡してください。",
+      };
     }
     const added: TodoItem[] = [];
     for (const raw of items) {
       if (typeof raw !== "object" || raw === null) continue;
       const r = raw as Record<string, unknown>;
       const content = typeof r.content === "string" ? r.content : "";
-      const status = (typeof r.status === "string" && STATUS_ENUM.includes(r.status))
-        ? (r.status as TodoStatus)
-        : "pending" as TodoStatus;
+      const status =
+        typeof r.status === "string" && STATUS_ENUM.includes(r.status)
+          ? (r.status as TodoStatus)
+          : ("pending" as TodoStatus);
       if (!content) continue;
       added.push({ id: generateTodoId(), content, status });
     }
@@ -222,7 +224,12 @@ export const todoMarkTool: ToolHandler = {
       return { success: false, output: "", error: `status は ${STATUS_ENUM.join("/")} のいずれかを指定してください。` };
     }
     const target = todos.find((t) => t.id === id);
-    if (!target) return { success: false, output: "", error: `id="${id}" の todo が見つかりません。 一覧: ${todos.map((t) => t.id).join(", ")}` };
+    if (!target)
+      return {
+        success: false,
+        output: "",
+        error: `id="${id}" の todo が見つかりません。 一覧: ${todos.map((t) => t.id).join(", ")}`,
+      };
     target.status = status as TodoStatus;
     return { success: true, output: `id="${id}" を ${status} に変更しました。\n\n${formatTodos()}` };
   },
@@ -303,7 +310,12 @@ export const todoWriteTool: ToolHandler = {
   async execute(params: Record<string, unknown>): Promise<ToolResult> {
     const newTodos = params.todos;
     if (!Array.isArray(newTodos)) {
-      return { success: false, output: "", error: "todosパラメータが配列ではありません。todos: [{content: '...', status: 'pending'}] の形式で渡してください。" };
+      return {
+        success: false,
+        output: "",
+        error:
+          "todosパラメータが配列ではありません。todos: [{content: '...', status: 'pending'}] の形式で渡してください。",
+      };
     }
     // 全削除 + append 等価。 status は valid 値に絞る (旧呼出が "completed" 等を期待していた互換性)
     todos = [];
@@ -311,9 +323,10 @@ export const todoWriteTool: ToolHandler = {
       if (typeof raw !== "object" || raw === null) continue;
       const r = raw as Record<string, unknown>;
       const content = typeof r.content === "string" ? r.content : "";
-      const status = (typeof r.status === "string" && STATUS_ENUM.includes(r.status))
-        ? (r.status as TodoStatus)
-        : "pending" as TodoStatus;
+      const status =
+        typeof r.status === "string" && STATUS_ENUM.includes(r.status)
+          ? (r.status as TodoStatus)
+          : ("pending" as TodoStatus);
       if (!content) continue;
       todos.push({ id: generateTodoId(), content, status });
     }

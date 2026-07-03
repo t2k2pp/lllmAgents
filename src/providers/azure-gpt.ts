@@ -104,13 +104,15 @@ export class AzureGPTProvider implements LLMProvider {
   }
 
   async listModels(): Promise<ModelInfo[]> {
-    return [{
-      name: this.config.model,
-      size: 0,
-      contextLength: 200_000,
-      supportsVision: true,
-      supportsFunctionCalling: true,
-    }];
+    return [
+      {
+        name: this.config.model,
+        size: 0,
+        contextLength: 200_000,
+        supportsVision: true,
+        supportsFunctionCalling: true,
+      },
+    ];
   }
 
   async getModelInfo(_modelName: string): Promise<ModelDetail> {
@@ -150,9 +152,7 @@ export class AzureGPTProvider implements LLMProvider {
   }
 
   /** OpenAI 形式の ChatParams を Responses API リクエストボディに変換 */
-  private buildRequestBody(
-    params: ChatParams & { tools?: ToolDefinition[] },
-  ): Record<string, unknown> {
+  private buildRequestBody(params: ChatParams & { tools?: ToolDefinition[] }): Record<string, unknown> {
     // 1. system は instructions に集約
     const systemMessages = params.messages.filter((m) => m.role === "system");
     const nonSystem = params.messages.filter((m) => m.role !== "system");
@@ -187,14 +187,14 @@ export class AzureGPTProvider implements LLMProvider {
   }
 
   /** ストリーミングチャット本体 */
-  protected async *doChat(
-    params: ChatParams & { tools?: ToolDefinition[] },
-  ): AsyncGenerator<ChatChunk> {
+  protected async *doChat(params: ChatParams & { tools?: ToolDefinition[] }): AsyncGenerator<ChatChunk> {
     const body = this.buildRequestBody({ ...params, stream: true });
     const url = this.chatUrl();
 
     if (process.env.LLM_DEBUG_HTTP) {
-      console.error(`[LLM_DEBUG_HTTP] POST ${url}  model=${body.model}  input_items=${(body.input as unknown[])?.length}`);
+      console.error(
+        `[LLM_DEBUG_HTTP] POST ${url}  model=${body.model}  input_items=${(body.input as unknown[])?.length}`,
+      );
     }
 
     let stream: ReadableStream<Uint8Array>;
@@ -250,9 +250,13 @@ function convertOpenAIMessagesToResponses(messages: Message[]): ResponsesInputIt
 
     if (msg.role === "assistant") {
       // テキスト部
-      const textPart = typeof msg.content === "string"
-        ? msg.content
-        : (msg.content ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("");
+      const textPart =
+        typeof msg.content === "string"
+          ? msg.content
+          : (msg.content ?? [])
+              .filter((p) => p.type === "text")
+              .map((p) => p.text ?? "")
+              .join("");
       if (textPart && textPart.length > 0) {
         out.push({
           type: "message",
@@ -554,16 +558,24 @@ async function* parseResponsesStream(
       }
     }
   } finally {
-    try { reader.releaseLock(); } catch { /* ignore */ }
+    try {
+      reader.releaseLock();
+    } catch {
+      /* ignore */
+    }
   }
 }
 
 function mapResponsesStatus(status: string | undefined, hasToolCalls: boolean): string {
   if (hasToolCalls) return "tool_calls";
   switch (status) {
-    case "completed": return "stop";
-    case "incomplete": return "length";
-    case "failed": return "error";
-    default: return status ?? "stop";
+    case "completed":
+      return "stop";
+    case "incomplete":
+      return "length";
+    case "failed":
+      return "error";
+    default:
+      return status ?? "stop";
   }
 }

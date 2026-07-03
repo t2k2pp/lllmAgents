@@ -38,7 +38,11 @@ async function writeNoisyPng(side: number): Promise<string> {
 
 afterEach(() => {
   for (const p of created.splice(0)) {
-    try { fs.unlinkSync(p); } catch { /* ignore */ }
+    try {
+      fs.unlinkSync(p);
+    } catch {
+      /* ignore */
+    }
   }
 });
 

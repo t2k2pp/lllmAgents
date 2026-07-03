@@ -28,13 +28,13 @@ describe("PricingTable", () => {
     it("完全一致で料金を取得できる", () => {
       const pricing = getModelPricing("gemini-3-flash");
       expect(pricing).toBeDefined();
-      expect(pricing!.inputPerMToken).toBe(0.50);
+      expect(pricing!.inputPerMToken).toBe(0.5);
     });
 
     it("プレフィックス一致で料金を取得できる", () => {
       const pricing = getModelPricing("gemini-3-flash-001");
       expect(pricing).toBeDefined();
-      expect(pricing!.inputPerMToken).toBe(0.50);
+      expect(pricing!.inputPerMToken).toBe(0.5);
     });
 
     it("存在しないモデルは null を返す", () => {
@@ -47,8 +47,8 @@ describe("PricingTable", () => {
       // 前方一致せず null=コスト0 になっていた。 統一後はマッチすること。
       const pricing = getModelPricing("claude-sonnet-4-6");
       expect(pricing).toBeDefined();
-      expect(pricing!.inputPerMToken).toBe(3.00);
-      expect(pricing!.outputPerMToken).toBe(15.00);
+      expect(pricing!.inputPerMToken).toBe(3.0);
+      expect(pricing!.outputPerMToken).toBe(15.0);
     });
   });
 });

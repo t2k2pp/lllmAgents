@@ -28,12 +28,16 @@ function parseSkillFile(content: string, filePath: string, builtIn: boolean): Sk
   const trigger = meta.trigger || `/${meta.name}`;
 
   // context: "fork" のみ有効値として受け付ける
-  const context = meta.context === "fork" ? "fork" as const : undefined;
+  const context = meta.context === "fork" ? ("fork" as const) : undefined;
 
   // tools: "[bash, file_read]" or "bash, file_read" 形式をパース
   const toolsRaw = meta.tools;
   const tools = toolsRaw
-    ? toolsRaw.replace(/^\[|\]$/g, "").split(",").map((t) => t.trim()).filter(Boolean)
+    ? toolsRaw
+        .replace(/^\[|\]$/g, "")
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
     : undefined;
 
   return {

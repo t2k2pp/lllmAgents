@@ -89,9 +89,7 @@ export class ComfyUIProvider implements ImageProvider {
         body: JSON.stringify({ prompt: workflow, client_id: clientId }),
       });
     } catch (e) {
-      throw new Error(
-        `ComfyUI に接続できません (${this.baseUrl}): ${e instanceof Error ? e.message : String(e)}`,
-      );
+      throw new Error(`ComfyUI に接続できません (${this.baseUrl}): ${e instanceof Error ? e.message : String(e)}`);
     }
     const queueText = await queueRes.text();
     if (!queueRes.ok) {
@@ -130,16 +128,17 @@ export class ComfyUIProvider implements ImageProvider {
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
       const res = await fetch(`${this.baseUrl}/history/${promptId}`);
       if (!res.ok) continue;
-      const history = (await res.json()) as Record<string, {
-        status?: { status_str?: string; completed?: boolean; messages?: unknown[] };
-        outputs?: Record<string, { images?: HistoryImageRef[] }>;
-      }>;
+      const history = (await res.json()) as Record<
+        string,
+        {
+          status?: { status_str?: string; completed?: boolean; messages?: unknown[] };
+          outputs?: Record<string, { images?: HistoryImageRef[] }>;
+        }
+      >;
       const entry = history[promptId];
       if (!entry) continue;
       if (entry.status?.status_str === "error") {
-        throw new Error(
-          `ComfyUI 実行エラー: ${JSON.stringify(entry.status.messages ?? entry.status).slice(0, 2000)}`,
-        );
+        throw new Error(`ComfyUI 実行エラー: ${JSON.stringify(entry.status.messages ?? entry.status).slice(0, 2000)}`);
       }
       if (entry.outputs && Object.keys(entry.outputs).length > 0) {
         const refs = Object.values(entry.outputs).flatMap((o) => o.images ?? []);
@@ -148,6 +147,8 @@ export class ComfyUIProvider implements ImageProvider {
         if (entry.status?.completed) return [];
       }
     }
-    throw new Error(`ComfyUI がタイムアウトしました (${POLL_TIMEOUT_MS / 1000}秒)。/history で prompt_id=${promptId} を確認してください。`);
+    throw new Error(
+      `ComfyUI がタイムアウトしました (${POLL_TIMEOUT_MS / 1000}秒)。/history で prompt_id=${promptId} を確認してください。`,
+    );
   }
 }

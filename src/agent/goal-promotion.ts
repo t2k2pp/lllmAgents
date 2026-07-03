@@ -120,9 +120,8 @@ export async function maybePromoteToGoal(opts: {
     if (criteria.length === 0) return false;
 
     // 承認
-    const approved = source === "cli"
-      ? await askCliApproval(criteria)
-      : await askChannelApproval(bridge!, criteria, source);
+    const approved =
+      source === "cli" ? await askCliApproval(criteria) : await askChannelApproval(bridge!, criteria, source);
 
     if (!approved) {
       _declineCount++;

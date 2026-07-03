@@ -6,7 +6,11 @@ import type { Message, ToolDefinition } from "../../src/providers/base-provider.
  * プロンプトキャッシュ (docs/prompt-cache-cost-reduction.md) の buildRequestBody 検証。
  * buildRequestBody は private のためブラケットアクセスで叩く。
  */
-function build(provider: AzureAnthropicProvider, messages: Message[], tools?: ToolDefinition[]): Record<string, unknown> {
+function build(
+  provider: AzureAnthropicProvider,
+  messages: Message[],
+  tools?: ToolDefinition[],
+): Record<string, unknown> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (provider as any).buildRequestBody({ model: "claude-sonnet-4-6", messages, stream: true, tools });
 }
@@ -42,7 +46,9 @@ describe("AzureAnthropicProvider buildRequestBody — プロンプトキャッ�
 
   it("ttl=1h を指定すると cache_control に ttl が乗る", () => {
     const p = new AzureAnthropicProvider({
-      endpoint: "https://x.azure.com", apiKey: "k", model: "claude-sonnet-4-6",
+      endpoint: "https://x.azure.com",
+      apiKey: "k",
+      model: "claude-sonnet-4-6",
       promptCache: { enabled: true, ttl: "1h" },
     });
     const body = build(p, [SYS_STABLE, USER]);
@@ -52,7 +58,9 @@ describe("AzureAnthropicProvider buildRequestBody — プロンプトキャッ�
 
   it("OFF: system は文字列、 cache_control は一切付かない (従来挙動)", () => {
     const p = new AzureAnthropicProvider({
-      endpoint: "https://x.azure.com", apiKey: "k", model: "claude-sonnet-4-6",
+      endpoint: "https://x.azure.com",
+      apiKey: "k",
+      model: "claude-sonnet-4-6",
       promptCache: { enabled: false },
     });
     const body = build(p, [SYS_STABLE, SYS_DYNAMIC, USER], TOOLS);

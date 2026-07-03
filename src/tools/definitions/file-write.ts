@@ -29,7 +29,10 @@ function syntaxCheck(filePath: string, content: string): string | null {
     } catch (e) {
       const stderr = (e as { stderr?: string }).stderr ?? "";
       // node --check の出力からエラー箇所を抽出
-      const lines = stderr.split("\n").filter(l => l.trim()).slice(0, 5);
+      const lines = stderr
+        .split("\n")
+        .filter((l) => l.trim())
+        .slice(0, 5);
       return `JavaScript構文エラー:\n${lines.join("\n")}`;
     }
     return null;
@@ -58,7 +61,10 @@ function extractInterfaceSummary(filePath: string, content: string): string | nu
     // function foo( (top-level)
     if (/^export\s+(default\s+)?(class|function|const|let|var|async\s+function)\s/.test(trimmed)) {
       // 関数/クラスのシグネチャ部分だけ抽出（{以降を除去）
-      const sig = trimmed.replace(/\{[\s\S]*$/, "").replace(/=[\s\S]*$/, "").trim();
+      const sig = trimmed
+        .replace(/\{[\s\S]*$/, "")
+        .replace(/=[\s\S]*$/, "")
+        .trim();
       signatures.push(sig);
     } else if (/^(class|function|async\s+function)\s/.test(trimmed)) {
       const sig = trimmed.replace(/\{[\s\S]*$/, "").trim();
@@ -136,9 +142,7 @@ export const fileWriteTool: ToolHandler = {
     }
 
     const summary = extractInterfaceSummary(filePath, content);
-    const output = summary
-      ? `${meta}\nExports: ${summary}`
-      : meta;
+    const output = summary ? `${meta}\nExports: ${summary}` : meta;
     return {
       success: true,
       output,

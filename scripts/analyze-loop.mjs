@@ -45,7 +45,8 @@ if (!fs.existsSync(LOG_DIR)) {
 }
 
 // ===== ログ列挙 =====
-const files = fs.readdirSync(LOG_DIR)
+const files = fs
+  .readdirSync(LOG_DIR)
   .filter((f) => f.endsWith("_main.jsonl"))
   .map((f) => ({
     name: f,
@@ -111,11 +112,12 @@ for (const f of files) {
     if (e.type === "request") {
       const msgs = e.messages ?? [];
       const lastMsg = msgs[msgs.length - 1];
-      if (lastMsg?.role === "user") userTurns.push({
-        turn: e.turn,
-        preview: typeof lastMsg.content === "string" ? lastMsg.content.slice(0, 80) : "[non-string]",
-        tokensIn: e.tokensIn ?? 0,
-      });
+      if (lastMsg?.role === "user")
+        userTurns.push({
+          turn: e.turn,
+          preview: typeof lastMsg.content === "string" ? lastMsg.content.slice(0, 80) : "[non-string]",
+          tokensIn: e.tokensIn ?? 0,
+        });
     }
   }
   // 最終ターンを終端として加える
@@ -209,7 +211,7 @@ const p90 = allIters[Math.floor(allIters.length * 0.9)] ?? 0;
 const max = allIters[allIters.length - 1] ?? 0;
 const avg = allIters.length > 0 ? Math.round(allIters.reduce((s, x) => s + x, 0) / allIters.length) : 0;
 const stuckCount = stats.stuckLoops.length;
-const stuckRate = stats.totalUserSpans > 0 ? (stuckCount / stats.totalUserSpans * 100).toFixed(1) : "0.0";
+const stuckRate = stats.totalUserSpans > 0 ? ((stuckCount / stats.totalUserSpans) * 100).toFixed(1) : "0.0";
 
 // 大反復スパン (≥40)
 const longSpans = stats.spans
@@ -218,9 +220,7 @@ const longSpans = stats.spans
   .slice(0, topN);
 
 // 失敗パターン top
-const topFailures = [...stats.failurePatterns.entries()]
-  .sort((a, b) => b[1] - a[1])
-  .slice(0, topN);
+const topFailures = [...stats.failurePatterns.entries()].sort((a, b) => b[1] - a[1]).slice(0, topN);
 
 // stuck-loop top (signature でグルーピング)
 const stuckGrouped = new Map();
@@ -237,9 +237,7 @@ const topStuck = [...stuckGrouped.entries()]
   });
 
 // ツール頻度 top
-const topTools = [...stats.toolCounts.entries()]
-  .sort((a, b) => b[1] - a[1])
-  .slice(0, topN);
+const topTools = [...stats.toolCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, topN);
 
 // ===== 改善提案 (heuristic) =====
 const suggestions = [];
@@ -342,4 +340,6 @@ ${topTools.map(([k, n]) => `| ${n} | ${k} |`).join("\n")}
 
 fs.writeFileSync(reportFile, md, "utf-8");
 console.log(`Report written: ${reportFile}`);
-console.log(`Sessions analyzed: ${stats.sessionCount}, user spans: ${stats.totalUserSpans}, stuck-loops: ${stuckCount} (${stuckRate}%)`);
+console.log(
+  `Sessions analyzed: ${stats.sessionCount}, user spans: ${stats.totalUserSpans}, stuck-loops: ${stuckCount} (${stuckRate}%)`,
+);

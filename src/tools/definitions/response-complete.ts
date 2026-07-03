@@ -34,7 +34,8 @@ export const responseCompleteTool: ToolHandler = {
           },
           force: {
             type: "boolean",
-            description: "完了条件リストが未消化でも強制的に完了報告する場合 true。 ユーザーが部分完成を許容している場合などに使用",
+            description:
+              "完了条件リストが未消化でも強制的に完了報告する場合 true。 ユーザーが部分完成を許容している場合などに使用",
           },
         },
         required: ["summary"],

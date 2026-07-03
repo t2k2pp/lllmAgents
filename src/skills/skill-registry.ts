@@ -1,8 +1,8 @@
 export interface SkillDefinition {
   name: string;
   description: string;
-  trigger: string;  // e.g., "/commit"
-  content: string;  // The full skill prompt/instructions
+  trigger: string; // e.g., "/commit"
+  content: string; // The full skill prompt/instructions
   filePath: string;
   builtIn: boolean;
   /** フォークモード: "fork" の場合、独立したSubAgentコンテキストで実行 */

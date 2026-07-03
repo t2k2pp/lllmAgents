@@ -60,11 +60,19 @@ async function probe(): Promise<{ ok: boolean; reason: string }> {
 export async function probeBrowserCapability(config?: Config): Promise<BrowserCapability> {
   const forced = forcedMode(config);
   if (forced === "off") {
-    cached = { ready: false, reason: "disabled by config (features.browser=off / LOCALLLM_NO_BROWSER)", source: "forced-off" };
+    cached = {
+      ready: false,
+      reason: "disabled by config (features.browser=off / LOCALLLM_NO_BROWSER)",
+      source: "forced-off",
+    };
     return cached;
   }
   if (forced === "on") {
-    cached = { ready: true, reason: "force-enabled by config (features.browser=on / LOCALLLM_FORCE_BROWSER)", source: "forced-on" };
+    cached = {
+      ready: true,
+      reason: "force-enabled by config (features.browser=on / LOCALLLM_FORCE_BROWSER)",
+      source: "forced-on",
+    };
     return cached;
   }
   const { ok, reason } = await probe();

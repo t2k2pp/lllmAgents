@@ -118,9 +118,7 @@ function buildNotFoundError(filePath: string): string {
       return eStem === stem && e !== base;
     });
     if (stemMatches.length > 0) {
-      lines.push(
-        `[同名・別拡張子の候補あり] ${stemMatches.map((e) => path.join(dir, e)).join(", ")}`,
-      );
+      lines.push(`[同名・別拡張子の候補あり] ${stemMatches.map((e) => path.join(dir, e)).join(", ")}`);
       lines.push(`[次の手] 上記いずれかのパスで file_read を再試行。`);
       return lines.join("\n");
     }
@@ -129,9 +127,7 @@ function buildNotFoundError(filePath: string): string {
     const lowerBase = base.toLowerCase();
     const caseMatches = entries.filter((e) => e.toLowerCase() === lowerBase);
     if (caseMatches.length > 0) {
-      lines.push(
-        `[大文字小文字違いの候補] ${caseMatches.map((e) => path.join(dir, e)).join(", ")}`,
-      );
+      lines.push(`[大文字小文字違いの候補] ${caseMatches.map((e) => path.join(dir, e)).join(", ")}`);
       return lines.join("\n");
     }
 
@@ -141,9 +137,7 @@ function buildNotFoundError(filePath: string): string {
       return stem.length >= 3 && eStem.includes(stem.toLowerCase().slice(0, Math.min(stem.length, 6)));
     });
     if (partial.length > 0 && partial.length <= 6) {
-      lines.push(
-        `[名前が似た候補] ${partial.map((e) => path.join(dir, e)).join(", ")}`,
-      );
+      lines.push(`[名前が似た候補] ${partial.map((e) => path.join(dir, e)).join(", ")}`);
     }
 
     lines.push(`[親ディレクトリ ${dir} の中身]\n${listDirShort(dir)}`);

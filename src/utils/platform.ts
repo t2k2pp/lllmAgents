@@ -85,14 +85,9 @@ export function pathStartsWith(targetPath: string, prefix: string): boolean {
   if (isWindows) {
     const normalizedTarget = normalizeWindowsPath(targetPath);
     const normalizedPrefix = normalizeWindowsPath(prefix);
-    return (
-      normalizedTarget.startsWith(normalizedPrefix + path.sep) ||
-      normalizedTarget === normalizedPrefix
-    );
+    return normalizedTarget.startsWith(normalizedPrefix + path.sep) || normalizedTarget === normalizedPrefix;
   }
-  return (
-    targetPath.startsWith(prefix + path.sep) || targetPath === prefix
-  );
+  return targetPath.startsWith(prefix + path.sep) || targetPath === prefix;
 }
 
 export function getShell(): string {

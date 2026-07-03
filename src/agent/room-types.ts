@@ -41,6 +41,9 @@ export function isRoomId(value: unknown): value is RoomId {
 
 /** "a" / "room b" / "B" 等を RoomId へ正規化。 不正なら null。 */
 export function normalizeRoomId(input: string): RoomId | null {
-  const m = input.trim().toUpperCase().replace(/^ROOM\s*/, "");
+  const m = input
+    .trim()
+    .toUpperCase()
+    .replace(/^ROOM\s*/, "");
   return isRoomId(m) ? m : null;
 }

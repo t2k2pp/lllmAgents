@@ -29,10 +29,7 @@ export function getDisplayJpyRate(): number | undefined {
  * jpyPerUsd (1ドルあたりの円) が指定/設定されていれば「円のみ」、 未設定ならドルのみを返す。
  * 第 2 引数を省略すると現在のモジュール表示レート (setDisplayJpyRate) を使う。
  */
-export function formatMoney(
-  usd: number,
-  jpyPerUsd: number | undefined = currentJpyPerUsd,
-): string {
+export function formatMoney(usd: number, jpyPerUsd: number | undefined = currentJpyPerUsd): string {
   if (jpyPerUsd && jpyPerUsd > 0) {
     return "¥" + Math.round(usd * jpyPerUsd).toLocaleString();
   }

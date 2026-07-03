@@ -17,13 +17,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { getConfigDir } from "./config-manager.js";
-import type {
-  Config,
-  LLMEndpoint,
-  LLMRegistryEntry,
-  LLMSlotAssignments,
-  ModelRegistryStore,
-} from "./types.js";
+import type { Config, LLMEndpoint, LLMRegistryEntry, LLMSlotAssignments, ModelRegistryStore } from "./types.js";
 
 // パスは遅延評価。 テストで getConfigDir() を mock したい場合に対応する。
 function registryFile(): string {
@@ -103,13 +97,15 @@ function emptyStore(): ModelRegistryStore {
 function isValidEntry(p: unknown): p is LLMRegistryEntry {
   if (!p || typeof p !== "object") return false;
   const o = p as Partial<LLMRegistryEntry>;
-  return typeof o.id === "string"
-    && typeof o.name === "string"
-    && !!o.endpoint
-    && typeof o.endpoint === "object"
-    && typeof (o.endpoint as LLMEndpoint).providerType === "string"
-    && typeof o.createdAt === "string"
-    && typeof o.lastUsedAt === "string";
+  return (
+    typeof o.id === "string" &&
+    typeof o.name === "string" &&
+    !!o.endpoint &&
+    typeof o.endpoint === "object" &&
+    typeof (o.endpoint as LLMEndpoint).providerType === "string" &&
+    typeof o.createdAt === "string" &&
+    typeof o.lastUsedAt === "string"
+  );
 }
 
 /**
@@ -141,18 +137,18 @@ function readStore(): ModelRegistryStore {
   try {
     const raw = fs.readFileSync(registryFile(), "utf-8");
     const parsed = JSON.parse(raw) as Partial<ModelRegistryStore>;
-    const entries = Array.isArray(parsed.entries)
-      ? (parsed.entries as unknown[]).filter(isValidEntry)
-      : [];
-    const slots: LLMSlotAssignments = parsed.slots && typeof parsed.slots === "object"
-      ? {
-          main: typeof parsed.slots.main === "string" ? parsed.slots.main : "",
-          second: typeof parsed.slots.second === "string" ? parsed.slots.second : undefined,
-          named: parsed.slots.named && typeof parsed.slots.named === "object"
-            ? { ...parsed.slots.named as Record<string, string> }
-            : undefined,
-        }
-      : { main: "" };
+    const entries = Array.isArray(parsed.entries) ? (parsed.entries as unknown[]).filter(isValidEntry) : [];
+    const slots: LLMSlotAssignments =
+      parsed.slots && typeof parsed.slots === "object"
+        ? {
+            main: typeof parsed.slots.main === "string" ? parsed.slots.main : "",
+            second: typeof parsed.slots.second === "string" ? parsed.slots.second : undefined,
+            named:
+              parsed.slots.named && typeof parsed.slots.named === "object"
+                ? { ...(parsed.slots.named as Record<string, string>) }
+                : undefined,
+          }
+        : { main: "" };
     return { version: 1, entries, slots };
   } catch {
     return emptyStore();
@@ -169,8 +165,8 @@ function writeStore(store: ModelRegistryStore): void {
 
 /** lastUsedAt 降順で全エントリを返す。 */
 export function listEntries(): LLMRegistryEntry[] {
-  return [...readStore().entries].sort(
-    (a, b) => (b.lastUsedAt > a.lastUsedAt ? 1 : b.lastUsedAt < a.lastUsedAt ? -1 : 0),
+  return [...readStore().entries].sort((a, b) =>
+    b.lastUsedAt > a.lastUsedAt ? 1 : b.lastUsedAt < a.lastUsedAt ? -1 : 0,
   );
 }
 
@@ -191,10 +187,7 @@ export function findEntryBySignature(ep: LLMEndpoint): LLMRegistryEntry | undefi
  *
  * @param options.forceNew true なら signature 一致を無視して新規エントリを作る (Duplicate 用、 /models から呼ぶ)
  */
-export function recordEntry(
-  endpoint: LLMEndpoint,
-  options: { forceNew?: boolean } = {},
-): LLMRegistryEntry | undefined {
+export function recordEntry(endpoint: LLMEndpoint, options: { forceNew?: boolean } = {}): LLMRegistryEntry | undefined {
   if (!endpoint || !endpoint.providerType || !endpoint.model) return undefined;
 
   const store = readStore();

@@ -43,12 +43,15 @@ const JUDGE_MAX_TOKENS = 200;
 
 function buildJudgePrompt(input: JudgeProgressInput): string {
   const latestText = input.latestResponse.text.trim() || "(本文なし)";
-  const latestToolCalls = input.latestResponse.toolCalls.length > 0
-    ? input.latestResponse.toolCalls.map((tc) => {
-        const args = (tc.function.arguments ?? "").slice(0, 120);
-        return `- ${tc.function.name}(${args})`;
-      }).join("\n")
-    : "(ツール呼出なし)";
+  const latestToolCalls =
+    input.latestResponse.toolCalls.length > 0
+      ? input.latestResponse.toolCalls
+          .map((tc) => {
+            const args = (tc.function.arguments ?? "").slice(0, 120);
+            return `- ${tc.function.name}(${args})`;
+          })
+          .join("\n")
+      : "(ツール呼出なし)";
 
   return `あなたは Q→A 進捗判定 judge です。
 別の AI agent が応答 (もしくは完了宣言) を返したので、 本当に user の Q に答えたか、
@@ -91,7 +94,9 @@ function parseJudgeResponse(raw: string): JudgeProgressResult {
       if (verdict === "answered" || verdict === "took_step" || verdict === "stalled") {
         return { verdict, reason };
       }
-    } catch { /* fall through */ }
+    } catch {
+      /* fall through */
+    }
   }
   // パース失敗時のフォールバック: 緩め判定 (stalled に倒さない)
   return { verdict: "took_step", reason: "judge 出力 parse 失敗、 緩めで took_step に倒す" };
@@ -101,14 +106,19 @@ function parseJudgeResponse(raw: string): JudgeProgressResult {
  * 直近のツール履歴 + 結果から軽量要約を作る。
  * 案 (ii): ツール名 + 引数の短縮 + 結果サイズ。 元 chat 履歴をそのまま渡すより軽い。
  */
-export function buildRecentSummary(messages: Array<{ role: string; content: unknown; tool_calls?: ToolCall[] }>, maxTurns: number = 5): string {
+export function buildRecentSummary(
+  messages: Array<{ role: string; content: unknown; tool_calls?: ToolCall[] }>,
+  maxTurns: number = 5,
+): string {
   // 直近 N ターン = 約 N*3 メッセージ (user / assistant / tool 等)
   const recent = messages.slice(-(maxTurns * 4));
   const lines: string[] = [];
   for (const m of recent) {
     if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
       for (const tc of m.tool_calls) {
-        const args = String(tc.function.arguments ?? "").replace(/\s+/g, " ").slice(0, 100);
+        const args = String(tc.function.arguments ?? "")
+          .replace(/\s+/g, " ")
+          .slice(0, 100);
         lines.push(`call: ${tc.function.name}(${args}${args.length >= 100 ? "..." : ""})`);
       }
     } else if (m.role === "tool") {

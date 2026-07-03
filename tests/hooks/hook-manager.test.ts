@@ -108,9 +108,7 @@ describe("HookManager", () => {
     it("should load hooks from project-level hooks.json", () => {
       const projectDir = "/my/project";
       const hooksFilePath = path.join(projectDir, ".claude", "hooks.json");
-      setupHooksFile(hooksFilePath, [
-        { type: "PreToolUse", command: "echo pre", description: "pre hook" },
-      ]);
+      setupHooksFile(hooksFilePath, [{ type: "PreToolUse", command: "echo pre", description: "pre hook" }]);
 
       manager.loadHooks(projectDir);
 
@@ -121,9 +119,7 @@ describe("HookManager", () => {
     it("should load hooks from .localllm project directory", () => {
       const projectDir = "/my/project";
       const hooksFilePath = path.join(projectDir, ".localllm", "hooks.json");
-      setupHooksFile(hooksFilePath, [
-        { type: "PostToolUse", command: "echo post" },
-      ]);
+      setupHooksFile(hooksFilePath, [{ type: "PostToolUse", command: "echo post" }]);
 
       manager.loadHooks(projectDir);
 
@@ -148,12 +144,8 @@ describe("HookManager", () => {
       const globalFile = path.join("/mock/home", ".localllm", "hooks.json");
 
       setupMultipleHooksFiles({
-        [claudeFile]: [
-          { type: "PreToolUse", command: "echo pre-project" },
-        ],
-        [globalFile]: [
-          { type: "PreToolUse", command: "echo pre-global" },
-        ],
+        [claudeFile]: [{ type: "PreToolUse", command: "echo pre-project" }],
+        [globalFile]: [{ type: "PreToolUse", command: "echo pre-global" }],
       });
 
       manager.loadHooks(projectDir);
@@ -204,9 +196,7 @@ describe("HookManager", () => {
       expect(manager.count).toBe(2);
 
       // On second call, should reset and reload
-      setupHooksFile(globalPath, [
-        { type: "PreToolUse", command: "echo 3" },
-      ]);
+      setupHooksFile(globalPath, [{ type: "PreToolUse", command: "echo 3" }]);
 
       manager.loadHooks();
       expect(manager.count).toBe(1);
@@ -395,9 +385,7 @@ describe("HookManager", () => {
 
     it("should set TOOL_NAME and FILE_PATH env vars", async () => {
       const globalPath = path.join("/mock/home", ".localllm", "hooks.json");
-      setupHooksFile(globalPath, [
-        { type: "PreToolUse", command: "echo check" },
-      ]);
+      setupHooksFile(globalPath, [{ type: "PreToolUse", command: "echo check" }]);
       manager.loadHooks();
       mockExecSuccess();
 
@@ -427,26 +415,32 @@ describe("HookManager", () => {
       manager.loadHooks();
       mockExecSuccess();
 
-      await manager.runPostToolHooks("bash", { command: "ls" }, {
-        success: true,
-        output: "file1.ts\nfile2.ts",
-      });
+      await manager.runPostToolHooks(
+        "bash",
+        { command: "ls" },
+        {
+          success: true,
+          output: "file1.ts\nfile2.ts",
+        },
+      );
 
       expect(mockExec).toHaveBeenCalled();
     });
 
     it("should set TOOL_OUTPUT and TOOL_SUCCESS env vars", async () => {
       const globalPath = path.join("/mock/home", ".localllm", "hooks.json");
-      setupHooksFile(globalPath, [
-        { type: "PostToolUse", command: "echo post" },
-      ]);
+      setupHooksFile(globalPath, [{ type: "PostToolUse", command: "echo post" }]);
       manager.loadHooks();
       mockExecSuccess();
 
-      await manager.runPostToolHooks("bash", {}, {
-        success: true,
-        output: "hello",
-      });
+      await manager.runPostToolHooks(
+        "bash",
+        {},
+        {
+          success: true,
+          output: "hello",
+        },
+      );
 
       const callArgs = mockExec.mock.calls[0];
       const opts = callArgs[1] as any;
@@ -456,17 +450,19 @@ describe("HookManager", () => {
 
     it("should set TOOL_ERROR env var when result has error", async () => {
       const globalPath = path.join("/mock/home", ".localllm", "hooks.json");
-      setupHooksFile(globalPath, [
-        { type: "PostToolUse", command: "echo post" },
-      ]);
+      setupHooksFile(globalPath, [{ type: "PostToolUse", command: "echo post" }]);
       manager.loadHooks();
       mockExecSuccess();
 
-      await manager.runPostToolHooks("bash", {}, {
-        success: false,
-        output: "",
-        error: "command not found",
-      });
+      await manager.runPostToolHooks(
+        "bash",
+        {},
+        {
+          success: false,
+          output: "",
+          error: "command not found",
+        },
+      );
 
       const callArgs = mockExec.mock.calls[0];
       const opts = callArgs[1] as any;
@@ -485,10 +481,14 @@ describe("HookManager", () => {
       ]);
       manager.loadHooks();
 
-      await manager.runPostToolHooks("bash", {}, {
-        success: true,
-        output: "",
-      });
+      await manager.runPostToolHooks(
+        "bash",
+        {},
+        {
+          success: true,
+          output: "",
+        },
+      );
 
       expect(mockExec).not.toHaveBeenCalled();
     });
@@ -513,10 +513,14 @@ describe("HookManager", () => {
         return child as any;
       });
 
-      await manager.runPostToolHooks("any_tool", {}, {
-        success: true,
-        output: "",
-      });
+      await manager.runPostToolHooks(
+        "any_tool",
+        {},
+        {
+          success: true,
+          output: "",
+        },
+      );
 
       // Both hooks should run (post-hooks do not stop on failure)
       expect(mockExec).toHaveBeenCalledTimes(2);
@@ -530,9 +534,7 @@ describe("HookManager", () => {
   describe("runSessionHooks", () => {
     it("should run SessionStart hooks", async () => {
       const globalPath = path.join("/mock/home", ".localllm", "hooks.json");
-      setupHooksFile(globalPath, [
-        { type: "SessionStart", command: "echo session started" },
-      ]);
+      setupHooksFile(globalPath, [{ type: "SessionStart", command: "echo session started" }]);
       manager.loadHooks();
       mockExecSuccess();
 
@@ -546,9 +548,7 @@ describe("HookManager", () => {
 
     it("should run SessionStop hooks", async () => {
       const globalPath = path.join("/mock/home", ".localllm", "hooks.json");
-      setupHooksFile(globalPath, [
-        { type: "SessionStop", command: "echo session stopped" },
-      ]);
+      setupHooksFile(globalPath, [{ type: "SessionStop", command: "echo session stopped" }]);
       manager.loadHooks();
       mockExecSuccess();
 
@@ -562,9 +562,7 @@ describe("HookManager", () => {
 
     it("should not run SessionStop hooks when running start", async () => {
       const globalPath = path.join("/mock/home", ".localllm", "hooks.json");
-      setupHooksFile(globalPath, [
-        { type: "SessionStop", command: "echo stop" },
-      ]);
+      setupHooksFile(globalPath, [{ type: "SessionStop", command: "echo stop" }]);
       manager.loadHooks();
 
       await manager.runSessionHooks("start");
@@ -574,9 +572,7 @@ describe("HookManager", () => {
 
     it("should skip when no session hooks are defined", async () => {
       const globalPath = path.join("/mock/home", ".localllm", "hooks.json");
-      setupHooksFile(globalPath, [
-        { type: "PreToolUse", command: "echo pre" },
-      ]);
+      setupHooksFile(globalPath, [{ type: "PreToolUse", command: "echo pre" }]);
       manager.loadHooks();
 
       await manager.runSessionHooks("start");

@@ -53,16 +53,10 @@ const streamAgent = new Agent({
  * プロセス終了直前にこれを呼び、プールを明示破棄してハンドルを解放する。
  */
 export async function shutdownHttpClient(): Promise<void> {
-  await Promise.allSettled([
-    streamAgent.destroy(),
-    getGlobalDispatcher().destroy(),
-  ]);
+  await Promise.allSettled([streamAgent.destroy(), getGlobalDispatcher().destroy()]);
 }
 
-export async function httpGet<T = unknown>(
-  url: string,
-  timeoutMs = DEFAULT_GET_TIMEOUT,
-): Promise<HttpResponse<T>> {
+export async function httpGet<T = unknown>(url: string, timeoutMs = DEFAULT_GET_TIMEOUT): Promise<HttpResponse<T>> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 

@@ -68,9 +68,7 @@ function createMockPermissions(
   }> = {},
 ): PermissionManager {
   return {
-    checkToolPermission:
-      overrides.checkToolPermission ??
-      vi.fn(async () => ({ allowed: true })),
+    checkToolPermission: overrides.checkToolPermission ?? vi.fn(async () => ({ allowed: true })),
     getPermissionLevel: vi.fn(() => "auto"),
     isPathAllowed: vi.fn(() => true),
   } as unknown as PermissionManager;
@@ -78,23 +76,13 @@ function createMockPermissions(
 
 function createMockHookManager(
   overrides: Partial<{
-    runPreToolHooks: (
-      toolName: string,
-      params: Record<string, unknown>,
-    ) => Promise<PreHookResult>;
-    runPostToolHooks: (
-      toolName: string,
-      params: Record<string, unknown>,
-      result: ToolResult,
-    ) => Promise<void>;
+    runPreToolHooks: (toolName: string, params: Record<string, unknown>) => Promise<PreHookResult>;
+    runPostToolHooks: (toolName: string, params: Record<string, unknown>, result: ToolResult) => Promise<void>;
   }> = {},
 ): HookManager {
   return {
-    runPreToolHooks:
-      overrides.runPreToolHooks ??
-      vi.fn(async () => ({ proceed: true })),
-    runPostToolHooks:
-      overrides.runPostToolHooks ?? vi.fn(async () => {}),
+    runPreToolHooks: overrides.runPreToolHooks ?? vi.fn(async () => ({ proceed: true })),
+    runPostToolHooks: overrides.runPostToolHooks ?? vi.fn(async () => {}),
     loadHooks: vi.fn(),
     runSessionHooks: vi.fn(),
     count: 0,
@@ -134,9 +122,7 @@ describe("ToolExecutor", () => {
       const permissions = createMockPermissions();
       const executor = new ToolExecutor(registry, permissions);
 
-      const result = await executor.execute(
-        createToolCall("file_read", { file_path: "/tmp/test.ts" }),
-      );
+      const result = await executor.execute(createToolCall("file_read", { file_path: "/tmp/test.ts" }));
 
       expect(result.success).toBe(true);
       expect(result.output).toBe("file contents here");
@@ -170,9 +156,7 @@ describe("ToolExecutor", () => {
       const permissions = createMockPermissions();
       const executor = new ToolExecutor(registry, permissions);
 
-      const result = await executor.execute(
-        createToolCall("bash", { command: "exit 1" }),
-      );
+      const result = await executor.execute(createToolCall("bash", { command: "exit 1" }));
 
       expect(result.success).toBe(false);
       expect(result.error).toBe("Process exited with code 1");
@@ -188,9 +172,7 @@ describe("ToolExecutor", () => {
       const permissions = createMockPermissions();
       const executor = new ToolExecutor(registry, permissions);
 
-      const result = await executor.execute(
-        createToolCall("bash", { command: "fail" }),
-      );
+      const result = await executor.execute(createToolCall("bash", { command: "fail" }));
 
       expect(result.success).toBe(false);
       expect(result.error).toBe("string error");
@@ -208,9 +190,7 @@ describe("ToolExecutor", () => {
       const permissions = createMockPermissions();
       const executor = new ToolExecutor(registry, permissions);
 
-      const result = await executor.execute(
-        createToolCall("nonexistent_tool", {}),
-      );
+      const result = await executor.execute(createToolCall("nonexistent_tool", {}));
 
       expect(result.success).toBe(false);
       expect(result.error).toBe("Unknown tool: nonexistent_tool");
@@ -265,9 +245,7 @@ describe("ToolExecutor", () => {
       });
       const executor = new ToolExecutor(registry, permissions);
 
-      const result = await executor.execute(
-        createToolCall("bash", { command: "rm -rf /" }),
-      );
+      const result = await executor.execute(createToolCall("bash", { command: "rm -rf /" }));
 
       expect(result.success).toBe(false);
       expect(result.error).toBe("Permission denied by user");
@@ -286,9 +264,7 @@ describe("ToolExecutor", () => {
       });
       const executor = new ToolExecutor(registry, permissions);
 
-      const result = await executor.execute(
-        createToolCall("bash", { command: "test" }),
-      );
+      const result = await executor.execute(createToolCall("bash", { command: "test" }));
 
       expect(result.success).toBe(false);
       expect(result.error).toBe("Permission denied");
@@ -337,9 +313,7 @@ describe("ToolExecutor", () => {
       });
       const executor = new ToolExecutor(registry, permissions, hookManager);
 
-      const result = await executor.execute(
-        createToolCall("bash", { command: "test" }),
-      );
+      const result = await executor.execute(createToolCall("bash", { command: "test" }));
 
       expect(result.success).toBe(false);
       expect(result.error).toBe("Blocked by pre-tool hook");
@@ -387,11 +361,7 @@ describe("ToolExecutor", () => {
 
       await executor.execute(createToolCall("bash", { command: "echo hi" }));
 
-      expect(postHookFn).toHaveBeenCalledWith(
-        "bash",
-        { command: "echo hi" },
-        toolResult,
-      );
+      expect(postHookFn).toHaveBeenCalledWith("bash", { command: "echo hi" }, toolResult);
     });
 
     it("should not run post-hooks when tool execution throws", async () => {
@@ -408,9 +378,7 @@ describe("ToolExecutor", () => {
       });
       const executor = new ToolExecutor(registry, permissions, hookManager);
 
-      const result = await executor.execute(
-        createToolCall("bash", { command: "fail" }),
-      );
+      const result = await executor.execute(createToolCall("bash", { command: "fail" }));
 
       expect(result.success).toBe(false);
       // Post-hooks should NOT be called when execution throws
@@ -455,9 +423,7 @@ describe("ToolExecutor", () => {
       // No hookManager passed
       const executor = new ToolExecutor(registry, permissions);
 
-      const result = await executor.execute(
-        createToolCall("file_read", { file_path: "/tmp/test" }),
-      );
+      const result = await executor.execute(createToolCall("file_read", { file_path: "/tmp/test" }));
 
       expect(result.success).toBe(true);
       expect(result.output).toBe("contents");

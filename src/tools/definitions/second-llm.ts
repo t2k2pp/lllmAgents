@@ -13,13 +13,13 @@ export function setSecondLLMManager(manager: SecondLLMManager): void {
  * カテゴリごとに対処手順が異なるため、 ハーネス側で 3 択提示するための情報源。
  */
 type SecondLLMFailureCategory =
-  | "RATE_LIMIT"   // 429 / Quota exceeded
-  | "AUTH"         // 401 / 403 / API key invalid
-  | "NOT_FOUND"    // 404 / Resource not found / model not deployed
-  | "BAD_REQUEST"  // 400 / 422 / 不正なリクエスト
+  | "RATE_LIMIT" // 429 / Quota exceeded
+  | "AUTH" // 401 / 403 / API key invalid
+  | "NOT_FOUND" // 404 / Resource not found / model not deployed
+  | "BAD_REQUEST" // 400 / 422 / 不正なリクエスト
   | "SERVER_ERROR" // 5xx
-  | "TIMEOUT"      // ECONNABORTED, ETIMEDOUT
-  | "NETWORK"      // ECONNREFUSED, ENOTFOUND
+  | "TIMEOUT" // ECONNABORTED, ETIMEDOUT
+  | "NETWORK" // ECONNREFUSED, ENOTFOUND
   | "UNKNOWN";
 
 function classifySecondLLMError(e: unknown): SecondLLMFailureCategory {
@@ -109,7 +109,8 @@ export const secondLLMAgentTool: ToolHandler = {
         properties: {
           task: {
             type: "string",
-            description: "依頼内容の詳細。必要な背景・制約を全て含める (no_tools の相談では質問・相談内容をここに書く)。",
+            description:
+              "依頼内容の詳細。必要な背景・制約を全て含める (no_tools の相談では質問・相談内容をここに書く)。",
           },
           reason: {
             type: "string",
@@ -122,12 +123,13 @@ export const secondLLMAgentTool: ToolHandler = {
           },
           no_tools: {
             type: "boolean",
-            description: "道具を使わない単発の相談・レビュー・要約なら true。この場合セカンドLLMは道具を使わず一発で答え、reason は不要。",
+            description:
+              "道具を使わない単発の相談・レビュー・要約なら true。この場合セカンドLLMは道具を使わず一発で答え、reason は不要。",
           },
         },
         required: ["task"],
       },
-    }
+    },
   },
   async execute(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
     if (!secondLLMManager || !secondLLMManager.isAvailable()) {
@@ -150,7 +152,7 @@ export const secondLLMAgentTool: ToolHandler = {
     // 道具ありの委任: 委任理由ハードガード — 3 条件のいずれかでなければ拒否 (Phase 5-B3)
     const VALID_REASONS = ["context_protection", "parallelism", "specialty"] as const;
     const reason = params.reason as string | undefined;
-    if (!reason || !VALID_REASONS.includes(reason as typeof VALID_REASONS[number])) {
+    if (!reason || !VALID_REASONS.includes(reason as (typeof VALID_REASONS)[number])) {
       return {
         success: false,
         output: "",

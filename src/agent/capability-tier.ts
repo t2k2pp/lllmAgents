@@ -22,10 +22,7 @@
  *       capability-tier 内に独自のテーブルを持たない (= 重複層を作らない)
  *   - tier 判定はモデル名の一致のみ。 contextWindow は判定に使わない。
  */
-import {
-  inferContextLength,
-  FALLBACK_CONTEXT_WINDOW,
-} from "../providers/utils/context-length.js";
+import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "../providers/utils/context-length.js";
 
 export type Tier = "T1" | "T2" | "T3";
 
@@ -337,7 +334,10 @@ export function resolveCapability(
  * 実 caller (AgentLoop / SecondLLMManager) は ctxWindow を必ず渡すので、
  * ここの fallback は実運用では発火しない (前提として)。
  */
-function resolveContextWindow(modelId: string, ctxWindow: number | undefined): {
+function resolveContextWindow(
+  modelId: string,
+  ctxWindow: number | undefined,
+): {
   value: number;
   source: "arg" | "infer" | "fallback";
 } {
@@ -359,10 +359,7 @@ function filterUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> 
   return out;
 }
 
-function applyOverride(
-  profile: CapabilityProfile,
-  override?: CapabilityOverride,
-): CapabilityProfile {
+function applyOverride(profile: CapabilityProfile, override?: CapabilityOverride): CapabilityProfile {
   if (!override) return profile;
   const cleaned = filterUndefined(override as Record<string, unknown>);
   if (Object.keys(cleaned).length === 0) return profile;
@@ -406,8 +403,7 @@ function inferTierFromName(modelId: string): Tier | null {
  * /capability コマンド・起動時ログで使う。
  */
 export function formatCapabilityLabel(profile: CapabilityProfile, modelId: string): string {
-  const ctxK = profile.contextWindow >= 1000
-    ? `${Math.round(profile.contextWindow / 1000)}K`
-    : `${profile.contextWindow}`;
+  const ctxK =
+    profile.contextWindow >= 1000 ? `${Math.round(profile.contextWindow / 1000)}K` : `${profile.contextWindow}`;
   return `${profile.tier} / ${modelId} / ${ctxK} ctx / ${profile.promptStyle}`;
 }

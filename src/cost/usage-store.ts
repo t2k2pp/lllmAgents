@@ -209,14 +209,21 @@ function shiftMonth(base: Date, deltaMonths: number): Date {
 export function resolvePeriod(token: string): PeriodSpec | null {
   const t = token.toLowerCase();
   switch (t) {
-    case "session": return { type: "session" };
-    case "window": return { type: "window" };
-    case "all": return { type: "all" };
-    case "today": return { type: "day", key: dayKey(new Date()) };
-    case "yesterday": return { type: "day", key: dayKey(shiftDay(new Date(), -1)) };
-    case "month": return { type: "month", key: monthKey(new Date()) };
+    case "session":
+      return { type: "session" };
+    case "window":
+      return { type: "window" };
+    case "all":
+      return { type: "all" };
+    case "today":
+      return { type: "day", key: dayKey(new Date()) };
+    case "yesterday":
+      return { type: "day", key: dayKey(shiftDay(new Date(), -1)) };
+    case "month":
+      return { type: "month", key: monthKey(new Date()) };
     case "lastmonth":
-    case "last-month": return { type: "month", key: monthKey(shiftMonth(new Date(), -1)) };
+    case "last-month":
+      return { type: "month", key: monthKey(shiftMonth(new Date(), -1)) };
   }
   if (isDayKey(t)) return { type: "day", key: t };
   if (isMonthKey(t)) return { type: "month", key: t };
@@ -229,10 +236,7 @@ export function resolvePeriod(token: string): PeriodSpec | null {
  * 指定期間のレコードを取得する。
  * @param sessionRecords type="session" のとき in-memory レコードを使う (永続化失敗時のフォールバック兼用)
  */
-export function loadRecords(
-  spec: PeriodSpec,
-  sessionRecords: readonly TokenUsageRecord[] = [],
-): TokenUsageRecord[] {
+export function loadRecords(spec: PeriodSpec, sessionRecords: readonly TokenUsageRecord[] = []): TokenUsageRecord[] {
   switch (spec.type) {
     case "session":
       return [...sessionRecords];
@@ -243,9 +247,7 @@ export function loadRecords(
     case "day": {
       // 日付の属する月ファイルを読んで当日のみ抽出
       const month = spec.key.slice(0, 7);
-      return readJsonl(monthFilePath(month)).filter(
-        (r) => dayKey(new Date(r.timestamp)) === spec.key,
-      );
+      return readJsonl(monthFilePath(month)).filter((r) => dayKey(new Date(r.timestamp)) === spec.key);
     }
     case "window": {
       const start = readState().windowStartAt;
@@ -258,9 +260,12 @@ export function loadRecords(
 
 function periodLabel(spec: PeriodSpec): string {
   switch (spec.type) {
-    case "session": return "今セッション";
-    case "window": return "計測窓";
-    case "all": return "全期間";
+    case "session":
+      return "今セッション";
+    case "window":
+      return "計測窓";
+    case "all":
+      return "全期間";
     case "day": {
       const today = dayKey(new Date());
       const yst = dayKey(shiftDay(new Date(), -1));
@@ -370,7 +375,8 @@ export function exportUsage(
   if (format === "jsonl") {
     fs.writeFileSync(outPath, records.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf-8");
   } else {
-    const header = "timestamp,slot,provider,model,inputTokens,outputTokens,cachedTokens,estimatedCostUsd,imageCount,sessionId";
+    const header =
+      "timestamp,slot,provider,model,inputTokens,outputTokens,cachedTokens,estimatedCostUsd,imageCount,sessionId";
     const lines = records.map((r) =>
       [
         r.timestamp,

@@ -51,7 +51,8 @@ export const enterPlanModeTool: ToolHandler = {
         mode: "planning",
         planId: plan.id,
         planFile: plan.filePath,
-        message: "プランモードに入りました。コードベースを調査して実装計画を設計してください。計画が完了したらexit_plan_modeを使用してください。",
+        message:
+          "プランモードに入りました。コードベースを調査して実装計画を設計してください。計画が完了したらexit_plan_modeを使用してください。",
         allowedTools: Array.from(PlanManagerClass.getPlanModeAllowedTools()),
       }),
     };
@@ -114,7 +115,8 @@ export const exitPlanModeTool: ToolHandler = {
         output: JSON.stringify({
           approved: false,
           feedback: result.feedback,
-          message: "ユーザーからフィードバックがあります。計画を修正してください。修正後、exit_plan_mode を再度呼び出して修正版の計画を提出してください。",
+          message:
+            "ユーザーからフィードバックがあります。計画を修正してください。修正後、exit_plan_mode を再度呼び出して修正版の計画を提出してください。",
           next_action: "exit_plan_mode",
         }),
       };

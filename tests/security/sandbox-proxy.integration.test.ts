@@ -165,22 +165,25 @@ describe("SandboxProxy 拒否パス (integration)", () => {
   });
 
   // unix ソケット + chmod は POSIX 前提 (Windows は fail-closed で listen 不可) → skip
-  it.skipIf(process.platform === "win32")("unix ソケット listen でも同じ allowlist 判定が効く (Linux ブリッジ土台)", async () => {
-    proxy = mkProxy([]); // 全未許可・deny
-    const sock = join(tmpdir(), `lllm-proxy-test-${process.pid}.sock`);
-    await proxy.ensureUnixSocket(sock);
-    // unix ソケット経由で forward proxy リクエスト（未許可→403）
-    const status = await new Promise<number>((resolve, reject) => {
-      const req = http.request(
-        { socketPath: sock, path: "http://evil.example/", method: "GET", headers: { host: "evil.example" } },
-        (res) => {
-          resolve(res.statusCode ?? 0);
-          res.resume();
-        },
-      );
-      req.on("error", reject);
-      req.end();
-    });
-    expect(status).toBe(403);
-  });
+  it.skipIf(process.platform === "win32")(
+    "unix ソケット listen でも同じ allowlist 判定が効く (Linux ブリッジ土台)",
+    async () => {
+      proxy = mkProxy([]); // 全未許可・deny
+      const sock = join(tmpdir(), `lllm-proxy-test-${process.pid}.sock`);
+      await proxy.ensureUnixSocket(sock);
+      // unix ソケット経由で forward proxy リクエスト（未許可→403）
+      const status = await new Promise<number>((resolve, reject) => {
+        const req = http.request(
+          { socketPath: sock, path: "http://evil.example/", method: "GET", headers: { host: "evil.example" } },
+          (res) => {
+            resolve(res.statusCode ?? 0);
+            res.resume();
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      });
+      expect(status).toBe(403);
+    },
+  );
 });

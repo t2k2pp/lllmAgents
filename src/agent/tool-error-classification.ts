@@ -12,5 +12,7 @@
 export function isLikelyPermanentToolError(error: string | undefined): boolean {
   const e = (error ?? "").toLowerCase();
   if (!e) return false;
-  return /\b401\b|\b403\b|invalid webhook token|unauthorized|forbidden|認証|権限確認がタイムアウト|permission denied/.test(e);
+  return /\b401\b|\b403\b|invalid webhook token|unauthorized|forbidden|認証|権限確認がタイムアウト|permission denied/.test(
+    e,
+  );
 }

@@ -14,8 +14,8 @@ export type ImageQuality = "low" | "medium" | "high";
 
 // 組み込み画像単価 (2026-05 Azure GA 時点、1024x1024 基準)
 export const BUILTIN_IMAGE_PRICING: Record<string, Record<ImageQuality, number>> = {
-  "gpt-image-2":      { low: 0.006, medium: 0.053, high: 0.211 },
-  "gpt-image-1":      { low: 0.011, medium: 0.042, high: 0.167 },
+  "gpt-image-2": { low: 0.006, medium: 0.053, high: 0.211 },
+  "gpt-image-1": { low: 0.011, medium: 0.042, high: 0.167 },
   "gpt-image-1-mini": { low: 0.005, medium: 0.011, high: 0.036 },
 };
 
@@ -44,12 +44,7 @@ const BASE_PIXELS = 1024 * 1024;
  * 画像 1 枚の推定単価 (USD)。モデル未登録なら null (呼び出し側で警告表示)。
  * 部分一致 (prefix) も試行する (例: "gpt-image-2-2026-04-21" → "gpt-image-2")。
  */
-export function getImageUnitPrice(
-  model: string,
-  quality: ImageQuality,
-  width: number,
-  height: number,
-): number | null {
+export function getImageUnitPrice(model: string, quality: ImageQuality, width: number, height: number): number | null {
   const pricing = loadImagePricing();
   let entry = pricing[model];
   if (!entry) {

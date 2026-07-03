@@ -31,11 +31,13 @@ export function createImageGenerateTool(imageService: ImageService, config: Conf
           properties: {
             prompt: {
               type: "string",
-              description: "Image description prompt (English recommended). Be specific about style, subject, composition.",
+              description:
+                "Image description prompt (English recommended). Be specific about style, subject, composition.",
             },
             output_path: {
               type: "string",
-              description: "Absolute path of the PNG file to save (e.g. C:\\proj\\assets\\hero.png). When n>1, files are numbered -2, -3, ...",
+              description:
+                "Absolute path of the PNG file to save (e.g. C:\\proj\\assets\\hero.png). When n>1, files are numbered -2, -3, ...",
             },
             size: {
               type: "string",
@@ -44,7 +46,8 @@ export function createImageGenerateTool(imageService: ImageService, config: Conf
             quality: {
               type: "string",
               enum: ["low", "medium", "high"],
-              description: "Quality (Azure GPT Images only). Higher = more expensive. Default: profile setting (medium).",
+              description:
+                "Quality (Azure GPT Images only). Higher = more expensive. Default: profile setting (medium).",
             },
             n: {
               type: "number",
@@ -80,8 +83,7 @@ export function createImageGenerateTool(imageService: ImageService, config: Conf
                 ? params.quality
                 : undefined,
             n,
-            negativePrompt:
-              typeof params.negative_prompt === "string" ? params.negative_prompt : undefined,
+            negativePrompt: typeof params.negative_prompt === "string" ? params.negative_prompt : undefined,
           },
           outputPath,
         );

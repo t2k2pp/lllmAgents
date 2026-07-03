@@ -5,17 +5,16 @@ import {
   resetGoalPromotionState,
   type GoalPromotionAgent,
 } from "../../src/agent/goal-promotion.js";
-import {
-  setInteractionBridge,
-  clearInteractionBridges,
-} from "../../src/agent/interaction-bridge-registry.js";
+import { setInteractionBridge, clearInteractionBridges } from "../../src/agent/interaction-bridge-registry.js";
 import type { GoalDefinition } from "../../src/agent/goal-slot.js";
 import type { LLMProvider, ChatChunk } from "../../src/providers/base-provider.js";
 
 // B-1: docs/goal-promotion-design.md
 
 /** criteria JSON を返すフェイク provider */
-function mkProvider(criteriaJson = '{"criteria": ["c1 が動作する", "c2 のテストがパスする", "c3 が存在する"]}'): LLMProvider {
+function mkProvider(
+  criteriaJson = '{"criteria": ["c1 が動作する", "c2 のテストがパスする", "c3 が存在する"]}',
+): LLMProvider {
   return {
     providerType: "fake",
     async *chat(): AsyncGenerator<ChatChunk> {

@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import { SandboxProxy, parseConnectPort, isBlockedAddress, type DomainDecision } from "../../src/security/sandbox-proxy.js";
+import {
+  SandboxProxy,
+  parseConnectPort,
+  isBlockedAddress,
+  type DomainDecision,
+} from "../../src/security/sandbox-proxy.js";
 
 describe("parseConnectPort", () => {
   it("host:port から port、 無指定は 443", () => {
@@ -18,7 +23,15 @@ describe("parseConnectPort", () => {
 
 describe("isBlockedAddress (SSRF/内部レンジ遮断)", () => {
   it("loopback / link-local(メタデータ) / RFC1918 を遮断", () => {
-    for (const ip of ["127.0.0.1", "169.254.169.254", "10.0.0.5", "172.16.0.1", "172.31.255.1", "192.168.1.1", "0.0.0.0"]) {
+    for (const ip of [
+      "127.0.0.1",
+      "169.254.169.254",
+      "10.0.0.5",
+      "172.16.0.1",
+      "172.31.255.1",
+      "192.168.1.1",
+      "0.0.0.0",
+    ]) {
       expect(isBlockedAddress(ip)).toBe(true);
     }
   });

@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  resolveCapability,
-  formatCapabilityLabel,
-  type Tier,
-} from "../../src/agent/capability-tier.js";
+import { resolveCapability, formatCapabilityLabel, type Tier } from "../../src/agent/capability-tier.js";
 
 describe("resolveCapability — 完全一致テーブル", () => {
   const cases: Array<[string, Tier, string]> = [

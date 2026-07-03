@@ -89,9 +89,7 @@ export function createGameSmokeTool(manager: PlaywrightManager): ToolHandler {
               "`/checkpoint list` → `/checkpoint restore <n>` で直前の動く版へ戻すことをユーザーに提案してください。",
           );
         } else {
-          lines.push(
-            "破滅的な失敗（クラッシュ/未捕捉例外/完全フリーズ）は検知されませんでした。",
-          );
+          lines.push("破滅的な失敗（クラッシュ/未捕捉例外/完全フリーズ）は検知されませんでした。");
           lines.push(
             "※ PASS は『落ちていない』だけの意味です。開始遷移が正しく動くか・操作が効くか・ゲーム性は判定していません。これらは必ず人間の試遊で確認してもらってください（PASS=完成 ではない）。",
           );

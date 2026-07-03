@@ -89,10 +89,7 @@ export function restoreGoalState(goal: GoalDefinition, history: EvaluationRecord
  * 直近 N 反復で平均スコアが ε 未満しか改善せず、 unmet 集合が変わっていない場合 true。
  * 設計書 §3.5 参照。
  */
-export function isDiminishingReturns(
-  windowSize: number = 3,
-  epsilon: number = 0.02,
-): boolean {
+export function isDiminishingReturns(windowSize: number = 3, epsilon: number = 0.02): boolean {
   if (_history.length < windowSize) return false;
   const window = _history.slice(-windowSize);
   const scores = window.map((r) => r.overall_score);
@@ -144,7 +141,9 @@ export function buildGoalSlotSection(): string {
   lines.push("");
   lines.push("[Goal Seek mode 中の方針]");
   lines.push("- 全 Acceptance Criteria を満たすまで response_complete は呼ばない (ハーネスが拒否する)");
-  lines.push("- 各反復は goal に近づくツール呼出を優先する (forward-chaining の思いつき優先より、 criteria 充足を優先)");
+  lines.push(
+    "- 各反復は goal に近づくツール呼出を優先する (forward-chaining の思いつき優先より、 criteria 充足を優先)",
+  );
   lines.push("- 行き詰まった場合は ask_user で user に相談");
 
   return lines.join("\n");

@@ -65,10 +65,7 @@ function buildRetryPrompt(prompt: string, checkCommand: string, check: CheckResu
  * 決定的検証ゲート型ループを回す。
  * 完了 (exit 0) で success=true。それ以外は exitGoalSeek("abort") して success=false。
  */
-export async function runGoalLoop(
-  opts: GoalLoopOptions,
-  agent: AgentLoop,
-): Promise<GoalLoopResult> {
+export async function runGoalLoop(opts: GoalLoopOptions, agent: AgentLoop): Promise<GoalLoopResult> {
   const { prompt, checkCommand, maxIterations } = opts;
 
   const goal: GoalDefinition = {
@@ -91,8 +88,7 @@ export async function runGoalLoop(
 
       console.log(chalk.cyan(`  ── goal-loop 反復 ${i}/${maxIterations} ${"─".repeat(34)}`));
 
-      const promptForIteration =
-        i === 1 || !lastCheck ? prompt : buildRetryPrompt(prompt, checkCommand, lastCheck);
+      const promptForIteration = i === 1 || !lastCheck ? prompt : buildRetryPrompt(prompt, checkCommand, lastCheck);
 
       await agent.run(promptForIteration);
       if (agent.isAborted()) break;
@@ -130,9 +126,7 @@ export async function runGoalLoop(
       }
       prevFailureTail = curTail;
       if (sameFailureStreak >= 2) {
-        console.log(
-          chalk.yellow(`  ⚠ 同一の失敗が ${sameFailureStreak + 1} 回続いています。ループを打ち切ります。\n`),
-        );
+        console.log(chalk.yellow(`  ⚠ 同一の失敗が ${sameFailureStreak + 1} 回続いています。ループを打ち切ります。\n`));
         break;
       }
 
@@ -148,9 +142,7 @@ export async function runGoalLoop(
   }
 
   if (lastCheck && !agent.isAborted()) {
-    console.log(
-      chalk.yellow(`  ${maxIterations} 反復で検証を通せませんでした (最終: exit ${lastCheck.exitCode})`),
-    );
+    console.log(chalk.yellow(`  ${maxIterations} 反復で検証を通せませんでした (最終: exit ${lastCheck.exitCode})`));
     const tail = (lastCheck.stderrTail || lastCheck.stdoutTail).trim();
     if (tail) console.log(chalk.dim(tail.split("\n").slice(-10).join("\n")));
     console.log();

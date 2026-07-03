@@ -302,7 +302,7 @@ describe("normalizeToolCalls — Pipe-call 形式 (<|tool|>call:NAME{...})", () 
     expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({ command: "it's alive" });
   });
 
-  it("シングルクオート値内の \" を二重エスケープせず復元する", () => {
+  it('シングルクオート値内の " を二重エスケープせず復元する', () => {
     const text = `<|tool|>call:bash{command: 'say "hello"'}`;
     const r = normalizeToolCalls(text);
     expect(JSON.parse(r.toolCalls[0].function.arguments)).toEqual({ command: 'say "hello"' });

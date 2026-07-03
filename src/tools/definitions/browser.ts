@@ -147,7 +147,11 @@ export function createBrowserTools(manager: PlaywrightManager): ToolHandler[] {
         parameters: {
           type: "object",
           properties: {
-            save_path: { type: "string", description: "指定された場合、スクリーンショットを指定したローカルパスの画像ファイル(PNG)として保存します。ファイルに保存したい場合はこの引数を使用してください。" },
+            save_path: {
+              type: "string",
+              description:
+                "指定された場合、スクリーンショットを指定したローカルパスの画像ファイル(PNG)として保存します。ファイルに保存したい場合はこの引数を使用してください。",
+            },
           },
         },
       },

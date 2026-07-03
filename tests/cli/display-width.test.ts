@@ -15,7 +15,7 @@ describe("getDisplayWidth", () => {
   it("should count CJK characters as 2 columns each", () => {
     // 漢字
     expect(getDisplayWidth("日本語")).toBe(6); // 3 chars × 2 columns
-    expect(getDisplayWidth("漢字")).toBe(4);   // 2 chars × 2 columns
+    expect(getDisplayWidth("漢字")).toBe(4); // 2 chars × 2 columns
   });
 
   it("should count hiragana as 2 columns each", () => {
@@ -29,8 +29,8 @@ describe("getDisplayWidth", () => {
   });
 
   it("should handle mixed ASCII and CJK correctly", () => {
-    expect(getDisplayWidth("hello世界")).toBe(9);  // 5 + 2×2
-    expect(getDisplayWidth("a日b本c")).toBe(7);    // 3×1 + 2×2
+    expect(getDisplayWidth("hello世界")).toBe(9); // 5 + 2×2
+    expect(getDisplayWidth("a日b本c")).toBe(7); // 3×1 + 2×2
     expect(getDisplayWidth("> こんにちは")).toBe(12); // 2 + 5×2
   });
 

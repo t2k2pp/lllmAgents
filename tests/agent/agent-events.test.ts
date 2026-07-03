@@ -47,9 +47,7 @@ describe("AgentEventBus", () => {
     });
     bus.on("assistant_text", after);
 
-    expect(() =>
-      bus.emit("assistant_text", { text: "hello", final: true }),
-    ).not.toThrow();
+    expect(() => bus.emit("assistant_text", { text: "hello", final: true })).not.toThrow();
     expect(after).toHaveBeenCalledTimes(1);
   });
 

@@ -106,7 +106,9 @@ function parseSummaryResponse(raw: string): { summary: string; keyFacts: string[
         summary: parsed.summary ?? raw,
         keyFacts: Array.isArray(parsed.keyFacts) ? parsed.keyFacts : [],
       };
-    } catch { /* fall through */ }
+    } catch {
+      /* fall through */
+    }
   }
   // JSONパース失敗時は応答全体を要約として使用
   return { summary: raw, keyFacts: [] };
@@ -146,9 +148,7 @@ export class HierarchicalCompressor {
 
     // Step 2: 各ブロックを Layer 1 に要約（並列実行）
     logger.info(`Compressing ${blocks.length} block(s) to Layer 1...`);
-    const newLayer1Blocks = await Promise.all(
-      blocks.map((block) => this.summarizeToLayer1(block)),
-    );
+    const newLayer1Blocks = await Promise.all(blocks.map((block) => this.summarizeToLayer1(block)));
     this.summaryBlocks.push(...newLayer1Blocks);
 
     // Step 3: Layer 1 が多すぎたら Layer 2 に統合
@@ -191,7 +191,7 @@ export class HierarchicalCompressor {
       logger.warn(`Layer 1 summarization failed, using fallback: ${e}`);
       const userMessages = messages
         .filter((m) => m.role === "user")
-        .map((m) => typeof m.content === "string" ? m.content : JSON.stringify(m.content))
+        .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
         .join("\n");
       const fallback = userMessages.slice(0, 500);
       return {
@@ -207,10 +207,12 @@ export class HierarchicalCompressor {
 
   /** Layer 1 ブロック群 → Layer 2 に統合 */
   private async promoteToLayer2(layer1Blocks: SummaryBlock[]): Promise<void> {
-    const blockTexts = layer1Blocks.map((b, i) => {
-      const facts = b.keyFacts.length > 0 ? `\nキーファクト: ${b.keyFacts.join(", ")}` : "";
-      return `--- ブロック${i + 1} ---\n${b.summary}${facts}`;
-    }).join("\n\n");
+    const blockTexts = layer1Blocks
+      .map((b, i) => {
+        const facts = b.keyFacts.length > 0 ? `\nキーファクト: ${b.keyFacts.join(", ")}` : "";
+        return `--- ブロック${i + 1} ---\n${b.summary}${facts}`;
+      })
+      .join("\n\n");
 
     const prompt = LAYER2_PROMPT + blockTexts;
 

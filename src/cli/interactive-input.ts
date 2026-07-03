@@ -104,10 +104,7 @@ export class InteractiveInput {
    * @param prefix  プロンプト文字列 (例: "> ")
    * @param options.disableMenu  trueならドロップダウンを抑制
    */
-  async question(
-    prefix: string,
-    options?: { disableMenu?: boolean },
-  ): Promise<string> {
+  async question(prefix: string, options?: { disableMenu?: boolean }): Promise<string> {
     if (!process.stdin.isTTY) {
       return this.fallbackQuestion(prefix);
     }
@@ -125,10 +122,7 @@ export class InteractiveInput {
 
   // ─── インタラクティブ入力（メイン） ──────────────────
 
-  private interactiveQuestion(
-    prefix: string,
-    disableMenu: boolean,
-  ): Promise<string> {
+  private interactiveQuestion(prefix: string, disableMenu: boolean): Promise<string> {
     return new Promise<string>((resolve) => {
       const stdin = process.stdin;
       const stdout = process.stdout;
@@ -225,7 +219,7 @@ export class InteractiveInput {
 
       // ─── レイアウトヘルパー ─────────────────────
 
-      /** 
+      /**
        * ターミナルの幅に合わせて物理行（スクリーン行）へ分割し、
        * それぞれの行に対するテキスト、開始インデックス、およびカーソルの(物理行, 列)を算出する
        */
@@ -233,7 +227,7 @@ export class InteractiveInput {
         const columns = process.stdout.columns || 80;
         const logicalLines = buffer.split("\n");
         const screenLines: { text: string; startIndex: number }[] = [];
-        
+
         let cRow = 0;
         let cCol = 0;
         let currentPos = 0;
@@ -242,66 +236,64 @@ export class InteractiveInput {
           const logicalLine = logicalLines[i];
           let currentScreenLine = "";
           let lineStartIndex = currentPos;
-          let currentLineWidth = (i === 0 && screenLines.length === 0) ? prefixLen : contPrefixLen;
-          
+          let currentLineWidth = i === 0 && screenLines.length === 0 ? prefixLen : contPrefixLen;
+
           if (logicalLine.length === 0) {
-             if (currentPos === cursorPos) {
-                cRow = screenLines.length;
-                cCol = 0;
-             }
-             screenLines.push({ text: "", startIndex: lineStartIndex });
-             currentPos++; // \n
-             continue;
+            if (currentPos === cursorPos) {
+              cRow = screenLines.length;
+              cCol = 0;
+            }
+            screenLines.push({ text: "", startIndex: lineStartIndex });
+            currentPos++; // \n
+            continue;
           }
 
           const chars = Array.from(logicalLine);
           for (let charIdx = 0; charIdx < chars.length; charIdx++) {
             if (currentPos === cursorPos) {
-               cRow = screenLines.length;
-               cCol = currentScreenLine.length;
+              cRow = screenLines.length;
+              cCol = currentScreenLine.length;
             }
 
             const char = chars[charIdx];
             const charW = getDisplayWidth(char);
-            
+
             // ターミナル幅を超過する場合、そこで行を折り返す（ハードラップ）
             if (currentLineWidth + charW > columns) {
-               screenLines.push({ text: currentScreenLine, startIndex: lineStartIndex });
-               currentScreenLine = char;
-               lineStartIndex = currentPos;
-               currentLineWidth = contPrefixLen + charW;
+              screenLines.push({ text: currentScreenLine, startIndex: lineStartIndex });
+              currentScreenLine = char;
+              lineStartIndex = currentPos;
+              currentLineWidth = contPrefixLen + charW;
             } else {
-               currentScreenLine += char;
-               currentLineWidth += charW;
+              currentScreenLine += char;
+              currentLineWidth += charW;
             }
             currentPos += char.length;
           }
-          
+
           if (currentPos === cursorPos) {
-             cRow = screenLines.length;
-             cCol = currentScreenLine.length;
+            cRow = screenLines.length;
+            cCol = currentScreenLine.length;
           }
-          
+
           screenLines.push({ text: currentScreenLine, startIndex: lineStartIndex });
           currentPos++; // \n
         }
 
         if (cursorPos === buffer.length) {
-            cRow = Math.max(0, screenLines.length - 1);
-            cCol = screenLines.length > 0 ? screenLines[cRow].text.length : 0;
+          cRow = Math.max(0, screenLines.length - 1);
+          cCol = screenLines.length > 0 ? screenLines[cRow].text.length : 0;
         }
 
         return { screenLines, row: cRow, col: cCol };
       };
 
-      const getLinePrefixLayout = (screenIndex: number): string =>
-        screenIndex === 0 ? prefix : contPrefixStr;
+      const getLinePrefixLayout = (screenIndex: number): string => (screenIndex === 0 ? prefix : contPrefixStr);
 
-      const getLinePrefixWidthLayout = (screenIndex: number): number =>
-        screenIndex === 0 ? prefixLen : contPrefixLen;
+      const getLinePrefixWidthLayout = (screenIndex: number): number => (screenIndex === 0 ? prefixLen : contPrefixLen);
 
       /** バッファの行・列からターミナル上のカラム位置を計算 */
-      const getTerminalColumn = (row: number, col: number, screenLines: {text: string}[]): number => {
+      const getTerminalColumn = (row: number, col: number, screenLines: { text: string }[]): number => {
         const lineText = screenLines[row]?.text || "";
         return getLinePrefixWidthLayout(row) + getDisplayWidth(lineText.slice(0, col));
       };
@@ -317,7 +309,7 @@ export class InteractiveInput {
       };
 
       /** バッファの(row, col)からフラットなcursorPosを計算 */
-      const rowColToPos = (row: number, col: number, screenLines: {text: string; startIndex: number}[]): number => {
+      const rowColToPos = (row: number, col: number, screenLines: { text: string; startIndex: number }[]): number => {
         if (screenLines.length === 0) return 0;
         const line = screenLines[row];
         return line.startIndex + col;
@@ -429,7 +421,7 @@ export class InteractiveInput {
           } else if (i === 0 && screenLines.length === 0) {
             stdout.write(prefix);
           }
-          
+
           if (i < maxLines - 1) {
             if (i < oldInputLines - 1) {
               // 既存行へ移動（スクロールしない）
@@ -501,9 +493,7 @@ export class InteractiveInput {
             const labelTruncated = truncateToWidth(item.label, Math.max(1, maxLineWidth - marginW));
             const labelTruncatedW = getDisplayWidth(labelTruncated);
             const descBudget = maxLineWidth - marginW - labelTruncatedW - 1;
-            const descText = item.description
-              ? truncateToWidth(item.description, Math.max(0, descBudget))
-              : "";
+            const descText = item.description ? truncateToWidth(item.description, Math.max(0, descBudget)) : "";
 
             if (isSelected) {
               stdout.write(`  ${chalk.bgBlue.white(` ${labelTruncated} `)}`);
@@ -592,10 +582,7 @@ export class InteractiveInput {
 
       // ─── キープレスハンドラ ────────────────────
 
-      const onKeypress = (
-        _ch: string | undefined,
-        key?: readline.Key,
-      ): void => {
+      const onKeypress = (_ch: string | undefined, key?: readline.Key): void => {
         if (!key) return;
 
         // ── ブラケット貼り付け: 開始マーカー ──
@@ -639,9 +626,7 @@ export class InteractiveInput {
         // ConPTY が「続けて\r」 を 1 チャンクで届けると (a) 改行入りチャンク (b) keyDelta≈0 の
         // 両方が誤発動して Enter が飲み込まれるため、 ここで両方を打ち消す (2026-06-13)。
         const isPasteBurst =
-          now < this.lineSubmitUntilMs
-            ? false
-            : now < this.pasteBurstUntilMs || keyDelta < FAST_PASTE_DELTA_MS;
+          now < this.lineSubmitUntilMs ? false : now < this.pasteBurstUntilMs || keyDelta < FAST_PASTE_DELTA_MS;
 
         // \r の直後でも \n 以外のキーが来たら CRLF 吸収状態を解除
         if (lastKeyWasReturn && key.name !== "enter") {
@@ -667,10 +652,7 @@ export class InteractiveInput {
         // ── Shift+Enter → 改行挿入（マルチライン入力） ──
         // Shift+Enter: モダンターミナル (Windows Terminal + CSI u, iTerm2, kitty)
         // Ctrl+J:      ユニバーサルフォールバック (\n = 0x0A → key.name="enter")
-        if (
-          (key.name === "return" && key.shift) ||
-          key.name === "enter"
-        ) {
+        if ((key.name === "return" && key.shift) || key.name === "enter") {
           // CRLF 吸収: 直前のキーが \r で、これが直後に届いた \n なら、既に \r 側で
           // 改行処理済みなので無視する。Ctrl+J 単独入力の場合は lastKeyWasReturn=false。
           if (key.name === "enter" && lastKeyWasReturn) {

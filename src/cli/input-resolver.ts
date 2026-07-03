@@ -103,12 +103,12 @@ export function resolveAtMentions(
         if (textBefore.trim()) {
           parts.push({ type: "text", text: textBefore });
         }
-        
+
         const rawPath = m.original.slice(1);
         if (m.type === "file_image") {
           parts.push({
             type: "image_url",
-            image_url: { url: `data:${m.mimeType};base64,${m.content}` }
+            image_url: { url: `data:${m.mimeType};base64,${m.content}` },
           });
           // ファイル名テキストもちょっと挟んでおく
           parts.push({ type: "text", text: ` [Image: ${rawPath}] ` });
@@ -116,10 +116,10 @@ export function resolveAtMentions(
           // 画像以外のファイル/フォルダをテキストパーツとして追加する
           parts.push({
             type: "text",
-            text: `\n\n--- ${m.type === "file" ? "File" : "Directory"}: ${rawPath} ---\n${m.content}\n--- end ---\n`
+            text: `\n\n--- ${m.type === "file" ? "File" : "Directory"}: ${rawPath} ---\n${m.content}\n--- end ---\n`,
           });
         }
-        
+
         remainingInput = remainingInput.slice(idx + m.original.length);
       }
     }
@@ -142,7 +142,7 @@ export function resolveAtMentions(
         mergedParts.push(p);
       }
     }
-    
+
     return { resolved: mergedParts, mentions };
   }
 }

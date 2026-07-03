@@ -122,12 +122,7 @@ export class ChatLogger {
 
     // 新パートに圧縮サマリーの要約を入れる
     if (compressionSummary) {
-      const intro = [
-        "> **前パートからの引き継ぎ:** コンテキスト圧縮後の続き",
-        "",
-        "---",
-        "",
-      ];
+      const intro = ["> **前パートからの引き継ぎ:** コンテキスト圧縮後の続き", "", "---", ""];
       fs.appendFileSync(this.currentFilePath, intro.join("\n"), "utf-8");
     }
   }

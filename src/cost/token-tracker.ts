@@ -3,7 +3,7 @@ import { appendUsageRecord } from "./usage-store.js";
 export type UsageSlot = "main" | "second" | "vision" | "image";
 
 export interface TokenUsageRecord {
-  timestamp: string;         // ISO 8601
+  timestamp: string; // ISO 8601
   provider: string;
   model: string;
   /** どのスロットの消費か。 未指定は "main" 扱い (後方互換) */

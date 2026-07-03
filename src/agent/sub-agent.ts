@@ -55,7 +55,9 @@ function extractFakeFileWriteCalls(text: string): Array<{ file_path: string; con
       if (typeof obj.file_path === "string" && typeof obj.content === "string") {
         results.push({ file_path: obj.file_path, content: obj.content });
       }
-    } catch { /* JSON パース失敗は無視 */ }
+    } catch {
+      /* JSON パース失敗は無視 */
+    }
   }
   return results;
 }
@@ -84,8 +86,7 @@ function resolveAgentConfig(type: SubAgentType): Omit<SubAgentConfig, "descripti
   }
 
   logger.warn(
-    `Agent definition '${type}' not found in src/agents/builtin/. ` +
-      `Available: ${loader.listNames().join(", ")}`,
+    `Agent definition '${type}' not found in src/agents/builtin/. ` + `Available: ${loader.listNames().join(", ")}`,
   );
   return null;
 }
@@ -155,11 +156,7 @@ export class SubAgent {
     this.selfAncestors = extendAncestors(parentAncestors, "sub");
     // D1: ancestors に基づき task / second_llm_* を構造的に除外。
     //     allowedTools 指定があればそれと AND で交差させる (= ホワイトリスト ∩ 非除外)
-    this.filteredRegistry = filterRegistryForAncestors(
-      toolRegistry,
-      this.selfAncestors,
-      this.config.allowedTools,
-    );
+    this.filteredRegistry = filterRegistryForAncestors(toolRegistry, this.selfAncestors, this.config.allowedTools);
     this.history = new MessageHistory(this.config.systemPrompt);
     // ToolExecutor にも自分の ancestors を渡し、 task / second_llm_* ツールが呼ばれた時に
     // さらに 1 段拡張した ancestors を子に伝播できるようにする
@@ -188,18 +185,19 @@ export class SubAgent {
     for (let iteration = 0; iteration < maxTurns; iteration++) {
       try {
         const defs = this.filteredRegistry.getDefinitions();
-        const gen = defs.length > 0
-          ? this.provider.chatWithTools({
-              model: this.model,
-              messages: this.history.getMessages(),
-              tools: defs,
-              stream: true,
-            })
-          : this.provider.chat({
-              model: this.model,
-              messages: this.history.getMessages(),
-              stream: true,
-            });
+        const gen =
+          defs.length > 0
+            ? this.provider.chatWithTools({
+                model: this.model,
+                messages: this.history.getMessages(),
+                tools: defs,
+                stream: true,
+              })
+            : this.provider.chat({
+                model: this.model,
+                messages: this.history.getMessages(),
+                stream: true,
+              });
 
         const response = await collectResponse(gen);
 
@@ -208,9 +206,7 @@ export class SubAgent {
 
           for (const toolCall of response.toolCalls) {
             const result = await this.toolExecutor.execute(toolCall);
-            const raw = result.success
-              ? (result.output ?? "")
-              : `Error: ${result.error ?? ""}\n${result.output ?? ""}`;
+            const raw = result.success ? (result.output ?? "") : `Error: ${result.error ?? ""}\n${result.output ?? ""}`;
             // D8: ハーネス介入レイヤを通す (壁ドンループ警告 / Read→Edit 契約 等)
             const enriched = enrichToolResult(toolCall, result.success, raw, harnessState);
             this.history.addToolResult(toolCall.id, enriched);
@@ -228,13 +224,15 @@ export class SubAgent {
             logger.debug(`SubAgent: continuation requested (${structural.reason})`);
             this.history.addAssistantMessage(response.content);
             // ID-012: 偽ユーザー発言ではなく [自己点検] フォーマットでハーネス通知を明示
-            this.history.addUserMessage(formatSelfCheck(
-              continuationAttempts,
-              MAX_CONTINUATION_ATTEMPTS,
-              delegatePrompt,
-              `応答が途中で切れています (${structural.reason})。 続きを出力してタスクを完成させてください。`,
-              SUB_AGENT_ACTION_HINT,
-            ));
+            this.history.addUserMessage(
+              formatSelfCheck(
+                continuationAttempts,
+                MAX_CONTINUATION_ATTEMPTS,
+                delegatePrompt,
+                `応答が途中で切れています (${structural.reason})。 続きを出力してタスクを完成させてください。`,
+                SUB_AGENT_ACTION_HINT,
+              ),
+            );
             continue;
           }
         }
@@ -244,11 +242,15 @@ export class SubAgent {
           codeBlockRetried = true;
           this.history.addAssistantMessage(response.content);
           // ID-012: 偽ユーザー発言ではなく [自己点検] フォーマットでハーネス通知を明示
-          this.history.addUserMessage(formatSelfCheck(
-            1, 1, delegatePrompt,
-            "コードをテキストで返しましたが、 成果物として file_write ツールでファイル化してください。 コードをチャットに書くのではなく、 必ず file_write ツールを使用してください。",
-            SUB_AGENT_ACTION_HINT,
-          ));
+          this.history.addUserMessage(
+            formatSelfCheck(
+              1,
+              1,
+              delegatePrompt,
+              "コードをテキストで返しましたが、 成果物として file_write ツールでファイル化してください。 コードをチャットに書くのではなく、 必ず file_write ツールを使用してください。",
+              SUB_AGENT_ACTION_HINT,
+            ),
+          );
           continue;
         }
 
@@ -271,11 +273,15 @@ export class SubAgent {
               this.history.addToolResult(syntheticCall.id, enriched);
             }
             // ID-012: 偽ユーザー発言ではなく [自己点検] フォーマットでハーネス通知を明示
-            this.history.addUserMessage(formatSelfCheck(
-              1, 1, delegatePrompt,
-              "ファイル作成が完了しました。 作業の最終結果を整理して回答してください。",
-              SUB_AGENT_ACTION_HINT,
-            ));
+            this.history.addUserMessage(
+              formatSelfCheck(
+                1,
+                1,
+                delegatePrompt,
+                "ファイル作成が完了しました。 作業の最終結果を整理して回答してください。",
+                SUB_AGENT_ACTION_HINT,
+              ),
+            );
             continue;
           }
         }
@@ -394,8 +400,8 @@ export class SubAgentManager {
               description: tasks[i].description,
               result: `Error: ${r.reason}`,
               success: false,
-            }
-      )
+            },
+      ),
     );
   }
 

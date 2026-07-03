@@ -66,12 +66,14 @@ export class AzureFoundryProvider extends OpenAICompatProvider {
   }
 
   async listModels(): Promise<ModelInfo[]> {
-    return [{
-      name: this.foundryConfig.model,
-      size: 0,
-      contextLength: inferContextLength(this.foundryConfig.model) || FALLBACK_CONTEXT_WINDOW,
-      supportsVision: false,
-      supportsFunctionCalling: true,
-    }];
+    return [
+      {
+        name: this.foundryConfig.model,
+        size: 0,
+        contextLength: inferContextLength(this.foundryConfig.model) || FALLBACK_CONTEXT_WINDOW,
+        supportsVision: false,
+        supportsFunctionCalling: true,
+      },
+    ];
   }
 }

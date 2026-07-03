@@ -31,12 +31,7 @@ export class LoopManager {
    * 新しいループを開始する。
    * @returns 割り当てたループ ID
    */
-  start(
-    prompt: string,
-    intervalMs: number,
-    intervalStr: string,
-    runner: LoopRunner,
-  ): string {
+  start(prompt: string, intervalMs: number, intervalStr: string, runner: LoopRunner): string {
     const id = String(this.nextId++);
 
     const timerId = setInterval(async () => {

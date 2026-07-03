@@ -4,13 +4,12 @@ const ALGORITHM = "aes-256-gcm";
 const SALT_LENGTH = 32;
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
-const KEY_LENGTH = 32;       // AES-256用: 256bit = 32byte
-const ITERATIONS = 210_000;  // OWASP 2024推奨
+const KEY_LENGTH = 32; // AES-256用: 256bit = 32byte
+const ITERATIONS = 210_000; // OWASP 2024推奨
 const DIGEST = "sha512";
 const ENCRYPTED_PREFIX = "encrypted:";
 
 export class CredentialVault {
-
   /**
    * パスフレーズでAPIキーを暗号化する。
    * @returns "encrypted:<base64(salt + iv + authTag + ciphertext)>"
@@ -21,10 +20,7 @@ export class CredentialVault {
     const iv = randomBytes(IV_LENGTH);
 
     const cipher = createCipheriv(ALGORITHM, key, iv);
-    const encrypted = Buffer.concat([
-      cipher.update(plaintext, "utf8"),
-      cipher.final(),
-    ]);
+    const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
     const authTag = cipher.getAuthTag();
 
     // salt(32) + iv(16) + authTag(16) + ciphertext(N)
@@ -41,20 +37,12 @@ export class CredentialVault {
       throw new Error("Not an encrypted value");
     }
 
-    const combined = Buffer.from(
-      encryptedValue.slice(ENCRYPTED_PREFIX.length),
-      "base64",
-    );
+    const combined = Buffer.from(encryptedValue.slice(ENCRYPTED_PREFIX.length), "base64");
 
     const salt = combined.subarray(0, SALT_LENGTH);
     const iv = combined.subarray(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
-    const authTag = combined.subarray(
-      SALT_LENGTH + IV_LENGTH,
-      SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH,
-    );
-    const ciphertext = combined.subarray(
-      SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH,
-    );
+    const authTag = combined.subarray(SALT_LENGTH + IV_LENGTH, SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH);
+    const ciphertext = combined.subarray(SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH);
 
     const key = pbkdf2Sync(passphrase, salt, ITERATIONS, KEY_LENGTH, DIGEST);
 
@@ -62,10 +50,7 @@ export class CredentialVault {
     decipher.setAuthTag(authTag);
 
     try {
-      const decrypted = Buffer.concat([
-        decipher.update(ciphertext),
-        decipher.final(),
-      ]);
+      const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
       return decrypted.toString("utf8");
     } catch {
       // GCM認証タグ検証失敗 = 合言葉が間違っている

@@ -45,10 +45,7 @@ async function loadJimp(): Promise<typeof import("jimp") | null> {
   }
 
   // 2) createRequire で探す (SEA / CJS バンドル)
-  const roots = [
-    path.join(os.homedir(), ".localllm"),
-    process.cwd(),
-  ];
+  const roots = [path.join(os.homedir(), ".localllm"), process.cwd()];
   for (const root of roots) {
     try {
       const req = createRequire(path.join(root, "node_modules", "x"));
@@ -62,7 +59,7 @@ async function loadJimp(): Promise<typeof import("jimp") | null> {
 
   logger.warn(
     "jimp が見つかりません。画像の自動縮小は無効です (オリジナルをそのまま添付します)。" +
-    "npm install jimp で導入できます。",
+      "npm install jimp で導入できます。",
   );
   _jimpModule = null;
   return null;
@@ -98,10 +95,7 @@ function makeTempPath(originalPath: string, ext: string): string {
  * 縮小に失敗、または縮小しても目標に収まらない場合でもオリジナルを返す
  * (送信側で最終的な上限超過をハンドルする)。
  */
-export async function prepareForDiscord(
-  filePath: string,
-  maxBytes: number,
-): Promise<PreparedAttachment> {
+export async function prepareForDiscord(filePath: string, maxBytes: number): Promise<PreparedAttachment> {
   let originalSize: number;
   try {
     originalSize = fs.statSync(filePath).size;
@@ -186,4 +180,3 @@ export async function prepareForDiscord(
   // 縮小できなかった場合はオリジナルを返す
   return { path: filePath, isTemp: false };
 }
-

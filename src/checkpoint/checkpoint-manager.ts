@@ -150,11 +150,9 @@ export class CheckpointManager {
 
   private git(args: string[]): Promise<{ stdout: string; stderr: string }> {
     // --git-dir と --work-tree を明示することで「作業フォルダの外」 に履歴を持つ
-    return execFileAsync(
-      "git",
-      [`--git-dir=${this.gitDir}`, `--work-tree=${this.workTree}`, ...args],
-      { maxBuffer: 16 * 1024 * 1024 },
-    );
+    return execFileAsync("git", [`--git-dir=${this.gitDir}`, `--work-tree=${this.workTree}`, ...args], {
+      maxBuffer: 16 * 1024 * 1024,
+    });
   }
 
   private async ensureInit(): Promise<boolean> {
@@ -208,9 +206,11 @@ export class CheckpointManager {
   async commitForFile(filePath: string, message: string): Promise<void> {
     if (!this.enabled) return;
     if (!this.inScope(filePath)) return;
-    this.queue = this.queue.then(() => this.doCommit(message)).catch((e) => {
-      logger.debug(`checkpoint: commit 失敗 — ${String(e)}`);
-    });
+    this.queue = this.queue
+      .then(() => this.doCommit(message))
+      .catch((e) => {
+        logger.debug(`checkpoint: commit 失敗 — ${String(e)}`);
+      });
     await this.queue;
   }
 
@@ -255,7 +255,10 @@ export class CheckpointManager {
   private async stagedFiles(): Promise<string[]> {
     try {
       const { stdout } = await this.git(["diff", "--cached", "--name-only"]);
-      return stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+      return stdout
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
     } catch {
       return [];
     }
@@ -301,11 +304,7 @@ export class CheckpointManager {
   async list(limit = 30): Promise<CheckpointEntry[]> {
     if (!(await this.ensureInit())) return [];
     try {
-      const { stdout } = await this.git([
-        "log",
-        `-n${Math.max(limit, 1)}`,
-        "--pretty=format:%H%x1f%cI%x1f%s",
-      ]);
+      const { stdout } = await this.git(["log", `-n${Math.max(limit, 1)}`, "--pretty=format:%H%x1f%cI%x1f%s"]);
       const lines = stdout.split("\n").filter((l) => l.trim());
       return lines.map((line, i) => {
         const [hash, date, ...rest] = line.split("\x1f");
@@ -350,7 +349,10 @@ export class CheckpointManager {
             entry.hash,
             "HEAD",
           ]);
-          added = stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+          added = stdout
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean);
         } catch {
           /* 履歴が浅い等は空 */
         }

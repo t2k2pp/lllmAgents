@@ -8,7 +8,11 @@ export interface SecurityRule {
 
 export const DANGEROUS_COMMAND_PATTERNS: SecurityRule[] = [
   // Unix destructive
-  { pattern: /rm\s+(-[rRf]+\s+|--recursive\s+)\/(?!\w)/, action: "block", message: "ルートディレクトリの再帰削除は禁止されています" },
+  {
+    pattern: /rm\s+(-[rRf]+\s+|--recursive\s+)\/(?!\w)/,
+    action: "block",
+    message: "ルートディレクトリの再帰削除は禁止されています",
+  },
   { pattern: /rm\s+-[rRf]*\s+~\//, action: "warn", message: "ホームディレクトリの削除は危険です" },
   { pattern: /mkfs/, action: "block", message: "ファイルシステムの作成は禁止されています" },
   { pattern: /dd\s+.*of=\/dev\//, action: "block", message: "デバイスへの直接書き込みは禁止されています" },
@@ -19,12 +23,28 @@ export const DANGEROUS_COMMAND_PATTERNS: SecurityRule[] = [
   { pattern: /chmod\s+-R\s+777/, action: "block", message: "再帰的な777パーミッション設定は禁止されています" },
 
   // Download & execute（| sh / | sudo sh / プロセス置換 bash <(curl …) を網羅）
-  { pattern: /(curl|wget)\s+.*\|\s*(sudo\s+)?(bash|sh|zsh|python3?|node|perl|ruby)\b/, action: "block", message: "ダウンロードしたスクリプトの直接実行は禁止されています" },
-  { pattern: /\b(bash|sh|zsh|python3?|node|perl|ruby)\b[^\n]*<\(\s*(curl|wget)\b/, action: "block", message: "プロセス置換によるダウンロードスクリプトの実行は禁止されています" },
+  {
+    pattern: /(curl|wget)\s+.*\|\s*(sudo\s+)?(bash|sh|zsh|python3?|node|perl|ruby)\b/,
+    action: "block",
+    message: "ダウンロードしたスクリプトの直接実行は禁止されています",
+  },
+  {
+    pattern: /\b(bash|sh|zsh|python3?|node|perl|ruby)\b[^\n]*<\(\s*(curl|wget)\b/,
+    action: "block",
+    message: "プロセス置換によるダウンロードスクリプトの実行は禁止されています",
+  },
 
   // System
-  { pattern: /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&?\s*\}\s*;\s*:/, action: "block", message: "フォーク爆弾は禁止されています" },
-  { pattern: /\b(shutdown|reboot|poweroff|halt)\b/, action: "block", message: "システムのシャットダウン/再起動は禁止されています" },
+  {
+    pattern: /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&?\s*\}\s*;\s*:/,
+    action: "block",
+    message: "フォーク爆弾は禁止されています",
+  },
+  {
+    pattern: /\b(shutdown|reboot|poweroff|halt)\b/,
+    action: "block",
+    message: "システムのシャットダウン/再起動は禁止されています",
+  },
   { pattern: /\binit\s+0\b/, action: "block", message: "システム停止は禁止されています" },
 
   // Windows destructive
@@ -36,13 +56,26 @@ export const DANGEROUS_COMMAND_PATTERNS: SecurityRule[] = [
   // Git destructive
   // force push を main/master へ（語順非依存・git -c … 挿入耐性・-f/--force/--force-with-lease・
   // refspec の `+`(=force) を網羅）。 lookahead で「git・push・force指標・main|master」を独立に要求。
-  { pattern: /\bgit\b(?=[^\n]*\bpush\b)(?=[^\n]*(?:--force\b|--force-with-lease\b|\s-f\b|\s\+\S))(?=[^\n]*\b(?:main|master)\b)/, action: "block", message: "main/masterへのforce pushは禁止されています" },
+  {
+    pattern:
+      /\bgit\b(?=[^\n]*\bpush\b)(?=[^\n]*(?:--force\b|--force-with-lease\b|\s-f\b|\s\+\S))(?=[^\n]*\b(?:main|master)\b)/,
+    action: "block",
+    message: "main/masterへのforce pushは禁止されています",
+  },
   { pattern: /git\s+reset\s+--hard/, action: "warn", message: "git reset --hardはコミットされていない変更を失います" },
   { pattern: /git\s+clean\s+-f/, action: "warn", message: "git cleanは追跡されていないファイルを削除します" },
 
   // Credential exposure
-  { pattern: /echo\s+.*(?:password|secret|token|api.?key)/i, action: "warn", message: "認証情報がログに記録される可能性があります" },
-  { pattern: /export\s+.*(?:PASSWORD|SECRET|TOKEN|API.?KEY)\s*=/i, action: "warn", message: "環境変数に認証情報を設定しています" },
+  {
+    pattern: /echo\s+.*(?:password|secret|token|api.?key)/i,
+    action: "warn",
+    message: "認証情報がログに記録される可能性があります",
+  },
+  {
+    pattern: /export\s+.*(?:PASSWORD|SECRET|TOKEN|API.?KEY)\s*=/i,
+    action: "warn",
+    message: "環境変数に認証情報を設定しています",
+  },
 ];
 
 export function checkCommand(command: string): SecurityRule | null {

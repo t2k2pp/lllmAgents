@@ -42,7 +42,7 @@ export function loadConfig(): Config {
     return [...new Set([...defaultList, ...savedList])];
   };
 
-  const savedSecurity = parsed.security ?? {} as Partial<Config["security"]>;
+  const savedSecurity = parsed.security ?? ({} as Partial<Config["security"]>);
   return {
     ...defaults,
     ...parsed,
@@ -51,8 +51,14 @@ export function loadConfig(): Config {
       ...savedSecurity,
       autoApproveTools: mergeToolList(defaults.security.autoApproveTools, savedSecurity.autoApproveTools),
       requireApprovalTools: mergeToolList(defaults.security.requireApprovalTools, savedSecurity.requireApprovalTools),
-      discordAutoApproveTools: mergeToolList(defaults.security.discordAutoApproveTools, savedSecurity.discordAutoApproveTools),
-      slackAutoApproveTools: mergeToolList(defaults.security.slackAutoApproveTools, savedSecurity.slackAutoApproveTools),
+      discordAutoApproveTools: mergeToolList(
+        defaults.security.discordAutoApproveTools,
+        savedSecurity.discordAutoApproveTools,
+      ),
+      slackAutoApproveTools: mergeToolList(
+        defaults.security.slackAutoApproveTools,
+        savedSecurity.slackAutoApproveTools,
+      ),
     },
     context: { ...defaults.context, ...parsed.context },
     discord: { ...(defaults.discord ?? { enabled: false, webhookUrl: "" }), ...parsed.discord },
@@ -112,7 +118,11 @@ export function saveConfig(config: Config): void {
   }
   // 直前の正常版を1世代残してからアトミックに書き込む (PR-02)。
   if (fs.existsSync(CONFIG_FILE)) {
-    try { fs.copyFileSync(CONFIG_FILE, CONFIG_BACKUP); } catch { /* バックアップ失敗は保存を止めない */ }
+    try {
+      fs.copyFileSync(CONFIG_FILE, CONFIG_BACKUP);
+    } catch {
+      /* バックアップ失敗は保存を止めない */
+    }
   }
   writeFileAtomic(CONFIG_FILE, JSON.stringify(config, null, 2));
   // API キーやトークンを含むため自ユーザーのみ読めるようにする (PR-04)

@@ -121,9 +121,7 @@ describe("ToDo / Goal lifecycle (docs/todo-goal-lifecycle.md)", () => {
     });
 
     it("buildTodoSection は completed のみ (active 0 件) の時は空文字を返す", () => {
-      setTodos([
-        { content: "done", status: "completed" },
-      ]);
+      setTodos([{ content: "done", status: "completed" }]);
       expect(buildTodoSection()).toBe("");
     });
 

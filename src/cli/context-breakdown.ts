@@ -147,9 +147,7 @@ export function buildContextBreakdown(
   // --- system message を抽出して内訳を計算
   const systemMsg = messages[0];
   const systemContent =
-    systemMsg && systemMsg.role === "system" && typeof systemMsg.content === "string"
-      ? systemMsg.content
-      : "";
+    systemMsg && systemMsg.role === "system" && typeof systemMsg.content === "string" ? systemMsg.content : "";
   const systemPromptTotal = estimateTokens(systemContent);
 
   const sections = splitByKnownHeaders(systemContent);
@@ -334,9 +332,7 @@ export function formatContextBreakdown(b: ContextBreakdown, cwd: string = proces
   out.push("");
   out.push(chalk.bold("  Context Usage"));
   out.push(chalk.dim(`    Model: ${b.model}`));
-  out.push(
-    chalk.dim(`    Used : ~${formatTokens(b.totalUsed)} / ${winLabel} tokens (${b.totalUsedPct.toFixed(1)}%)`),
-  );
+  out.push(chalk.dim(`    Used : ~${formatTokens(b.totalUsed)} / ${winLabel} tokens (${b.totalUsedPct.toFixed(1)}%)`));
   out.push(`    ${progressBarLine(b.totalUsedPct)}`);
   out.push("");
   out.push(chalk.dim("    Estimated usage by category"));
@@ -346,12 +342,7 @@ export function formatContextBreakdown(b: ContextBreakdown, cwd: string = proces
   out.push(categoryLine("⛁", chalk.gray, "System prompt", b.systemPrompt.core, win));
   out.push(subLine("Rules / env / profiles", `~${formatTokens(b.systemPrompt.core)} tokens`));
   if (b.systemPrompt.total !== b.systemPrompt.core) {
-    out.push(
-      subLine(
-        "(full system msg incl. memory+skills)",
-        `~${formatTokens(b.systemPrompt.total)} tokens`,
-      ),
-    );
+    out.push(subLine("(full system msg incl. memory+skills)", `~${formatTokens(b.systemPrompt.total)} tokens`));
   }
 
   // Memory files
@@ -390,17 +381,10 @@ export function formatContextBreakdown(b: ContextBreakdown, cwd: string = proces
   // System tools
   out.push(categoryLine("⛁", chalk.hex("#9333ea"), "System tools", b.tools.total, win));
   if (b.tools.builtIn.count > 0) {
-    out.push(
-      subLine(
-        `Built-in tools (${b.tools.builtIn.count})`,
-        `~${formatTokens(b.tools.builtIn.tokens)} tokens`,
-      ),
-    );
+    out.push(subLine(`Built-in tools (${b.tools.builtIn.count})`, `~${formatTokens(b.tools.builtIn.tokens)} tokens`));
   }
   if (b.tools.mcp.count > 0) {
-    out.push(
-      subLine(`MCP tools (${b.tools.mcp.count})`, `~${formatTokens(b.tools.mcp.tokens)} tokens`),
-    );
+    out.push(subLine(`MCP tools (${b.tools.mcp.count})`, `~${formatTokens(b.tools.mcp.tokens)} tokens`));
     for (const s of b.tools.mcp.servers) {
       out.push(subLine(`  ${s.name} (${s.tools})`, `~${formatTokens(s.tokens)} tokens`));
     }
@@ -414,11 +398,7 @@ export function formatContextBreakdown(b: ContextBreakdown, cwd: string = proces
   out.push(categoryLine("⛶", chalk.dim, "Free space", b.freeSpace, win));
 
   out.push("");
-  out.push(
-    chalk.dim(
-      "    /context <section> で中身を確認: system / memory / skills / tools / messages",
-    ),
-  );
+  out.push(chalk.dim("    /context <section> で中身を確認: system / memory / skills / tools / messages"));
   out.push(chalk.dim("    トークン値は推定 (CJK=1, ASCII≈4字/トークン)。 圧縮は /compact"));
   out.push("");
   return out.join("\n");
@@ -472,9 +452,7 @@ function pushBody(out: string[], body: string): void {
 function getSystemContent(agent: AgentLoop): string {
   const messages = agent.getHistory().getMessages();
   const systemMsg = messages[0];
-  return systemMsg && systemMsg.role === "system" && typeof systemMsg.content === "string"
-    ? systemMsg.content
-    : "";
+  return systemMsg && systemMsg.role === "system" && typeof systemMsg.content === "string" ? systemMsg.content : "";
 }
 
 function detailSystem(agent: AgentLoop): string {
@@ -484,9 +462,7 @@ function detailSystem(agent: AgentLoop): string {
   out.push("");
   out.push(chalk.bold("  Context detail: System prompt"));
   out.push(
-    chalk.dim(
-      `    システムメッセージ全体 ~${formatTokens(estimateTokens(content))} tokens (Memory/Skills を含む)`,
-    ),
+    chalk.dim(`    システムメッセージ全体 ~${formatTokens(estimateTokens(content))} tokens (Memory/Skills を含む)`),
   );
   out.push("");
   for (const s of sections) {
@@ -529,7 +505,9 @@ function detailMemory(agent: AgentLoop, cwd: string): string {
       for (const s of st) {
         if (s.applied) {
           out.push(
-            chalk.dim(`    └ ${s.label}: ${s.beforeTokens} → ${s.afterTokens} tokens に圧縮 (原文 ${s.original.length} 字は保持)`),
+            chalk.dim(
+              `    └ ${s.label}: ${s.beforeTokens} → ${s.afterTokens} tokens に圧縮 (原文 ${s.original.length} 字は保持)`,
+            ),
           );
         } else {
           out.push(chalk.dim(`    └ ${s.label}: 圧縮見送り=原文使用 (${s.note ?? "縮小せず"})`));
@@ -570,9 +548,7 @@ function detailMemory(agent: AgentLoop, cwd: string): string {
   }
   if (fs.existsSync(autoMemoryPath)) {
     out.push(
-      chalk.dim(
-        `      • ${shortenPath(autoMemoryPath, cwd)}  ~${formatTokens(safeFileTokens(autoMemoryPath))} tokens`,
-      ),
+      chalk.dim(`      • ${shortenPath(autoMemoryPath, cwd)}  ~${formatTokens(safeFileTokens(autoMemoryPath))} tokens`),
     );
   }
   out.push("");
@@ -661,15 +637,9 @@ function detailTools(agent: AgentLoop, toolName?: string): string {
     }))
     .sort((a, b) => b.tokens - a.tokens);
   const total = withTokens.reduce((acc, t) => acc + t.tokens, 0);
-  out.push(
-    chalk.dim(`    ${withTokens.length} 個のツール定義 (JSON) ~${formatTokens(total)} tokens、 トークン降順`),
-  );
-  out.push(
-    chalk.dim(`    全文 (description + parameters スキーマ) は /context tools <name> で確認`),
-  );
-  out.push(
-    chalk.dim(`    ※ plan mode / discord・slack 時は実際に送られるのはこの部分集合 (フィルタ後)`),
-  );
+  out.push(chalk.dim(`    ${withTokens.length} 個のツール定義 (JSON) ~${formatTokens(total)} tokens、 トークン降順`));
+  out.push(chalk.dim(`    全文 (description + parameters スキーマ) は /context tools <name> で確認`));
+  out.push(chalk.dim(`    ※ plan mode / discord・slack 時は実際に送られるのはこの部分集合 (フィルタ後)`));
   out.push("");
   for (const t of withTokens) {
     out.push(`    ${chalk.bold(t.name.padEnd(22))} ${chalk.dim(`~${formatTokens(t.tokens)} tok`)}`);
@@ -704,10 +674,8 @@ function detailMessages(agent: AgentLoop): string {
     const textContent =
       typeof m.content === "string"
         ? m.content
-        : m.content.map((p) => (p.type === "text" ? p.text ?? "" : "[image]")).join(" ");
-    out.push(
-      `    ${chalk.dim(`[${idx + 1}]`)} ${color(m.role.padEnd(9))} ${chalk.dim(`~${formatTokens(tok)} tok`)}`,
-    );
+        : m.content.map((p) => (p.type === "text" ? (p.text ?? "") : "[image]")).join(" ");
+    out.push(`    ${chalk.dim(`[${idx + 1}]`)} ${color(m.role.padEnd(9))} ${chalk.dim(`~${formatTokens(tok)} tok`)}`);
     if (textContent.trim()) {
       out.push(chalk.dim(`        ${preview(textContent, 160)}`));
     }

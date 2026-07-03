@@ -40,10 +40,7 @@ export function extendAncestors(current: AncestorTypes, origin: DelegationOrigin
  *   (second 同種再帰禁止 + 孫からの second 起動禁止)
  */
 export function excludedToolsFor(ancestors: AncestorTypes): Set<string> {
-  const excluded = new Set<string>([
-    "enter_plan_mode",
-    "exit_plan_mode",
-  ]);
+  const excluded = new Set<string>(["enter_plan_mode", "exit_plan_mode"]);
   if (ancestors.has("sub")) {
     excluded.add("task");
     excluded.add("task_output");

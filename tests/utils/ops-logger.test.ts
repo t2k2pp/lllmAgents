@@ -22,7 +22,8 @@ describe("OpsLogger", () => {
 
   function readEntries(): Array<Record<string, unknown>> {
     if (!fs.existsSync(tmpFile)) return [];
-    return fs.readFileSync(tmpFile, "utf-8")
+    return fs
+      .readFileSync(tmpFile, "utf-8")
       .split("\n")
       .filter((l) => l.length > 0)
       .map((l) => JSON.parse(l) as Record<string, unknown>);
@@ -122,7 +123,7 @@ describe("maskHeaders", () => {
     const masked = maskHeaders({
       "Content-Type": "application/json",
       "x-api-key": "secret-key",
-      "Authorization": "Bearer xxx",
+      Authorization: "Bearer xxx",
       "API-Key": "another",
     });
     expect(masked["Content-Type"]).toBe("application/json");

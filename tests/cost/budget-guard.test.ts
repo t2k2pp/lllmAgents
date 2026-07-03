@@ -4,7 +4,7 @@ import type { BudgetConfig } from "../../src/config/types.js";
 
 describe("BudgetGuard", () => {
   const defaultConfig: BudgetConfig = {
-    limitUsd: 10.00,
+    limitUsd: 10.0,
     warningThreshold: 0.8,
     stopThreshold: 0.95,
   };
@@ -66,7 +66,7 @@ describe("BudgetGuard", () => {
     it("設定のコピーが返される", () => {
       const guard = new BudgetGuard(defaultConfig);
       const config = guard.getConfig();
-      expect(config.limitUsd).toBe(10.00);
+      expect(config.limitUsd).toBe(10.0);
       expect(config.warningThreshold).toBe(0.8);
       expect(config.stopThreshold).toBe(0.95);
     });

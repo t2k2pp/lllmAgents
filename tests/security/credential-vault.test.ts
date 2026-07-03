@@ -31,9 +31,7 @@ describe("CredentialVault", () => {
     });
 
     it("encrypted: プレフィックスがない場合はエラーをスロー", () => {
-      expect(() => CredentialVault.decrypt("plain-text", "pass")).toThrow(
-        "Not an encrypted value",
-      );
+      expect(() => CredentialVault.decrypt("plain-text", "pass")).toThrow("Not an encrypted value");
     });
   });
 

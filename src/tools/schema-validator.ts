@@ -120,9 +120,7 @@ function matchesType(actual: string, expected: string): boolean {
  * 「次にどう直せばよいか」 が明確になるよう、 修正例を含める。
  */
 export function formatValidationError(toolName: string, errors: ValidationError[]): string {
-  const lines: string[] = [
-    `[schema validation] ${toolName} の引数が contract 違反です:`,
-  ];
+  const lines: string[] = [`[schema validation] ${toolName} の引数が contract 違反です:`];
   for (const e of errors) {
     if (e.kind === "missing") {
       lines.push(`  - 必須フィールド "${e.field}" がありません (期待型: ${e.expected})`);

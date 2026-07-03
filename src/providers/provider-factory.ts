@@ -32,10 +32,7 @@ function resolvePromptCache(): { enabled?: boolean; ttl?: "5m" | "1h" } {
  * LLMEndpoint / SecondLLMEndpoint 共通の Provider ファクトリ。
  * クラウド系 (vertex-ai, azure-*) は apiKey の復号 (env: / encrypted: / 平文) も担う。
  */
-function createProviderFromEndpoint(
-  endpoint: LLMEndpoint | SecondLLMEndpoint,
-  passphrase?: string,
-): LLMProvider {
+function createProviderFromEndpoint(endpoint: LLMEndpoint | SecondLLMEndpoint, passphrase?: string): LLMProvider {
   if (isCloudProvider(endpoint.providerType)) {
     switch (endpoint.providerType) {
       case "vertex-ai":
@@ -126,7 +123,9 @@ function createProviderFromEndpoint(
         const raw = endpoint.apiKey ?? "env:ANTHROPIC_API_KEY";
         const token = CredentialVault.resolve(raw, passphrase);
         if (!token) {
-          throw new Error("ANTHROPIC_API_KEY が見つかりません。/model setup anthropic で設定するか、 環境変数 ANTHROPIC_API_KEY をセットしてください。");
+          throw new Error(
+            "ANTHROPIC_API_KEY が見つかりません。/model setup anthropic で設定するか、 環境変数 ANTHROPIC_API_KEY をセットしてください。",
+          );
         }
         return new AnthropicProvider({
           apiKey: token,
@@ -164,7 +163,9 @@ function createProviderFromEndpoint(
         const raw = endpoint.apiKey ?? "env:GEMINI_API_KEY";
         const token = CredentialVault.resolve(raw, passphrase);
         if (!token) {
-          throw new Error("GEMINI_API_KEY が見つかりません。 /model setup gemini で設定するか、 環境変数 GEMINI_API_KEY をセットしてください。");
+          throw new Error(
+            "GEMINI_API_KEY が見つかりません。 /model setup gemini で設定するか、 環境変数 GEMINI_API_KEY をセットしてください。",
+          );
         }
         return new GeminiProvider({
           apiKey: token,

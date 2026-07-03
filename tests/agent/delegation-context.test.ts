@@ -134,12 +134,8 @@ describe("delegation-context: filterRegistryForAncestors", () => {
     const reg = makeFullRegistry();
     const subAncestors = extendAncestors(ROOT_ANCESTORS, "sub");
     // allowed に task が入っていても、 ancestors に sub があれば除外される
-    const filtered = filterRegistryForAncestors(reg, subAncestors, [
-      "task",
-      "file_read",
-      "bash",
-    ]);
-    expect(filtered.get("task")).toBeUndefined();   // allowed に入っていても sub 同種再帰で除外
+    const filtered = filterRegistryForAncestors(reg, subAncestors, ["task", "file_read", "bash"]);
+    expect(filtered.get("task")).toBeUndefined(); // allowed に入っていても sub 同種再帰で除外
     expect(filtered.get("file_read")).toBeDefined();
     expect(filtered.get("bash")).toBeDefined();
     // allowed に無いツールは除外

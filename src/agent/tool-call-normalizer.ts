@@ -198,11 +198,13 @@ function extractReActAction(text: string): NormalizationResult | null {
     // 命名規則は不明なので "input" で wrap (ツール側で拒否されればモデルが学習する)
     argsStr = JSON.stringify({ input: rawArgs });
   }
-  const toolCalls: ToolCall[] = [{
-    id: generateCallId(),
-    type: "function",
-    function: { name, arguments: argsStr },
-  }];
+  const toolCalls: ToolCall[] = [
+    {
+      id: generateCallId(),
+      type: "function",
+      function: { name, arguments: argsStr },
+    },
+  ];
   const cleanedText = text.replace(re, "").trim();
   return { toolCalls, cleanedText, format: "react" };
 }
@@ -228,11 +230,13 @@ function extractPlainJSONToolCall(text: string): NormalizationResult | null {
     if (!name) return null;
     const args = obj.arguments ?? obj.parameters ?? obj.input ?? {};
     const argsStr = typeof args === "string" ? args : JSON.stringify(args);
-    const toolCalls: ToolCall[] = [{
-      id: generateCallId(),
-      type: "function",
-      function: { name, arguments: argsStr },
-    }];
+    const toolCalls: ToolCall[] = [
+      {
+        id: generateCallId(),
+        type: "function",
+        function: { name, arguments: argsStr },
+      },
+    ];
     const cleanedText = (text.slice(0, startIdx) + text.slice(endIdx + 1)).trim();
     return { toolCalls, cleanedText, format: "plain-json" };
   } catch {
@@ -300,13 +304,23 @@ function scanBalancedBrace(text: string, start: number): number {
   let escape = false;
   for (let i = start; i < text.length; i++) {
     const ch = text[i];
-    if (escape) { escape = false; continue; }
-    if (ch === "\\") { escape = true; continue; }
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
     if (inStr) {
       if (ch === quote) inStr = false;
       continue;
     }
-    if (ch === '"' || ch === "'") { inStr = true; quote = ch; continue; }
+    if (ch === '"' || ch === "'") {
+      inStr = true;
+      quote = ch;
+      continue;
+    }
     if (ch === "{") depth++;
     else if (ch === "}") {
       depth--;
@@ -327,9 +341,7 @@ function lenientJsonParse(s: string): Record<string, unknown> | null {
   const tryParse = (str: string): Record<string, unknown> | null => {
     try {
       const v = JSON.parse(str);
-      return v !== null && typeof v === "object" && !Array.isArray(v)
-        ? (v as Record<string, unknown>)
-        : null;
+      return v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
     } catch {
       return null;
     }
@@ -372,7 +384,13 @@ function coerceLooseJson(s: string): string {
       i++;
       continue;
     }
-    if (ch === '"') { out += ch; inStr = true; prevStruct = '"'; i++; continue; }
+    if (ch === '"') {
+      out += ch;
+      inStr = true;
+      prevStruct = '"';
+      i++;
+      continue;
+    }
     if (ch === "'") {
       // シングルクオート文字列を読み切り、 デコードした実値を JSON.stringify で
       // 安全な JSON 文字列に変換する。 \' と \\ は解き、 それ以外の \X は字面を保つ。
@@ -382,24 +400,42 @@ function coerceLooseJson(s: string): string {
         const c = s[j];
         if (c === "\\" && j + 1 < s.length) {
           const next = s[j + 1];
-          if (next === "'") { val += "'"; j += 2; continue; }
-          if (next === "\\") { val += "\\"; j += 2; continue; }
-          val += c; j++; continue; // 他のエスケープ列は字面のまま (JSON.stringify が再エスケープ)
+          if (next === "'") {
+            val += "'";
+            j += 2;
+            continue;
+          }
+          if (next === "\\") {
+            val += "\\";
+            j += 2;
+            continue;
+          }
+          val += c;
+          j++;
+          continue; // 他のエスケープ列は字面のまま (JSON.stringify が再エスケープ)
         }
         if (c === "'") break;
-        val += c; j++;
+        val += c;
+        j++;
       }
       out += JSON.stringify(val);
       prevStruct = '"';
       i = j + 1;
       continue;
     }
-    if (isWs(ch)) { out += ch; i++; continue; } // 空白は prevStruct を変えない
+    if (isWs(ch)) {
+      out += ch;
+      i++;
+      continue;
+    } // 空白は prevStruct を変えない
     if ((prevStruct === "{" || prevStruct === ",") && /[A-Za-z_]/.test(ch)) {
       // 未クオートキー候補: 直後 (空白スキップ後) が `:` のときだけクオート化
       let j = i;
       let key = "";
-      while (j < s.length && isKeyChar(s[j])) { key += s[j]; j++; }
+      while (j < s.length && isKeyChar(s[j])) {
+        key += s[j];
+        j++;
+      }
       let k = j;
       while (k < s.length && isWs(s[k])) k++;
       if (s[k] === ":") {

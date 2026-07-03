@@ -1,9 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import {
-  formatMoney,
-  setDisplayJpyRate,
-  getDisplayJpyRate,
-} from "../../src/cost/money-format.js";
+import { formatMoney, setDisplayJpyRate, getDisplayJpyRate } from "../../src/cost/money-format.js";
 
 describe("formatMoney", () => {
   afterEach(() => setDisplayJpyRate(undefined));

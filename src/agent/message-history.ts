@@ -115,11 +115,7 @@ export class MessageHistory {
         if (m.role === "assistant" && m.thinking) {
           const baseContent = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
           const inlined =
-            `<thinking>\n` +
-            `**以下を踏まえ答えを出す**\n` +
-            `${m.thinking}\n` +
-            `</thinking>\n\n` +
-            `${baseContent}`;
+            `<thinking>\n` + `**以下を踏まえ答えを出す**\n` + `${m.thinking}\n` + `</thinking>\n\n` + `${baseContent}`;
           const out: Message = { role: m.role, content: inlined };
           if (m.tool_calls) out.tool_calls = m.tool_calls;
           if (m.tool_call_id) out.tool_call_id = m.tool_call_id;
@@ -250,9 +246,7 @@ export class MessageHistory {
       const prev = this.messages[boundary - 1];
       const startsWithToolResult = cur?.role === "tool";
       const prevHasToolCalls =
-        prev?.role === "assistant" &&
-        Array.isArray(prev.tool_calls) &&
-        prev.tool_calls.length > 0;
+        prev?.role === "assistant" && Array.isArray(prev.tool_calls) && prev.tool_calls.length > 0;
       if (startsWithToolResult || prevHasToolCalls) {
         boundary--;
       } else {
@@ -262,10 +256,7 @@ export class MessageHistory {
     if (boundary <= 0) return; // 全保持に倒す
 
     const recent = this.messages.slice(boundary);
-    this.messages = [
-      { role: "system", content: `[会話履歴の要約]\n${summary}` },
-      ...recent,
-    ];
+    this.messages = [{ role: "system", content: `[会話履歴の要約]\n${summary}` }, ...recent];
   }
 
   /** 直近 N 往復の会話テキストを返す（意図分類の文脈提供用） */

@@ -30,48 +30,58 @@ describe("ImageService", () => {
   });
 
   it("enabled=true でも active が無ければ無効 (ツール非登録)", () => {
-    const svc = new ImageService(makeConfig({
-      enabled: true,
-      profiles: [{ name: "a", providerType: "sd-webui", baseUrl: "http://localhost:7860" }],
-    }));
+    const svc = new ImageService(
+      makeConfig({
+        enabled: true,
+        profiles: [{ name: "a", providerType: "sd-webui", baseUrl: "http://localhost:7860" }],
+      }),
+    );
     expect(svc.getActiveProfile()).toBeNull();
     expect(svc.isEnabled()).toBe(false);
   });
 
   it("active が profiles に存在すれば有効", () => {
-    const svc = new ImageService(makeConfig({
-      enabled: true,
-      active: "a",
-      profiles: [{ name: "a", providerType: "sd-webui", baseUrl: "http://localhost:7860" }],
-    }));
+    const svc = new ImageService(
+      makeConfig({
+        enabled: true,
+        active: "a",
+        profiles: [{ name: "a", providerType: "sd-webui", baseUrl: "http://localhost:7860" }],
+      }),
+    );
     expect(svc.getActiveProfile()?.name).toBe("a");
     expect(svc.isEnabled()).toBe(true);
   });
 
   it("active が存在しない名前を指していたら null (削除後の整合)", () => {
-    const svc = new ImageService(makeConfig({
-      enabled: true,
-      active: "gone",
-      profiles: [{ name: "a", providerType: "sd-webui", baseUrl: "http://localhost:7860" }],
-    }));
+    const svc = new ImageService(
+      makeConfig({
+        enabled: true,
+        active: "gone",
+        profiles: [{ name: "a", providerType: "sd-webui", baseUrl: "http://localhost:7860" }],
+      }),
+    );
     expect(svc.getActiveProfile()).toBeNull();
   });
 
   it("enabled=false ならアクティブがあっても無効", () => {
-    const svc = new ImageService(makeConfig({
-      enabled: false,
-      active: "a",
-      profiles: [{ name: "a", providerType: "sd-webui", baseUrl: "http://localhost:7860" }],
-    }));
+    const svc = new ImageService(
+      makeConfig({
+        enabled: false,
+        active: "a",
+        profiles: [{ name: "a", providerType: "sd-webui", baseUrl: "http://localhost:7860" }],
+      }),
+    );
     expect(svc.isEnabled()).toBe(false);
   });
 
   it("generateAndSave は相対パスを拒否する (アプリ内ルール: 絶対パス必須)", async () => {
-    const svc = new ImageService(makeConfig({
-      enabled: true,
-      active: "a",
-      profiles: [{ name: "a", providerType: "sd-webui", baseUrl: "http://localhost:7860" }],
-    }));
+    const svc = new ImageService(
+      makeConfig({
+        enabled: true,
+        active: "a",
+        profiles: [{ name: "a", providerType: "sd-webui", baseUrl: "http://localhost:7860" }],
+      }),
+    );
     await expect(svc.generateAndSave({ prompt: "x" }, "relative/out.png")).rejects.toThrow(/絶対パス/);
   });
 });

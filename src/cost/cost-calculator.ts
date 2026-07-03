@@ -10,20 +10,11 @@ export class CostCalculator {
   /**
    * 通常のコスト計算
    */
-  calculate(
-    inputTokens: number,
-    outputTokens: number,
-    pricing: ModelPricing,
-  ): number {
-    return (inputTokens * pricing.inputPerMToken / 1_000_000)
-         + (outputTokens * pricing.outputPerMToken / 1_000_000);
+  calculate(inputTokens: number, outputTokens: number, pricing: ModelPricing): number {
+    return (inputTokens * pricing.inputPerMToken) / 1_000_000 + (outputTokens * pricing.outputPerMToken) / 1_000_000;
   }
 
-  calculateForModel(
-    model: string,
-    inputTokens: number,
-    outputTokens: number,
-  ): number {
+  calculateForModel(model: string, inputTokens: number, outputTokens: number): number {
     const pricing = getModelPricing(model);
     if (!pricing) return 0;
     return this.calculate(inputTokens, outputTokens, pricing);
@@ -34,12 +25,7 @@ export class CostCalculator {
    * cachedTokens は inputTokens の内数 (キャッシュヒットした入力分)。
    * pricing に cachedInputPerMToken が無ければ通常入力単価にフォールバック (= 割引なし)。
    */
-  calculateForModelWithCache(
-    model: string,
-    inputTokens: number,
-    outputTokens: number,
-    cachedTokens: number,
-  ): number {
+  calculateForModelWithCache(model: string, inputTokens: number, outputTokens: number, cachedTokens: number): number {
     const pricing = getModelPricing(model);
     if (!pricing) return 0;
     return this.calculateWithCache(inputTokens, outputTokens, cachedTokens, pricing);
@@ -49,17 +35,14 @@ export class CostCalculator {
    * キャッシュ考慮のコスト計算 (OpenAI セマンティクス)。
    * inputTokens は cachedTokens を **内包** する前提 (OpenAI/Azure GPT の prompt_tokens)。
    */
-  calculateWithCache(
-    inputTokens: number,
-    outputTokens: number,
-    cachedTokens: number,
-    pricing: ModelPricing,
-  ): number {
+  calculateWithCache(inputTokens: number, outputTokens: number, cachedTokens: number, pricing: ModelPricing): number {
     const uncachedInput = inputTokens - cachedTokens;
     const cachedRate = pricing.cachedInputPerMToken ?? pricing.inputPerMToken;
-    return (uncachedInput * pricing.inputPerMToken / 1_000_000)
-         + (cachedTokens * cachedRate / 1_000_000)
-         + (outputTokens * pricing.outputPerMToken / 1_000_000);
+    return (
+      (uncachedInput * pricing.inputPerMToken) / 1_000_000 +
+      (cachedTokens * cachedRate) / 1_000_000 +
+      (outputTokens * pricing.outputPerMToken) / 1_000_000
+    );
   }
 
   /**
@@ -79,10 +62,12 @@ export class CostCalculator {
   ): number {
     const cachedRate = pricing.cachedInputPerMToken ?? pricing.inputPerMToken;
     const cacheWriteRate = pricing.inputPerMToken * 1.25;
-    return (uncachedInputTokens * pricing.inputPerMToken / 1_000_000)
-         + (cacheReadTokens * cachedRate / 1_000_000)
-         + (cacheCreationTokens * cacheWriteRate / 1_000_000)
-         + (outputTokens * pricing.outputPerMToken / 1_000_000);
+    return (
+      (uncachedInputTokens * pricing.inputPerMToken) / 1_000_000 +
+      (cacheReadTokens * cachedRate) / 1_000_000 +
+      (cacheCreationTokens * cacheWriteRate) / 1_000_000 +
+      (outputTokens * pricing.outputPerMToken) / 1_000_000
+    );
   }
 
   /** モデル名から Anthropic セマンティクスの内訳コストを計算 */
@@ -96,18 +81,18 @@ export class CostCalculator {
     const pricing = getModelPricing(model);
     if (!pricing) return 0;
     return this.calculateWithCacheBreakdown(
-      uncachedInputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, pricing,
+      uncachedInputTokens,
+      outputTokens,
+      cacheReadTokens,
+      cacheCreationTokens,
+      pricing,
     );
   }
 
   /**
    * ローカルLLM利用時のクラウド参考コスト算出
    */
-  calculateReferencesCosts(
-    inputTokens: number,
-    outputTokens: number,
-    referenceModels: string[],
-  ): ReferenceCost[] {
+  calculateReferencesCosts(inputTokens: number, outputTokens: number, referenceModels: string[]): ReferenceCost[] {
     return referenceModels
       .map((model) => {
         const pricing = getModelPricing(model);

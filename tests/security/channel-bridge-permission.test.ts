@@ -14,11 +14,7 @@ import {
   getInteractionBridge,
   clearInteractionBridges,
 } from "../../src/agent/interaction-bridge-registry.js";
-import type {
-  InteractionBridge,
-  PermissionRequest,
-  PermissionDecision,
-} from "../../src/agent/agent-events.js";
+import type { InteractionBridge, PermissionRequest, PermissionDecision } from "../../src/agent/agent-events.js";
 
 // A-2: チャネル権限のブリッジフロー (docs/channel-interaction-bridge-design.md §3)
 
@@ -68,7 +64,11 @@ describe("interaction-bridge-registry", () => {
 describe("checkToolPermission (channel + bridge)", () => {
   it("autorun 無効 + ブリッジ未登録なら headless 拒否", async () => {
     const pm = new PermissionManager(mkConfig({ slackAutorun: false }));
-    const r = await pm.checkToolPermission("file_write", { file_path: `${process.cwd()}/a.txt`, content: "x" }, "slack");
+    const r = await pm.checkToolPermission(
+      "file_write",
+      { file_path: `${process.cwd()}/a.txt`, content: "x" },
+      "slack",
+    );
     expect(r.allowed).toBe(false);
     expect(r.reason).toContain("Slack経由では");
   });
@@ -78,7 +78,11 @@ describe("checkToolPermission (channel + bridge)", () => {
     const { bridge, calls } = mkBridge("deny");
     setInteractionBridge("slack", bridge);
     const pm = new PermissionManager(mkConfig()); // autorun 未指定=true
-    const r = await pm.checkToolPermission("file_write", { file_path: `${process.cwd()}/a.txt`, content: "x" }, "slack");
+    const r = await pm.checkToolPermission(
+      "file_write",
+      { file_path: `${process.cwd()}/a.txt`, content: "x" },
+      "slack",
+    );
     expect(r.allowed).toBe(true);
     expect(calls.length).toBe(0); // 同期ボタン確認を呼ばない (失効トークンに依存しない)
   });
@@ -89,7 +93,9 @@ describe("checkToolPermission (channel + bridge)", () => {
 
     const pm = new PermissionManager(mkConfig());
     const outside = process.platform === "win32" ? "C:\\Windows\\evil.txt" : "/etc/evil.txt";
-    expect((await pm.checkToolPermission("file_write", { file_path: outside, content: "x" }, "slack")).allowed).toBe(false);
+    expect((await pm.checkToolPermission("file_write", { file_path: outside, content: "x" }, "slack")).allowed).toBe(
+      false,
+    );
     expect((await pm.checkToolPermission("bash", { command: "rm -rf /" }, "slack")).allowed).toBe(false);
   });
 
@@ -244,7 +250,11 @@ describe("checkToolPermission (channel + bridge)", () => {
   it("autorun(既定) の sandbox 内 file_write は封じ込め非依存で許可 (bash 以外はゲートしない)", async () => {
     vi.mocked(isBashNetworkContained).mockReturnValue(false);
     const pm = new PermissionManager(mkConfig());
-    const r = await pm.checkToolPermission("file_write", { file_path: `${process.cwd()}/a.txt`, content: "x" }, "discord");
+    const r = await pm.checkToolPermission(
+      "file_write",
+      { file_path: `${process.cwd()}/a.txt`, content: "x" },
+      "discord",
+    );
     expect(r.allowed).toBe(true);
   });
 });
@@ -272,10 +282,7 @@ describe("ask_user のチャネルブリッジ (A-3)", () => {
 
   it("ブリッジ未登録のチャネルではエラーを返す (ハングしない)", async () => {
     const { askUserTool } = await import("../../src/tools/definitions/ask-user.js");
-    const result = await askUserTool.execute(
-      { question: "Q?" },
-      { ancestors: new Set(), source: "discord" },
-    );
+    const result = await askUserTool.execute({ question: "Q?" }, { ancestors: new Set(), source: "discord" });
     expect(result.success).toBe(false);
     expect(result.error).toContain("対話ブリッジ");
   });
@@ -287,12 +294,8 @@ describe("ask_user のチャネルブリッジ (A-3)", () => {
       },
     });
     const { askUserTool } = await import("../../src/tools/definitions/ask-user.js");
-    const result = await askUserTool.execute(
-      { question: "Q?" },
-      { ancestors: new Set(), source: "slack" },
-    );
+    const result = await askUserTool.execute({ question: "Q?" }, { ancestors: new Set(), source: "slack" });
     expect(result.success).toBe(false);
     expect(result.error).toContain("タイムアウト");
   });
 });
-

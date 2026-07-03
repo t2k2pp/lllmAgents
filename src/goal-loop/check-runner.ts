@@ -69,10 +69,7 @@ export interface RunCheckOptions {
  * 検証コマンドを直接実行して結果を返す。LLM を経由しない (= 決定的ゲート)。
  * 例外は投げず、失敗も CheckResult として返す (ループ側で扱いやすくするため)。
  */
-export async function runCheck(
-  command: string,
-  opts: RunCheckOptions = {},
-): Promise<CheckResult> {
+export async function runCheck(command: string, opts: RunCheckOptions = {}): Promise<CheckResult> {
   const cwd = opts.cwd ?? process.cwd();
   const timeoutMs = opts.timeoutMs ?? 120_000;
   const { shell, args } = resolveShell(command);
@@ -141,7 +138,7 @@ export async function runCheck(
       finish(-1);
     });
     proc.on("close", (code: number | null) => {
-      finish(timedOut ? 124 : code ?? -1);
+      finish(timedOut ? 124 : (code ?? -1));
     });
   });
 }

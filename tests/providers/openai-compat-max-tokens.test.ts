@@ -16,18 +16,16 @@ describe("OpenAICompatProvider: max_tokens 送信ポリシー", () => {
 
   beforeEach(() => {
     capturedBody = undefined;
-    vi.spyOn(httpClient, "httpPostStream").mockImplementation(
-      async (_url, body) => {
-        capturedBody = body as Record<string, unknown>;
-        // 即座に [DONE] を返す空ストリームを返却
-        return new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
-            controller.close();
-          },
-        });
-      },
-    );
+    vi.spyOn(httpClient, "httpPostStream").mockImplementation(async (_url, body) => {
+      capturedBody = body as Record<string, unknown>;
+      // 即座に [DONE] を返す空ストリームを返却
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      });
+    });
   });
 
   afterEach(() => {

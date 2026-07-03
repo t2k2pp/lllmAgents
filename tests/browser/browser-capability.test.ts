@@ -1,16 +1,12 @@
 import { describe, it, expect, afterEach } from "vitest";
-import {
-  probeBrowserCapability,
-  getBrowserCapability,
-} from "../../src/browser/browser-capability.js";
+import { probeBrowserCapability, getBrowserCapability } from "../../src/browser/browser-capability.js";
 import type { Config } from "../../src/config/types.js";
 
 // capability ゲートの「強制制御」（env / config）を固定する回帰テスト。
 // docs/exe-playwright-externalization.md §B。auto プローブ（実 playwright 解決）は
 // 環境依存のためここでは強制パスのみを対象にする。
 
-const cfg = (browser?: "auto" | "on" | "off"): Config =>
-  ({ features: { browser } }) as unknown as Config;
+const cfg = (browser?: "auto" | "on" | "off"): Config => ({ features: { browser } }) as unknown as Config;
 
 afterEach(() => {
   delete process.env.LOCALLLM_NO_BROWSER;

@@ -71,12 +71,7 @@ export class PlanManager {
 
     if (!process.stdin.isTTY) {
       // 非TTYモード（パイプ等）: テキストメニューにフォールバック
-      process.stdout.write(
-        `  1: 承認して実装開始\n` +
-        `  2: フィードバックを追加\n` +
-        `  3: 却下\n` +
-        `選択 [1-3]: `,
-      );
+      process.stdout.write(`  1: 承認して実装開始\n` + `  2: フィードバックを追加\n` + `  3: 却下\n` + `選択 [1-3]: `);
       const answer = await nonTTYReader.readLine();
       const map: Record<string, string> = { "1": "approve", "2": "feedback", "3": "reject" };
       action = map[answer?.trim()] ?? "approve";
@@ -141,10 +136,20 @@ export class PlanManager {
     // 全ツール許可。ツール制限ではなくシステムプロンプト+ハーネス検出で制御する
     // （Claude Codeと同じアプローチ: 行動方針として制限、機械的ブロックはしない）
     return new Set([
-      "file_read", "file_write", "file_edit", "glob", "grep",
-      "web_fetch", "web_search", "bash",
-      "ask_user", "todo_write", "exit_plan_mode",
-      "enter_plan_mode", "knowledge_search", "knowledge_save",
+      "file_read",
+      "file_write",
+      "file_edit",
+      "glob",
+      "grep",
+      "web_fetch",
+      "web_search",
+      "bash",
+      "ask_user",
+      "todo_write",
+      "exit_plan_mode",
+      "enter_plan_mode",
+      "knowledge_search",
+      "knowledge_save",
       "second_llm_agent",
     ]);
   }

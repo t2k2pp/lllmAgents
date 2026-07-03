@@ -55,10 +55,7 @@ describe("cost-view formatSummary", () => {
 describe("cost-view formatModels", () => {
   it("モデル別の単価と算出根拠、 未登録警告を出す", () => {
     const out = text(
-      formatModels(SESSION, [
-        rec({ model: "gpt-5.4" }),
-        rec({ model: "totally-fake-model-xyz", estimatedCostUsd: 0 }),
-      ]),
+      formatModels(SESSION, [rec({ model: "gpt-5.4" }), rec({ model: "totally-fake-model-xyz", estimatedCostUsd: 0 })]),
     );
     expect(out).toContain("単価(in/out $/M)");
     expect(out).toContain("2.50 / 15.00"); // gpt-5.4 builtin pricing
@@ -69,9 +66,7 @@ describe("cost-view formatModels", () => {
   });
 
   it("jpyPerUsd 指定時は cost 列ヘッダが cost(¥) になり円表示する", () => {
-    const out = text(
-      formatModels(SESSION, [rec({ model: "gpt-5.4", estimatedCostUsd: 0.02 })], 150),
-    );
+    const out = text(formatModels(SESSION, [rec({ model: "gpt-5.4", estimatedCostUsd: 0.02 })], 150));
     expect(out).toContain("cost(¥)");
     expect(out).toContain("¥3"); // 0.02 USD * 150 = ¥3
     expect(out).toContain("2.50 / 15.00"); // 単価列は USD 据え置き

@@ -11,21 +11,31 @@
 //  - ユーザー独自スキル = 完全に無視
 //  - メタ: ~/.localllm/.skills-sync-meta.json
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, cpSync, rmSync, readdirSync, renameSync, statSync } from 'node:fs';
-import { join, dirname, resolve, relative } from 'node:path';
-import { homedir } from 'node:os';
-import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  cpSync,
+  rmSync,
+  readdirSync,
+  renameSync,
+  statSync,
+} from "node:fs";
+import { join, dirname, resolve, relative } from "node:path";
+import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, '..');
-const SRC_BUILTIN = join(ROOT, 'src', 'skills', 'builtin');
-const USER_SKILLS = join(homedir(), '.localllm', 'skills');
-const META_PATH = join(homedir(), '.localllm', '.skills-sync-meta.json');
+const ROOT = resolve(__dirname, "..");
+const SRC_BUILTIN = join(ROOT, "src", "skills", "builtin");
+const USER_SKILLS = join(homedir(), ".localllm", "skills");
+const META_PATH = join(homedir(), ".localllm", ".skills-sync-meta.json");
 
 const argv = new Set(process.argv.slice(2));
-const VERBOSE = argv.has('--verbose');
-const FORCE = argv.has('--force');
+const VERBOSE = argv.has("--verbose");
+const FORCE = argv.has("--force");
 
 function log(msg) {
   if (VERBOSE) console.error(`[sync-skills] ${msg}`);
@@ -36,7 +46,7 @@ function walkFiles(dir, base = dir, out = []) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
     if (e.isDirectory()) walkFiles(p, base, out);
-    else if (e.isFile()) out.push(relative(base, p).replace(/\\/g, '/'));
+    else if (e.isFile()) out.push(relative(base, p).replace(/\\/g, "/"));
   }
   return out;
 }
@@ -44,24 +54,27 @@ function walkFiles(dir, base = dir, out = []) {
 function hashDir(dir) {
   if (!existsSync(dir)) return null;
   const files = walkFiles(dir).sort();
-  const h = createHash('sha1');
+  const h = createHash("sha1");
   for (const rel of files) {
-    h.update(rel).update('\0');
+    h.update(rel).update("\0");
     h.update(readFileSync(join(dir, rel)));
-    h.update('\0');
+    h.update("\0");
   }
-  return h.digest('hex');
+  return h.digest("hex");
 }
 
 function readMeta() {
   if (!existsSync(META_PATH)) return { skills: {} };
-  try { return JSON.parse(readFileSync(META_PATH, 'utf8')); }
-  catch { return { skills: {} }; }
+  try {
+    return JSON.parse(readFileSync(META_PATH, "utf8"));
+  } catch {
+    return { skills: {} };
+  }
 }
 
 function writeMeta(meta) {
   mkdirSync(dirname(META_PATH), { recursive: true });
-  writeFileSync(META_PATH, JSON.stringify(meta, null, 2) + '\n');
+  writeFileSync(META_PATH, JSON.stringify(meta, null, 2) + "\n");
 }
 
 function copyDir(from, to) {
@@ -99,7 +112,11 @@ function main() {
     .filter((e) => e.isDirectory())
     .map((e) => e.name);
 
-  let added = 0, updated = 0, skipped = 0, preserved = 0, removed = 0;
+  let added = 0,
+    updated = 0,
+    skipped = 0,
+    preserved = 0,
+    removed = 0;
 
   for (const name of builtinNames) {
     const srcDir = join(SRC_BUILTIN, name);
@@ -159,7 +176,9 @@ function main() {
     preserved && `preserved:${preserved}`,
     removed && `removed:${removed}`,
     skipped && `=${skipped}`,
-  ].filter(Boolean).join(' ');
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   if (summary) console.error(`[sync-skills] ${summary}`);
 }

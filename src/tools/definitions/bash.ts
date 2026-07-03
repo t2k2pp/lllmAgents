@@ -26,7 +26,9 @@ function findGitBash(): string | null {
     const result = execFileSync("where", ["bash.exe"], { encoding: "utf-8", timeout: 3000 });
     const first = result.trim().split("\n")[0]?.trim();
     if (first && fs.existsSync(first)) return first;
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return null;
 }
 
@@ -51,7 +53,7 @@ function convertWindowsPaths(command: string): string {
   // 後ろにパス構成文字が続くバックスラッシュのみ変換
   return command.replace(
     /([A-Za-z]):\\([\w.\-\\/ ]+)/g,
-    (_match, drive: string, rest: string) => `${drive}:/${rest.replace(/\\/g, '/')}`
+    (_match, drive: string, rest: string) => `${drive}:/${rest.replace(/\\/g, "/")}`,
   );
 }
 
@@ -186,10 +188,7 @@ export const bashTool: BashToolHandler = {
         const config = loadConfig();
         // ~/.localllm は bash の書込許可に含めない（自アプリの config/API キー/セッションの
         // 改ざんを防ぐ。 読取も機密として遮断＝process-sandbox の computeSecretProtection）。
-        const allowedWriteDirs = [
-          process.cwd(),
-          ...config.security.allowedDirectories,
-        ];
+        const allowedWriteDirs = [process.cwd(), ...config.security.allowedDirectories];
         // fs レベルなら在プロセスプロキシを起動し、 ネットを allowlist 経由に閉じる。
         //  - macOS (2b-1): Seatbelt が 127.0.0.1:proxyPort のみ許可。直結は遮断。
         //  - Linux/WSL2 (2b-2): bwrap --unshare-net + unix ソケット + socat ブリッジ。
@@ -364,5 +363,9 @@ function killProcessTree(proc: ChildProcess): void {
     }
   }
   // 非Windows or taskkill失敗時: 通常のkill
-  try { proc.kill(); } catch { /* ignore */ }
+  try {
+    proc.kill();
+  } catch {
+    /* ignore */
+  }
 }

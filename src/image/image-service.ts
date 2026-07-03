@@ -96,7 +96,7 @@ export class ImageService {
       fs.mkdirSync(dir, { recursive: true });
     }
     const ext = path.extname(outputPath) || ".png";
-    const stem = outputPath.slice(0, outputPath.length - (path.extname(outputPath).length));
+    const stem = outputPath.slice(0, outputPath.length - path.extname(outputPath).length);
     const savedPaths: string[] = [];
     result.images.forEach((buf, i) => {
       const p = i === 0 ? `${stem}${ext}` : `${stem}-${i + 1}${ext}`;

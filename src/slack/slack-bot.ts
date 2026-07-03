@@ -107,7 +107,7 @@ export class SlackBot implements InteractionBridge {
     if (!this.config.allowedUserIds || this.config.allowedUserIds.length === 0) {
       console.warn(
         "  [警告] slack.allowedUserIds が未設定です。 fail-closed のため誰のメッセージも受け付けません。\n" +
-        "         config の slack.allowedUserIds に許可するユーザー ID を設定してください。",
+          "         config の slack.allowedUserIds に許可するユーザー ID を設定してください。",
       );
     }
 
@@ -199,9 +199,7 @@ export class SlackBot implements InteractionBridge {
     // pending 中は同スレッド (DM は同チャネル)・依頼者本人の次メッセージを回答として消費する
     if (this.pendingText && prompt) {
       const p = this.pendingText;
-      const matches = p.userId === userId &&
-        p.channel === channel &&
-        (p.isDM || p.threadTs === threadRoot);
+      const matches = p.userId === userId && p.channel === channel && (p.isDM || p.threadTs === threadRoot);
       if (matches) {
         this.pendingText = null;
         p.resolve(prompt);
@@ -236,9 +234,7 @@ export class SlackBot implements InteractionBridge {
 
     // 受信順グローバル FIFO キューに積む (docs/room-model-design.md §11)。 拒否せず並ばせる。
     const ctx: ConversationContext = { channel, threadTs: threadRoot, userId, isDM };
-    const { position, result } = this.roomQueue.enqueue(() =>
-      this.processRequest(prompt, ctx, say),
-    );
+    const { position, result } = this.roomQueue.enqueue(() => this.processRequest(prompt, ctx, say));
     if (position > 0) {
       await say({
         text: `:hourglass_flowing_sand: キューに追加しました（前に ${position} 件）`,
@@ -351,11 +347,12 @@ export class SlackBot implements InteractionBridge {
     let display: string;
     if (pending.kind === "permission") {
       resolved = choice;
-      display = choice === "allow_once"
-        ? "✅ 許可 (今回のみ)"
-        : choice === "allow_session"
-          ? "✅ 許可 (セッション中)"
-          : "⛔ 拒否";
+      display =
+        choice === "allow_once"
+          ? "✅ 許可 (今回のみ)"
+          : choice === "allow_session"
+            ? "✅ 許可 (セッション中)"
+            : "⛔ 拒否";
     } else if (choice === OTHER_VALUE) {
       resolved = OTHER_VALUE;
       display = "✏️ 自由入力を選択";

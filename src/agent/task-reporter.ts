@@ -87,9 +87,7 @@ export function formatTaskReport(e: TaskCompleteEvent, maxResponseChars = 800): 
   const response = e.finalResponse.trim();
   if (response) {
     lines.push("");
-    lines.push(response.length > maxResponseChars
-      ? response.slice(0, maxResponseChars) + "\n…(以下省略)"
-      : response);
+    lines.push(response.length > maxResponseChars ? response.slice(0, maxResponseChars) + "\n…(以下省略)" : response);
   } else if (e.outcome !== "completed") {
     lines.push("");
     lines.push("（最終応答はありません。ターミナル側のログを確認してください）");

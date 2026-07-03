@@ -13,12 +13,7 @@ import type { RequestSource } from "../security/permission-manager.js";
 import * as logger from "../utils/logger.js";
 
 /** run() 全体の終了区分。 docs/agent-events-design.md §3.1 */
-export type TaskOutcome =
-  | "completed"
-  | "aborted"
-  | "error"
-  | "max_iterations"
-  | "incomplete";
+export type TaskOutcome = "completed" | "aborted" | "error" | "max_iterations" | "incomplete";
 
 export interface AgentEventMap {
   /** run() 開始 */
@@ -83,9 +78,7 @@ export interface AgentEventMap {
 
 export type AgentEventName = keyof AgentEventMap;
 
-export type AgentEventListener<E extends AgentEventName> = (
-  payload: AgentEventMap[E],
-) => void | Promise<void>;
+export type AgentEventListener<E extends AgentEventName> = (payload: AgentEventMap[E]) => void | Promise<void>;
 
 /** 購読解除関数 */
 export type Unsubscribe = () => void;
@@ -123,9 +116,7 @@ export class AgentEventBus {
         const r = (listener as AgentEventListener<E>)(payload) as unknown;
         // async リスナーの未捕捉 rejection も握りつぶさず debug ログへ
         if (r instanceof Promise) {
-          r.catch((e) =>
-            logger.debug(`AgentEventBus async listener error (${event}): ${e}`),
-          );
+          r.catch((e) => logger.debug(`AgentEventBus async listener error (${event}): ${e}`));
         }
       } catch (e) {
         logger.debug(`AgentEventBus listener error (${event}): ${e}`);

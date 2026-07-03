@@ -59,7 +59,9 @@ function validateOutput(workerResponse: string, expected: ExpectedOutput): Valid
     } else {
       const stat = fs.statSync(p);
       if (expected.expected_min_bytes && stat.size < expected.expected_min_bytes) {
-        reasons.push(`expected_file is ${stat.size} bytes, less than expected_min_bytes=${expected.expected_min_bytes}`);
+        reasons.push(
+          `expected_file is ${stat.size} bytes, less than expected_min_bytes=${expected.expected_min_bytes}`,
+        );
       }
       if (expected.expected_file_contains) {
         const content = fs.readFileSync(p, "utf-8");
@@ -78,7 +80,9 @@ function validateOutput(workerResponse: string, expected: ExpectedOutput): Valid
     try {
       const re = new RegExp(expected.expected_response_contains);
       if (!re.test(workerResponse)) {
-        reasons.push(`expected_response_contains pattern "${expected.expected_response_contains}" not in worker response`);
+        reasons.push(
+          `expected_response_contains pattern "${expected.expected_response_contains}" not in worker response`,
+        );
       }
     } catch (err) {
       reasons.push(`invalid regex for expected_response_contains: ${err}`);
@@ -98,30 +102,35 @@ export const federatedDelegateTool: ToolHandler = {
         "second_llm_agent との違いは「期待出力の明示」 と「結果の自動検証」。 worker が期待を満たさなければ自動で失敗を返し、 supervisor がやり直しを判断できる。\n" +
         "[使うべき場面] (1) 自分 (T1) のコンテキスト消費が惜しい routine 実装。 (2) 期待出力が明確に検証可能 (= ファイル生成 + 中身パターン)。 (3) 失敗時に supervisor が引き取れる粒度。\n" +
         "[使うべきでない] (1) 設計判断・複雑な推論 → supervisor 自身でやる。 (2) 期待出力が曖昧 → second_llm_agent (期待検証なし) を使う。 (3) second LLM 未設定 → エラーになるので /second setup を先に。\n" +
-        "[期待出力の例] expected_file_path=/abs/main.py + expected_file_contains=\"def main\" + expected_min_bytes=100。\n" +
+        '[期待出力の例] expected_file_path=/abs/main.py + expected_file_contains="def main" + expected_min_bytes=100。\n' +
         "[validation 失敗時] worker のレスポンス本文 + 失敗理由が返る。 supervisor は: (a) より具体的な指示で再委譲 / (b) 自分でやり直し / (c) ask_user で確認。",
       parameters: {
         type: "object",
         properties: {
           task: {
             type: "string",
-            description: "worker (= second LLM) に実行させるタスクの完全な指示。 必要なコンテキスト・制約・保存先パスを全て含める。",
+            description:
+              "worker (= second LLM) に実行させるタスクの完全な指示。 必要なコンテキスト・制約・保存先パスを全て含める。",
           },
           expected_file_path: {
             type: "string",
-            description: "[validation 用・任意] worker が作成すべきファイルの絶対パス。 これが存在しなければ validation 失敗。",
+            description:
+              "[validation 用・任意] worker が作成すべきファイルの絶対パス。 これが存在しなければ validation 失敗。",
           },
           expected_file_contains: {
             type: "string",
-            description: "[validation 用・任意] expected_file_path の中身に正規表現でマッチすべき pattern。 例: \"def main\\\\(\" や \"<title>\"。",
+            description:
+              '[validation 用・任意] expected_file_path の中身に正規表現でマッチすべき pattern。 例: "def main\\\\(" や "<title>"。',
           },
           expected_response_contains: {
             type: "string",
-            description: "[validation 用・任意] worker の return テキストに含まれるべき正規表現 pattern。 worker が「完了サマリ」 をどう書くべきか規定する。",
+            description:
+              "[validation 用・任意] worker の return テキストに含まれるべき正規表現 pattern。 worker が「完了サマリ」 をどう書くべきか規定する。",
           },
           expected_min_bytes: {
             type: "number",
-            description: "[validation 用・任意] expected_file_path の最小バイト数。 空ファイル/極小ファイルを失敗にする。",
+            description:
+              "[validation 用・任意] expected_file_path の最小バイト数。 空ファイル/極小ファイルを失敗にする。",
           },
         },
         required: ["task"],
@@ -144,8 +153,10 @@ export const federatedDelegateTool: ToolHandler = {
 
     const expected: ExpectedOutput = {
       expected_file_path: typeof params.expected_file_path === "string" ? params.expected_file_path : undefined,
-      expected_file_contains: typeof params.expected_file_contains === "string" ? params.expected_file_contains : undefined,
-      expected_response_contains: typeof params.expected_response_contains === "string" ? params.expected_response_contains : undefined,
+      expected_file_contains:
+        typeof params.expected_file_contains === "string" ? params.expected_file_contains : undefined,
+      expected_response_contains:
+        typeof params.expected_response_contains === "string" ? params.expected_response_contains : undefined,
       expected_min_bytes: typeof params.expected_min_bytes === "number" ? params.expected_min_bytes : undefined,
     };
 
@@ -168,9 +179,10 @@ export const federatedDelegateTool: ToolHandler = {
 
     // 自動 validation
     const v = validateOutput(workerResponse, expected);
-    const validationSummary = expected.expected_file_path || expected.expected_file_contains || expected.expected_response_contains
-      ? `\n\n[federated_delegate validation] ${v.passed ? "PASSED" : "FAILED"}${v.reasons.length > 0 ? "\n  - " + v.reasons.join("\n  - ") : ""}`
-      : "\n\n[federated_delegate validation] (no expected output specified — worker response not validated)";
+    const validationSummary =
+      expected.expected_file_path || expected.expected_file_contains || expected.expected_response_contains
+        ? `\n\n[federated_delegate validation] ${v.passed ? "PASSED" : "FAILED"}${v.reasons.length > 0 ? "\n  - " + v.reasons.join("\n  - ") : ""}`
+        : "\n\n[federated_delegate validation] (no expected output specified — worker response not validated)";
 
     if (!v.passed) {
       return {

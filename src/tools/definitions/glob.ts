@@ -88,8 +88,12 @@ function buildNoMatchHint(pattern: string, cwd: string): string {
     const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name + "/");
     const files = entries.filter((e) => e.isFile()).map((e) => e.name);
     const summary: string[] = [];
-    if (dirs.length > 0) summary.push(`dirs: ${dirs.slice(0, 8).join("  ")}${dirs.length > 8 ? `  ... (計 ${dirs.length} dirs)` : ""}`);
-    if (files.length > 0) summary.push(`files: ${files.slice(0, 8).join("  ")}${files.length > 8 ? `  ... (計 ${files.length} files)` : ""}`);
+    if (dirs.length > 0)
+      summary.push(`dirs: ${dirs.slice(0, 8).join("  ")}${dirs.length > 8 ? `  ... (計 ${dirs.length} dirs)` : ""}`);
+    if (files.length > 0)
+      summary.push(
+        `files: ${files.slice(0, 8).join("  ")}${files.length > 8 ? `  ... (計 ${files.length} files)` : ""}`,
+      );
     if (summary.length > 0) {
       lines.push(`[起点 ${cwd} の浅い中身]`);
       summary.forEach((s) => lines.push("  " + s));

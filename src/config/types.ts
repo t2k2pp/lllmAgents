@@ -60,13 +60,13 @@ export interface LLMEndpoint extends SamplingParams {
 export type SecondLLMEndpoint = LLMEndpoint;
 
 export interface BudgetConfig {
-  limitUsd: number;          // 予算上限 (USD)
-  warningThreshold: number;  // 警告閾値 (0.0〜1.0、デフォルト0.8)
-  stopThreshold: number;     // 停止閾値 (0.0〜1.0、デフォルト0.95)
+  limitUsd: number; // 予算上限 (USD)
+  warningThreshold: number; // 警告閾値 (0.0〜1.0、デフォルト0.8)
+  stopThreshold: number; // 停止閾値 (0.0〜1.0、デフォルト0.95)
 }
 
 export interface CostConfig {
-  referenceModels: string[];  // ローカルLLM利用時の参考コスト比較対象
+  referenceModels: string[]; // ローカルLLM利用時の参考コスト比較対象
 }
 
 /**
@@ -97,7 +97,7 @@ export interface SecondLLMIterationLimits {
 export interface SecondLLMConfig {
   enabled: boolean;
   endpoint: SecondLLMEndpoint;
-  budget: BudgetConfig | null;  // ローカルLLMの場合は null（予算不要）
+  budget: BudgetConfig | null; // ローカルLLMの場合は null（予算不要）
   cost: CostConfig;
   /** 用途別サンプリング既定値 (D9)。 endpoint.temperature が指定されていればそちら優先 */
   samplingDefaults?: SecondLLMSamplingDefaults;
@@ -190,10 +190,10 @@ export interface DiscordConfig {
   webhookUrl: string;
   // Slash Command 受信用 (Discord Developer Portal で取得)
   applicationId?: string;
-  publicKey?: string;       // [未使用] 旧 Endpoint 方式の署名検証用。 Gateway 方式移行で不要 (後方互換のため型に残す)
-  botToken?: string;        // Bot トークン (Gateway 接続・コマンド登録・follow-up 送信)
+  publicKey?: string; // [未使用] 旧 Endpoint 方式の署名検証用。 Gateway 方式移行で不要 (後方互換のため型に残す)
+  botToken?: string; // Bot トークン (Gateway 接続・コマンド登録・follow-up 送信)
   interactionPort?: number; // [未使用] 旧 Endpoint 方式の HTTP ポート。 Gateway 方式移行で不要 (後方互換のため型に残す)
-  listenEnabled?: boolean;  // 起動時に受信 (Gateway 接続) を自動開始するか
+  listenEnabled?: boolean; // 起動時に受信 (Gateway 接続) を自動開始するか
   /** コマンド・確認ボタンを受け付けるユーザー ID。 未設定/空 = 全員拒否 (fail-closed, proposal §6)。 利用には設定が必須 */
   allowedUserIds?: string[];
   /**
@@ -218,10 +218,10 @@ export interface DiscordConfig {
 }
 
 export interface SlackConfig {
-  enabled: boolean;           // Webhook通知の有効/無効
-  webhookUrl: string;         // 通知用Incoming Webhook URL
-  botToken?: string;          // xoxb- Bot Token (Bolt用)
-  appToken?: string;          // xapp- App-Level Token (Socket Mode用)
+  enabled: boolean; // Webhook通知の有効/無効
+  webhookUrl: string; // 通知用Incoming Webhook URL
+  botToken?: string; // xoxb- Bot Token (Bolt用)
+  appToken?: string; // xapp- App-Level Token (Socket Mode用)
   /** メッセージ・確認ボタンを受け付けるユーザー ID。 未設定/空 = 全員拒否 (fail-closed, proposal §6)。 利用には設定が必須 */
   allowedUserIds?: string[];
   /** 権限確認ボタンのタイムアウト秒 (デフォルト 300。 ask_user はこの 2 倍) */
@@ -526,18 +526,20 @@ export interface CheckpointConfig {
 
 // ヘルパー: セカンドLLMがクラウドかローカルかを判定
 export function isCloudProvider(type: SecondLLMProviderType): boolean {
-  return ([
-    "vertex-ai",
-    "azure-openai",
-    "azure-gpt",
-    "azure-claude",
-    "azure-foundry",
-    "azure-anthropic",
-    "anthropic",
-    "claude-cli",
-    "claude-agent-sdk",
-    "gemini",
-  ] as string[]).includes(type);
+  return (
+    [
+      "vertex-ai",
+      "azure-openai",
+      "azure-gpt",
+      "azure-claude",
+      "azure-foundry",
+      "azure-anthropic",
+      "anthropic",
+      "claude-cli",
+      "claude-agent-sdk",
+      "gemini",
+    ] as string[]
+  ).includes(type);
 }
 
 /**
@@ -634,10 +636,34 @@ export interface GeminiModelEntry {
 }
 export const GEMINI_MODELS: readonly GeminiModelEntry[] = [
   { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", contextWindow: 1_048_576, supportsVision: true, supportsTool: true },
-  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", contextWindow: 1_048_576, supportsVision: true, supportsTool: true },
-  { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", contextWindow: 1_048_576, supportsVision: true, supportsTool: true },
-  { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash", contextWindow: 1_048_576, supportsVision: true, supportsTool: true },
-  { id: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite", contextWindow: 1_048_576, supportsVision: true, supportsTool: true },
+  {
+    id: "gemini-2.5-flash",
+    label: "Gemini 2.5 Flash",
+    contextWindow: 1_048_576,
+    supportsVision: true,
+    supportsTool: true,
+  },
+  {
+    id: "gemini-2.5-flash-lite",
+    label: "Gemini 2.5 Flash Lite",
+    contextWindow: 1_048_576,
+    supportsVision: true,
+    supportsTool: true,
+  },
+  {
+    id: "gemini-2.0-flash",
+    label: "Gemini 2.0 Flash",
+    contextWindow: 1_048_576,
+    supportsVision: true,
+    supportsTool: true,
+  },
+  {
+    id: "gemini-2.0-flash-lite",
+    label: "Gemini 2.0 Flash Lite",
+    contextWindow: 1_048_576,
+    supportsVision: true,
+    supportsTool: true,
+  },
 ];
 
 export function getDefaultConfig(): Config {
@@ -653,22 +679,41 @@ export function getDefaultConfig(): Config {
       allowedDirectories: [],
       blockedCommands: [],
       autoApproveTools: [
-        "file_read", "glob", "grep", "browser_snapshot", "vision_analyze",
-        "ask_user", "todo_write", "enter_plan_mode", "exit_plan_mode", "task_output",
-        "web_search", "web_fetch",
+        "file_read",
+        "glob",
+        "grep",
+        "browser_snapshot",
+        "vision_analyze",
+        "ask_user",
+        "todo_write",
+        "enter_plan_mode",
+        "exit_plan_mode",
+        "task_output",
+        "web_search",
+        "web_fetch",
       ],
       requireApprovalTools: ["file_write", "file_edit", "bash", "browser_navigate", "browser_click", "browser_type"],
       discordAutoApproveTools: [
-        "file_read", "glob", "grep",
-        "web_search", "web_fetch",
-        "browser_snapshot", "vision_analyze",
-        "current_datetime", "sandbox_info",
+        "file_read",
+        "glob",
+        "grep",
+        "web_search",
+        "web_fetch",
+        "browser_snapshot",
+        "vision_analyze",
+        "current_datetime",
+        "sandbox_info",
       ],
       slackAutoApproveTools: [
-        "file_read", "glob", "grep",
-        "web_search", "web_fetch",
-        "browser_snapshot", "vision_analyze",
-        "current_datetime", "sandbox_info",
+        "file_read",
+        "glob",
+        "grep",
+        "web_search",
+        "web_fetch",
+        "browser_snapshot",
+        "vision_analyze",
+        "current_datetime",
+        "sandbox_info",
       ],
       rules: {
         allow: [],

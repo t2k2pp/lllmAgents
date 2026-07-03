@@ -61,10 +61,7 @@ export async function resolvePlaywright(
   let firstLoadable: typeof import("playwright") | null = null;
 
   // 候補を評価: chromium 実在なら即採用、 そうでなければ firstLoadable として控える。
-  const consider = (
-    mod: typeof import("playwright") | null,
-    label: string,
-  ): typeof import("playwright") | null => {
+  const consider = (mod: typeof import("playwright") | null, label: string): typeof import("playwright") | null => {
     if (!mod || !mod.chromium) return null;
     if (!firstLoadable) firstLoadable = mod;
     if (chromiumPresent(mod)) {
@@ -144,7 +141,7 @@ export class PlaywrightManager {
   async snapshot(): Promise<string> {
     const page = await this.ensureBrowser();
     // page.evaluate runs in browser context; pass code as a string to avoid TS dom-lib issues
-    const snapshot = await page.evaluate(`
+    const snapshot = (await page.evaluate(`
       (function() {
         function buildTree(el, depth) {
           if (depth > 10) return null;
@@ -159,7 +156,7 @@ export class PlaywrightManager {
         }
         return buildTree(document.body, 0);
       })()
-    `) as AccessibilityNode | null;
+    `)) as AccessibilityNode | null;
     if (!snapshot) {
       return "No accessibility tree available.";
     }

@@ -13,9 +13,36 @@ function mkDeps(overrides: Partial<ChannelCommandDeps> = {}): {
   const clear = vi.fn();
   const exit = vi.fn();
   const status: RoomStatus[] = [
-    { id: "A", active: false, replBound: true, autoResume: false, sessionId: null, messageCount: 0, title: "", surfaces: ["repl"] },
-    { id: "B", active: true, replBound: false, autoResume: true, sessionId: "s1", messageCount: 3, title: "", surfaces: ["discord"] },
-    { id: "C", active: false, replBound: false, autoResume: true, sessionId: null, messageCount: 0, title: "", surfaces: ["slack"] },
+    {
+      id: "A",
+      active: false,
+      replBound: true,
+      autoResume: false,
+      sessionId: null,
+      messageCount: 0,
+      title: "",
+      surfaces: ["repl"],
+    },
+    {
+      id: "B",
+      active: true,
+      replBound: false,
+      autoResume: true,
+      sessionId: "s1",
+      messageCount: 3,
+      title: "",
+      surfaces: ["discord"],
+    },
+    {
+      id: "C",
+      active: false,
+      replBound: false,
+      autoResume: true,
+      sessionId: null,
+      messageCount: 0,
+      title: "",
+      surfaces: ["slack"],
+    },
   ];
   const roomManager = {
     runInRoom: async (_room: string, fn: () => Promise<unknown>) => fn(),

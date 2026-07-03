@@ -2,11 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import {
-  createCompleter,
-  createCommandMenuProvider,
-  createFileMenuProvider,
-} from "../../src/cli/completer.js";
+import { createCompleter, createCommandMenuProvider, createFileMenuProvider } from "../../src/cli/completer.js";
 
 describe("createCompleter (readline fallback)", () => {
   let tmpDir: string;
@@ -186,7 +182,9 @@ describe("createCommandMenuProvider", () => {
     const ba = provider("context tools ba").map((i) => i.value);
     expect(ba).toEqual(["/context tools bash"]);
     // "context tools file" → file_read / file_write
-    const file = provider("context tools file").map((i) => i.value).sort();
+    const file = provider("context tools file")
+      .map((i) => i.value)
+      .sort();
     expect(file).toEqual(["/context tools file_read", "/context tools file_write"]);
     // 空プレフィックスで MCP ツール含む全件
     const all = provider("context tools ").map((i) => i.value);

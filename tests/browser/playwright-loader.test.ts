@@ -28,8 +28,7 @@ describe("resolvePlaywright", () => {
     const cwdMod = mk(); // Chromium 実在
     const importFn = vi.fn(async () => importMod);
     // path.join により from の区切りは OS 依存 (Windows は \)。区切り非依存で判定する。
-    const makeRequire = (from: string) => () =>
-      from.includes(".localllm") ? homeMod : cwdMod;
+    const makeRequire = (from: string) => () => (from.includes(".localllm") ? homeMod : cwdMod);
     const chromiumPresent = (m: typeof import("playwright")) => m === cwdMod;
     const mod = await resolvePlaywright(importFn, ["/home/.localllm", "/cwd"], makeRequire, chromiumPresent);
     expect(mod).toBe(cwdMod); // 動くペアを再利用

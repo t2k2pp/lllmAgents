@@ -17,9 +17,9 @@ export const currentDatetimeTool: ToolHandler = {
   async execute(): Promise<ToolResult> {
     try {
       const now = new Date();
-      
+
       const isoString = now.toISOString();
-      
+
       // format: YYYY/MM/DD HH:mm:ss
       const localString = now.toLocaleString("ja-JP", {
         year: "numeric",
@@ -28,7 +28,7 @@ export const currentDatetimeTool: ToolHandler = {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
-        hour12: false
+        hour12: false,
       });
 
       // format offset like +09:00
@@ -39,11 +39,9 @@ export const currentDatetimeTool: ToolHandler = {
       const offsetMins = String(absOffset % 60).padStart(2, "0");
       const offsetString = `${offsetSign}${offsetHours}:${offsetMins}`;
 
-      const output = [
-        `ISO 8601: ${isoString}`,
-        `Local Time: ${localString}`,
-        `Timezone Offset: ${offsetString}`
-      ].join("\n");
+      const output = [`ISO 8601: ${isoString}`, `Local Time: ${localString}`, `Timezone Offset: ${offsetString}`].join(
+        "\n",
+      );
 
       return { success: true, output };
     } catch (error: any) {

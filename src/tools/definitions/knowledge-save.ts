@@ -24,11 +24,11 @@ export function getKnowledgeBasePath(): string | null {
 /** ファイル名に使えない文字を除去し、タイトルからslugを生成 */
 function slugify(title: string): string {
   return title
-    .replace(/[\\/:*?"<>|#^[\]]/g, "")  // Obsidian非対応文字
+    .replace(/[\\/:*?"<>|#^[\]]/g, "") // Obsidian非対応文字
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
-    .slice(0, 80);  // 長すぎるファイル名を防止
+    .slice(0, 80); // 長すぎるファイル名を防止
 }
 
 /** 日付文字列 YYYY-MM-DD を返す */
@@ -67,7 +67,9 @@ function findExistingBySource(dir: string, sourceUrl: string): string | null {
         return filePath;
       }
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return null;
 }
 
@@ -141,7 +143,8 @@ export const knowledgeSaveTool: ToolHandler = {
           },
           content: {
             type: "string",
-            description: "ノート本文 (Markdown形式、日本語)。## 要約、## 主要ポイント、## 詳細、## ソース のセクション構成を推奨",
+            description:
+              "ノート本文 (Markdown形式、日本語)。## 要約、## 主要ポイント、## 詳細、## ソース のセクション構成を推奨",
           },
           type: {
             type: "string",

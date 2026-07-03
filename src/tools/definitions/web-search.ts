@@ -85,9 +85,7 @@ async function searchSearXNG(baseUrl: string, query: string, maxResults: number)
     return { success: true, output: `No results found for: ${query}` };
   }
 
-  const output = results
-    .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.content ?? ""}`)
-    .join("\n\n");
+  const output = results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.content ?? ""}`).join("\n\n");
 
   return {
     success: true,
@@ -133,9 +131,7 @@ async function searchDuckDuckGo(query: string, maxResults: number): Promise<Tool
     return { success: true, output: `No results found for: ${query}` };
   }
 
-  const output = results
-    .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
-    .join("\n\n");
+  const output = results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join("\n\n");
 
   return { success: true, output: `Search results for "${query}":\n\n${output}` };
 }
@@ -175,5 +171,11 @@ function parseSearchResults(html: string, max: number): SearchResult[] {
 }
 
 function stripTags(html: string): string {
-  return html.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').trim();
+  return html
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .trim();
 }

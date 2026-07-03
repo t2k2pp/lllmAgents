@@ -53,7 +53,10 @@ export class SdWebuiProvider implements ImageProvider {
     };
 
     getOpsLogger().info("image", "sd-webui txt2img", {
-      baseUrl: this.baseUrl, size, steps: body.steps, n: body.batch_size,
+      baseUrl: this.baseUrl,
+      size,
+      steps: body.steps,
+      n: body.batch_size,
     });
 
     let res: Response;
@@ -66,7 +69,7 @@ export class SdWebuiProvider implements ImageProvider {
     } catch (e) {
       throw new Error(
         `SD WebUI に接続できません (${this.baseUrl}): ${e instanceof Error ? e.message : String(e)}\n` +
-        `WebUI を --api オプション付きで起動しているか確認してください。`,
+          `WebUI を --api オプション付きで起動しているか確認してください。`,
       );
     }
 

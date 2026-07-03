@@ -23,12 +23,7 @@
 import type { Config } from "../config/types.js";
 import { saveConfig } from "../config/config-manager.js";
 import { ROOM_IDS, getDefaultRoomConfig, type RoomId, type Surface } from "./room-types.js";
-import {
-  createSession,
-  loadSession,
-  latestSessionMetaOfRoom,
-  type SessionData,
-} from "./session-manager.js";
+import { createSession, loadSession, latestSessionMetaOfRoom, type SessionData } from "./session-manager.js";
 import type { AgentLoop } from "./agent-loop.js";
 
 export interface RoomStatus {
@@ -172,7 +167,7 @@ export class RoomManager {
     const bindings = this.config.roomConfig!.bindings;
     return ROOM_IDS.map((id) => {
       const sid = this.activeSessionId.get(id) ?? null;
-      let meta = sid ? loadSession(sid)?.meta ?? null : null;
+      let meta = sid ? (loadSession(sid)?.meta ?? null) : null;
       if (!meta) meta = latestSessionMetaOfRoom(id);
       const surfaces = (Object.keys(bindings) as Surface[]).filter((s) => bindings[s] === id);
       return {

@@ -57,7 +57,7 @@ export async function registerAskCommand(
       body: JSON.stringify(ASK_COMMAND),
     });
 
-    const data = await res.json() as any;
+    const data = (await res.json()) as any;
 
     if (!res.ok) {
       const msg = `Discord command registration failed: ${res.status} ${JSON.stringify(data)}`;
@@ -98,7 +98,7 @@ export async function listCommands(
       return { success: false, error: `HTTP ${res.status}: ${text}` };
     }
 
-    const commands = await res.json() as any[];
+    const commands = (await res.json()) as any[];
     return { success: true, commands };
   } catch (e) {
     return { success: false, error: String(e) };

@@ -122,13 +122,15 @@ export class AzureAnthropicProvider implements LLMProvider {
   }
 
   async listModels(): Promise<ModelInfo[]> {
-    return [{
-      name: this.config.model,
-      size: 0,
-      contextLength: 200_000,
-      supportsVision: true,
-      supportsFunctionCalling: true,
-    }];
+    return [
+      {
+        name: this.config.model,
+        size: 0,
+        contextLength: 200_000,
+        supportsVision: true,
+        supportsFunctionCalling: true,
+      },
+    ];
   }
 
   async getModelInfo(_modelName: string): Promise<ModelDetail> {
@@ -171,9 +173,7 @@ export class AzureAnthropicProvider implements LLMProvider {
   }
 
   /** OpenAI 形式の ChatParams を Anthropic Messages API のリクエストボディに変換 */
-  private buildRequestBody(
-    params: ChatParams & { tools?: ToolDefinition[] },
-  ): Record<string, unknown> {
+  private buildRequestBody(params: ChatParams & { tools?: ToolDefinition[] }): Record<string, unknown> {
     // 1. system messages を抽出してトップレベル system に集約。
     // system[0] = 安定 base (MessageHistory が stable/dynamic を別メッセージで返す)。
     const systemMessages = params.messages.filter((m) => m.role === "system");
@@ -193,9 +193,9 @@ export class AzureAnthropicProvider implements LLMProvider {
     // プロンプトキャッシュ (docs/prompt-cache-cost-reduction.md)。 既定 ON。
     const cacheEnabled = this.config.promptCache?.enabled !== false;
     const cacheControl: Record<string, unknown> | undefined = cacheEnabled
-      ? (this.config.promptCache?.ttl === "1h"
-          ? { type: "ephemeral", ttl: "1h" }
-          : { type: "ephemeral" })
+      ? this.config.promptCache?.ttl === "1h"
+        ? { type: "ephemeral", ttl: "1h" }
+        : { type: "ephemeral" }
       : undefined;
 
     const body: Record<string, unknown> = {
@@ -240,9 +240,7 @@ export class AzureAnthropicProvider implements LLMProvider {
   }
 
   /** ストリーミングチャット本体 */
-  protected async *doChat(
-    params: ChatParams & { tools?: ToolDefinition[] },
-  ): AsyncGenerator<ChatChunk> {
+  protected async *doChat(params: ChatParams & { tools?: ToolDefinition[] }): AsyncGenerator<ChatChunk> {
     const body = this.buildRequestBody({ ...params, stream: true });
     const url = this.chatUrl();
 
@@ -298,10 +296,7 @@ interface AnthropicMessage {
  * メッセージの「最終 content ブロック」 に cache_control を付与する (ローリング履歴キャッシュ用)。
  * content が文字列の場合は単一 text ブロックの配列に変換してから付与する。 空文字列はスキップ。
  */
-function applyCacheControlToLastBlock(
-  msg: AnthropicMessage,
-  cacheControl: Record<string, unknown>,
-): void {
+function applyCacheControlToLastBlock(msg: AnthropicMessage, cacheControl: Record<string, unknown>): void {
   if (typeof msg.content === "string") {
     if (msg.content.length === 0) return;
     msg.content = [{ type: "text", text: msg.content, cache_control: cacheControl }];
@@ -354,9 +349,13 @@ function convertOpenAIMessagesToAnthropic(messages: Message[]): AnthropicMessage
       const blocks: AnthropicContentBlock[] = [];
 
       // テキスト部分
-      const textPart = typeof msg.content === "string"
-        ? msg.content
-        : (msg.content ?? []).filter((p) => p.type === "text").map((p) => p.text ?? "").join("");
+      const textPart =
+        typeof msg.content === "string"
+          ? msg.content
+          : (msg.content ?? [])
+              .filter((p) => p.type === "text")
+              .map((p) => p.text ?? "")
+              .join("");
       if (textPart && textPart.length > 0) {
         blocks.push({ type: "text", text: textPart });
       }
@@ -367,7 +366,9 @@ function convertOpenAIMessagesToAnthropic(messages: Message[]): AnthropicMessage
           let parsedInput: unknown = {};
           try {
             parsedInput = JSON.parse(tc.function.arguments ?? "{}");
-          } catch { /* keep empty */ }
+          } catch {
+            /* keep empty */
+          }
           blocks.push({
             type: "tool_use",
             id: tc.id,
@@ -392,7 +393,9 @@ function convertOpenAIMessagesToAnthropic(messages: Message[]): AnthropicMessage
   return out;
 }
 
-function normalizeContentToAnthropic(content: string | { type: string; text?: string; image_url?: { url: string } }[]): string | AnthropicContentBlock[] {
+function normalizeContentToAnthropic(
+  content: string | { type: string; text?: string; image_url?: { url: string } }[],
+): string | AnthropicContentBlock[] {
   if (typeof content === "string") return content;
   const blocks: AnthropicContentBlock[] = [];
   for (const p of content) {
@@ -559,7 +562,8 @@ async function* parseAnthropicStream(
             if (typeof usage.output_tokens === "number") completionTokens = usage.output_tokens;
             // 一部応答は message_delta 側で cache usage を確定させる (あれば上書き)
             if (typeof usage.cache_read_input_tokens === "number") cacheReadTokens = usage.cache_read_input_tokens;
-            if (typeof usage.cache_creation_input_tokens === "number") cacheCreationTokens = usage.cache_creation_input_tokens;
+            if (typeof usage.cache_creation_input_tokens === "number")
+              cacheCreationTokens = usage.cache_creation_input_tokens;
             if (delta.stop_reason) stopReason = delta.stop_reason;
             break;
           }
@@ -594,16 +598,25 @@ async function* parseAnthropicStream(
       }
     }
   } finally {
-    try { reader.releaseLock(); } catch { /* ignore */ }
+    try {
+      reader.releaseLock();
+    } catch {
+      /* ignore */
+    }
   }
 }
 
 function mapAnthropicStopReason(reason: string | undefined): string {
   switch (reason) {
-    case "end_turn": return "stop";
-    case "max_tokens": return "length";
-    case "tool_use": return "tool_calls";
-    case "stop_sequence": return "stop";
-    default: return reason ?? "stop";
+    case "end_turn":
+      return "stop";
+    case "max_tokens":
+      return "length";
+    case "tool_use":
+      return "tool_calls";
+    case "stop_sequence":
+      return "stop";
+    default:
+      return reason ?? "stop";
   }
 }

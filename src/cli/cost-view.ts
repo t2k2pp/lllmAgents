@@ -2,13 +2,7 @@ import chalk from "chalk";
 import { getDisplayWidth } from "./interactive-input.js";
 import { formatMoney } from "../cost/money-format.js";
 import type { TokenUsageRecord } from "../cost/token-tracker.js";
-import {
-  aggregate,
-  modelUnitPrice,
-  type UsageAggregate,
-  type PeriodSpec,
-  type UsageRow,
-} from "../cost/usage-store.js";
+import { aggregate, modelUnitPrice, type UsageAggregate, type PeriodSpec, type UsageRow } from "../cost/usage-store.js";
 
 /**
  * /cost コマンドの表示フォーマッタ。 各関数は表示行 (string[]) を返す (テスト容易性のため)。
@@ -49,9 +43,7 @@ function sinceLabel(iso?: string): string {
 /** 列幅を揃えてテーブル行を組む。 header と rows[].cells は同じ列数。 数値列は右寄せ。
  *  CJK 全角を 2 桁として数える getDisplayWidth で桁揃えする (合計/未登録 等の日本語ラベル対応)。 */
 function renderTable(header: string[], rows: string[][], rightAlign: boolean[]): string[] {
-  const widths = header.map((h, i) =>
-    Math.max(getDisplayWidth(h), ...rows.map((r) => getDisplayWidth(r[i] ?? ""))),
-  );
+  const widths = header.map((h, i) => Math.max(getDisplayWidth(h), ...rows.map((r) => getDisplayWidth(r[i] ?? ""))));
   const padCell = (s: string, i: number): string => {
     const fill = " ".repeat(Math.max(0, widths[i] - getDisplayWidth(s)));
     return rightAlign[i] ? fill + s : s + fill;
@@ -88,7 +80,11 @@ export function formatSummary(
   }
   if (g.recordCount === 0) {
     out.push(chalk.dim("  この期間の記録はありません。"));
-    out.push(chalk.dim("  期間切替: /cost today|yesterday|month|lastmonth|all|session または YYYY-MM-DD / YYYY-MM   詳細: /cost models | providers"));
+    out.push(
+      chalk.dim(
+        "  期間切替: /cost today|yesterday|month|lastmonth|all|session または YYYY-MM-DD / YYYY-MM   詳細: /cost models | providers",
+      ),
+    );
     return out;
   }
   out.push(
@@ -116,7 +112,11 @@ export function formatSummary(
   if (agg.unpricedModels.length > 0) {
     out.push(chalk.yellow(`  ⚠ 単価未登録: ${agg.unpricedModels.join(", ")} (cost=0 で計上)`));
   }
-  out.push(chalk.dim("  期間切替: /cost today|yesterday|month|lastmonth|all|session または YYYY-MM-DD / YYYY-MM   詳細: /cost models | providers"));
+  out.push(
+    chalk.dim(
+      "  期間切替: /cost today|yesterday|month|lastmonth|all|session または YYYY-MM-DD / YYYY-MM   詳細: /cost models | providers",
+    ),
+  );
   return out;
 }
 
@@ -170,9 +170,7 @@ export function formatModels(
       ),
     );
   }
-  out.push(
-    chalk.dim("  算出: cost = in×単価in/1M + out×単価out/1M (cached は cachedInputPerMToken 適用)"),
-  );
+  out.push(chalk.dim("  算出: cost = in×単価in/1M + out×単価out/1M (cached は cachedInputPerMToken 適用)"));
   return out;
 }
 

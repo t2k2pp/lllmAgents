@@ -43,8 +43,12 @@ describe("LLMLogger 文脈タグ (roomId/surface)", () => {
     logger.logRequest([{ role: "user", content: "hi" }], "m", []);
     logger.logResponse({ model: "m", text: "yo" });
     logger.logToolResult({
-      toolCallId: "t1", toolName: "file_write", rawArguments: "{}",
-      output: "", success: true, durationMs: 1,
+      toolCallId: "t1",
+      toolName: "file_write",
+      rawArguments: "{}",
+      output: "",
+      success: true,
+      durationMs: 1,
     });
 
     const entries = readEntries(logger);
@@ -62,8 +66,12 @@ describe("LLMLogger 文脈タグ (roomId/surface)", () => {
     logger.nextTurn();
     logger.logRequest([], "m");
     logger.logToolResult({
-      toolCallId: "t1", toolName: "bash", rawArguments: "{}",
-      output: "", success: true, durationMs: 1,
+      toolCallId: "t1",
+      toolName: "bash",
+      rawArguments: "{}",
+      output: "",
+      success: true,
+      durationMs: 1,
     });
     for (const e of readEntries(logger)) {
       expect(e.roomId).toBe("C");

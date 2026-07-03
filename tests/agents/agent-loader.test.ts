@@ -158,9 +158,7 @@ describe("AgentDefinitionLoader", () => {
       // Set up so the project-local path has this agent
       const projectAgentsDir = path.resolve(".localllm", "agents");
       setupAgentDirs({
-        [projectAgentsDir]: [
-          { filename: "code-reviewer.md", content },
-        ],
+        [projectAgentsDir]: [{ filename: "code-reviewer.md", content }],
       });
 
       const defs = loader.loadAll();
@@ -178,9 +176,7 @@ describe("AgentDefinitionLoader", () => {
       const content = "---\nname: simple\ndescription: A simple agent\n---\nDo something.";
       const projectAgentsDir = path.resolve(".localllm", "agents");
       setupAgentDirs({
-        [projectAgentsDir]: [
-          { filename: "simple.md", content },
-        ],
+        [projectAgentsDir]: [{ filename: "simple.md", content }],
       });
 
       const defs = loader.loadAll();
@@ -195,9 +191,7 @@ describe("AgentDefinitionLoader", () => {
       const content = "Just plain markdown without frontmatter.";
       const projectAgentsDir = path.resolve(".localllm", "agents");
       setupAgentDirs({
-        [projectAgentsDir]: [
-          { filename: "no-front.md", content },
-        ],
+        [projectAgentsDir]: [{ filename: "no-front.md", content }],
       });
 
       const defs = loader.loadAll();
@@ -207,12 +201,10 @@ describe("AgentDefinitionLoader", () => {
     });
 
     it("should handle quoted values in frontmatter", () => {
-      const content = '---\nname: "quoted-agent"\ndescription: \'Single quoted desc\'\n---\nBody here.';
+      const content = "---\nname: \"quoted-agent\"\ndescription: 'Single quoted desc'\n---\nBody here.";
       const projectAgentsDir = path.resolve(".localllm", "agents");
       setupAgentDirs({
-        [projectAgentsDir]: [
-          { filename: "quoted.md", content },
-        ],
+        [projectAgentsDir]: [{ filename: "quoted.md", content }],
       });
 
       const defs = loader.loadAll();
@@ -226,9 +218,7 @@ describe("AgentDefinitionLoader", () => {
       const content = "---\nname: multi-tool\ntools: [bash, file_read, grep]\n---\nMulti tool agent.";
       const projectAgentsDir = path.resolve(".localllm", "agents");
       setupAgentDirs({
-        [projectAgentsDir]: [
-          { filename: "multi-tool.md", content },
-        ],
+        [projectAgentsDir]: [{ filename: "multi-tool.md", content }],
       });
 
       const defs = loader.loadAll();
@@ -381,12 +371,8 @@ describe("AgentDefinitionLoader", () => {
       });
 
       setupAgentDirs({
-        [userGlobalDir]: [
-          { filename: "planner.md", content: builtinContent },
-        ],
-        [projectLocalDir]: [
-          { filename: "planner.md", content: projectContent },
-        ],
+        [userGlobalDir]: [{ filename: "planner.md", content: builtinContent }],
+        [projectLocalDir]: [{ filename: "planner.md", content: projectContent }],
       });
 
       const defs = loader.loadAll();

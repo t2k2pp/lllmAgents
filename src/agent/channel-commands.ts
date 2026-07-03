@@ -56,10 +56,7 @@ const HELP = [
  * line が "/..." のチャネルコマンドなら処理してテキストを返す。 コマンドでなければ null
  * (= 通常のエージェント依頼として処理させる)。
  */
-export async function runChannelCommand(
-  line: string,
-  deps: ChannelCommandDeps,
-): Promise<string | null> {
+export async function runChannelCommand(line: string, deps: ChannelCommandDeps): Promise<string | null> {
   const t = line.trim();
   if (!t.startsWith("/")) return null;
   const parts = t.slice(1).trim().split(/\s+/);

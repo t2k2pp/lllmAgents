@@ -36,11 +36,7 @@ export class Evaluator {
   private mainModel: string;
   private source: "secondLLM" | "mainLLM";
 
-  constructor(
-    secondLLMManager: SecondLLMManager | null,
-    mainProvider: LLMProvider,
-    mainModel: string,
-  ) {
+  constructor(secondLLMManager: SecondLLMManager | null, mainProvider: LLMProvider, mainModel: string) {
     this.secondLLMManager = secondLLMManager;
     this.mainProvider = mainProvider;
     this.mainModel = mainModel;
@@ -118,14 +114,14 @@ export class Evaluator {
         try {
           const content = fs.readFileSync(filePath, "utf-8");
           fileContents.push({ path: filePath, content });
-        } catch { /* skip unreadable files */ }
+        } catch {
+          /* skip unreadable files */
+        }
       }
 
-      const fileSections = fileContents
-        .map(f => `### ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
-        .join("\n\n");
+      const fileSections = fileContents.map((f) => `### ${f.path}\n\`\`\`\n${f.content}\n\`\`\``).join("\n\n");
 
-      const fileList = fileContents.map(f => `- ${f.path}`).join("\n");
+      const fileList = fileContents.map((f) => `- ${f.path}`).join("\n");
 
       let prompt = `## ユーザーの元の依頼\n${params.originalRequest}\n\n`;
       if (params.assistantResponse) {
@@ -170,7 +166,7 @@ export class Evaluator {
     originalRequest: string;
     assistantResponse?: string;
   }): string {
-    const fileList = params.filePaths.map(f => `- ${f}`).join("\n");
+    const fileList = params.filePaths.map((f) => `- ${f}`).join("\n");
 
     let prompt = `## ユーザーの元の依頼\n${params.originalRequest}\n\n`;
 
@@ -190,11 +186,13 @@ export class Evaluator {
     if (result.passed) {
       console.log(chalk.cyan(`  ✔ Evaluator: 合格 — ${fileCount}件レビュー (${this.source})`));
     } else {
-      const criticalCount = result.issues.filter(i => i.severity === "critical").length;
-      const warningCount = result.issues.filter(i => i.severity === "warning").length;
-      console.log(chalk.cyan(
-        `  ⚠ Evaluator: 不合格 — critical: ${criticalCount}, warning: ${warningCount}, ${fileCount}件レビュー (${this.source})`
-      ));
+      const criticalCount = result.issues.filter((i) => i.severity === "critical").length;
+      const warningCount = result.issues.filter((i) => i.severity === "warning").length;
+      console.log(
+        chalk.cyan(
+          `  ⚠ Evaluator: 不合格 — critical: ${criticalCount}, warning: ${warningCount}, ${fileCount}件レビュー (${this.source})`,
+        ),
+      );
     }
     logger.debug(`Evaluator result: passed=${result.passed}, issues=${result.issues.length}, files=${fileCount}`);
   }
@@ -211,7 +209,7 @@ export class Evaluator {
           location: i.location as string | undefined,
           suggestion: i.suggestion as string | undefined,
         }));
-        const hasCritical = issues.some(i => i.severity === "critical");
+        const hasCritical = issues.some((i) => i.severity === "critical");
         return {
           passed: parsed.passed ?? !hasCritical,
           issues,
@@ -226,9 +224,7 @@ export class Evaluator {
     const hasProblems = /問題|不合格|critical|fail|修正が必要/i.test(raw);
     return {
       passed: !hasProblems,
-      issues: hasProblems
-        ? [{ severity: "warning", description: raw.slice(0, 500) }]
-        : [],
+      issues: hasProblems ? [{ severity: "warning", description: raw.slice(0, 500) }] : [],
       summary: raw.slice(0, 300),
     };
   }
@@ -258,7 +254,9 @@ export class Evaluator {
     }
 
     if (!result.passed) {
-      parts.push("\n上記の指摘事項を修正してください。該当ファイルをfile_edit/file_writeで修正し、修正完了後に報告してください。");
+      parts.push(
+        "\n上記の指摘事項を修正してください。該当ファイルをfile_edit/file_writeで修正し、修正完了後に報告してください。",
+      );
     }
 
     return parts.join("\n");

@@ -27,11 +27,23 @@ describe("resolveEffectiveLevel (全 OS×ツール×レベルの分岐・#4)", (
   });
   it("linux full: bwrap→full / bwrap無し+unshare→network 降格 / 何も無し→none", () => {
     expect(resolveEffectiveLevel("linux", { enabled: true, level: "full" }, all)).toBe("full");
-    expect(resolveEffectiveLevel("linux", { enabled: true, level: "full" }, { bwrap: false, unshare: true, sandboxExec: false })).toBe("network");
+    expect(
+      resolveEffectiveLevel(
+        "linux",
+        { enabled: true, level: "full" },
+        { bwrap: false, unshare: true, sandboxExec: false },
+      ),
+    ).toBe("network");
     expect(resolveEffectiveLevel("linux", { enabled: true, level: "full" }, none)).toBe("none");
   });
   it("linux network: unshare 必須", () => {
-    expect(resolveEffectiveLevel("linux", { enabled: true, level: "network" }, { bwrap: false, unshare: true, sandboxExec: false })).toBe("network");
+    expect(
+      resolveEffectiveLevel(
+        "linux",
+        { enabled: true, level: "network" },
+        { bwrap: false, unshare: true, sandboxExec: false },
+      ),
+    ).toBe("network");
     expect(resolveEffectiveLevel("linux", { enabled: true, level: "network" }, none)).toBe("none");
   });
   it("win32 等は常に none", () => {
@@ -177,9 +189,7 @@ describe("buildSeatbeltProfile", () => {
   it("機密ディレクトリは read を deny し、 allow file-read* より後に置く (last-match-wins)", () => {
     const p = buildSeatbeltProfile(["/work"], "fs", ["/home/u/.aws"]);
     expect(p).toContain(`(deny file-read* (subpath "/home/u/.aws"))`);
-    expect(p.indexOf("(allow file-read*)")).toBeLessThan(
-      p.indexOf(`(deny file-read* (subpath "/home/u/.aws"))`),
-    );
+    expect(p.indexOf("(allow file-read*)")).toBeLessThan(p.indexOf(`(deny file-read* (subpath "/home/u/.aws"))`));
   });
 });
 

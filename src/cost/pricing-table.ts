@@ -3,40 +3,40 @@ import * as path from "node:path";
 import * as os from "node:os";
 
 export interface ModelPricing {
-  inputPerMToken: number;     // USD per 1M input tokens
-  outputPerMToken: number;    // USD per 1M output tokens
+  inputPerMToken: number; // USD per 1M input tokens
+  outputPerMToken: number; // USD per 1M output tokens
   cachedInputPerMToken?: number; // キャッシュヒット時の入力単価
 }
 
 // 組み込み料金テーブル (2026年3月時点)
 export const BUILTIN_PRICING: Record<string, ModelPricing> = {
   // --- Gemini (Vertex AI) ---
-  "gemini-3-pro":          { inputPerMToken: 2.00,  outputPerMToken: 12.00 },
-  "gemini-3-flash":        { inputPerMToken: 0.50,  outputPerMToken: 3.00 },
-  "gemini-2.5-pro":        { inputPerMToken: 1.25,  outputPerMToken: 10.00 },
-  "gemini-2.5-flash":      { inputPerMToken: 0.30,  outputPerMToken: 2.50 },
-  "gemini-2.5-flash-lite": { inputPerMToken: 0.10,  outputPerMToken: 0.40 },
+  "gemini-3-pro": { inputPerMToken: 2.0, outputPerMToken: 12.0 },
+  "gemini-3-flash": { inputPerMToken: 0.5, outputPerMToken: 3.0 },
+  "gemini-2.5-pro": { inputPerMToken: 1.25, outputPerMToken: 10.0 },
+  "gemini-2.5-flash": { inputPerMToken: 0.3, outputPerMToken: 2.5 },
+  "gemini-2.5-flash-lite": { inputPerMToken: 0.1, outputPerMToken: 0.4 },
 
   // --- GPT (Azure OpenAI) ---
   // cachedInputPerMToken: プロンプトキャッシュヒット分の単価。 OpenAI/Azure 標準の入力 0.1× で設定。
   // 実契約で異なる場合は ~/.localllm/pricing.json で上書き。
-  "gpt-5.4":     { inputPerMToken: 2.50,  outputPerMToken: 15.00, cachedInputPerMToken: 0.25 },
-  "gpt-5.2":     { inputPerMToken: 1.75,  outputPerMToken: 14.00, cachedInputPerMToken: 0.175 },
-  "gpt-5.1":     { inputPerMToken: 1.25,  outputPerMToken: 10.00, cachedInputPerMToken: 0.125 },
-  "gpt-5-mini":  { inputPerMToken: 0.25,  outputPerMToken: 2.00,  cachedInputPerMToken: 0.025 },
-  "gpt-5-nano":  { inputPerMToken: 0.05,  outputPerMToken: 0.40,  cachedInputPerMToken: 0.005 },
-  "gpt-4o":      { inputPerMToken: 5.00,  outputPerMToken: 15.00, cachedInputPerMToken: 2.50 },
-  "gpt-4o-mini": { inputPerMToken: 0.15,  outputPerMToken: 0.60,  cachedInputPerMToken: 0.075 },
+  "gpt-5.4": { inputPerMToken: 2.5, outputPerMToken: 15.0, cachedInputPerMToken: 0.25 },
+  "gpt-5.2": { inputPerMToken: 1.75, outputPerMToken: 14.0, cachedInputPerMToken: 0.175 },
+  "gpt-5.1": { inputPerMToken: 1.25, outputPerMToken: 10.0, cachedInputPerMToken: 0.125 },
+  "gpt-5-mini": { inputPerMToken: 0.25, outputPerMToken: 2.0, cachedInputPerMToken: 0.025 },
+  "gpt-5-nano": { inputPerMToken: 0.05, outputPerMToken: 0.4, cachedInputPerMToken: 0.005 },
+  "gpt-4o": { inputPerMToken: 5.0, outputPerMToken: 15.0, cachedInputPerMToken: 2.5 },
+  "gpt-4o-mini": { inputPerMToken: 0.15, outputPerMToken: 0.6, cachedInputPerMToken: 0.075 },
 
   // --- Claude (Anthropic API / Azure AI Foundry / Vertex AI Model Garden) ---
   // キーは実モデルID (ハイフン表記) に統一。 getModelPricing は前方一致するため
   // "claude-sonnet-4-6" は "claude-sonnet-4-6..." 系にもマッチする。
   // cachedInputPerMToken = 入力の 0.1× (プロンプトキャッシュ読込)。 書込 1.25× は計算側で係数処理。
-  "claude-opus-4-8":    { inputPerMToken: 5.00,  outputPerMToken: 25.00, cachedInputPerMToken: 0.50 },
-  "claude-opus-4-7":    { inputPerMToken: 5.00,  outputPerMToken: 25.00, cachedInputPerMToken: 0.50 },
-  "claude-opus-4-6":    { inputPerMToken: 5.00,  outputPerMToken: 25.00, cachedInputPerMToken: 0.50 },
-  "claude-sonnet-4-6":  { inputPerMToken: 3.00,  outputPerMToken: 15.00, cachedInputPerMToken: 0.30 },
-  "claude-haiku-4-5":   { inputPerMToken: 1.00,  outputPerMToken: 5.00,  cachedInputPerMToken: 0.10 },
+  "claude-opus-4-8": { inputPerMToken: 5.0, outputPerMToken: 25.0, cachedInputPerMToken: 0.5 },
+  "claude-opus-4-7": { inputPerMToken: 5.0, outputPerMToken: 25.0, cachedInputPerMToken: 0.5 },
+  "claude-opus-4-6": { inputPerMToken: 5.0, outputPerMToken: 25.0, cachedInputPerMToken: 0.5 },
+  "claude-sonnet-4-6": { inputPerMToken: 3.0, outputPerMToken: 15.0, cachedInputPerMToken: 0.3 },
+  "claude-haiku-4-5": { inputPerMToken: 1.0, outputPerMToken: 5.0, cachedInputPerMToken: 0.1 },
 };
 
 const PRICING_FILE = path.join(os.homedir(), ".localllm", "pricing.json");

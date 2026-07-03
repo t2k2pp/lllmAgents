@@ -15,7 +15,11 @@ const h = vi.hoisted(() => {
     store,
     nextId: () => `s${++counter}`,
     tick: () => `t${clock++}`,
-    reset: () => { store.clear(); counter = 0; clock = 1; },
+    reset: () => {
+      store.clear();
+      counter = 0;
+      clock = 1;
+    },
   };
 });
 
@@ -48,16 +52,26 @@ class FakeAgent {
     meta: { id: "boot", createdAt: "t0", updatedAt: "t0", model: "m", messageCount: 0, title: "" },
     messages: [],
   };
-  getModel(): string { return "m"; }
-  getCurrentSessionId(): string { return this.session.meta.id; }
-  getCurrentSessionRoom() { return this.session.meta.room; }
-  tagSessionRoom(room: "A" | "B" | "C"): void { this.session.meta.room = room; }
+  getModel(): string {
+    return "m";
+  }
+  getCurrentSessionId(): string {
+    return this.session.meta.id;
+  }
+  getCurrentSessionRoom() {
+    return this.session.meta.room;
+  }
+  tagSessionRoom(room: "A" | "B" | "C"): void {
+    this.session.meta.room = room;
+  }
   saveCurrentSession(): void {
     this.session.meta.updatedAt = h.tick();
     this.session.meta.messageCount = this.session.messages.length;
     h.store.set(this.session.meta.id, structuredClone(this.session));
   }
-  restoreSession(data: SessionData): void { this.session = structuredClone(data); }
+  restoreSession(data: SessionData): void {
+    this.session = structuredClone(data);
+  }
 }
 
 function mkConfig(): Config {
@@ -100,20 +114,24 @@ describe("RoomManager", () => {
       roomDuring = rm.current();
       agent.session.messages.push({ role: "user", content: "hi" } as never);
     });
-    expect(roomDuring).toBe("B");          // 実行中は B
-    expect(rm.current()).toBe("A");        // 終了後は resting room A
+    expect(roomDuring).toBe("B"); // 実行中は B
+    expect(rm.current()).toBe("A"); // 終了後は resting room A
     expect(agent.getCurrentSessionRoom()).toBe("A");
     const b = bSessions();
-    expect(b.length).toBe(1);              // B の会話がディスク保存された
+    expect(b.length).toBe(1); // B の会話がディスク保存された
     expect(b[0].messages.length).toBe(1);
   });
 
   it("同じ Room への 2 回目の run は会話を継続する (新規セッションを作らない)", async () => {
     rm.initReplSession();
-    await rm.runInRoom("B", async () => { agent.session.messages.push({ role: "user", content: "1" } as never); });
-    await rm.runInRoom("B", async () => { agent.session.messages.push({ role: "user", content: "2" } as never); });
+    await rm.runInRoom("B", async () => {
+      agent.session.messages.push({ role: "user", content: "1" } as never);
+    });
+    await rm.runInRoom("B", async () => {
+      agent.session.messages.push({ role: "user", content: "2" } as never);
+    });
     const b = bSessions();
-    expect(b.length).toBe(1);              // 同一セッションを継続
+    expect(b.length).toBe(1); // 同一セッションを継続
     expect(b[0].messages.length).toBe(2);
   });
 
@@ -133,9 +151,11 @@ describe("RoomManager", () => {
 
   it("resumeRoom は会話が無ければ false、 あれば true", async () => {
     rm.initReplSession();
-    expect(rm.resumeRoom("B")).toBe(false);          // まだ B の会話なし
-    await rm.runInRoom("B", async () => { agent.session.messages.push({ role: "user", content: "x" } as never); });
-    expect(rm.resumeRoom("B")).toBe(true);           // B の会話ができた
+    expect(rm.resumeRoom("B")).toBe(false); // まだ B の会話なし
+    await rm.runInRoom("B", async () => {
+      agent.session.messages.push({ role: "user", content: "x" } as never);
+    });
+    expect(rm.resumeRoom("B")).toBe(true); // B の会話ができた
   });
 
   it("status は 3 Room 分を返し、 active と replBound を反映する", () => {

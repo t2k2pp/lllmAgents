@@ -56,7 +56,7 @@ interface NoteInfo {
   filePath: string;
   relativePath: string;
   frontmatter: Record<string, unknown>;
-  preview: string;  // 本文の先頭N文字
+  preview: string; // 本文の先頭N文字
 }
 
 /** ファイルを読み込んで NoteInfo を構築 */
@@ -82,20 +82,16 @@ function loadNote(filePath: string, vaultPath: string): NoteInfo | null {
 /** タグが配列の一部にマッチするか (前方一致で階層タグ対応) */
 function matchesTags(noteTags: unknown, filterTags: string[]): boolean {
   if (!Array.isArray(noteTags)) return false;
-  return filterTags.some((ft) =>
-    (noteTags as string[]).some((nt) => nt === ft || nt.startsWith(ft + "/"))
-  );
+  return filterTags.some((ft) => (noteTags as string[]).some((nt) => nt === ft || nt.startsWith(ft + "/")));
 }
 
 /** キーワードがfrontmatter + 本文にマッチするか */
 function matchesQuery(note: NoteInfo, query: string): boolean {
   const lower = query.toLowerCase();
   const keywords = lower.split(/\s+/).filter((k) => k.length > 0);
-  const searchText = [
-    String(note.frontmatter.title ?? ""),
-    String(note.frontmatter.query ?? ""),
-    note.preview,
-  ].join(" ").toLowerCase();
+  const searchText = [String(note.frontmatter.title ?? ""), String(note.frontmatter.query ?? ""), note.preview]
+    .join(" ")
+    .toLowerCase();
 
   return keywords.every((kw) => searchText.includes(kw));
 }
@@ -200,9 +196,7 @@ export const knowledgeSearchTool: ToolHandler = {
 
     for (const note of results) {
       const title = note.frontmatter.title ?? path.basename(note.filePath, ".md");
-      const tags = Array.isArray(note.frontmatter.tags)
-        ? (note.frontmatter.tags as string[]).join(", ")
-        : "";
+      const tags = Array.isArray(note.frontmatter.tags) ? (note.frontmatter.tags as string[]).join(", ") : "";
       const created = note.frontmatter.created ?? "";
       lines.push(`### ${title}`);
       lines.push(`パス: ${note.relativePath}`);

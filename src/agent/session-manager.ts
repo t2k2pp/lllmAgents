@@ -118,9 +118,7 @@ export function listSessions(limit = 20, room?: RoomId): SessionMeta[] {
     }
   }
 
-  return sessions
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    .slice(0, limit);
+  return sessions.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).slice(0, limit);
 }
 
 /**

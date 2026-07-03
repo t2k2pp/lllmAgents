@@ -73,13 +73,10 @@ export function createVisionTool(visionService: VisionService): ToolHandler {
         if (!fs.existsSync(imagePath)) {
           return { success: false, output: "", error: `ファイルが見つかりません: ${imagePath}` };
         }
-        
+
         const base64 = fs.readFileSync(imagePath, "base64");
-        
-        const result = await visionService.analyzeImage(
-          base64,
-          params.prompt as string,
-        );
+
+        const result = await visionService.analyzeImage(base64, params.prompt as string);
         return { success: true, output: result };
       } catch (e) {
         return { success: false, output: "", error: String(e) };

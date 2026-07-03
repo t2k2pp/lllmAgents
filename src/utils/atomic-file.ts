@@ -34,7 +34,11 @@ export function writeFileAtomic(filePath: string, data: string): void {
     fs.renameSync(tmpPath, filePath);
   } catch (e) {
     // rename 失敗時は一時ファイルを残さない (失敗自体は呼び出し元へ伝える)
-    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch {
+      /* ignore */
+    }
     throw e;
   }
 }
@@ -53,11 +57,7 @@ export function hardenFilePermissions(filePath: string): boolean {
       const user = process.env.USERNAME;
       if (!user) return false;
       // 継承 ACL を外し、自ユーザーのフルコントロールのみ付与する
-      execFileSync(
-        "icacls",
-        [filePath, "/inheritance:r", "/grant:r", `${user}:F`],
-        { stdio: "ignore" },
-      );
+      execFileSync("icacls", [filePath, "/inheritance:r", "/grant:r", `${user}:F`], { stdio: "ignore" });
     } else {
       fs.chmodSync(filePath, 0o600);
     }

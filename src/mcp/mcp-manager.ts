@@ -122,9 +122,23 @@ export class MCPManager {
     throw new Error(`MCP server "${name}" は設定ファイルに存在しません`);
   }
   /** runtime + 設定ファイル の combined 状態を返す */
-  getServerStatus(): Array<{ name: string; configured: boolean; configDisabled: boolean; runtimeDisabled: boolean; connected: boolean; toolCount: number }> {
+  getServerStatus(): Array<{
+    name: string;
+    configured: boolean;
+    configDisabled: boolean;
+    runtimeDisabled: boolean;
+    connected: boolean;
+    toolCount: number;
+  }> {
     const configs = this.loadConfig();
-    const out: Array<{ name: string; configured: boolean; configDisabled: boolean; runtimeDisabled: boolean; connected: boolean; toolCount: number }> = [];
+    const out: Array<{
+      name: string;
+      configured: boolean;
+      configDisabled: boolean;
+      runtimeDisabled: boolean;
+      connected: boolean;
+      toolCount: number;
+    }> = [];
     for (const [key, c] of Object.entries(configs)) {
       const client = this.clients.get(key);
       out.push({
@@ -206,14 +220,10 @@ export class MCPManager {
         }
 
         totalTools += handlers.length;
-        console.log(
-          chalk.green(`  ✓ MCP: ${serverName} (${handlers.length} tools)`)
-        );
+        console.log(chalk.green(`  ✓ MCP: ${serverName} (${handlers.length} tools)`));
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        console.error(
-          chalk.yellow(`  ⚠ MCP: ${serverName} 接続失敗: ${errMsg}`)
-        );
+        console.error(chalk.yellow(`  ⚠ MCP: ${serverName} 接続失敗: ${errMsg}`));
       }
     }
 

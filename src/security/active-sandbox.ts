@@ -52,7 +52,6 @@ export function reconcileSandboxProxy(): void {
   const proxy = getSandboxProxy();
   if (!proxy) return;
   const sb = getActiveProcessSandbox();
-  const needsProxy =
-    sb.getEffectiveLevel() === "fs" && (isMacOS || sb.canEnforceLinuxNetAllowlist());
+  const needsProxy = sb.getEffectiveLevel() === "fs" && (isMacOS || sb.canEnforceLinuxNetAllowlist());
   if (!needsProxy) proxy.stop();
 }

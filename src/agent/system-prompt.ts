@@ -188,7 +188,7 @@ No access outside the sandbox. Block dangerous commands (rm -rf, etc.). No hardc
   parts.push(`
 # Environment
 - Platform: ${process.platform}
-- Shell: ${isWindows ? "git bash (use Unix syntax; cmd.exe/PowerShell syntax is not supported)" : process.env.SHELL ?? "/bin/sh"}
+- Shell: ${isWindows ? "git bash (use Unix syntax; cmd.exe/PowerShell syntax is not supported)" : (process.env.SHELL ?? "/bin/sh")}
 - Working directory: ${process.cwd()}
 - Git: ${gitInfo.isGitRepo ? `yes (branch: ${gitInfo.branch ?? "unknown"})` : "no"}
 - Node.js: ${process.version}
@@ -253,25 +253,33 @@ ${skillLines}`);
         : "  ← same machine (parallel launch contends for the GPU KV cache; sequential execution recommended)";
       sections.push("");
       sections.push(`Second LLM: ${s.model} (${s.providerType}${s.baseUrl ? ` @ ${s.baseUrl}` : ""})${parallelNote}`);
-      sections.push(secDesc
-        ? `Traits: ${secDesc}`
-        : `Traits: (unset — the user can set it via /second description <text>)`);
+      sections.push(
+        secDesc ? `Traits: ${secDesc}` : `Traits: (unset — the user can set it via /second description <text>)`,
+      );
 
       sections.push("");
       sections.push(`Delegation guidance:`);
-      sections.push(`- task tool → launch the main LLM (yourself) in a separate context. Use for tasks suited to the main model's traits`);
-      sections.push(`- second_llm_agent tool → delegate to the second LLM. Both tool-using work and a tool-less one-shot consult / review / summary (no_tools:true) go through this one tool`);
+      sections.push(
+        `- task tool → launch the main LLM (yourself) in a separate context. Use for tasks suited to the main model's traits`,
+      );
+      sections.push(
+        `- second_llm_agent tool → delegate to the second LLM. Both tool-using work and a tool-less one-shot consult / review / summary (no_tools:true) go through this one tool`,
+      );
       sections.push(`Look at both models' traits and pick the one that fits the task.`);
       // ※ 旧 prompt にあった「どちらでも良い場合は ctx 節約のためセカンド優先」 は削除 (2026-05-11)。
       // ctx 節約はサブエージェント化 (task / second_llm_agent のいずれか) 全般の効果であり、
       // main vs second の選択軸とは別。 タイブレーカーをセカンドに振る合理性がない。
       // description 未設定時の自動補完は意図的に行わない (誤誘導リスク回避、 未入力は自己責任)。
       if (llmProfiles.parallelCapable) {
-        sections.push(`When you have multiple independent tasks, launching task and second_llm_agent in parallel shortens total elapsed time.`);
+        sections.push(
+          `When you have multiple independent tasks, launching task and second_llm_agent in parallel shortens total elapsed time.`,
+        );
       }
     } else {
       sections.push("");
-      sections.push(`Delegation: the task tool can launch the main LLM (yourself) in a separate context. The second LLM is unset, so there is only one delegation target.`);
+      sections.push(
+        `Delegation: the task tool can launch the main LLM (yourself) in a separate context. The second LLM is unset, so there is only one delegation target.`,
+      );
     }
 
     parts.push("\n" + sections.join("\n"));

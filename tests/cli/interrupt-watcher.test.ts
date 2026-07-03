@@ -85,10 +85,7 @@ describe("interruptWatcher", () => {
     const onInterrupt = vi.fn();
     let sigintCount = 0;
     const realEmit = process.emit.bind(process);
-    vi.spyOn(process, "emit").mockImplementation(((
-      event: string,
-      ...args: unknown[]
-    ) => {
+    vi.spyOn(process, "emit").mockImplementation(((event: string, ...args: unknown[]) => {
       if (event === "SIGINT") {
         sigintCount++;
         return true;

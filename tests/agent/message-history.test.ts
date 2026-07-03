@@ -7,9 +7,7 @@ describe("MessageHistory.replaceOlderMessages — tool_call/tool_result の分�
     // 0: user
     history.addUserMessage("話1");
     // 1: assistant (tool_calls)  ← これと 2 のペアが分断されると 400
-    history.addAssistantMessage("呼ぶ", [
-      { id: "call_1", type: "function", function: { name: "f", arguments: "{}" } },
-    ]);
+    history.addAssistantMessage("呼ぶ", [{ id: "call_1", type: "function", function: { name: "f", arguments: "{}" } }]);
     // 2: tool result
     history.addToolResult("call_1", "結果1");
     // 3..12: 追加の会話 (recent=10 とした時に 1 と 2 が境界をまたぐ構造)
@@ -28,10 +26,7 @@ describe("MessageHistory.replaceOlderMessages — tool_call/tool_result の分�
       const idx = raw.indexOf(toolMsg);
       const before = raw.slice(0, idx);
       const hasMatchingCall = before.some(
-        (m) =>
-          m.role === "assistant" &&
-          Array.isArray(m.tool_calls) &&
-          m.tool_calls.some((c) => c.id === "call_1"),
+        (m) => m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.some((c) => c.id === "call_1"),
       );
       expect(hasMatchingCall).toBe(true);
     }
@@ -40,9 +35,7 @@ describe("MessageHistory.replaceOlderMessages — tool_call/tool_result の分�
   it("recent の先頭が tool 結果単独でも、対応する assistant.tool_calls を巻き取る", () => {
     const history = new MessageHistory("system");
     history.addUserMessage("u1");
-    history.addAssistantMessage("a1", [
-      { id: "call_x", type: "function", function: { name: "f", arguments: "{}" } },
-    ]);
+    history.addAssistantMessage("a1", [{ id: "call_x", type: "function", function: { name: "f", arguments: "{}" } }]);
     history.addToolResult("call_x", "r1");
     history.addAssistantMessage("a2");
     // keepRecent=2 だと 境界 = length-2 = 2 → recent[0] が tool 結果になり分断される
@@ -202,7 +195,7 @@ describe("MessageHistory.getMessages — system の stable/dynamic 分割 (プ�
     const msgs = h.getMessages();
     const sys = msgs.filter((m) => m.role === "system");
     expect(sys.length).toBe(2);
-    expect(sys[0].content).toBe("BASE");       // 安定 base = キャッシュ対象 (先頭)
+    expect(sys[0].content).toBe("BASE"); // 安定 base = キャッシュ対象 (先頭)
     expect(sys[1].content).toBe("DT/GOAL/TODO"); // 動的 = キャッシュ境界より後ろ
   });
 
@@ -221,4 +214,3 @@ describe("MessageHistory.getMessages — system の stable/dynamic 分割 (プ�
     expect(sys[0].content).toBe("BASE\n\nEXTRA");
   });
 });
-

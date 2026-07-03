@@ -51,11 +51,7 @@ export async function runTenacious(
 
   // ── Step 1: 成功基準の策定 ────────────────────────────
   console.log(chalk.dim("  [準備] 成功基準を策定中..."));
-  const planResult = await subAgentManager.launchForeground(
-    "plan",
-    "成功基準策定",
-    buildPlannerPrompt(prompt),
-  );
+  const planResult = await subAgentManager.launchForeground("plan", "成功基準策定", buildPlannerPrompt(prompt));
   const criteria = planResult.result;
   console.log(chalk.dim("  [準備] 成功基準の策定完了\n"));
 
@@ -92,9 +88,7 @@ export async function runTenacious(
       passed,
     });
 
-    const scoreLabel = passed
-      ? chalk.green(`${score}/10 ✓ 合格`)
-      : chalk.yellow(`${score}/10 ✗ 未達成`);
+    const scoreLabel = passed ? chalk.green(`${score}/10 ✓ 合格`) : chalk.yellow(`${score}/10 ✗ 未達成`);
     console.log(chalk.dim(`  │ [Evaluator] スコア: `) + scoreLabel);
     console.log(chalk.cyan(`  └${"─".repeat(50)}\n`));
 
@@ -138,37 +132,25 @@ ${originalPrompt}
 ファイル作成を伴うタスクの場合は「ファイルが実際に存在すること」を必須基準に含めること。`;
 }
 
-function buildGeneratorPrompt(
-  originalPrompt: string,
-  criteria: string,
-  lastFeedback: string,
-  attempt: number,
-): string {
-  const parts: string[] = [
-    `## タスク\n${originalPrompt}`,
-    `## 成功基準\n${criteria}`,
-  ];
+function buildGeneratorPrompt(originalPrompt: string, criteria: string, lastFeedback: string, attempt: number): string {
+  const parts: string[] = [`## タスク\n${originalPrompt}`, `## 成功基準\n${criteria}`];
 
   if (attempt > 1 && lastFeedback) {
     parts.push(
       `## 前回の試行(#${attempt - 1})の評価フィードバック\n${lastFeedback}\n\n` +
-      `上記の問題点を修正した上で再実装してください。前回と同じ失敗を繰り返さないよう注意してください。`,
+        `上記の問題点を修正した上で再実装してください。前回と同じ失敗を繰り返さないよう注意してください。`,
     );
   }
 
   parts.push(
     `成功基準を全て満たすよう丁寧に実装してください。` +
-    `特にファイルの作成は必ずfile_writeツールを呼び出して実際に保存してください。`,
+      `特にファイルの作成は必ずfile_writeツールを呼び出して実際に保存してください。`,
   );
 
   return parts.join("\n\n");
 }
 
-function buildEvaluatorPrompt(
-  originalPrompt: string,
-  criteria: string,
-  genSummary: string,
-): string {
+function buildEvaluatorPrompt(originalPrompt: string, criteria: string, genSummary: string): string {
   return `以下の実装を評価してください。実際のファイルを確認した上でスコアをつけてください。
 
 ## 元のタスク

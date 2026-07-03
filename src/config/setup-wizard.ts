@@ -52,7 +52,9 @@ export async function runSetupWizard(): Promise<Config> {
       const visionConfig = await setupVisionLLM();
       config.visionLLM = visionConfig;
     } catch (e) {
-      console.error(chalk.red(`  Vision LLM セットアップに失敗しました: ${e instanceof Error ? e.message : String(e)}`));
+      console.error(
+        chalk.red(`  Vision LLM セットアップに失敗しました: ${e instanceof Error ? e.message : String(e)}`),
+      );
       process.exit(1);
     }
   } else {
@@ -155,8 +157,8 @@ export async function runLocalLLMSetup(opts: LocalLLMSetupOptions = {}): Promise
   const selectedModel = models.find((m) => m.name === modelName)!;
 
   // 6. Context window
-  const defaultCtx = opts.current?.contextWindow
-    ?? (selectedModel.contextLength > 0 ? selectedModel.contextLength : 4096);
+  const defaultCtx =
+    opts.current?.contextWindow ?? (selectedModel.contextLength > 0 ? selectedModel.contextLength : 4096);
   const { contextWindow } = await inquirer.prompt<{ contextWindow: number }>([
     {
       type: "number",
@@ -168,8 +170,8 @@ export async function runLocalLLMSetup(opts: LocalLLMSetupOptions = {}): Promise
 
   // 7. 特性説明 (任意)
   console.log(chalk.dim("\n  モデルの特性を記述しておくと、サブエージェント委任時の判断材料になります。"));
-  console.log(chalk.dim("  例: \"MoE 32B。日本語堅牢で推論・企画に強い。中速\""));
-  console.log(chalk.dim("      \"Dense 13B。高速・コーディング特化・日本語苦手\""));
+  console.log(chalk.dim('  例: "MoE 32B。日本語堅牢で推論・企画に強い。中速"'));
+  console.log(chalk.dim('      "Dense 13B。高速・コーディング特化・日本語苦手"'));
   console.log(chalk.dim("  (空のままEnterで後から /model description で設定可)"));
   const { description } = await inquirer.prompt<{ description: string }>([
     {
@@ -197,10 +199,7 @@ export async function runLocalLLMSetup(opts: LocalLLMSetupOptions = {}): Promise
  * 指定 URL に接続テストし、 モデル一覧を取得する。 失敗時は throw。
  * REPL の host/port 変更後の確認表示にも使う。
  */
-export async function connectAndListModels(
-  providerType: ProviderType,
-  baseUrl: string,
-): Promise<ModelInfo[]> {
+export async function connectAndListModels(providerType: ProviderType, baseUrl: string): Promise<ModelInfo[]> {
   const provider = createProviderByType(providerType, baseUrl);
 
   const spinner = createSpinner(`${baseUrl} に接続中...`).start();

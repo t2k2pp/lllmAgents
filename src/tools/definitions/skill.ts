@@ -83,22 +83,19 @@ export const skillTool: ToolHandler = {
     // context:fork - 独立したSubAgentコンテキストでスキルを実行
     if (skill.context === "fork") {
       if (!subAgentManager) {
-        return { success: false, output: "", error: "SubAgentManager not initialized (context:fork requires SubAgentManager)" };
+        return {
+          success: false,
+          output: "",
+          error: "SubAgentManager not initialized (context:fork requires SubAgentManager)",
+        };
       }
 
       console.log(chalk.dim(`\n  [Skill:fork] ${skill.trigger}: ${skill.description}`));
       console.log(chalk.dim(`  フォークコンテキストで実行中...`));
 
-      const forkPrompt = args
-        ? `${args}`
-        : "スキルの指示に従ってタスクを実行してください。";
+      const forkPrompt = args ? `${args}` : "スキルの指示に従ってタスクを実行してください。";
 
-      const result = await subAgentManager.launchSkillFork(
-        skill.name,
-        resolvedContent,
-        skill.tools,
-        forkPrompt,
-      );
+      const result = await subAgentManager.launchSkillFork(skill.name, resolvedContent, skill.tools, forkPrompt);
 
       const statusLabel = result.success ? chalk.green("完了") : chalk.red("失敗");
       console.log(chalk.dim(`  [Skill:fork] ${statusLabel}`));

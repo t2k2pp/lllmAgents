@@ -34,7 +34,12 @@ import { createBrowserTools } from "./tools/definitions/browser.js";
 import { createGameSmokeTool } from "./tools/definitions/game-smoke.js";
 import { taskTool, taskOutputTool, setSubAgentManager } from "./tools/definitions/task.js";
 import { enterPlanModeTool, exitPlanModeTool, setPlanManager } from "./tools/definitions/plan-mode.js";
-import { skillTool, setSkillRegistry, setSkillPermissionManager, setSkillSubAgentManager } from "./tools/definitions/skill.js";
+import {
+  skillTool,
+  setSkillRegistry,
+  setSkillPermissionManager,
+  setSkillSubAgentManager,
+} from "./tools/definitions/skill.js";
 import { secondLLMAgentTool, setSecondLLMManager } from "./tools/definitions/second-llm.js";
 import { federatedDelegateTool, setFederatedSecondLLMManager } from "./tools/definitions/federated-delegate.js";
 import { knowledgeSaveTool, setObsidianConfig } from "./tools/definitions/knowledge-save.js";
@@ -116,7 +121,11 @@ async function main(): Promise<void> {
   // Model Registry (docs/model-registry.md): config.mainLLM / secondLLM を
   // registry に同期し、 main/second slot を確定させる。 旧 llm-profiles.json から
   // の透過移行もここで完了する (本処理は失敗しても起動を止めない)。
-  try { reconcileSlotsFromConfig(config); } catch { /* ignore */ }
+  try {
+    reconcileSlotsFromConfig(config);
+  } catch {
+    /* ignore */
+  }
 
   // メインLLM が暗号化された apiKey を持つクラウド系の場合、起動時に合言葉を取得する。
   // セカンドLLM 側でも同じパスフレーズを使い回せるよう shared scope で保持。
@@ -141,8 +150,8 @@ async function main(): Promise<void> {
   } catch (e) {
     console.error(
       `\nメインLLMの初期化に失敗しました: ${e instanceof Error ? e.message : String(e)}\n` +
-      `  /model setup または config.json で設定を確認してください。\n` +
-      `  暗号化キーの場合、合言葉が間違っている可能性があります。\n`
+        `  /model setup または config.json で設定を確認してください。\n` +
+        `  暗号化キーの場合、合言葉が間違っている可能性があります。\n`,
     );
     process.exit(1);
   }
@@ -211,15 +220,11 @@ async function main(): Promise<void> {
     // ランタイムスモーク (ブラウザ成果物の破滅的失敗を検知)。 docs/checkpoint-and-smoke-design.md §5
     toolRegistry.register(createGameSmokeTool(playwrightManager));
   } else {
-    console.log(
-      chalk.dim(`ℹ ブラウザ機能 (browser_*/game_smoke) は無効: ${browserCap.reason}`),
-    );
+    console.log(chalk.dim(`ℹ ブラウザ機能 (browser_*/game_smoke) は無効: ${browserCap.reason}`));
   }
 
   // Vision tool
-  const visionProvider = config.visionLLM
-    ? createProvider(config.visionLLM, sharedPassphrase)
-    : provider;
+  const visionProvider = config.visionLLM ? createProvider(config.visionLLM, sharedPassphrase) : provider;
   const visionModel = config.visionLLM?.model ?? config.mainLLM.model;
   const visionService = new VisionService(visionProvider, visionModel);
   toolRegistry.register(createVisionTool(visionService));
@@ -231,9 +236,7 @@ async function main(): Promise<void> {
     if (imageService.isEnabled()) {
       toolRegistry.register(createImageGenerateTool(imageService, config));
     } else {
-      console.log(
-        chalk.dim("ℹ 画像生成機能 (image_generate) は無効: /image on または /image setup で有効化"),
-      );
+      console.log(chalk.dim("ℹ 画像生成機能 (image_generate) は無効: /image on または /image setup で有効化"));
     }
   }
   // imageGen 未設定 (undefined) なら何も表示しない (初心者ノイズ回避)
@@ -254,7 +257,9 @@ async function main(): Promise<void> {
       mcpManager.disableServer(name);
     }
     if (config.disabledMcpServers.length > 0) {
-      console.log(chalk.dim(`  MCP: ${config.disabledMcpServers.length} server(s) skipped by config.disabledMcpServers`));
+      console.log(
+        chalk.dim(`  MCP: ${config.disabledMcpServers.length} server(s) skipped by config.disabledMcpServers`),
+      );
     }
   }
   await mcpManager.connectAll(toolRegistry);
@@ -300,10 +305,14 @@ async function main(): Promise<void> {
   if (!ctxSource) {
     contextWindow = FALLBACK_CONTEXT_WINDOW;
     ctxSource = "fallback";
-    getOpsLogger().warn("config", `contextWindow fell back to ${FALLBACK_CONTEXT_WINDOW} — set mainLLM.contextWindow explicitly to override.`, {
-      model: config.mainLLM.model,
-      provider: config.mainLLM.providerType,
-    });
+    getOpsLogger().warn(
+      "config",
+      `contextWindow fell back to ${FALLBACK_CONTEXT_WINDOW} — set mainLLM.contextWindow explicitly to override.`,
+      {
+        model: config.mainLLM.model,
+        provider: config.mainLLM.providerType,
+      },
+    );
   }
   getOpsLogger().info("config", "contextWindow resolved", {
     contextWindow,
@@ -356,9 +365,7 @@ async function main(): Promise<void> {
     let passphrase: string | undefined = sharedPassphrase;
     if (secondLlmConfig.endpoint.apiKey && CredentialVault.isEncrypted(secondLlmConfig.endpoint.apiKey)) {
       // メイン側パスフレーズで復号できるかテスト
-      const testDecrypt = passphrase
-        ? CredentialVault.resolve(secondLlmConfig.endpoint.apiKey, passphrase)
-        : "";
+      const testDecrypt = passphrase ? CredentialVault.resolve(secondLlmConfig.endpoint.apiKey, passphrase) : "";
       if (!testDecrypt) {
         // メイン用と異なる、もしくは未設定なので別途プロンプト
         const { default: inquirer } = await import("inquirer");
@@ -385,7 +392,7 @@ async function main(): Promise<void> {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(
         `\n⚠️  セカンドLLMの初期化に失敗しました: ${msg}\n` +
-        `   セカンドLLMを無効化して起動を続行します。/second で設定を確認してください。\n`
+          `   セカンドLLMを無効化して起動を続行します。/second で設定を確認してください。\n`,
       );
     }
     if (secondLLMManager.isAvailable()) {
@@ -513,9 +520,7 @@ async function main(): Promise<void> {
     const cp = agent.getCheckpointManager();
     if (cp.getStatus().enabled && !(await cp.isGitReady())) {
       console.log(
-        chalk.yellow(
-          "  ⚠ チェックポイントは有効ですが git が見つかりません。 スナップショットは記録されません。",
-        ),
+        chalk.yellow("  ⚠ チェックポイントは有効ですが git が見つかりません。 スナップショットは記録されません。"),
       );
       console.log(chalk.dim("    git をインストールするか、 /checkpoint off で無効化してください。"));
     }
@@ -534,7 +539,9 @@ async function main(): Promise<void> {
     }
     // Room モデル: --background は REPL なしで Discord(Room B) を resting room とする。
     roomManager.initBackgroundSurface("discord");
-    const server = new DiscordInteractionServer(discord, agent, roomManager, roomQueue, skillRegistry, mcpManager, () => saveConfig(config));
+    const server = new DiscordInteractionServer(discord, agent, roomManager, roomQueue, skillRegistry, mcpManager, () =>
+      saveConfig(config),
+    );
     try {
       await server.start();
       console.log(`  [Background Mode] Discord に接続しました${server.botUser ? ` (Bot: ${server.botUser})` : ""}`);
@@ -618,7 +625,7 @@ async function main(): Promise<void> {
     PROVIDER_LABELS[config.mainLLM.providerType],
     contextWindow,
     skills.length,
-    secondLlmConfig
+    secondLlmConfig,
   );
 
   // 復元された状態を表示
@@ -630,7 +637,19 @@ async function main(): Promise<void> {
   roomManager.initReplSession();
 
   // Start REPL (sharedPassphrase は /swap や /second setup 後の Provider 再生成で使い回す)
-  const repl = new REPL(agent, config, skillRegistry, planManager, secondLLMManager, sharedPassphrase, mcpManager, visionService, imageService, roomManager, roomQueue);
+  const repl = new REPL(
+    agent,
+    config,
+    skillRegistry,
+    planManager,
+    secondLLMManager,
+    sharedPassphrase,
+    mcpManager,
+    visionService,
+    imageService,
+    roomManager,
+    roomQueue,
+  );
   await repl.start();
 
   // Cleanup

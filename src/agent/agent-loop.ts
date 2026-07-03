@@ -18,26 +18,14 @@ import type { PermissionManager, RequestSource } from "../security/permission-ma
 import type { HookManager } from "../hooks/hook-manager.js";
 import { MessageHistory } from "./message-history.js";
 import { ContextManager } from "./context-manager.js";
-import {
-  resolveCapability,
-  formatCapabilityLabel,
-  type CapabilityProfile,
-} from "./capability-tier.js";
+import { resolveCapability, formatCapabilityLabel, type CapabilityProfile } from "./capability-tier.js";
 import { normalizeToolCalls } from "./tool-call-normalizer.js";
-import {
-  classifyTaskComplexity,
-  recommendTier,
-  explainRecommendation,
-} from "./task-complexity.js";
+import { classifyTaskComplexity, recommendTier, explainRecommendation } from "./task-complexity.js";
 import { buildSystemPrompt, type SkillInfo, type LLMProfiles, type SystemPromptOverrides } from "./system-prompt.js";
 import { compressText } from "./compress-text.js";
 import { loadMemory } from "./memory.js";
 import { loadProjectInstructions } from "./project-context.js";
-import {
-  createSession,
-  saveSession,
-  type SessionData,
-} from "./session-manager.js";
+import { createSession, saveSession, type SessionData } from "./session-manager.js";
 import type { RoomId } from "./room-types.js";
 import { PlanManager } from "./plan-mode.js";
 import type { SamplingParams } from "../config/types.js";
@@ -162,7 +150,6 @@ function truncateLargeToolResult(toolName: string, content: string, threshold: n
     tail
   );
 }
-
 
 export class AgentLoop {
   private history: MessageHistory;
@@ -378,13 +365,7 @@ export class AgentLoop {
     });
     // ※ 古いセッションの掃除 (pruneOldSessions) は、 resume でセッション identity が
     //    確定した後に runCheckpointMaintenance() で実行する (復元対象を誤って消さないため)。
-    this.toolExecutor = new ToolExecutor(
-      toolRegistry,
-      permissions,
-      hookManager,
-      undefined,
-      this.checkpointManager,
-    );
+    this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager, undefined, this.checkpointManager);
     // claude-agent-sdk プロバイダの場合、 lllmAgent ツールを in-process MCP として
     // SDK に公開する (docs/claude-agent-sdk-provider-design.md §3.3)。
     // duck typing で attach メソッドを持つプロバイダのみに適用。
@@ -429,9 +410,8 @@ export class AgentLoop {
       cl
         ? (content, toolCalls) => {
             if (!content || content === "（空のレスポンス）") return;
-            const toolSummary = toolCalls && toolCalls.length > 0
-              ? toolCalls.map((tc) => tc.function.name).join(", ")
-              : undefined;
+            const toolSummary =
+              toolCalls && toolCalls.length > 0 ? toolCalls.map((tc) => tc.function.name).join(", ") : undefined;
             cl.logAssistant(content, toolSummary);
           }
         : null,
@@ -452,7 +432,9 @@ export class AgentLoop {
       const args = JSON.parse(toolCall.function.arguments ?? "{}");
       const fp = (args.file_path ?? args.path) as string | undefined;
       if (fp) this.runStats.filesChanged.add(fp);
-    } catch { /* parse 失敗は無視 (統計用途のみ) */ }
+    } catch {
+      /* parse 失敗は無視 (統計用途のみ) */
+    }
   }
 
   /** 実行中の処理を中断する（Esc / Ctrl+C など）。進行中の LLM 接続も即座に切断する */
@@ -490,12 +472,13 @@ export class AgentLoop {
     };
     this.events.emit("task_start", {
       source: this.currentSource,
-      prompt: typeof userMessage === "string"
-        ? userMessage
-        : userMessage
-            .filter((p): p is { type: "text"; text: string } => p.type === "text")
-            .map((p) => p.text)
-            .join(" "),
+      prompt:
+        typeof userMessage === "string"
+          ? userMessage
+          : userMessage
+              .filter((p): p is { type: "text"; text: string } => p.type === "text")
+              .map((p) => p.text)
+              .join(" "),
       timestamp: this.runStats.startMs,
     });
     // P0-A: ユーザー発話のたびに失敗履歴をリセット (前ターンの失敗を引き摺らない)
@@ -510,872 +493,1013 @@ export class AgentLoop {
     this.currentRegister = "unknown";
     this.softCapWarned = false;
     try {
-    this.history.addUserMessage(userMessage);
-    // チャットログ記録
-    if (this.chatLogger) {
-      const userText = typeof userMessage === "string"
-        ? userMessage
-        : (userMessage as ContentPart[])
-            .filter((p): p is { type: "text"; text: string } => p.type === "text")
-            .map((p) => p.text)
-            .join(" ");
-      this.chatLogger.logUser(userText);
-    }
-    // ユーザーメッセージのテキスト部分を抽出（タスク判定用）
-    const userMessageText = typeof userMessage === "string"
-      ? userMessage
-      : (userMessage as ContentPart[])
-          .filter((p): p is { type: "text"; text: string } => p.type === "text")
-          .map((p) => p.text)
-          .join(" ");
-    // Phase E-3: タスク複雑度を分類して、 不一致なら model 推奨を 1 行ログ。
-    // 自動切替はしない (ユーザの明示操作 = /model を尊重)。
-    try {
-      const complexity = classifyTaskComplexity(userMessageText);
-      const recommended = recommendTier(complexity, this.capability.tier);
-      if (recommended) {
-        const reason = explainRecommendation(complexity, this.capability.tier, recommended);
-        console.log(chalk.dim(
-          `  [model 推奨] ${this.capability.tier} → ${recommended} (complexity=${complexity}). ${reason}`,
-        ));
-        console.log(chalk.dim(`  → 切替する場合: /model <name> または /second swap`));
+      this.history.addUserMessage(userMessage);
+      // チャットログ記録
+      if (this.chatLogger) {
+        const userText =
+          typeof userMessage === "string"
+            ? userMessage
+            : (userMessage as ContentPart[])
+                .filter((p): p is { type: "text"; text: string } => p.type === "text")
+                .map((p) => p.text)
+                .join(" ");
+        this.chatLogger.logUser(userText);
       }
-    } catch { /* 推奨は best-effort、 失敗しても続行 */ }
-    // <think>タグフィルター（古いOllama向け、ストリーム跨ぎ対応）
-    const filterThinkingTags = createThinkingFilter();
-    let emptyResponseRetries = 0;
-    const MAX_EMPTY_RETRIES = 3;
-    let codeBlockRetried = false;
-    let hasExecutedTools = false; // この run() 内でツールを1回でも実行したか
-    /** 直前のツール呼び出しシグネチャ（反復検出用） */
-    let lastToolSignature = "";
-    let repeatToolCount = 0;
-    /** 検証待ちコードファイルのリスト（file_write/file_edit後、bash未実行ならここに溜まる） */
-    let pendingVerification: string[] = [];
-    /** Evaluatorレビュー待ちファイルのリスト（コード+ドキュメント両方） */
-    let pendingEvalFiles: string[] = [];
-    /**
-     * 自己点検の累積回数（統合カウンタ）。
-     * verification, evaluator, text-only, code-block の4種類の懸念すべてで共有する。
-     * 上限到達で追加の自己点検注入は停止しターン終了。
-     */
-    let selfCheckRounds = 0;
-    // Phase C-2: tier 別に自己点検回数を変える。 T1=3 / T2=2 / T3=1。
-    // T3 は scaffolding を増やしても改善しないため早めにユーザに戻す。
-    const MAX_SELF_CHECK_ROUNDS = this.capability.maxSelfCheckRounds;
-    const MAX_REPEAT_TOOL = 3; // 同じツール呼び出しがN回連続で失敗したら中断
-
-    // 2026-05-16 (docs/strategic-todo-design.md 議論): base harness の persistence 機構。
-    // 既存 self-check と独立した並列カウンタ。 standard 以上のレジスターでのみ発火。
-    let progressGateRetries = 0;        // Axis (1) Q→A 進捗 gate (response_complete 時)
-    let coherenceGateRetries = 0;       // Axis (2a) thinking-text コヒーレンス
-    const MAX_NEW_GATE_RETRIES = 2;     // 各 gate の上限 (自己点検と独立)
-
-    // Phase C-2: hard cap を tier 別に。 T1=100, T2=80, T3=50。
-    // ユーザー override (config.json modelCapabilities) で上書きも可能。
-    const hardCap = this.capability.maxIterations;
-    for (let iteration = 0; iteration < hardCap; iteration++) {
-      this.currentIteration = iteration;
-      this.runStats.iterations = iteration + 1;
-      // P3-A: レジスター別ソフトキャップ。 hard cap (= capability.maxIterations) 内で、
-      // 軽量タスク (explore/rough) は早めに上限到達を促し、 standard はやや控えめ。
-      // Phase C-4: production が hard cap (T3=50) を超えないよう min を取る。
-      const softCap = Math.min(this.computeRegisterSoftCap(), hardCap);
-      if (iteration >= softCap && !this.softCapWarned) {
-        console.log(chalk.yellow(
-          `\n  完了レベル "${this.currentRegister}" のソフト上限 (${softCap}) に到達しました。 ` +
-          `必要なら ask_user で続行可否を確認するか、 区切って報告してください。`,
-        ));
-        this.notice("warn", `完了レベル "${this.currentRegister}" のソフト上限 (${softCap} 反復) に到達`);
-        this.history.addUserMessage(
-          `[ハーネス] 完了レベル "${this.currentRegister}" のソフト上限 (${softCap} 反復) に到達しました。\n` +
-          `  進捗を簡潔にまとめ、 残作業を提示してから ask_user で続行 or 中断を確認してください。\n` +
-          `  「もう少しで終わる」 と判断するなら response_complete で完了報告を。 hard cap は ${hardCap} 反復です (tier=${this.capability.tier})。`,
-        );
-        this.softCapWarned = true;
-        // ソフトキャップ到達後は hard cap までしか走らないようループ条件で自然終了させる
-        // (即座に return せず、 LLM の応答を 1 回受けてから安全に閉じる)
-      }
-      // 中断チェック
-      if (this._aborted) {
-        // P4 (5.4): サーキットブレーカ起因の中断は、 generic な中断でなく「何が・なぜ恒久的に
-        // 失敗したか」を最終応答として正直に届ける (silent な打ち切りにしない)。
-        const cb = this.takeCircuitBreak();
-        if (cb) {
-          const report =
-            `⛔ ${cb.tool} が同じエラーで繰り返し失敗したため、処理を打ち切りました。\n` +
-            `エラー: ${cb.error.slice(0, 300)}\n` +
-            `待っても直らない種類の失敗の可能性が高いです。原因（権限/接続/設定）を解消してから再依頼してください。`;
-          console.log(chalk.red("\n  " + report.replace(/\n/g, "\n  ")));
-          this.history.addAssistantMessage(report);
-          this.runStats.finalText = report;
-          this.events.emit("assistant_text", { text: report, final: true });
-          this.purgeEphemeralAtSpanEnd("circuit_break");
-          return;
-        }
-        console.log(chalk.yellow("\n  (処理を中断しました)"));
-        // 中断ターンを履歴上で可視化する。 これが無いと「応答の無い user メッセージ」 が
-        // 残り、 再送信のたびに同文が重複蓄積してモデルを混乱させる (2026-06-12 ログで実証)。
-        this.appendAbortMarker("");
-        this.purgeEphemeralAtSpanEnd("user_abort");
-        return;
-      }
-      // Context compression check
-      if (this.contextManager.shouldCompress(this.history)) {
-        const compressSpinner = createSpinner("コンテキストを圧縮中...").start();
-        try {
-          await this.contextManager.compress(this.history);
-          compressSpinner.succeed("コンテキストを圧縮しました");
-          // チャットログのパート分割
-          this.chatLogger?.onCompressed();
-        } catch (e) {
-          compressSpinner.fail("圧縮に失敗しました");
-          logger.error("Context compression failed:", e);
-        }
-      }
-
-      // Call LLM with retry
-      let textContent = "";
-      let thinkingContent = "";
-      const toolCalls: ToolCall[] = [];
-      let hasStartedOutput = false;
-      let thinkingSpinner: ReturnType<typeof createSpinner> | null = null;
-      let success = false;
-
-      let receivedTokens = 0; // スピナーモード: 受信トークンカウンター
-      let thinkingStarted = false; // ストリーミングモード: [思考]ヘッダー表示済みフラグ
-      let finishReason = "stop"; // LLMの終了理由（"length"なら出力が途中で切れた）
-      let tokensIn: number | undefined;
-      let tokensOut: number | undefined;
-      // LLM呼び出しループ: 接続エラー時は自動リトライ、その他はユーザーに判断を委ねる
-      let connectionRetries = 0;
-
-      while (!success) {
-        try {
-          const toolDefs = this.getFilteredToolDefs();
-          // LLM I/O ログ: リクエスト記録
-          this.llmLogger.nextTurn();
-          this.llmLogger.logRequest(
-            this.history.getMessages(),
-            this.model,
-            toolDefs.length > 0 ? toolDefs : undefined,
+      // ユーザーメッセージのテキスト部分を抽出（タスク判定用）
+      const userMessageText =
+        typeof userMessage === "string"
+          ? userMessage
+          : (userMessage as ContentPart[])
+              .filter((p): p is { type: "text"; text: string } => p.type === "text")
+              .map((p) => p.text)
+              .join(" ");
+      // Phase E-3: タスク複雑度を分類して、 不一致なら model 推奨を 1 行ログ。
+      // 自動切替はしない (ユーザの明示操作 = /model を尊重)。
+      try {
+        const complexity = classifyTaskComplexity(userMessageText);
+        const recommended = recommendTier(complexity, this.capability.tier);
+        if (recommended) {
+          const reason = explainRecommendation(complexity, this.capability.tier, recommended);
+          console.log(
+            chalk.dim(`  [model 推奨] ${this.capability.tier} → ${recommended} (complexity=${complexity}). ${reason}`),
           );
-          // maxTokens は意図的に渡さない:
-          //   - openai-compat (Azure Foundry / vLLM 等): 省略すると「残りコンテキスト全部」がサーバ既定値となる。
-          //     contextWindow をそのまま渡すと、サーバによっては input + max_tokens > context で 400 を返す
-          //     (例: Kimi-K2 で 13991 input + 256000 max_tokens > 262144 → BadRequest)。
-          //   - azure-anthropic: max_tokens 必須だが provider 側に DEFAULT_MAX_TOKENS=64000 のフォールバックあり。
-          //   - azure-gpt (Responses API): max_output_tokens 省略時はサーバ既定 (= 残コンテキスト) が適用される。
-          // 呼び出しごとに AbortController を作り直す。 abort() がこれを切断することで
-          // Esc 中断が HTTP 層まで届く (ストリーム待機中でも即座に reject される)。
-          this.llmAbortController = new AbortController();
-          const gen = toolDefs.length > 0
-            ? this.provider.chatWithTools({
-              model: this.model,
-              messages: this.history.getMessages(),
-              tools: toolDefs,
-              stream: true,
-              signal: this.llmAbortController.signal,
-              ...this.samplingParams,
-            })
-            : this.provider.chat({
-              model: this.model,
-              messages: this.history.getMessages(),
-              stream: true,
-              signal: this.llmAbortController.signal,
-              ...this.samplingParams,
-            });
+          console.log(chalk.dim(`  → 切替する場合: /model <name> または /second swap`));
+        }
+      } catch {
+        /* 推奨は best-effort、 失敗しても続行 */
+      }
+      // <think>タグフィルター（古いOllama向け、ストリーム跨ぎ対応）
+      const filterThinkingTags = createThinkingFilter();
+      let emptyResponseRetries = 0;
+      const MAX_EMPTY_RETRIES = 3;
+      let codeBlockRetried = false;
+      let hasExecutedTools = false; // この run() 内でツールを1回でも実行したか
+      /** 直前のツール呼び出しシグネチャ（反復検出用） */
+      let lastToolSignature = "";
+      let repeatToolCount = 0;
+      /** 検証待ちコードファイルのリスト（file_write/file_edit後、bash未実行ならここに溜まる） */
+      let pendingVerification: string[] = [];
+      /** Evaluatorレビュー待ちファイルのリスト（コード+ドキュメント両方） */
+      let pendingEvalFiles: string[] = [];
+      /**
+       * 自己点検の累積回数（統合カウンタ）。
+       * verification, evaluator, text-only, code-block の4種類の懸念すべてで共有する。
+       * 上限到達で追加の自己点検注入は停止しターン終了。
+       */
+      let selfCheckRounds = 0;
+      // Phase C-2: tier 別に自己点検回数を変える。 T1=3 / T2=2 / T3=1。
+      // T3 は scaffolding を増やしても改善しないため早めにユーザに戻す。
+      const MAX_SELF_CHECK_ROUNDS = this.capability.maxSelfCheckRounds;
+      const MAX_REPEAT_TOOL = 3; // 同じツール呼び出しがN回連続で失敗したら中断
 
-          // LLM待機スピナー: リクエスト送信〜最初のチャンク受信まで
-          // 文脈情報（msg数 / 直前ターンの送信トークン / contextWindow）も併記してブラックボックス化を防ぐ
-          const waitingStartTime = Date.now();
-          const msgCount = this.history.getMessages().length;
-          const ctxFragments: string[] = [`${msgCount}msg`];
-          if (this.lastPromptTokens > 0) {
-            const usedK = (this.lastPromptTokens / 1000).toFixed(1);
-            const maxK = this.contextWindow >= 1000
-              ? `${Math.round(this.contextWindow / 1000)}K`
-              : `${this.contextWindow}`;
-            ctxFragments.push(`~${usedK}K/${maxK}`);
-          }
-          const ctxInfo = ctxFragments.join(" · ");
-          let receivingStartTime = 0; // 最初のテキストチャンク受信時刻（tok/s 計算用）
+      // 2026-05-16 (docs/strategic-todo-design.md 議論): base harness の persistence 機構。
+      // 既存 self-check と独立した並列カウンタ。 standard 以上のレジスターでのみ発火。
+      let progressGateRetries = 0; // Axis (1) Q→A 進捗 gate (response_complete 時)
+      let coherenceGateRetries = 0; // Axis (2a) thinking-text コヒーレンス
+      const MAX_NEW_GATE_RETRIES = 2; // 各 gate の上限 (自己点検と独立)
 
-          let waitingSpinner: ReturnType<typeof createSpinner> | null = createSpinner({
-            text: chalk.dim(`  LLM処理中... (0:00 · ${ctxInfo})`),
-            spinner: "dots",
-          }).start();
-
-          // 経過時間の定期更新（1秒ごと）
-          const waitingTimer = setInterval(() => {
-            if (waitingSpinner) {
-              const elapsed = Math.floor((Date.now() - waitingStartTime) / 1000);
-              waitingSpinner.text = chalk.dim(`  LLM処理中... (${formatElapsed(elapsed)} · ${ctxInfo})`);
-            }
-          }, 1000);
-
-          const stopWaitingSpinner = (): void => {
-            if (waitingTimer) clearInterval(waitingTimer);
-            if (waitingSpinner) {
-              const elapsed = Math.floor((Date.now() - waitingStartTime) / 1000);
-              if (elapsed >= 2) {
-                // 2秒以上待った場合のみ経過時間を表示
-                waitingSpinner.succeed(chalk.dim(`  LLM応答開始 (${formatElapsed(elapsed)} · ${ctxInfo})`));
-              } else {
-                waitingSpinner.stop();
-              }
-              waitingSpinner = null;
-            }
-          };
-
-          // 「考え中…」 スピナーに経過時間を表示するためのヘルパー。
-          // thinking フェーズが長引いても進捗が見える (2026-05-14 修正)。
-          let thinkingStartTime = 0;
-          let thinkingTimer: ReturnType<typeof setInterval> | null = null;
-          const startThinkingSpinner = (): void => {
-            if (thinkingSpinner) return;
-            thinkingStartTime = Date.now();
-            thinkingSpinner = createSpinner(chalk.dim("  考え中...")).start();
-            thinkingTimer = setInterval(() => {
-              if (thinkingSpinner) {
-                const elapsed = Math.floor((Date.now() - thinkingStartTime) / 1000);
-                thinkingSpinner.text = chalk.dim(`  考え中... (${formatElapsed(elapsed)})`);
-              }
-            }, 1000);
-          };
-          const stopThinkingSpinner = (failMessage?: string): void => {
-            if (thinkingTimer) {
-              clearInterval(thinkingTimer);
-              thinkingTimer = null;
-            }
-            if (thinkingSpinner) {
-              if (failMessage !== undefined) {
-                thinkingSpinner.fail(failMessage);
-              } else {
-                thinkingSpinner.stop();
-              }
-              thinkingSpinner = null;
-            }
-          };
-
-          for await (const chunk of abortableIterator(gen, () => this._aborted)) {
-            if (this._aborted) {
-              stopWaitingSpinner();
-              stopThinkingSpinner();
-              if (this.streamingDisplay && hasStartedOutput) process.stdout.write("\n");
-              console.log(chalk.yellow("\n  (処理を中断しました)"));
-              // 部分テキストごと中断マーカーを履歴に残す (重複 user メッセージ蓄積の防止)
-              this.appendAbortMarker(textContent);
-              this.purgeEphemeralAtSpanEnd("user_abort");
-              return;
-            }
-            switch (chunk.type) {
-              case "thinking":
-                // Qwen3等のthinkingモデル: reasoning_content を受信
-                if (chunk.text) {
-                  stopWaitingSpinner();
-                  if (this.streamingDisplay) {
-                    // ストリーミングモード: グレーでリアルタイム表示
-                    if (!thinkingStarted) {
-                      thinkingStarted = true;
-                      process.stdout.write(chalk.gray("\n[思考]\n"));
-                    }
-                    process.stdout.write(chalk.gray(chunk.text));
-                  } else {
-                    // スピナーモード: "考え中... (Xs)" スピナー (経過時間付き)
-                    startThinkingSpinner();
-                  }
-                  thinkingContent += chunk.text;
-                }
-                break;
-              case "text":
-                if (chunk.text) {
-                  stopWaitingSpinner();
-                  if (this.streamingDisplay) {
-                    // ストリーミングモード: リアルタイム表示
-                    stopThinkingSpinner();
-                    const displayText = filterThinkingTags(chunk.text);
-                    if (displayText) {
-                      if (!hasStartedOutput) {
-                        hasStartedOutput = true;
-                        // thinking直後なら区切り線を挿入
-                        if (thinkingStarted) {
-                          process.stdout.write(chalk.gray("\n[/思考]\n\n"));
-                        } else {
-                          process.stdout.write("\n");
-                        }
-                      }
-                      process.stdout.write(displayText);
-                    }
-                  } else {
-                    // スピナーモード: バッファリング + "受信中..." スピナー
-                    // 「考え中…」 から「受信中…」 への切替なので thinkingTimer も止める
-                    stopThinkingSpinner();
-                    // <think>...</think> タグをフィルタリング（古いOllamaの場合contentに含まれる）
-                    const displayText = filterThinkingTags(chunk.text);
-                    if (displayText) {
-                      receivedTokens += displayText.split(/\s+/).length;
-                      if (!hasStartedOutput) {
-                        hasStartedOutput = true;
-                        receivingStartTime = Date.now();
-                        thinkingSpinner = createSpinner({ text: chalk.dim(`  受信中... (${receivedTokens} tok)`), spinner: "dots" }).start();
-                      }
-                      if (thinkingSpinner !== null) {
-                        const recvElapsed = (Date.now() - receivingStartTime) / 1000;
-                        const rate = recvElapsed > 0.3 ? Math.round(receivedTokens / recvElapsed) : 0;
-                        const rateText = rate > 0 ? `, ${rate} tok/s` : "";
-                        thinkingSpinner.text = chalk.dim(`  受信中... (${receivedTokens} tok${rateText})`);
-                      }
-                    }
-                  }
-                  textContent += chunk.text;
-                }
-                break;
-              case "tool_call":
-                // 待機スピナー + thinking スピナーを停止
-                stopWaitingSpinner();
-                stopThinkingSpinner();
-                if (chunk.toolCall) {
-                  toolCalls.push(chunk.toolCall);
-                }
-                break;
-              case "error":
-                stopWaitingSpinner();
-                stopThinkingSpinner("エラー");
-                throw new Error(chunk.error ?? "LLM error");
-              case "done":
-                finishReason = chunk.finishReason ?? "stop";
-                // ストリーミングモード: 表示済みテキストの末尾に改行
-                if (this.streamingDisplay && hasStartedOutput) {
-                  process.stdout.write("\n");
-                }
-                if (chunk.usage) {
-                  // 次回ターンの待機スピナー表示用にプロンプトトークン数を記憶
-                  this.lastPromptTokens = chunk.usage.promptTokens ?? this.lastPromptTokens;
-                  tokensIn = chunk.usage.promptTokens;
-                  tokensOut = chunk.usage.completionTokens;
-                  const promptTokens = chunk.usage.promptTokens ?? 0;
-                  const outputTokens = chunk.usage.completionTokens ?? 0;
-                  const cacheRead = chunk.usage.cachedTokens ?? 0;
-                  // cacheCreationTokens の有無でセマンティクスを判別 (docs/prompt-cache-cost-reduction.md):
-                  //   - 定義あり = Anthropic 系。 promptTokens(=input_tokens) は cached を含まない非キャッシュ残。
-                  //     読込 0.1× + 書込 1.25× で内訳計上。 表示用 inputTokens は総入力 = 非キャッシュ残+読込+書込。
-                  //   - 定義なし = OpenAI 系。 promptTokens(=prompt_tokens) は cached を内包。 従来の控除計算。
-                  const cacheCreation = chunk.usage.cacheCreationTokens;
-                  let cost: number;
-                  let recordedInput: number;
-                  if (cacheCreation !== undefined) {
-                    cost = globalCostCalculator.calculateForModelWithCacheBreakdown(
-                      this.model, promptTokens, outputTokens, cacheRead, cacheCreation,
-                    );
-                    recordedInput = promptTokens + cacheRead + cacheCreation;
-                  } else {
-                    cost = globalCostCalculator.calculateForModelWithCache(
-                      this.model, promptTokens, outputTokens, cacheRead,
-                    );
-                    recordedInput = promptTokens;
-                  }
-                  globalTokenTracker.record({
-                    timestamp: new Date().toISOString(),
-                    provider: this.provider.providerType,
-                    model: this.model,
-                    slot: "main",
-                    inputTokens: recordedInput,
-                    outputTokens,
-                    cachedTokens: cacheRead,
-                    estimatedCostUsd: cost,
-                    sessionId: this.session.meta.id
-                  });
-                  // A-6: run 単位の累計 (task_complete の完了報告用)
-                  this.runStats.tokensIn += recordedInput;
-                  this.runStats.tokensOut += outputTokens;
-                  this.runStats.costUsd += cost;
-                }
-                stopWaitingSpinner();
-                stopThinkingSpinner();
-                break;
-            }
-          }
-
-          // ストリーム完了後もスピナーが残っていたらクリーンアップ
-          stopWaitingSpinner();
-          stopThinkingSpinner();
-
-          // LLM I/O ログ: レスポンス記録（thinking含む）
-          this.llmLogger.logResponse({
-            model: this.model,
-            thinking: thinkingContent || undefined,
-            text: textContent || undefined,
-            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-            tokensIn,
-            tokensOut,
-            finishReason,
-          });
-
-          success = true;
-          connectionRetries = 0;
-        } catch (e) {
-          const err = e instanceof Error ? e : new Error(String(e));
-
-          // 接続エラー（ECONNREFUSED等）の場合: 自動リトライ（上限あり）
-          if (isConnectionError(err) && connectionRetries < MAX_CONNECTION_RETRIES) {
-            connectionRetries++;
-            const waitMs = 2000 * connectionRetries; // 2s, 4s, 6s
-            getOpsLogger().warn("retry", "connection retry scheduled", {
-              attempt: connectionRetries,
-              max: MAX_CONNECTION_RETRIES,
-              waitMs,
-              error: err.message,
-              model: this.model,
-            });
-            console.log(chalk.yellow(`\n  接続エラー: ${err.message}`));
-            console.log(chalk.yellow(`  サーバー復帰を待機中... (${connectionRetries}/${MAX_CONNECTION_RETRIES})`));
-            this.notice("warn", `接続エラー: ${err.message} — リトライ ${connectionRetries}/${MAX_CONNECTION_RETRIES}`);
-            await sleep(waitMs);
-            textContent = "";
-            thinkingContent = "";
-            toolCalls.length = 0;
-            hasStartedOutput = false;
-            thinkingSpinner = null;
-            receivedTokens = 0;
-            thinkingStarted = false;
-            continue;
-          }
-
-          // その他のエラー or 接続リトライ上限: ユーザーに判断を委ねる
-          getOpsLogger().error("llm", "LLM call failed (asking user)", {
-            error: err.message,
-            stack: err.stack,
-            model: this.model,
-            connectionRetries,
-          });
-          console.error(chalk.red(`\n  エラー: ${err.message}`));
-          this.notice("error", `LLM 呼び出しエラー: ${err.message}`);
-          const action = await askUserOnError(err);
-
-          if (action === "retry") {
-            // ユーザーが明示的にリトライを選択
-            connectionRetries = 0;
-            textContent = "";
-            thinkingContent = "";
-            toolCalls.length = 0;
-            hasStartedOutput = false;
-            thinkingSpinner = null;
-            receivedTokens = 0;
-            thinkingStarted = false;
-            continue;
-          } else {
-            // "abort" → この発話を中止してREPLに戻る（プロセスは終了しない）
-            // _aborted を立てることで /try などの呼び出し元もループを抜けられる
-            this._aborted = true;
-            this.appendAbortMarker("", "LLM 呼び出しエラーにより中止");
-            this.purgeEphemeralAtSpanEnd("llm_error_abort");
+      // Phase C-2: hard cap を tier 別に。 T1=100, T2=80, T3=50。
+      // ユーザー override (config.json modelCapabilities) で上書きも可能。
+      const hardCap = this.capability.maxIterations;
+      for (let iteration = 0; iteration < hardCap; iteration++) {
+        this.currentIteration = iteration;
+        this.runStats.iterations = iteration + 1;
+        // P3-A: レジスター別ソフトキャップ。 hard cap (= capability.maxIterations) 内で、
+        // 軽量タスク (explore/rough) は早めに上限到達を促し、 standard はやや控えめ。
+        // Phase C-4: production が hard cap (T3=50) を超えないよう min を取る。
+        const softCap = Math.min(this.computeRegisterSoftCap(), hardCap);
+        if (iteration >= softCap && !this.softCapWarned) {
+          console.log(
+            chalk.yellow(
+              `\n  完了レベル "${this.currentRegister}" のソフト上限 (${softCap}) に到達しました。 ` +
+                `必要なら ask_user で続行可否を確認するか、 区切って報告してください。`,
+            ),
+          );
+          this.notice("warn", `完了レベル "${this.currentRegister}" のソフト上限 (${softCap} 反復) に到達`);
+          this.history.addUserMessage(
+            `[ハーネス] 完了レベル "${this.currentRegister}" のソフト上限 (${softCap} 反復) に到達しました。\n` +
+              `  進捗を簡潔にまとめ、 残作業を提示してから ask_user で続行 or 中断を確認してください。\n` +
+              `  「もう少しで終わる」 と判断するなら response_complete で完了報告を。 hard cap は ${hardCap} 反復です (tier=${this.capability.tier})。`,
+          );
+          this.softCapWarned = true;
+          // ソフトキャップ到達後は hard cap までしか走らないようループ条件で自然終了させる
+          // (即座に return せず、 LLM の応答を 1 回受けてから安全に閉じる)
+        }
+        // 中断チェック
+        if (this._aborted) {
+          // P4 (5.4): サーキットブレーカ起因の中断は、 generic な中断でなく「何が・なぜ恒久的に
+          // 失敗したか」を最終応答として正直に届ける (silent な打ち切りにしない)。
+          const cb = this.takeCircuitBreak();
+          if (cb) {
+            const report =
+              `⛔ ${cb.tool} が同じエラーで繰り返し失敗したため、処理を打ち切りました。\n` +
+              `エラー: ${cb.error.slice(0, 300)}\n` +
+              `待っても直らない種類の失敗の可能性が高いです。原因（権限/接続/設定）を解消してから再依頼してください。`;
+            console.log(chalk.red("\n  " + report.replace(/\n/g, "\n  ")));
+            this.history.addAssistantMessage(report);
+            this.runStats.finalText = report;
+            this.events.emit("assistant_text", { text: report, final: true });
+            this.purgeEphemeralAtSpanEnd("circuit_break");
             return;
           }
+          console.log(chalk.yellow("\n  (処理を中断しました)"));
+          // 中断ターンを履歴上で可視化する。 これが無いと「応答の無い user メッセージ」 が
+          // 残り、 再送信のたびに同文が重複蓄積してモデルを混乱させる (2026-06-12 ログで実証)。
+          this.appendAbortMarker("");
+          this.purgeEphemeralAtSpanEnd("user_abort");
+          return;
         }
-      }
-
-      if (!success) {
-        this.purgeEphemeralAtSpanEnd("llm_call_unsuccessful");
-        return;
-      }
-
-      // P3-A: アシスタント応答テキストからレジスター宣言を検出 (1 user span に 1 度だけ反映)
-      this.detectRegisterFromText(textContent);
-
-      // 応答テキストの遅延表示ヘルパー (docs/spinner-mode-response-coloring-design.md v2)。
-      // 構造ベース: モデルがユーザーに向けた言葉はすべて白/Markdown で表示する。
-      // 「中間か最終か」 の意味分類は表示には使わない (v1 で intent classifier の誤分類により
-      // 本物の回答が灰色化した事故のため廃止)。
-      // 引数 final はチャネル通知用フラグのみ: span を終わらせる応答のテキスト = true。
-      // assistantTextFlushed で 1 イテレーションにつき 1 回だけ表示する。
-      let assistantTextFlushed = false;
-      const flushAssistantText = (final: boolean): void => {
-        if (assistantTextFlushed) return;
-        const filteredText = createThinkingFilter()(textContent);
-        if (!filteredText.trim()) return;
-        assistantTextFlushed = true;
-        // イベントは表示モードに依存せず発火する (チャネル購読者向け)。
-        // final=true はユーザー向け最終応答として task_complete にも載せる。
-        this.events.emit("assistant_text", { text: filteredText, final });
-        if (final) this.runStats.finalText = filteredText;
-        // CLI 表示: ストリーミングモードはライブ出力済みのためここでは表示しない
-        if (this.streamingDisplay || !hasStartedOutput) return;
-        if (hasMarkdown(filteredText)) {
-          console.log(renderMarkdown(filteredText));
-        } else {
-          console.log("\n" + filteredText);
-        }
-      };
-
-      // finish_reason="length": max_tokensに達して出力が途中で切れた場合、自動的に続きを生成する
-      // 安全ネット: vLLMがfinish_reason="stop"を誤って返す場合に備え、
-      // 構造的に不完全（未閉じコードブロック/テーブル、単語途中終端など）を検出して自動継続する
-      const isTruncatedByLength = finishReason === "length" && textContent.trim().length > 0;
-      const structural = toolCalls.length === 0 && textContent.trim().length > 0
-        ? isStructurallyIncomplete(textContent)
-        : { incomplete: false as const };
-      if (isTruncatedByLength || structural.incomplete) {
-        const structReason = "reason" in structural ? structural.reason : undefined;
-        const reason = isTruncatedByLength ? "max_tokens到達" : `構造的不完全: ${structReason}`;
-        console.log(chalk.dim(`\n  (${reason}のため、続きを生成します...)`));
-        // 部分応答を一旦履歴に積んで「続き」 を促す。 部分テキストは最終回答の前半部分
-        // (ユーザーに見える言葉) なので displayed=true で span 終了後も保全する。
-        // これを purge すると履歴に残る最終回答が「続き」 の後半だけになり欠損する。
-        this.history.addAssistantMessage(
-          textContent,
-          toolCalls.length > 0 ? toolCalls : undefined,
-          { ephemeral: toolCalls.length === 0, thinking: thinkingContent, displayed: textContent.trim().length > 0 },
-        );
-        this.history.addUserMessage(
-          "続きを出力してください。途中から再開してください。",
-          { ephemeral: true },
-        );
-        continue;
-      }
-
-      // Phase D-1: 非標準形式 (Mistral [TOOL_CALLS] / ChatML <tool_call> / Anthropic XML /
-      // ReAct Action: / Plain JSON / pipe-call) の tool 呼び出しを fallback として正規化する。
-      // 2026-05-13: 当初は T2/T3 限定だったが、 gpt-5.x reasoning モードが thinking/text に
-      // <tool_call><function=...><parameter=...> を書き出す事例 (2026-05-12 観測) があるため
-      // T1 でも有効化。 toolCalls.length === 0 のときのみ動くので native function calling と競合しない。
-      //
-      // 2026-06-07: この正規化を「ツール実行ブロックより前」 に移動 (バグ修正)。 旧版は実行
-      // ブロック (下方の `if (toolCalls.length > 0)`) の *後* に置かれていたため、 thinking/text
-      // から救出した tool 呼び出しが ops ログには記録されるのに *一度も実行されず* に空応答として
-      // ターンが終わる致命的欠陥があった (session mq34du2c: Qwen3.6 が reasoning_content に
-      // second_llm_consult を正しく書いたのにしりとりが一手も進まなかった事例)。 抽出した
-      // toolCalls を flush / coherence / 実行 の手前で確定させ、 既存の実行ルートに合流させる。
-      // docs/tool-call-salvage-pipe-format-design.md §6 参照。
-      if (toolCalls.length === 0 && textContent.trim().length > 0) {
-        const normalized = normalizeToolCalls(textContent);
-        if (normalized.toolCalls.length > 0) {
-          console.log(chalk.dim(
-            `  [tool-format] ${normalized.format} 形式から ${normalized.toolCalls.length} 件の tool 呼び出しを抽出 (tier=${this.capability.tier})`,
-          ));
-          // 非TTY / --background では console が見えないため、 ops-logger に構造化記録を残す
-          // (誤発火・発火頻度の事後調査用。 全形式共通)。
-          getOpsLogger().info("tool-format", "テキストから tool 呼び出しを正規化抽出", {
-            format: normalized.format,
-            toolCount: normalized.toolCalls.length,
-            toolNames: normalized.toolCalls.map((tc) => tc.function.name),
-            source: "text",
-            tier: this.capability.tier,
-          });
-          // 既存の textContent / toolCalls を上書きして tool 実行ルートへ流す。
-          // textContent を cleanedText に差し替えるので、 直後の flushAssistantText と
-          // 実行ブロックの addAssistantMessage は非標準マーカーを除去済みの本文を使う。
-          textContent = normalized.cleanedText;
-          toolCalls.push(...normalized.toolCalls);
-        }
-      }
-
-      // Phase 2: 思考保全 — text/toolCalls がともに空でも thinking 内に <tool_call> 等が
-      // 埋まっているケース (例: Qwen3 が reasoning_content に ChatML 形式、
-      // gpt-5.x reasoning が Anthropic XML 形式を吐く) を救う。
-      // 思考は SoWhat/WhySo の核なので、 そこに完成形のツールコールがあるなら捨てずに実行する。
-      // docs/ephemeral-context-design.md §7.2 参照。
-      if (toolCalls.length === 0 && thinkingContent.trim().length > 0) {
-        const normalized = normalizeToolCalls(thinkingContent);
-        if (normalized.toolCalls.length > 0) {
-          console.log(chalk.dim(
-            `  [tool-format] thinking 内 ${normalized.format} 形式から ${normalized.toolCalls.length} 件の tool 呼び出しを抽出 (tier=${this.capability.tier})`,
-          ));
-          getOpsLogger().info("tool-format", "thinking から tool 呼び出しを正規化抽出", {
-            format: normalized.format,
-            toolCount: normalized.toolCalls.length,
-            toolNames: normalized.toolCalls.map((tc) => tc.function.name),
-            source: "thinking",
-            tier: this.capability.tier,
-          });
-          // toolCalls が空の場合 (textContent の有無は問わない) に thinking 内のツール呼び出しを
-          // 救出する。 textContent は通常空だが、 上の text salvage がツールを抽出できなかった
-          // (normalized.toolCalls.length===0) 場合は非空のまま到達しうる。 toolCalls を追加すれば
-          // 実行ブロックの addAssistantMessage(textContent, toolCalls, ...) が textContent も正しく永続化する。
-          toolCalls.push(...normalized.toolCalls);
-        }
-      }
-
-      // ツール呼び出しを伴うテキストもユーザーへの言葉として白で表示する (v2: 構造ベース)。
-      // final は構造で決める: response_complete を含む = この応答で span が終わる予定 = 最終応答。
-      // ツールを伴わないテキストはここでは出さず、 下流のディスポジション地点で flush する
-      // (span 継続=final:false / span 終了=final:true の判定がそこで確定するため)。
-      if (toolCalls.length > 0) {
-        flushAssistantText(toolCalls.some((tc) => tc.function.name === "response_complete"));
-      }
-
-      // 2026-05-16: Axis (2a) thinking-text コヒーレンス検査。
-      // standard 以上のレジスターでのみ発火。 model が thinking で「続きある」 と書いているのに
-      // text/response_complete で「完了」 を宣言しているズレを拾う。
-      // - 緩めの regex パターン (兆候レベルで拾う)
-      // - LLM 呼出なし (軽量)
-      // - 検出時は ephemeral nudge を inject、 retry counter 制限あり
-      {
-        const isStandardOrUp = this.isStandardOrAboveRegister();
-        // toolCalls がある場合 (native / salvage 由来とも) は実行を優先し coherence nudge を
-        // 出さない。 さもないと続行意図のツール呼び出しを「完了ズレ」 と誤判定して drop し continue
-        // してしまう (2026-06-07: salvage 移動に伴う取りこぼし防止)。
-        if (toolCalls.length === 0 && isStandardOrUp && coherenceGateRetries < MAX_NEW_GATE_RETRIES) {
-          // この時点で toolCalls は空 (上の length===0 ガード) なので response_complete は無い。
-          // hasRC を toolCalls.some(...) で計算すると常に false の死蔵コードになり、 ガードを
-          // 変えた未来のメンテナがロジックを誤解する恐れがあるため false 固定で意図を明示する。
-          const hasRC = false;
-          const coherence = checkCoherence(thinkingContent, textContent, hasRC);
-          if (coherence.mismatch) {
-            coherenceGateRetries++;
-            console.log(chalk.yellow(
-              `  [coherence ${coherenceGateRetries}/${MAX_NEW_GATE_RETRIES}] thinking「${coherence.continuationHit}」 vs 完了「${coherence.completionHit}」 ズレ検出`,
-            ));
-            // 元 response は履歴に積まずに (= 完了宣言を確定させず)、 nudge だけ inject して loop 続行。
-            // ストリーミング表示中はユーザーが既に読んでいるため displayed で保全する。
-            this.history.addAssistantMessage(textContent, undefined, {
-              ephemeral: true,
-              thinking: thinkingContent,
-              displayed: this.streamingDisplay && hasStartedOutput,
-            });
-            this.history.addUserMessage(buildCoherenceNudge(coherence), { ephemeral: true });
-            continue;
+        // Context compression check
+        if (this.contextManager.shouldCompress(this.history)) {
+          const compressSpinner = createSpinner("コンテキストを圧縮中...").start();
+          try {
+            await this.contextManager.compress(this.history);
+            compressSpinner.succeed("コンテキストを圧縮しました");
+            // チャットログのパート分割
+            this.chatLogger?.onCompressed();
+          } catch (e) {
+            compressSpinner.fail("圧縮に失敗しました");
+            logger.error("Context compression failed:", e);
           }
         }
-      }
 
-      // Tool calls: execute (parallel when multiple) and continue
-      if (toolCalls.length > 0) {
-        hasExecutedTools = true;
+        // Call LLM with retry
+        let textContent = "";
+        let thinkingContent = "";
+        const toolCalls: ToolCall[] = [];
+        let hasStartedOutput = false;
+        let thinkingSpinner: ReturnType<typeof createSpinner> | null = null;
+        let success = false;
 
-        // 同じツール呼び出しの反復検出
-        const currentSignature = toolCalls.map(tc => tc.function.name + ":" + tc.function.arguments).join("|");
-        if (currentSignature === lastToolSignature) {
-          repeatToolCount++;
-          if (repeatToolCount >= MAX_REPEAT_TOOL) {
-            console.log(chalk.yellow(`\n  同じツール呼び出しが${MAX_REPEAT_TOOL}回連続しています。別のアプローチを試みます...`));
-            this.history.addAssistantMessage(textContent, toolCalls, { thinking: thinkingContent });
-            // 直前のツール結果を偽造せずに、問題を指摘するメッセージを追加
-            for (const tc of toolCalls) {
-              this.history.addToolResult(tc.id,
-                "Error: このツール呼び出しは同じ引数で繰り返し実行されており、同じ結果が返っています。" +
-                "別のアプローチを取ってください。ファイルが存在しない場合は作成し、ツール名を間違えている場合は正しいツールを使ってください。"
-              );
+        let receivedTokens = 0; // スピナーモード: 受信トークンカウンター
+        let thinkingStarted = false; // ストリーミングモード: [思考]ヘッダー表示済みフラグ
+        let finishReason = "stop"; // LLMの終了理由（"length"なら出力が途中で切れた）
+        let tokensIn: number | undefined;
+        let tokensOut: number | undefined;
+        // LLM呼び出しループ: 接続エラー時は自動リトライ、その他はユーザーに判断を委ねる
+        let connectionRetries = 0;
+
+        while (!success) {
+          try {
+            const toolDefs = this.getFilteredToolDefs();
+            // LLM I/O ログ: リクエスト記録
+            this.llmLogger.nextTurn();
+            this.llmLogger.logRequest(
+              this.history.getMessages(),
+              this.model,
+              toolDefs.length > 0 ? toolDefs : undefined,
+            );
+            // maxTokens は意図的に渡さない:
+            //   - openai-compat (Azure Foundry / vLLM 等): 省略すると「残りコンテキスト全部」がサーバ既定値となる。
+            //     contextWindow をそのまま渡すと、サーバによっては input + max_tokens > context で 400 を返す
+            //     (例: Kimi-K2 で 13991 input + 256000 max_tokens > 262144 → BadRequest)。
+            //   - azure-anthropic: max_tokens 必須だが provider 側に DEFAULT_MAX_TOKENS=64000 のフォールバックあり。
+            //   - azure-gpt (Responses API): max_output_tokens 省略時はサーバ既定 (= 残コンテキスト) が適用される。
+            // 呼び出しごとに AbortController を作り直す。 abort() がこれを切断することで
+            // Esc 中断が HTTP 層まで届く (ストリーム待機中でも即座に reject される)。
+            this.llmAbortController = new AbortController();
+            const gen =
+              toolDefs.length > 0
+                ? this.provider.chatWithTools({
+                    model: this.model,
+                    messages: this.history.getMessages(),
+                    tools: toolDefs,
+                    stream: true,
+                    signal: this.llmAbortController.signal,
+                    ...this.samplingParams,
+                  })
+                : this.provider.chat({
+                    model: this.model,
+                    messages: this.history.getMessages(),
+                    stream: true,
+                    signal: this.llmAbortController.signal,
+                    ...this.samplingParams,
+                  });
+
+            // LLM待機スピナー: リクエスト送信〜最初のチャンク受信まで
+            // 文脈情報（msg数 / 直前ターンの送信トークン / contextWindow）も併記してブラックボックス化を防ぐ
+            const waitingStartTime = Date.now();
+            const msgCount = this.history.getMessages().length;
+            const ctxFragments: string[] = [`${msgCount}msg`];
+            if (this.lastPromptTokens > 0) {
+              const usedK = (this.lastPromptTokens / 1000).toFixed(1);
+              const maxK =
+                this.contextWindow >= 1000 ? `${Math.round(this.contextWindow / 1000)}K` : `${this.contextWindow}`;
+              ctxFragments.push(`~${usedK}K/${maxK}`);
             }
-            repeatToolCount = 0;
-            lastToolSignature = "";
-            continue;
+            const ctxInfo = ctxFragments.join(" · ");
+            let receivingStartTime = 0; // 最初のテキストチャンク受信時刻（tok/s 計算用）
+
+            let waitingSpinner: ReturnType<typeof createSpinner> | null = createSpinner({
+              text: chalk.dim(`  LLM処理中... (0:00 · ${ctxInfo})`),
+              spinner: "dots",
+            }).start();
+
+            // 経過時間の定期更新（1秒ごと）
+            const waitingTimer = setInterval(() => {
+              if (waitingSpinner) {
+                const elapsed = Math.floor((Date.now() - waitingStartTime) / 1000);
+                waitingSpinner.text = chalk.dim(`  LLM処理中... (${formatElapsed(elapsed)} · ${ctxInfo})`);
+              }
+            }, 1000);
+
+            const stopWaitingSpinner = (): void => {
+              if (waitingTimer) clearInterval(waitingTimer);
+              if (waitingSpinner) {
+                const elapsed = Math.floor((Date.now() - waitingStartTime) / 1000);
+                if (elapsed >= 2) {
+                  // 2秒以上待った場合のみ経過時間を表示
+                  waitingSpinner.succeed(chalk.dim(`  LLM応答開始 (${formatElapsed(elapsed)} · ${ctxInfo})`));
+                } else {
+                  waitingSpinner.stop();
+                }
+                waitingSpinner = null;
+              }
+            };
+
+            // 「考え中…」 スピナーに経過時間を表示するためのヘルパー。
+            // thinking フェーズが長引いても進捗が見える (2026-05-14 修正)。
+            let thinkingStartTime = 0;
+            let thinkingTimer: ReturnType<typeof setInterval> | null = null;
+            const startThinkingSpinner = (): void => {
+              if (thinkingSpinner) return;
+              thinkingStartTime = Date.now();
+              thinkingSpinner = createSpinner(chalk.dim("  考え中...")).start();
+              thinkingTimer = setInterval(() => {
+                if (thinkingSpinner) {
+                  const elapsed = Math.floor((Date.now() - thinkingStartTime) / 1000);
+                  thinkingSpinner.text = chalk.dim(`  考え中... (${formatElapsed(elapsed)})`);
+                }
+              }, 1000);
+            };
+            const stopThinkingSpinner = (failMessage?: string): void => {
+              if (thinkingTimer) {
+                clearInterval(thinkingTimer);
+                thinkingTimer = null;
+              }
+              if (thinkingSpinner) {
+                if (failMessage !== undefined) {
+                  thinkingSpinner.fail(failMessage);
+                } else {
+                  thinkingSpinner.stop();
+                }
+                thinkingSpinner = null;
+              }
+            };
+
+            for await (const chunk of abortableIterator(gen, () => this._aborted)) {
+              if (this._aborted) {
+                stopWaitingSpinner();
+                stopThinkingSpinner();
+                if (this.streamingDisplay && hasStartedOutput) process.stdout.write("\n");
+                console.log(chalk.yellow("\n  (処理を中断しました)"));
+                // 部分テキストごと中断マーカーを履歴に残す (重複 user メッセージ蓄積の防止)
+                this.appendAbortMarker(textContent);
+                this.purgeEphemeralAtSpanEnd("user_abort");
+                return;
+              }
+              switch (chunk.type) {
+                case "thinking":
+                  // Qwen3等のthinkingモデル: reasoning_content を受信
+                  if (chunk.text) {
+                    stopWaitingSpinner();
+                    if (this.streamingDisplay) {
+                      // ストリーミングモード: グレーでリアルタイム表示
+                      if (!thinkingStarted) {
+                        thinkingStarted = true;
+                        process.stdout.write(chalk.gray("\n[思考]\n"));
+                      }
+                      process.stdout.write(chalk.gray(chunk.text));
+                    } else {
+                      // スピナーモード: "考え中... (Xs)" スピナー (経過時間付き)
+                      startThinkingSpinner();
+                    }
+                    thinkingContent += chunk.text;
+                  }
+                  break;
+                case "text":
+                  if (chunk.text) {
+                    stopWaitingSpinner();
+                    if (this.streamingDisplay) {
+                      // ストリーミングモード: リアルタイム表示
+                      stopThinkingSpinner();
+                      const displayText = filterThinkingTags(chunk.text);
+                      if (displayText) {
+                        if (!hasStartedOutput) {
+                          hasStartedOutput = true;
+                          // thinking直後なら区切り線を挿入
+                          if (thinkingStarted) {
+                            process.stdout.write(chalk.gray("\n[/思考]\n\n"));
+                          } else {
+                            process.stdout.write("\n");
+                          }
+                        }
+                        process.stdout.write(displayText);
+                      }
+                    } else {
+                      // スピナーモード: バッファリング + "受信中..." スピナー
+                      // 「考え中…」 から「受信中…」 への切替なので thinkingTimer も止める
+                      stopThinkingSpinner();
+                      // <think>...</think> タグをフィルタリング（古いOllamaの場合contentに含まれる）
+                      const displayText = filterThinkingTags(chunk.text);
+                      if (displayText) {
+                        receivedTokens += displayText.split(/\s+/).length;
+                        if (!hasStartedOutput) {
+                          hasStartedOutput = true;
+                          receivingStartTime = Date.now();
+                          thinkingSpinner = createSpinner({
+                            text: chalk.dim(`  受信中... (${receivedTokens} tok)`),
+                            spinner: "dots",
+                          }).start();
+                        }
+                        if (thinkingSpinner !== null) {
+                          const recvElapsed = (Date.now() - receivingStartTime) / 1000;
+                          const rate = recvElapsed > 0.3 ? Math.round(receivedTokens / recvElapsed) : 0;
+                          const rateText = rate > 0 ? `, ${rate} tok/s` : "";
+                          thinkingSpinner.text = chalk.dim(`  受信中... (${receivedTokens} tok${rateText})`);
+                        }
+                      }
+                    }
+                    textContent += chunk.text;
+                  }
+                  break;
+                case "tool_call":
+                  // 待機スピナー + thinking スピナーを停止
+                  stopWaitingSpinner();
+                  stopThinkingSpinner();
+                  if (chunk.toolCall) {
+                    toolCalls.push(chunk.toolCall);
+                  }
+                  break;
+                case "error":
+                  stopWaitingSpinner();
+                  stopThinkingSpinner("エラー");
+                  throw new Error(chunk.error ?? "LLM error");
+                case "done":
+                  finishReason = chunk.finishReason ?? "stop";
+                  // ストリーミングモード: 表示済みテキストの末尾に改行
+                  if (this.streamingDisplay && hasStartedOutput) {
+                    process.stdout.write("\n");
+                  }
+                  if (chunk.usage) {
+                    // 次回ターンの待機スピナー表示用にプロンプトトークン数を記憶
+                    this.lastPromptTokens = chunk.usage.promptTokens ?? this.lastPromptTokens;
+                    tokensIn = chunk.usage.promptTokens;
+                    tokensOut = chunk.usage.completionTokens;
+                    const promptTokens = chunk.usage.promptTokens ?? 0;
+                    const outputTokens = chunk.usage.completionTokens ?? 0;
+                    const cacheRead = chunk.usage.cachedTokens ?? 0;
+                    // cacheCreationTokens の有無でセマンティクスを判別 (docs/prompt-cache-cost-reduction.md):
+                    //   - 定義あり = Anthropic 系。 promptTokens(=input_tokens) は cached を含まない非キャッシュ残。
+                    //     読込 0.1× + 書込 1.25× で内訳計上。 表示用 inputTokens は総入力 = 非キャッシュ残+読込+書込。
+                    //   - 定義なし = OpenAI 系。 promptTokens(=prompt_tokens) は cached を内包。 従来の控除計算。
+                    const cacheCreation = chunk.usage.cacheCreationTokens;
+                    let cost: number;
+                    let recordedInput: number;
+                    if (cacheCreation !== undefined) {
+                      cost = globalCostCalculator.calculateForModelWithCacheBreakdown(
+                        this.model,
+                        promptTokens,
+                        outputTokens,
+                        cacheRead,
+                        cacheCreation,
+                      );
+                      recordedInput = promptTokens + cacheRead + cacheCreation;
+                    } else {
+                      cost = globalCostCalculator.calculateForModelWithCache(
+                        this.model,
+                        promptTokens,
+                        outputTokens,
+                        cacheRead,
+                      );
+                      recordedInput = promptTokens;
+                    }
+                    globalTokenTracker.record({
+                      timestamp: new Date().toISOString(),
+                      provider: this.provider.providerType,
+                      model: this.model,
+                      slot: "main",
+                      inputTokens: recordedInput,
+                      outputTokens,
+                      cachedTokens: cacheRead,
+                      estimatedCostUsd: cost,
+                      sessionId: this.session.meta.id,
+                    });
+                    // A-6: run 単位の累計 (task_complete の完了報告用)
+                    this.runStats.tokensIn += recordedInput;
+                    this.runStats.tokensOut += outputTokens;
+                    this.runStats.costUsd += cost;
+                  }
+                  stopWaitingSpinner();
+                  stopThinkingSpinner();
+                  break;
+              }
+            }
+
+            // ストリーム完了後もスピナーが残っていたらクリーンアップ
+            stopWaitingSpinner();
+            stopThinkingSpinner();
+
+            // LLM I/O ログ: レスポンス記録（thinking含む）
+            this.llmLogger.logResponse({
+              model: this.model,
+              thinking: thinkingContent || undefined,
+              text: textContent || undefined,
+              toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+              tokensIn,
+              tokensOut,
+              finishReason,
+            });
+
+            success = true;
+            connectionRetries = 0;
+          } catch (e) {
+            const err = e instanceof Error ? e : new Error(String(e));
+
+            // 接続エラー（ECONNREFUSED等）の場合: 自動リトライ（上限あり）
+            if (isConnectionError(err) && connectionRetries < MAX_CONNECTION_RETRIES) {
+              connectionRetries++;
+              const waitMs = 2000 * connectionRetries; // 2s, 4s, 6s
+              getOpsLogger().warn("retry", "connection retry scheduled", {
+                attempt: connectionRetries,
+                max: MAX_CONNECTION_RETRIES,
+                waitMs,
+                error: err.message,
+                model: this.model,
+              });
+              console.log(chalk.yellow(`\n  接続エラー: ${err.message}`));
+              console.log(chalk.yellow(`  サーバー復帰を待機中... (${connectionRetries}/${MAX_CONNECTION_RETRIES})`));
+              this.notice(
+                "warn",
+                `接続エラー: ${err.message} — リトライ ${connectionRetries}/${MAX_CONNECTION_RETRIES}`,
+              );
+              await sleep(waitMs);
+              textContent = "";
+              thinkingContent = "";
+              toolCalls.length = 0;
+              hasStartedOutput = false;
+              thinkingSpinner = null;
+              receivedTokens = 0;
+              thinkingStarted = false;
+              continue;
+            }
+
+            // その他のエラー or 接続リトライ上限: ユーザーに判断を委ねる
+            getOpsLogger().error("llm", "LLM call failed (asking user)", {
+              error: err.message,
+              stack: err.stack,
+              model: this.model,
+              connectionRetries,
+            });
+            console.error(chalk.red(`\n  エラー: ${err.message}`));
+            this.notice("error", `LLM 呼び出しエラー: ${err.message}`);
+            const action = await askUserOnError(err);
+
+            if (action === "retry") {
+              // ユーザーが明示的にリトライを選択
+              connectionRetries = 0;
+              textContent = "";
+              thinkingContent = "";
+              toolCalls.length = 0;
+              hasStartedOutput = false;
+              thinkingSpinner = null;
+              receivedTokens = 0;
+              thinkingStarted = false;
+              continue;
+            } else {
+              // "abort" → この発話を中止してREPLに戻る（プロセスは終了しない）
+              // _aborted を立てることで /try などの呼び出し元もループを抜けられる
+              this._aborted = true;
+              this.appendAbortMarker("", "LLM 呼び出しエラーにより中止");
+              this.purgeEphemeralAtSpanEnd("llm_error_abort");
+              return;
+            }
           }
-        } else {
-          repeatToolCount = 1;
-          lastToolSignature = currentSignature;
         }
 
-        this.history.addAssistantMessage(textContent, toolCalls, { thinking: thinkingContent });
-
-        let shouldAbort = false;
-        if (toolCalls.length === 1) {
-          shouldAbort = await this.executeSingleTool(toolCalls[0]);
-        } else {
-          shouldAbort = await this.executeToolsParallel(toolCalls);
-        }
-
-        if (shouldAbort) {
-          this.purgeEphemeralAtSpanEnd("tool_abort");
+        if (!success) {
+          this.purgeEphemeralAtSpanEnd("llm_call_unsuccessful");
           return;
         }
 
-        // planモード中にコードファイルへの書き込みを検出 → 計画を先に確定するよう促す
-        if (this.planManager?.isInPlanMode()) {
-          const implTools = PlanManager.getImplementationTools();
+        // P3-A: アシスタント応答テキストからレジスター宣言を検出 (1 user span に 1 度だけ反映)
+        this.detectRegisterFromText(textContent);
+
+        // 応答テキストの遅延表示ヘルパー (docs/spinner-mode-response-coloring-design.md v2)。
+        // 構造ベース: モデルがユーザーに向けた言葉はすべて白/Markdown で表示する。
+        // 「中間か最終か」 の意味分類は表示には使わない (v1 で intent classifier の誤分類により
+        // 本物の回答が灰色化した事故のため廃止)。
+        // 引数 final はチャネル通知用フラグのみ: span を終わらせる応答のテキスト = true。
+        // assistantTextFlushed で 1 イテレーションにつき 1 回だけ表示する。
+        let assistantTextFlushed = false;
+        const flushAssistantText = (final: boolean): void => {
+          if (assistantTextFlushed) return;
+          const filteredText = createThinkingFilter()(textContent);
+          if (!filteredText.trim()) return;
+          assistantTextFlushed = true;
+          // イベントは表示モードに依存せず発火する (チャネル購読者向け)。
+          // final=true はユーザー向け最終応答として task_complete にも載せる。
+          this.events.emit("assistant_text", { text: filteredText, final });
+          if (final) this.runStats.finalText = filteredText;
+          // CLI 表示: ストリーミングモードはライブ出力済みのためここでは表示しない
+          if (this.streamingDisplay || !hasStartedOutput) return;
+          if (hasMarkdown(filteredText)) {
+            console.log(renderMarkdown(filteredText));
+          } else {
+            console.log("\n" + filteredText);
+          }
+        };
+
+        // finish_reason="length": max_tokensに達して出力が途中で切れた場合、自動的に続きを生成する
+        // 安全ネット: vLLMがfinish_reason="stop"を誤って返す場合に備え、
+        // 構造的に不完全（未閉じコードブロック/テーブル、単語途中終端など）を検出して自動継続する
+        const isTruncatedByLength = finishReason === "length" && textContent.trim().length > 0;
+        const structural =
+          toolCalls.length === 0 && textContent.trim().length > 0
+            ? isStructurallyIncomplete(textContent)
+            : { incomplete: false as const };
+        if (isTruncatedByLength || structural.incomplete) {
+          const structReason = "reason" in structural ? structural.reason : undefined;
+          const reason = isTruncatedByLength ? "max_tokens到達" : `構造的不完全: ${structReason}`;
+          console.log(chalk.dim(`\n  (${reason}のため、続きを生成します...)`));
+          // 部分応答を一旦履歴に積んで「続き」 を促す。 部分テキストは最終回答の前半部分
+          // (ユーザーに見える言葉) なので displayed=true で span 終了後も保全する。
+          // これを purge すると履歴に残る最終回答が「続き」 の後半だけになり欠損する。
+          this.history.addAssistantMessage(textContent, toolCalls.length > 0 ? toolCalls : undefined, {
+            ephemeral: toolCalls.length === 0,
+            thinking: thinkingContent,
+            displayed: textContent.trim().length > 0,
+          });
+          this.history.addUserMessage("続きを出力してください。途中から再開してください。", { ephemeral: true });
+          continue;
+        }
+
+        // Phase D-1: 非標準形式 (Mistral [TOOL_CALLS] / ChatML <tool_call> / Anthropic XML /
+        // ReAct Action: / Plain JSON / pipe-call) の tool 呼び出しを fallback として正規化する。
+        // 2026-05-13: 当初は T2/T3 限定だったが、 gpt-5.x reasoning モードが thinking/text に
+        // <tool_call><function=...><parameter=...> を書き出す事例 (2026-05-12 観測) があるため
+        // T1 でも有効化。 toolCalls.length === 0 のときのみ動くので native function calling と競合しない。
+        //
+        // 2026-06-07: この正規化を「ツール実行ブロックより前」 に移動 (バグ修正)。 旧版は実行
+        // ブロック (下方の `if (toolCalls.length > 0)`) の *後* に置かれていたため、 thinking/text
+        // から救出した tool 呼び出しが ops ログには記録されるのに *一度も実行されず* に空応答として
+        // ターンが終わる致命的欠陥があった (session mq34du2c: Qwen3.6 が reasoning_content に
+        // second_llm_consult を正しく書いたのにしりとりが一手も進まなかった事例)。 抽出した
+        // toolCalls を flush / coherence / 実行 の手前で確定させ、 既存の実行ルートに合流させる。
+        // docs/tool-call-salvage-pipe-format-design.md §6 参照。
+        if (toolCalls.length === 0 && textContent.trim().length > 0) {
+          const normalized = normalizeToolCalls(textContent);
+          if (normalized.toolCalls.length > 0) {
+            console.log(
+              chalk.dim(
+                `  [tool-format] ${normalized.format} 形式から ${normalized.toolCalls.length} 件の tool 呼び出しを抽出 (tier=${this.capability.tier})`,
+              ),
+            );
+            // 非TTY / --background では console が見えないため、 ops-logger に構造化記録を残す
+            // (誤発火・発火頻度の事後調査用。 全形式共通)。
+            getOpsLogger().info("tool-format", "テキストから tool 呼び出しを正規化抽出", {
+              format: normalized.format,
+              toolCount: normalized.toolCalls.length,
+              toolNames: normalized.toolCalls.map((tc) => tc.function.name),
+              source: "text",
+              tier: this.capability.tier,
+            });
+            // 既存の textContent / toolCalls を上書きして tool 実行ルートへ流す。
+            // textContent を cleanedText に差し替えるので、 直後の flushAssistantText と
+            // 実行ブロックの addAssistantMessage は非標準マーカーを除去済みの本文を使う。
+            textContent = normalized.cleanedText;
+            toolCalls.push(...normalized.toolCalls);
+          }
+        }
+
+        // Phase 2: 思考保全 — text/toolCalls がともに空でも thinking 内に <tool_call> 等が
+        // 埋まっているケース (例: Qwen3 が reasoning_content に ChatML 形式、
+        // gpt-5.x reasoning が Anthropic XML 形式を吐く) を救う。
+        // 思考は SoWhat/WhySo の核なので、 そこに完成形のツールコールがあるなら捨てずに実行する。
+        // docs/ephemeral-context-design.md §7.2 参照。
+        if (toolCalls.length === 0 && thinkingContent.trim().length > 0) {
+          const normalized = normalizeToolCalls(thinkingContent);
+          if (normalized.toolCalls.length > 0) {
+            console.log(
+              chalk.dim(
+                `  [tool-format] thinking 内 ${normalized.format} 形式から ${normalized.toolCalls.length} 件の tool 呼び出しを抽出 (tier=${this.capability.tier})`,
+              ),
+            );
+            getOpsLogger().info("tool-format", "thinking から tool 呼び出しを正規化抽出", {
+              format: normalized.format,
+              toolCount: normalized.toolCalls.length,
+              toolNames: normalized.toolCalls.map((tc) => tc.function.name),
+              source: "thinking",
+              tier: this.capability.tier,
+            });
+            // toolCalls が空の場合 (textContent の有無は問わない) に thinking 内のツール呼び出しを
+            // 救出する。 textContent は通常空だが、 上の text salvage がツールを抽出できなかった
+            // (normalized.toolCalls.length===0) 場合は非空のまま到達しうる。 toolCalls を追加すれば
+            // 実行ブロックの addAssistantMessage(textContent, toolCalls, ...) が textContent も正しく永続化する。
+            toolCalls.push(...normalized.toolCalls);
+          }
+        }
+
+        // ツール呼び出しを伴うテキストもユーザーへの言葉として白で表示する (v2: 構造ベース)。
+        // final は構造で決める: response_complete を含む = この応答で span が終わる予定 = 最終応答。
+        // ツールを伴わないテキストはここでは出さず、 下流のディスポジション地点で flush する
+        // (span 継続=final:false / span 終了=final:true の判定がそこで確定するため)。
+        if (toolCalls.length > 0) {
+          flushAssistantText(toolCalls.some((tc) => tc.function.name === "response_complete"));
+        }
+
+        // 2026-05-16: Axis (2a) thinking-text コヒーレンス検査。
+        // standard 以上のレジスターでのみ発火。 model が thinking で「続きある」 と書いているのに
+        // text/response_complete で「完了」 を宣言しているズレを拾う。
+        // - 緩めの regex パターン (兆候レベルで拾う)
+        // - LLM 呼出なし (軽量)
+        // - 検出時は ephemeral nudge を inject、 retry counter 制限あり
+        {
+          const isStandardOrUp = this.isStandardOrAboveRegister();
+          // toolCalls がある場合 (native / salvage 由来とも) は実行を優先し coherence nudge を
+          // 出さない。 さもないと続行意図のツール呼び出しを「完了ズレ」 と誤判定して drop し continue
+          // してしまう (2026-06-07: salvage 移動に伴う取りこぼし防止)。
+          if (toolCalls.length === 0 && isStandardOrUp && coherenceGateRetries < MAX_NEW_GATE_RETRIES) {
+            // この時点で toolCalls は空 (上の length===0 ガード) なので response_complete は無い。
+            // hasRC を toolCalls.some(...) で計算すると常に false の死蔵コードになり、 ガードを
+            // 変えた未来のメンテナがロジックを誤解する恐れがあるため false 固定で意図を明示する。
+            const hasRC = false;
+            const coherence = checkCoherence(thinkingContent, textContent, hasRC);
+            if (coherence.mismatch) {
+              coherenceGateRetries++;
+              console.log(
+                chalk.yellow(
+                  `  [coherence ${coherenceGateRetries}/${MAX_NEW_GATE_RETRIES}] thinking「${coherence.continuationHit}」 vs 完了「${coherence.completionHit}」 ズレ検出`,
+                ),
+              );
+              // 元 response は履歴に積まずに (= 完了宣言を確定させず)、 nudge だけ inject して loop 続行。
+              // ストリーミング表示中はユーザーが既に読んでいるため displayed で保全する。
+              this.history.addAssistantMessage(textContent, undefined, {
+                ephemeral: true,
+                thinking: thinkingContent,
+                displayed: this.streamingDisplay && hasStartedOutput,
+              });
+              this.history.addUserMessage(buildCoherenceNudge(coherence), { ephemeral: true });
+              continue;
+            }
+          }
+        }
+
+        // Tool calls: execute (parallel when multiple) and continue
+        if (toolCalls.length > 0) {
+          hasExecutedTools = true;
+
+          // 同じツール呼び出しの反復検出
+          const currentSignature = toolCalls.map((tc) => tc.function.name + ":" + tc.function.arguments).join("|");
+          if (currentSignature === lastToolSignature) {
+            repeatToolCount++;
+            if (repeatToolCount >= MAX_REPEAT_TOOL) {
+              console.log(
+                chalk.yellow(`\n  同じツール呼び出しが${MAX_REPEAT_TOOL}回連続しています。別のアプローチを試みます...`),
+              );
+              this.history.addAssistantMessage(textContent, toolCalls, { thinking: thinkingContent });
+              // 直前のツール結果を偽造せずに、問題を指摘するメッセージを追加
+              for (const tc of toolCalls) {
+                this.history.addToolResult(
+                  tc.id,
+                  "Error: このツール呼び出しは同じ引数で繰り返し実行されており、同じ結果が返っています。" +
+                    "別のアプローチを取ってください。ファイルが存在しない場合は作成し、ツール名を間違えている場合は正しいツールを使ってください。",
+                );
+              }
+              repeatToolCount = 0;
+              lastToolSignature = "";
+              continue;
+            }
+          } else {
+            repeatToolCount = 1;
+            lastToolSignature = currentSignature;
+          }
+
+          this.history.addAssistantMessage(textContent, toolCalls, { thinking: thinkingContent });
+
+          let shouldAbort = false;
+          if (toolCalls.length === 1) {
+            shouldAbort = await this.executeSingleTool(toolCalls[0]);
+          } else {
+            shouldAbort = await this.executeToolsParallel(toolCalls);
+          }
+
+          if (shouldAbort) {
+            this.purgeEphemeralAtSpanEnd("tool_abort");
+            return;
+          }
+
+          // planモード中にコードファイルへの書き込みを検出 → 計画を先に確定するよう促す
+          if (this.planManager?.isInPlanMode()) {
+            const implTools = PlanManager.getImplementationTools();
+            for (const tc of toolCalls) {
+              if (implTools.has(tc.function.name)) {
+                try {
+                  const args = JSON.parse(tc.function.arguments ?? "{}");
+                  const filePath = (args.file_path ?? args.path ?? "") as string;
+                  if (filePath && isCodeFile(filePath)) {
+                    this.history.addUserMessage(
+                      "[ハーネス] プランモード中にコードファイルへの書き込みが検出されました。" +
+                        "実装を開始する前に、exit_plan_mode で計画をユーザーに提示して承認を得てください。" +
+                        "設計書（.md等）の作成はプランモード中でも問題ありません。",
+                      { ephemeral: true },
+                    );
+                    break;
+                  }
+                } catch {
+                  /* ignore */
+                }
+              }
+            }
+          }
+
+          // pendingVerification 追跡: file_write/file_edit → 検証待ちに追加、bash → コード検証クリア
+          // pendingEvalFiles 追跡: 全ファイル（コード+ドキュメント）をEvaluatorレビュー用に蓄積
           for (const tc of toolCalls) {
-            if (implTools.has(tc.function.name)) {
+            const toolName = tc.function.name;
+            if (toolName === "file_write" || toolName === "file_edit") {
               try {
                 const args = JSON.parse(tc.function.arguments ?? "{}");
                 const filePath = (args.file_path ?? args.path ?? "") as string;
                 if (filePath && isCodeFile(filePath)) {
-                  this.history.addUserMessage(
-                    "[ハーネス] プランモード中にコードファイルへの書き込みが検出されました。" +
-                    "実装を開始する前に、exit_plan_mode で計画をユーザーに提示して承認を得てください。" +
-                    "設計書（.md等）の作成はプランモード中でも問題ありません。",
-                    { ephemeral: true },
-                  );
-                  break;
+                  if (!pendingVerification.includes(filePath)) {
+                    pendingVerification.push(filePath);
+                  }
                 }
-              } catch { /* ignore */ }
+                // Evaluator用: コード・ドキュメント両方を蓄積
+                if (filePath && (isCodeFile(filePath) || isDocumentFile(filePath))) {
+                  if (!pendingEvalFiles.includes(filePath)) {
+                    pendingEvalFiles.push(filePath);
+                  }
+                }
+              } catch {
+                /* ignore parse error */
+              }
+            } else if (toolName === "bash") {
+              // bash実行 = コード検証が行われたとみなしてクリア
+              pendingVerification = [];
             }
           }
-        }
 
-        // pendingVerification 追跡: file_write/file_edit → 検証待ちに追加、bash → コード検証クリア
-        // pendingEvalFiles 追跡: 全ファイル（コード+ドキュメント）をEvaluatorレビュー用に蓄積
-        for (const tc of toolCalls) {
-          const toolName = tc.function.name;
-          if (toolName === "file_write" || toolName === "file_edit") {
+          // response_complete が呼ばれたらターン終了（自己点検ループから明示的に抜ける）
+          const rcCall = toolCalls.find((tc) => tc.function.name === "response_complete");
+          if (rcCall) {
+            let summary = "";
+            let forceFlag = false;
             try {
-              const args = JSON.parse(tc.function.arguments ?? "{}");
-              const filePath = (args.file_path ?? args.path ?? "") as string;
-              if (filePath && isCodeFile(filePath)) {
-                if (!pendingVerification.includes(filePath)) {
-                  pendingVerification.push(filePath);
-                }
+              const args = JSON.parse(rcCall.function.arguments ?? "{}");
+              summary = (args.summary as string) ?? "";
+              forceFlag = (args.force as boolean) ?? false;
+            } catch {
+              /* ignore */
+            }
+            if (summary.length > 0) {
+              // docs/spinner-mode-response-coloring-design.md v2 §2.1:
+              // 本文をユーザーが既に読んでいるなら summary は重複情報 = 灰色メタ行 (両モード統一)。
+              // 本文が無い場合のみ summary がユーザーへの唯一の言葉 = 白/Markdown + 最終応答に採用。
+              const bodyShown = assistantTextFlushed || (this.streamingDisplay && hasStartedOutput);
+              if (bodyShown) {
+                console.log("\n" + chalk.dim(`  [response_complete] ${summary}`));
+              } else {
+                this.events.emit("assistant_text", { text: summary, final: true });
+                this.runStats.finalText = summary;
+                console.log("\n" + (hasMarkdown(summary) ? renderMarkdown(summary) : summary));
               }
-              // Evaluator用: コード・ドキュメント両方を蓄積
-              if (filePath && (isCodeFile(filePath) || isDocumentFile(filePath))) {
-                if (!pendingEvalFiles.includes(filePath)) {
-                  pendingEvalFiles.push(filePath);
-                }
+            }
+            // Goal Seek mode: acceptance 充足で span 終了したら自動的に mode を抜ける。
+            // (todo gate は response-complete.ts で実施済み。 ここに来た = ゲート通過 = 全 criteria 完了 or force)
+            // 設計書 §3.6 — 完了経路 (1) all criteria met → exit
+            if (this.currentMode === "goal-seek") {
+              const todos = getTodosCurrent();
+              const allDone = todos.length > 0 && todos.every((t) => t.status === "completed");
+              if (allDone) {
+                console.log(chalk.green(`  ✓ Goal Seek: acceptance 全項目達成 — mode 終了`));
+                this.exitGoalSeek("completed");
+              } else if (forceFlag) {
+                console.log(chalk.yellow(`  ⚠ Goal Seek: force=true で強制完了 — mode 終了 (acceptance 未充足)`));
+                this.exitGoalSeek("abort");
               }
-            } catch { /* ignore parse error */ }
-          } else if (toolName === "bash") {
-            // bash実行 = コード検証が行われたとみなしてクリア
-            pendingVerification = [];
+              // それ以外 (todos 0 件 等) は mode を抜けず保持。 次の span でも goal を継続。
+            }
+
+            // 2026-05-16: Axis (1) Q→A 進捗 gate (docs/strategic-todo-design.md 議論)。
+            // standard 以上のレジスターで、 force=false の時のみ発火。
+            // sub-agent パターンで isolated に「本当に Q に答えたか?」 を判定し、
+            // stalled なら span 終了させず ephemeral nudge を inject して継続。
+            const isStandardOrUp = this.isStandardOrAboveRegister();
+            if (isStandardOrUp && !forceFlag && progressGateRetries < MAX_NEW_GATE_RETRIES) {
+              const recentSummary = buildRecentSummary(this.history.getRawMessages(), 5);
+              const judge = await judgeProgress({
+                originalUserMessage: userMessageText,
+                recentSummary,
+                latestResponse: { text: textContent, toolCalls },
+                provider: this.provider,
+                model: this.model,
+              });
+              if (judge.verdict === "stalled") {
+                progressGateRetries++;
+                console.log(
+                  chalk.yellow(
+                    `  [Q→A gate ${progressGateRetries}/${MAX_NEW_GATE_RETRIES}] stalled — ${judge.reason.slice(0, 100)}`,
+                  ),
+                );
+                this.history.addUserMessage(
+                  `[ハーネス] 完了宣言を受けましたが、 Q→A 進捗判定で **stalled** と判断されました。\n` +
+                    `理由: ${judge.reason}\n\n` +
+                    `# 元の Q (北極星)\n${userMessageText.slice(0, 300)}${userMessageText.length > 300 ? "..." : ""}\n\n` +
+                    `元 Q への進捗を実質的に進めてください。 必要なら ToDo を再確認し、 該当する実装 tool を呼ぶか ` +
+                    `(${MAX_NEW_GATE_RETRIES - progressGateRetries + 1} 回まで再判定可、 その後は force=true で強制完了可能)。`,
+                  { ephemeral: true },
+                );
+                // tool_call として response_complete は既に履歴に積まれているが、 span は終わらせず continue
+                continue;
+              }
+              if (judge.verdict === "took_step") {
+                console.log(chalk.dim(`  [Q→A gate] took_step — ${judge.reason.slice(0, 100)}`));
+              }
+              // answered or took_step なら span 終了に進む
+            }
+
+            // span 境界: in-turn の harness 注入 (self-check / nudge / 空応答 placeholder 等) を破棄。
+            // 過去 span のノイズを次 span に持ち込まない。 docs/ephemeral-context-design.md 参照。
+            this.purgeEphemeralAtSpanEnd("response_complete");
+            return;
           }
+
+          continue;
         }
 
-        // response_complete が呼ばれたらターン終了（自己点検ループから明示的に抜ける）
-        const rcCall = toolCalls.find(tc => tc.function.name === "response_complete");
-        if (rcCall) {
-          let summary = "";
-          let forceFlag = false;
-          try {
-            const args = JSON.parse(rcCall.function.arguments ?? "{}");
-            summary = (args.summary as string) ?? "";
-            forceFlag = (args.force as boolean) ?? false;
-          } catch { /* ignore */ }
-          if (summary.length > 0) {
-            // docs/spinner-mode-response-coloring-design.md v2 §2.1:
-            // 本文をユーザーが既に読んでいるなら summary は重複情報 = 灰色メタ行 (両モード統一)。
-            // 本文が無い場合のみ summary がユーザーへの唯一の言葉 = 白/Markdown + 最終応答に採用。
-            const bodyShown = assistantTextFlushed || (this.streamingDisplay && hasStartedOutput);
-            if (bodyShown) {
-              console.log("\n" + chalk.dim(`  [response_complete] ${summary}`));
-            } else {
-              this.events.emit("assistant_text", { text: summary, final: true });
-              this.runStats.finalText = summary;
-              console.log("\n" + (hasMarkdown(summary) ? renderMarkdown(summary) : summary));
-            }
-          }
-          // Goal Seek mode: acceptance 充足で span 終了したら自動的に mode を抜ける。
-          // (todo gate は response-complete.ts で実施済み。 ここに来た = ゲート通過 = 全 criteria 完了 or force)
-          // 設計書 §3.6 — 完了経路 (1) all criteria met → exit
-          if (this.currentMode === "goal-seek") {
-            const todos = getTodosCurrent();
-            const allDone = todos.length > 0 && todos.every((t) => t.status === "completed");
-            if (allDone) {
-              console.log(chalk.green(`  ✓ Goal Seek: acceptance 全項目達成 — mode 終了`));
-              this.exitGoalSeek("completed");
-            } else if (forceFlag) {
-              console.log(chalk.yellow(`  ⚠ Goal Seek: force=true で強制完了 — mode 終了 (acceptance 未充足)`));
-              this.exitGoalSeek("abort");
-            }
-            // それ以外 (todos 0 件 等) は mode を抜けず保持。 次の span でも goal を継続。
-          }
-
-          // 2026-05-16: Axis (1) Q→A 進捗 gate (docs/strategic-todo-design.md 議論)。
-          // standard 以上のレジスターで、 force=false の時のみ発火。
-          // sub-agent パターンで isolated に「本当に Q に答えたか?」 を判定し、
-          // stalled なら span 終了させず ephemeral nudge を inject して継続。
-          const isStandardOrUp = this.isStandardOrAboveRegister();
-          if (
-            isStandardOrUp &&
-            !forceFlag &&
-            progressGateRetries < MAX_NEW_GATE_RETRIES
-          ) {
-            const recentSummary = buildRecentSummary(this.history.getRawMessages(), 5);
-            const judge = await judgeProgress({
-              originalUserMessage: userMessageText,
-              recentSummary,
-              latestResponse: { text: textContent, toolCalls },
-              provider: this.provider,
-              model: this.model,
-            });
-            if (judge.verdict === "stalled") {
-              progressGateRetries++;
-              console.log(chalk.yellow(
-                `  [Q→A gate ${progressGateRetries}/${MAX_NEW_GATE_RETRIES}] stalled — ${judge.reason.slice(0, 100)}`,
-              ));
-              this.history.addUserMessage(
-                `[ハーネス] 完了宣言を受けましたが、 Q→A 進捗判定で **stalled** と判断されました。\n` +
-                `理由: ${judge.reason}\n\n` +
-                `# 元の Q (北極星)\n${userMessageText.slice(0, 300)}${userMessageText.length > 300 ? "..." : ""}\n\n` +
-                `元 Q への進捗を実質的に進めてください。 必要なら ToDo を再確認し、 該当する実装 tool を呼ぶか ` +
-                `(${MAX_NEW_GATE_RETRIES - progressGateRetries + 1} 回まで再判定可、 その後は force=true で強制完了可能)。`,
-                { ephemeral: true },
-              );
-              // tool_call として response_complete は既に履歴に積まれているが、 span は終わらせず continue
-              continue;
-            }
-            if (judge.verdict === "took_step") {
-              console.log(chalk.dim(`  [Q→A gate] took_step — ${judge.reason.slice(0, 100)}`));
-            }
-            // answered or took_step なら span 終了に進む
-          }
-
-          // span 境界: in-turn の harness 注入 (self-check / nudge / 空応答 placeholder 等) を破棄。
-          // 過去 span のノイズを次 span に持ち込まない。 docs/ephemeral-context-design.md 参照。
-          this.purgeEphemeralAtSpanEnd("response_complete");
+        // ガベージ応答（トークンアーティファクト等）を検出: リプロンプトしても改善しないため中断
+        // 注: 上の正規化で tool calls を抽出できた場合はここに来ない (toolCalls.length > 0)
+        if (toolCalls.length === 0 && textContent.trim().length > 0 && isGarbageResponse(textContent)) {
+          console.log(chalk.yellow("\n  モデルの応答が解析できない形式です。プロンプトを変えて再度お試しください。"));
+          this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
+          this.purgeEphemeralAtSpanEnd("garbage_response");
           return;
         }
 
-        continue;
-      }
-
-      // ガベージ応答（トークンアーティファクト等）を検出: リプロンプトしても改善しないため中断
-      // 注: 上の正規化で tool calls を抽出できた場合はここに来ない (toolCalls.length > 0)
-      if (toolCalls.length === 0 && textContent.trim().length > 0 && isGarbageResponse(textContent)) {
-        console.log(chalk.yellow("\n  モデルの応答が解析できない形式です。プロンプトを変えて再度お試しください。"));
-        this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
-        this.purgeEphemeralAtSpanEnd("garbage_response");
-        return;
-      }
-
-      // 検証未実施チェック: コードファイルを書いた後にbashを呼ばずにテキスト応答した場合
-      if (toolCalls.length === 0 && pendingVerification.length > 0 &&
+        // 検証未実施チェック: コードファイルを書いた後にbashを呼ばずにテキスト応答した場合
+        if (
+          toolCalls.length === 0 &&
+          pendingVerification.length > 0 &&
           selfCheckRounds < MAX_SELF_CHECK_ROUNDS &&
-          !this.planManager?.isInPlanMode()) {
-        selfCheckRounds++;
-        flushAssistantText(false); // span 継続 (自己点検) — 表示は白、final ではない
-        const fileList = pendingVerification.map(f => `    - ${f}`).join("\n");
-        console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] 検証未実施`));
-        this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] 検証未実施`);
-        // self-check nudge は in-turn 専用 (応答完了時に purge)。 thinking も保全。
-        // 表示済みテキストは会話記録として保全する (displayed)。
-        this.history.addAssistantMessage(textContent, undefined, {
-          ephemeral: true,
-          thinking: thinkingContent,
-          displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
-        });
-        this.history.addUserMessage(
-          formatSelfCheck(
-            selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
-            `以下のファイルの動作確認が未完了です:\n${fileList}\n` +
-            `    bash で検証コマンドを実行してください（.ts/.js: node --check, .py: python -m py_compile, プロジェクト全体: build/test/lint）。\n` +
-            `    注意: GUIアプリ(pygame等)は構文チェックのみ。直接起動するとタイムアウト。`
-          ),
-          { ephemeral: true },
-        );
-        continue;
-      }
-      // 検証リトライ上限到達: クリアして通常フローへ
-      if (toolCalls.length === 0 && pendingVerification.length > 0 &&
-          selfCheckRounds >= MAX_SELF_CHECK_ROUNDS) {
-        console.log(chalk.yellow(`\n  自己点検を${MAX_SELF_CHECK_ROUNDS}回要求しましたが完了しませんでした。`));
-        pendingVerification = [];
-      }
+          !this.planManager?.isInPlanMode()
+        ) {
+          selfCheckRounds++;
+          flushAssistantText(false); // span 継続 (自己点検) — 表示は白、final ではない
+          const fileList = pendingVerification.map((f) => `    - ${f}`).join("\n");
+          console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] 検証未実施`));
+          this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] 検証未実施`);
+          // self-check nudge は in-turn 専用 (応答完了時に purge)。 thinking も保全。
+          // 表示済みテキストは会話記録として保全する (displayed)。
+          this.history.addAssistantMessage(textContent, undefined, {
+            ephemeral: true,
+            thinking: thinkingContent,
+            displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
+          });
+          this.history.addUserMessage(
+            formatSelfCheck(
+              selfCheckRounds,
+              MAX_SELF_CHECK_ROUNDS,
+              userMessageText,
+              `以下のファイルの動作確認が未完了です:\n${fileList}\n` +
+                `    bash で検証コマンドを実行してください（.ts/.js: node --check, .py: python -m py_compile, プロジェクト全体: build/test/lint）。\n` +
+                `    注意: GUIアプリ(pygame等)は構文チェックのみ。直接起動するとタイムアウト。`,
+            ),
+            { ephemeral: true },
+          );
+          continue;
+        }
+        // 検証リトライ上限到達: クリアして通常フローへ
+        if (toolCalls.length === 0 && pendingVerification.length > 0 && selfCheckRounds >= MAX_SELF_CHECK_ROUNDS) {
+          console.log(chalk.yellow(`\n  自己点検を${MAX_SELF_CHECK_ROUNDS}回要求しましたが完了しませんでした。`));
+          pendingVerification = [];
+        }
 
-      // Evaluatorレビュー: ファイル書き込み後の完了時に自動レビュー（コード+ドキュメント両方）
-      if (toolCalls.length === 0 && pendingEvalFiles.length > 0 &&
+        // Evaluatorレビュー: ファイル書き込み後の完了時に自動レビュー（コード+ドキュメント両方）
+        if (
+          toolCalls.length === 0 &&
+          pendingEvalFiles.length > 0 &&
           selfCheckRounds < MAX_SELF_CHECK_ROUNDS &&
           textContent.trim().length > 0 &&
-          !this.planManager?.isInPlanMode()) {
-        const result = await this.evaluator.evaluate({
-          filePaths: pendingEvalFiles,
-          originalRequest: userMessageText,
-          assistantResponse: textContent,
-        });
-        if (!result.passed) {
+          !this.planManager?.isInPlanMode()
+        ) {
+          const result = await this.evaluator.evaluate({
+            filePaths: pendingEvalFiles,
+            originalRequest: userMessageText,
+            assistantResponse: textContent,
+          });
+          if (!result.passed) {
+            selfCheckRounds++;
+            flushAssistantText(false); // span 継続 (自己点検) — 表示は白、final ではない
+            const feedback = Evaluator.formatForInjection(result);
+            console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`));
+            this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`);
+            // Evaluator 指摘は in-turn 専用、 thinking も保全。 表示済みテキストは保全 (displayed)。
+            this.history.addAssistantMessage(textContent, undefined, {
+              ephemeral: true,
+              thinking: thinkingContent,
+              displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
+            });
+            this.history.addUserMessage(
+              formatSelfCheck(
+                selfCheckRounds,
+                MAX_SELF_CHECK_ROUNDS,
+                userMessageText,
+                `Evaluatorから以下の指摘があります:\n${feedback}`,
+              ),
+              { ephemeral: true },
+            );
+            continue;
+          }
+          // 合格 → クリアして通常フローへ
+          pendingEvalFiles = [];
+        }
+        // 自己点検上限到達: Evaluatorもクリアして通常フローへ
+        if (pendingEvalFiles.length > 0 && selfCheckRounds >= MAX_SELF_CHECK_ROUNDS) {
+          pendingEvalFiles = [];
+        }
+
+        // テキストのみ応答（ツール未呼び出し）の検出とリプロンプト
+        // 会話的入力（挨拶など）では発火しない
+        // ツール実行後のテキスト応答は結果報告なのでそのまま返す（再プロンプトしない）
+        const shouldReprompt =
+          toolCalls.length === 0 && !codeBlockRetried && !hasExecutedTools && textContent.trim().length > 0;
+
+        let isTask = false;
+        let isCompleted = false;
+        if (shouldReprompt) {
+          const [intent, completion] = await Promise.all([
+            this.intentClassifier.classifyIntent(userMessageText, this.history.getRecentContext(3)),
+            this.intentClassifier.classifyCompletion(textContent),
+          ]);
+          isTask = intent === "task";
+          isCompleted = completion === "completed";
+        }
+
+        if (shouldReprompt && isTask && !isCompleted) {
+          if (selfCheckRounds >= MAX_SELF_CHECK_ROUNDS) {
+            // 上限到達: ユーザーに報告して中断。 ここで turn が終わる = span 終了 = final。
+            flushAssistantText(true);
+            console.log(
+              chalk.yellow(
+                `\n  自己点検を${MAX_SELF_CHECK_ROUNDS}回実施しましたが response_complete が呼ばれませんでした。`,
+              ),
+            );
+            this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
+            this.purgeEphemeralAtSpanEnd("self_check_limit");
+            return;
+          }
+
           selfCheckRounds++;
           flushAssistantText(false); // span 継続 (自己点検) — 表示は白、final ではない
-          const feedback = Evaluator.formatForInjection(result);
-          console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`));
-          this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`);
-          // Evaluator 指摘は in-turn 専用、 thinking も保全。 表示済みテキストは保全 (displayed)。
+          console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ツール未呼び出し`));
+          this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ツール未呼び出し`);
+          // nudge は in-turn 専用、 thinking も保全。 表示済みテキストは会話記録として保全する
+          // (displayed)。 2026-06-12: 会話リクエストの実回答がこの経路で purge され、 次 span で
+          // モデルが自分の回答を参照できなくなる事故があった (履歴に self-check 確認文だけが残る)。
+          this.history.addAssistantMessage(textContent, undefined, {
+            ephemeral: true,
+            thinking: thinkingContent,
+            displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
+          });
+          // 2026-05-01: C 案。 「promise テキストだけでは作業継続と認識しない」 を明示し、
+          // 短い「了解しました」「実装します」 等の応答で止まるループを抜けやすくする。
+          this.history.addUserMessage(
+            formatSelfCheck(
+              selfCheckRounds,
+              MAX_SELF_CHECK_ROUNDS,
+              userMessageText,
+              `テキスト応答のみでツール呼出がありません。 ` +
+                `「了解しました」「実装します」 等の promise テキストだけではハーネスは作業継続と認識しません。 ` +
+                `思考 → ToDo → 実行 のリズムで進めてください: ` +
+                `(a) 戦略がまだ決まっていない → \`todo_append\` で計画を 3-5 項目立てる、 ` +
+                `(b) 既存 ToDo があるなら該当項目を \`todo_mark(id, "in_progress")\` してから実装 tool (file_write / file_edit / bash / mcp__...) を呼ぶ、 ` +
+                `(c) 行き詰まりなら \`todo_mark(id, "blocked")\` + \`ask_user\` で相談。`,
+            ),
+            { ephemeral: true },
+          );
+          continue;
+        }
+
+        // コードブロックをテキスト返した場合のリプロンプト（file_write未使用検出）
+        if (
+          toolCalls.length === 0 &&
+          !codeBlockRetried &&
+          hasLargeCodeBlock(textContent) &&
+          selfCheckRounds < MAX_SELF_CHECK_ROUNDS
+        ) {
+          codeBlockRetried = true;
+          selfCheckRounds++;
+          flushAssistantText(false); // span 継続 (自己点検) — 表示は白、final ではない
+          console.log(
+            chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] コードがテキスト応答に含まれています`),
+          );
+          this.notice(
+            "info",
+            `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] コードがテキスト応答に含まれています`,
+          );
+          // nudge は in-turn 専用、 thinking も保全。 表示済みテキストは保全 (displayed)。
           this.history.addAssistantMessage(textContent, undefined, {
             ephemeral: true,
             thinking: thinkingContent,
@@ -1383,277 +1507,200 @@ export class AgentLoop {
           });
           this.history.addUserMessage(
             formatSelfCheck(
-              selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
-              `Evaluatorから以下の指摘があります:\n${feedback}`
+              selfCheckRounds,
+              MAX_SELF_CHECK_ROUNDS,
+              userMessageText,
+              `コードをテキストで返しましたが、実際のファイル作成には file_write ツールが必要です。` +
+                `意図したパスにファイルを保存する場合は file_write を呼んでください。`,
             ),
             { ephemeral: true },
           );
           continue;
         }
-        // 合格 → クリアして通常フローへ
-        pendingEvalFiles = [];
-      }
-      // 自己点検上限到達: Evaluatorもクリアして通常フローへ
-      if (pendingEvalFiles.length > 0 && selfCheckRounds >= MAX_SELF_CHECK_ROUNDS) {
-        pendingEvalFiles = [];
-      }
 
-      // テキストのみ応答（ツール未呼び出し）の検出とリプロンプト
-      // 会話的入力（挨拶など）では発火しない
-      // ツール実行後のテキスト応答は結果報告なのでそのまま返す（再プロンプトしない）
-      const shouldReprompt = toolCalls.length === 0 &&
-        !codeBlockRetried &&
-        !hasExecutedTools &&
-        textContent.trim().length > 0;
+        // リプロンプト後もツールを呼ばず、JSONコードブロックでfile_writeを「説明」している場合
+        // → JSONを解析して直接実行する
+        if (toolCalls.length === 0 && codeBlockRetried) {
+          const fakeWrites = extractFakeFileWriteCalls(textContent);
+          if (fakeWrites.length > 0) {
+            console.log(
+              chalk.yellow(
+                `\n  ツール呼び出しの代わりにJSONが返されました。${fakeWrites.length}件のfile_writeを直接実行します...`,
+              ),
+            );
+            this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
+            let shouldAbort = false;
+            for (const fw of fakeWrites) {
+              const syntheticCall: ToolCall = {
+                id: `synthetic_fw_${Date.now()}`,
+                type: "function",
+                function: { name: "file_write", arguments: JSON.stringify(fw) },
+              };
+              shouldAbort = await this.executeSingleTool(syntheticCall);
+              if (shouldAbort) {
+                this.purgeEphemeralAtSpanEnd("synthetic_write_abort");
+                return;
+              }
+            }
+            // 書き込み完了後、モデルに続きを促す (in-turn の合図)
+            this.history.addUserMessage("ファイルの作成が完了しました。", { ephemeral: true });
+            continue;
+          }
+        }
 
-      let isTask = false;
-      let isCompleted = false;
-      if (shouldReprompt) {
-        const [intent, completion] = await Promise.all([
-          this.intentClassifier.classifyIntent(userMessageText, this.history.getRecentContext(3)),
-          this.intentClassifier.classifyCompletion(textContent),
-        ]);
-        isTask = intent === "task";
-        isCompleted = completion === "completed";
-      }
+        // Final response
+        const isEmptyResponse = toolCalls.length === 0 && textContent.trim().length === 0;
+        if (isEmptyResponse || (!hasStartedOutput && toolCalls.length === 0)) {
+          // ユーザーに見える出力がゼロ（thinking onlyや空レスポンス、またはストリーム中のみ出力で最終テキスト空）
+          if (emptyResponseRetries < MAX_EMPTY_RETRIES) {
+            emptyResponseRetries++;
+            // 何が起きていたか可視化: 思考のみ / max_tokens到達 / 完全な空レスポンス
+            let reason: string;
+            if (finishReason === "length") {
+              reason = "max_tokens到達で本文なし";
+            } else if (thinkingContent.length > 0) {
+              reason = `思考${thinkingContent.length}文字のみで本文なし`;
+            } else {
+              reason = "本文・思考ともに空";
+            }
+            console.log(
+              chalk.yellow(
+                `\n  空のレスポンス (${reason}) — 再試行します (${emptyResponseRetries}/${MAX_EMPTY_RETRIES})...`,
+              ),
+            );
+            // 同じリクエストをそのまま再送しても同じ結果になるため、元の意図を含むナッジメッセージを追加する。
+            // 2026-05-01: 「promise だけ返す」 ループ対策として B 案を実装:
+            //   ・「応答を返さないで」 等の沈黙系依頼は rephraseUserIntent で翻訳して提示
+            //   ・「了解しました / 実装します 等の promise テキストだけでは作業継続と認識しない」 を明示
+            const rephrasedIntent = rephraseUserIntent(userMessageText);
+            const nudgeIntent = rephrasedIntent.length > 200 ? rephrasedIntent.slice(0, 200) + "..." : rephrasedIntent;
+            // Phase 2: 思考保全 — thinking が出ていた場合は完全保全して placeholder にする。
+            // モデルは次イテレーションで自分の前思考を読めるので、 同じ digestion を再生成
+            // する無駄を避けられる。 ephemeral なので応答完了時に purge され次 span に漏れない。
+            //
+            // 機械的な文字カット (slice) は中途半端な切り取りで意味を壊しノイズになるため避ける。
+            // ctx 圧迫の懸念は以下で十分に抑えられている:
+            //   - MAX_EMPTY_RETRIES=3 で span 内の積み増し回数が上限固定
+            //   - ContextManager (capability.compressionThreshold) が閾値到達で要約圧縮
+            //   - 応答完了時の purgeEphemeral で span 境界を越えて残らない
+            // docs/ephemeral-context-design.md §7.1 参照。
+            const placeholder =
+              thinkingContent.trim().length > 0
+                ? `[前回の思考 ${thinkingContent.length}字 — 形式不一致で吐き出せず、 ハーネスが保全]\n${thinkingContent}`
+                : "（空のレスポンス）";
+            // empty-response placeholder と nudge は in-turn 専用 (応答完了時に purge)。
+            // ユーザーへの最終応答が出れば、 これらの中間ノイズは過去 span から除去される。
+            this.history.addAssistantMessage(placeholder, undefined, { ephemeral: true });
+            // 2026-05-15: 空応答 retry の意味反転 (docs/strategic-todo-design.md §3.3)。
+            // 旧 nudge は「ツール呼べ」 という圧力で、 弱モデルが戦略を立てる前に反応的に動く原因だった。
+            // 新 nudge: 思考の deliberation を todo_append で commit させ、 戦略 → 実行 のリズムへ誘導する。
+            // 「思考 → ToDo 化 → Action」 = ジャンプ前のしゃがみ込み。
+            // 2026-06-07: 形状中立化 (docs/reactive-intervention-coherence-design.md §4.2)。
+            // 旧 nudge は「思考を ToDo に commit せよ」 と機構を指示し、 答えが思考にあるのに
+            // todo を作る矛盾を生んでいた (explore タスクと衝突)。 新 nudge は目的を再提示し、
+            // 「答えがあるなら出力、 作業が要るなら実行」 と形をモデルの register 判断に委ねる。
+            const hasThinking = thinkingContent.length > 0;
+            this.history.addUserMessage(
+              `[ハーネス通知] thinking は記録されましたが、 ユーザーに見える結果 (テキスト回答 / ツール呼出) がまだありません。\n\n` +
+                `# 次の手 — 依頼にふさわしい形で可視的な結果を出す\n` +
+                (hasThinking
+                  ? `- 思考の中で結論や答えが出ているなら → **それを回答テキストとして出力**する (答えだけで済む依頼はそれで完了。 必要なら response_complete)\n`
+                  : `- まず依頼への答え・方針をテキストで示す\n`) +
+                `- まだ作業 (ファイル作成・検証等) が要るなら → \`todo_append\` で計画を立てる、 もしくは実装ツール (file_write / file_edit / bash / mcp__... 等) を呼ぶ\n` +
+                `- 行き詰まりなら → \`ask_user\` で相談する\n\n` +
+                (hasThinking ? `前回の思考は保全済み。 再思考は不要 — 結論をそのまま出力してください。\n\n` : "") +
+                `# 元依頼\n${nudgeIntent}\n\n` +
+                `中身の無い promise テキスト (「了解しました」「実装します」 等) *だけ* は進捗と認識しません (中身のある回答や実行は進捗です)。`,
+              { ephemeral: true },
+            );
+            continue;
+          }
 
-      if (shouldReprompt && isTask && !isCompleted) {
-        if (selfCheckRounds >= MAX_SELF_CHECK_ROUNDS) {
-          // 上限到達: ユーザーに報告して中断。 ここで turn が終わる = span 終了 = final。
-          flushAssistantText(true);
-          console.log(chalk.yellow(`\n  自己点検を${MAX_SELF_CHECK_ROUNDS}回実施しましたが response_complete が呼ばれませんでした。`));
-          this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
-          this.purgeEphemeralAtSpanEnd("self_check_limit");
+          // 2026-06-07: honest failure (docs/reactive-intervention-coherence-design.md §4.3)。
+          // 捏造しない (思考を scrape して疑似回答にしない) / 隠蔽しない (無言終了しない) /
+          // 新規 LLM 呼び出しもしない (壊れた状態での追加呼出は無意味)。 何回試みて何が
+          // 起きたかを正直に・具体的に報告して止める。 思考は llmLogger に保全済み。
+          const hasThinking = thinkingContent.length > 0 || textContent.includes("<think>");
+          const reason = hasThinking
+            ? `モデルは ${thinkingContent.length}字 考えましたが、 ${emptyResponseRetries} 回試みても ユーザー向けの出力 (テキスト/ツール) を生成できませんでした`
+            : `モデルから ${emptyResponseRetries} 回連続で空の応答が返りました`;
+          console.log(
+            chalk.yellow(
+              `\n  ⚠ 結果を出力できませんでした: ${reason}。\n` +
+                `    考えられる原因: コンテキスト長の超過 / 出力フォーマットの乱れ。\n` +
+                `    対処: もう一度依頼する / 入力を短くする / 別のモデルに切り替える。` +
+                (hasThinking ? `\n    （モデルの思考内容は LLM ログに保全されています）` : ""),
+            ),
+          );
+          this.notice("error", `結果を出力できませんでした: ${reason}`);
+          // 偽の回答は履歴に入れない (捏造しない)。 honest failure は上記でユーザーに提示済み。
+          this.purgeEphemeralAtSpanEnd("empty_response_giveup");
           return;
         }
-
-        selfCheckRounds++;
-        flushAssistantText(false); // span 継続 (自己点検) — 表示は白、final ではない
-        console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ツール未呼び出し`));
-        this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ツール未呼び出し`);
-        // nudge は in-turn 専用、 thinking も保全。 表示済みテキストは会話記録として保全する
-        // (displayed)。 2026-06-12: 会話リクエストの実回答がこの経路で purge され、 次 span で
-        // モデルが自分の回答を参照できなくなる事故があった (履歴に self-check 確認文だけが残る)。
-        this.history.addAssistantMessage(textContent, undefined, {
-          ephemeral: true,
-          thinking: thinkingContent,
-          displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
-        });
-        // 2026-05-01: C 案。 「promise テキストだけでは作業継続と認識しない」 を明示し、
-        // 短い「了解しました」「実装します」 等の応答で止まるループを抜けやすくする。
-        this.history.addUserMessage(
-          formatSelfCheck(
-            selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
-            `テキスト応答のみでツール呼出がありません。 ` +
-            `「了解しました」「実装します」 等の promise テキストだけではハーネスは作業継続と認識しません。 ` +
-            `思考 → ToDo → 実行 のリズムで進めてください: ` +
-            `(a) 戦略がまだ決まっていない → \`todo_append\` で計画を 3-5 項目立てる、 ` +
-            `(b) 既存 ToDo があるなら該当項目を \`todo_mark(id, "in_progress")\` してから実装 tool (file_write / file_edit / bash / mcp__...) を呼ぶ、 ` +
-            `(c) 行き詰まりなら \`todo_mark(id, "blocked")\` + \`ask_user\` で相談。`
-          ),
-          { ephemeral: true },
-        );
-        continue;
-      }
-
-      // コードブロックをテキスト返した場合のリプロンプト（file_write未使用検出）
-      if (toolCalls.length === 0 && !codeBlockRetried && hasLargeCodeBlock(textContent) &&
-          selfCheckRounds < MAX_SELF_CHECK_ROUNDS) {
-        codeBlockRetried = true;
-        selfCheckRounds++;
-        flushAssistantText(false); // span 継続 (自己点検) — 表示は白、final ではない
-        console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] コードがテキスト応答に含まれています`));
-        this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] コードがテキスト応答に含まれています`);
-        // nudge は in-turn 専用、 thinking も保全。 表示済みテキストは保全 (displayed)。
-        this.history.addAssistantMessage(textContent, undefined, {
-          ephemeral: true,
-          thinking: thinkingContent,
-          displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
-        });
-        this.history.addUserMessage(
-          formatSelfCheck(
-            selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
-            `コードをテキストで返しましたが、実際のファイル作成には file_write ツールが必要です。` +
-            `意図したパスにファイルを保存する場合は file_write を呼んでください。`
-          ),
-          { ephemeral: true },
-        );
-        continue;
-      }
-
-      // リプロンプト後もツールを呼ばず、JSONコードブロックでfile_writeを「説明」している場合
-      // → JSONを解析して直接実行する
-      if (toolCalls.length === 0 && codeBlockRetried) {
-        const fakeWrites = extractFakeFileWriteCalls(textContent);
-        if (fakeWrites.length > 0) {
-          console.log(chalk.yellow(`\n  ツール呼び出しの代わりにJSONが返されました。${fakeWrites.length}件のfile_writeを直接実行します...`));
-          this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
-          let shouldAbort = false;
-          for (const fw of fakeWrites) {
-            const syntheticCall: ToolCall = {
-              id: `synthetic_fw_${Date.now()}`,
-              type: "function",
-              function: { name: "file_write", arguments: JSON.stringify(fw) },
-            };
-            shouldAbort = await this.executeSingleTool(syntheticCall);
-            if (shouldAbort) {
-              this.purgeEphemeralAtSpanEnd("synthetic_write_abort");
-              return;
-            }
+        // ToDo 未完了ゲート (final_text_response 経路)。
+        // docs/spinner-mode-response-coloring-design.md / docs/strategic-todo-design.md
+        // response_complete は response-complete.ts で未完了 todo をブロックするが、
+        // response_complete を呼ばずテキストだけで終わるこの経路にはゲートが無かった。
+        // hasExecutedTools=true (このターンで実装/検証ツールを実行済み = タスク作業中) かつ
+        // 未完了 todo がある場合、 自己点検 nudge を注入して「完了 or response_complete(force)」 を促す。
+        // 上限到達時は未完了を明示してそのまま終了 (無限ループ防止)。
+        if (hasExecutedTools && selfCheckRounds < MAX_SELF_CHECK_ROUNDS && !this.planManager?.isInPlanMode()) {
+          const allTodos = getTodosCurrent();
+          const openTodos = allTodos.filter((t) => t.status !== "completed");
+          if (allTodos.length > 0 && openTodos.length > 0) {
+            selfCheckRounds++;
+            flushAssistantText(false); // span 継続 (自己点検) — 表示は白、final ではない
+            console.log(
+              chalk.dim(
+                `  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ToDo未完了 (${openTodos.length}/${allTodos.length})`,
+              ),
+            );
+            this.notice(
+              "info",
+              `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ToDo未完了 (${openTodos.length}/${allTodos.length})`,
+            );
+            this.history.addAssistantMessage(textContent, undefined, {
+              ephemeral: true,
+              thinking: thinkingContent,
+              displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
+            });
+            this.history.addUserMessage(
+              formatSelfCheck(
+                selfCheckRounds,
+                MAX_SELF_CHECK_ROUNDS,
+                userMessageText,
+                `Acceptance Checklist (todo) に未完了が ${openTodos.length} 項目あります:\n${formatTodos()}\n` +
+                  `テキストだけで終わらせず、 次のいずれかを実行してください: ` +
+                  `(1) 残項目を実装/検証して該当 todo を completed にする、 ` +
+                  `(2) 部分完了で報告するなら \`response_complete(force=true)\` を呼び summary に未完了の理由を明記、 ` +
+                  `(3) 行き詰まりなら該当 todo を \`todo_mark(id, "blocked")\` してから \`ask_user\` で相談。`,
+              ),
+              { ephemeral: true },
+            );
+            continue;
           }
-          // 書き込み完了後、モデルに続きを促す (in-turn の合図)
-          this.history.addUserMessage("ファイルの作成が完了しました。", { ephemeral: true });
-          continue;
-        }
-      }
-
-      // Final response
-      const isEmptyResponse = toolCalls.length === 0 && textContent.trim().length === 0;
-      if (isEmptyResponse || (!hasStartedOutput && toolCalls.length === 0)) {
-        // ユーザーに見える出力がゼロ（thinking onlyや空レスポンス、またはストリーム中のみ出力で最終テキスト空）
-        if (emptyResponseRetries < MAX_EMPTY_RETRIES) {
-          emptyResponseRetries++;
-          // 何が起きていたか可視化: 思考のみ / max_tokens到達 / 完全な空レスポンス
-          let reason: string;
-          if (finishReason === "length") {
-            reason = "max_tokens到達で本文なし";
-          } else if (thinkingContent.length > 0) {
-            reason = `思考${thinkingContent.length}文字のみで本文なし`;
-          } else {
-            reason = "本文・思考ともに空";
-          }
-          console.log(chalk.yellow(`\n  空のレスポンス (${reason}) — 再試行します (${emptyResponseRetries}/${MAX_EMPTY_RETRIES})...`));
-          // 同じリクエストをそのまま再送しても同じ結果になるため、元の意図を含むナッジメッセージを追加する。
-          // 2026-05-01: 「promise だけ返す」 ループ対策として B 案を実装:
-          //   ・「応答を返さないで」 等の沈黙系依頼は rephraseUserIntent で翻訳して提示
-          //   ・「了解しました / 実装します 等の promise テキストだけでは作業継続と認識しない」 を明示
-          const rephrasedIntent = rephraseUserIntent(userMessageText);
-          const nudgeIntent = rephrasedIntent.length > 200
-            ? rephrasedIntent.slice(0, 200) + "..."
-            : rephrasedIntent;
-          // Phase 2: 思考保全 — thinking が出ていた場合は完全保全して placeholder にする。
-          // モデルは次イテレーションで自分の前思考を読めるので、 同じ digestion を再生成
-          // する無駄を避けられる。 ephemeral なので応答完了時に purge され次 span に漏れない。
-          //
-          // 機械的な文字カット (slice) は中途半端な切り取りで意味を壊しノイズになるため避ける。
-          // ctx 圧迫の懸念は以下で十分に抑えられている:
-          //   - MAX_EMPTY_RETRIES=3 で span 内の積み増し回数が上限固定
-          //   - ContextManager (capability.compressionThreshold) が閾値到達で要約圧縮
-          //   - 応答完了時の purgeEphemeral で span 境界を越えて残らない
-          // docs/ephemeral-context-design.md §7.1 参照。
-          const placeholder = thinkingContent.trim().length > 0
-            ? `[前回の思考 ${thinkingContent.length}字 — 形式不一致で吐き出せず、 ハーネスが保全]\n${thinkingContent}`
-            : "（空のレスポンス）";
-          // empty-response placeholder と nudge は in-turn 専用 (応答完了時に purge)。
-          // ユーザーへの最終応答が出れば、 これらの中間ノイズは過去 span から除去される。
-          this.history.addAssistantMessage(placeholder, undefined, { ephemeral: true });
-          // 2026-05-15: 空応答 retry の意味反転 (docs/strategic-todo-design.md §3.3)。
-          // 旧 nudge は「ツール呼べ」 という圧力で、 弱モデルが戦略を立てる前に反応的に動く原因だった。
-          // 新 nudge: 思考の deliberation を todo_append で commit させ、 戦略 → 実行 のリズムへ誘導する。
-          // 「思考 → ToDo 化 → Action」 = ジャンプ前のしゃがみ込み。
-          // 2026-06-07: 形状中立化 (docs/reactive-intervention-coherence-design.md §4.2)。
-          // 旧 nudge は「思考を ToDo に commit せよ」 と機構を指示し、 答えが思考にあるのに
-          // todo を作る矛盾を生んでいた (explore タスクと衝突)。 新 nudge は目的を再提示し、
-          // 「答えがあるなら出力、 作業が要るなら実行」 と形をモデルの register 判断に委ねる。
-          const hasThinking = thinkingContent.length > 0;
-          this.history.addUserMessage(
-            `[ハーネス通知] thinking は記録されましたが、 ユーザーに見える結果 (テキスト回答 / ツール呼出) がまだありません。\n\n` +
-            `# 次の手 — 依頼にふさわしい形で可視的な結果を出す\n` +
-            (hasThinking
-              ? `- 思考の中で結論や答えが出ているなら → **それを回答テキストとして出力**する (答えだけで済む依頼はそれで完了。 必要なら response_complete)\n`
-              : `- まず依頼への答え・方針をテキストで示す\n`) +
-            `- まだ作業 (ファイル作成・検証等) が要るなら → \`todo_append\` で計画を立てる、 もしくは実装ツール (file_write / file_edit / bash / mcp__... 等) を呼ぶ\n` +
-            `- 行き詰まりなら → \`ask_user\` で相談する\n\n` +
-            (hasThinking
-              ? `前回の思考は保全済み。 再思考は不要 — 結論をそのまま出力してください。\n\n`
-              : "") +
-            `# 元依頼\n${nudgeIntent}\n\n` +
-            `中身の無い promise テキスト (「了解しました」「実装します」 等) *だけ* は進捗と認識しません (中身のある回答や実行は進捗です)。`,
-            { ephemeral: true },
-          );
-          continue;
         }
 
-        // 2026-06-07: honest failure (docs/reactive-intervention-coherence-design.md §4.3)。
-        // 捏造しない (思考を scrape して疑似回答にしない) / 隠蔽しない (無言終了しない) /
-        // 新規 LLM 呼び出しもしない (壊れた状態での追加呼出は無意味)。 何回試みて何が
-        // 起きたかを正直に・具体的に報告して止める。 思考は llmLogger に保全済み。
-        const hasThinking = thinkingContent.length > 0 || textContent.includes("<think>");
-        const reason = hasThinking
-          ? `モデルは ${thinkingContent.length}字 考えましたが、 ${emptyResponseRetries} 回試みても ユーザー向けの出力 (テキスト/ツール) を生成できませんでした`
-          : `モデルから ${emptyResponseRetries} 回連続で空の応答が返りました`;
-        console.log(chalk.yellow(
-          `\n  ⚠ 結果を出力できませんでした: ${reason}。\n` +
-          `    考えられる原因: コンテキスト長の超過 / 出力フォーマットの乱れ。\n` +
-          `    対処: もう一度依頼する / 入力を短くする / 別のモデルに切り替える。` +
-          (hasThinking ? `\n    （モデルの思考内容は LLM ログに保全されています）` : ""),
-        ));
-        this.notice("error", `結果を出力できませんでした: ${reason}`);
-        // 偽の回答は履歴に入れない (捏造しない)。 honest failure は上記でユーザーに提示済み。
-        this.purgeEphemeralAtSpanEnd("empty_response_giveup");
+        // 上限到達などでゲートを通過したが未完了 todo が残る場合: ユーザーに明示してから終了。
+        if (hasExecutedTools) {
+          const openAtEnd = getTodosCurrent().filter((t) => t.status !== "completed");
+          if (openAtEnd.length > 0) {
+            console.log(
+              chalk.yellow(`\n  ⚠ ToDo が ${openAtEnd.length} 項目未完了のまま応答を返します (自己点検上限到達)。`),
+            );
+          }
+        }
+
+        // ここに到達 = ツールも自己点検も無く turn が終わる = span 終了 = final。
+        flushAssistantText(true);
+        this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
+        this.purgeEphemeralAtSpanEnd("final_text_response");
         return;
       }
-      // ToDo 未完了ゲート (final_text_response 経路)。
-      // docs/spinner-mode-response-coloring-design.md / docs/strategic-todo-design.md
-      // response_complete は response-complete.ts で未完了 todo をブロックするが、
-      // response_complete を呼ばずテキストだけで終わるこの経路にはゲートが無かった。
-      // hasExecutedTools=true (このターンで実装/検証ツールを実行済み = タスク作業中) かつ
-      // 未完了 todo がある場合、 自己点検 nudge を注入して「完了 or response_complete(force)」 を促す。
-      // 上限到達時は未完了を明示してそのまま終了 (無限ループ防止)。
-      if (
-        hasExecutedTools &&
-        selfCheckRounds < MAX_SELF_CHECK_ROUNDS &&
-        !this.planManager?.isInPlanMode()
-      ) {
-        const allTodos = getTodosCurrent();
-        const openTodos = allTodos.filter((t) => t.status !== "completed");
-        if (allTodos.length > 0 && openTodos.length > 0) {
-          selfCheckRounds++;
-          flushAssistantText(false); // span 継続 (自己点検) — 表示は白、final ではない
-          console.log(chalk.dim(
-            `  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ToDo未完了 (${openTodos.length}/${allTodos.length})`,
-          ));
-          this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] ToDo未完了 (${openTodos.length}/${allTodos.length})`);
-          this.history.addAssistantMessage(textContent, undefined, {
-            ephemeral: true,
-            thinking: thinkingContent,
-            displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
-          });
-          this.history.addUserMessage(
-            formatSelfCheck(
-              selfCheckRounds, MAX_SELF_CHECK_ROUNDS, userMessageText,
-              `Acceptance Checklist (todo) に未完了が ${openTodos.length} 項目あります:\n${formatTodos()}\n` +
-              `テキストだけで終わらせず、 次のいずれかを実行してください: ` +
-              `(1) 残項目を実装/検証して該当 todo を completed にする、 ` +
-              `(2) 部分完了で報告するなら \`response_complete(force=true)\` を呼び summary に未完了の理由を明記、 ` +
-              `(3) 行き詰まりなら該当 todo を \`todo_mark(id, "blocked")\` してから \`ask_user\` で相談。`,
-            ),
-            { ephemeral: true },
-          );
-          continue;
-        }
-      }
 
-      // 上限到達などでゲートを通過したが未完了 todo が残る場合: ユーザーに明示してから終了。
-      if (hasExecutedTools) {
-        const openAtEnd = getTodosCurrent().filter((t) => t.status !== "completed");
-        if (openAtEnd.length > 0) {
-          console.log(chalk.yellow(
-            `\n  ⚠ ToDo が ${openAtEnd.length} 項目未完了のまま応答を返します (自己点検上限到達)。`,
-          ));
-        }
-      }
-
-      // ここに到達 = ツールも自己点検も無く turn が終わる = span 終了 = final。
-      flushAssistantText(true);
-      this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
-      this.purgeEphemeralAtSpanEnd("final_text_response");
-      return;
-    }
-
-    console.log(chalk.yellow("\n  Maximum tool iterations reached."));
-    this.events.emit("harness_notice", { level: "warn", message: "反復上限に到達しました" });
-    this.purgeEphemeralAtSpanEnd("max_iterations");
+      console.log(chalk.yellow("\n  Maximum tool iterations reached."));
+      this.events.emit("harness_notice", { level: "warn", message: "反復上限に到達しました" });
+      this.purgeEphemeralAtSpanEnd("max_iterations");
     } finally {
       this.isProcessing = false;
       // task_complete は finally で必ず発火する (例外・全 return 経路を含む)。
@@ -1707,9 +1754,10 @@ export class AgentLoop {
         });
       }
       // ブリッジ無し: 従来の headless フィルタ
-      const allowed = this.currentSource === "discord"
-        ? this.permissions.getDiscordAllowedToolNames()
-        : this.permissions.getSlackAllowedToolNames();
+      const allowed =
+        this.currentSource === "discord"
+          ? this.permissions.getDiscordAllowedToolNames()
+          : this.permissions.getSlackAllowedToolNames();
       return allDefs.filter((d) => allowed.has(d.function.name));
     }
 
@@ -1726,7 +1774,9 @@ export class AgentLoop {
       const m = messages[i];
       if (m.role === "user") {
         const content = typeof m.content === "string" ? m.content : "";
-        return /セカンド\s*(?:llm|エージェント|モデル)?|second\s*llm|サブ\s*エージェント|sub.?agent|委任|頼んで|依頼/i.test(content);
+        return /セカンド\s*(?:llm|エージェント|モデル)?|second\s*llm|サブ\s*エージェント|sub.?agent|委任|頼んで|依頼/i.test(
+          content,
+        );
       }
     }
     return false;
@@ -1741,10 +1791,7 @@ export class AgentLoop {
    *
    * 既にロック中なら理由を追加するだけ (タイムアウト延長はしない)。
    */
-  private maybeTriggerDialogueLock(
-    toolName: string,
-    result: import("../tools/tool-registry.js").ToolResult,
-  ): void {
+  private maybeTriggerDialogueLock(toolName: string, result: import("../tools/tool-registry.js").ToolResult): void {
     const reasons: string[] = [];
 
     // 契機1: ユーザー拒否 (file_edit/file_write)
@@ -1761,11 +1808,7 @@ export class AgentLoop {
     }
 
     // 契機2: 委任失敗 + ユーザーが委任を明示
-    if (
-      !result.success &&
-      toolName === "second_llm_agent" &&
-      this.hasRecentDelegationIntent()
-    ) {
+    if (!result.success && toolName === "second_llm_agent" && this.hasRecentDelegationIntent()) {
       const errStr = String(result.error ?? "");
       const m = errStr.match(/\[セカンドLLM失敗:([A-Z_]+)\]/);
       const cat = m?.[1] ?? "UNKNOWN";
@@ -1806,9 +1849,7 @@ export class AgentLoop {
     if (this.dialogueLockUntil <= Date.now()) return null;
     // ロック中の禁止対象は file_write / file_edit のみ (情報収集系・retry 系は通す)
     if (toolName !== "file_write" && toolName !== "file_edit") return null;
-    const reasons = this.dialogueLockReasons.length > 0
-      ? this.dialogueLockReasons.join(" / ")
-      : "対話が必要な状況";
+    const reasons = this.dialogueLockReasons.length > 0 ? this.dialogueLockReasons.join(" / ") : "対話が必要な状況";
     // ID-003 §2 (2026-04-30): system-prompt から「対話必須ロック」 の存在を説明する文言を
     // 削除した代わりに、 ロック発動時の本エラーで仕様 (発動契機 / 解除条件 / 推奨対応) を
     // 完全に伝える。 file_read の自助エラー (候補/親dir 提示) と同じ性格 — tool 自身の声で
@@ -1839,9 +1880,7 @@ export class AgentLoop {
    */
   private appendAbortMarker(partialText: string, reason = "ユーザーにより中断されました (Esc)"): void {
     const note = `[この応答は${reason}。 直前のユーザーメッセージへの回答は完了していません]`;
-    const content = partialText.trim().length > 0
-      ? `${partialText}\n\n${note}`
-      : note;
+    const content = partialText.trim().length > 0 ? `${partialText}\n\n${note}` : note;
     this.history.addAssistantMessage(content);
   }
 
@@ -1918,21 +1957,13 @@ export class AgentLoop {
   private static readonly FAILURE_WINDOW = 10;
   /** P4: 一過性失敗でも同一失敗がこの回数続いたら run を打ち切る。 恒久失敗は2回目で打ち切る。 */
   private static readonly STUCK_ABORT_THRESHOLD = 5;
-  private maybeDetectStuckLoop(
-    toolCall: ToolCall,
-    errorMsg: string,
-    errorKind?: "permanent" | "transient",
-  ): void {
+  private maybeDetectStuckLoop(toolCall: ToolCall, errorMsg: string, errorKind?: "permanent" | "transient"): void {
     const iteration = this.currentIteration;
     const signature = `${toolCall.function.name}:${toolCall.function.arguments ?? ""}`;
     // window 外の古いエントリを除去
-    this.recentFailures = this.recentFailures.filter(
-      (e) => iteration - e.iteration < AgentLoop.FAILURE_WINDOW,
-    );
+    this.recentFailures = this.recentFailures.filter((e) => iteration - e.iteration < AgentLoop.FAILURE_WINDOW);
     const trimmedErr = (errorMsg ?? "").slice(0, 500);
-    const prior = this.recentFailures.filter(
-      (e) => e.signature === signature && e.error === trimmedErr,
-    );
+    const prior = this.recentFailures.filter((e) => e.signature === signature && e.error === trimmedErr);
     this.recentFailures.push({ iteration, signature, error: trimmedErr });
     if (prior.length === 0) return; // 初回失敗 → 通常通り
 
@@ -1945,20 +1976,30 @@ export class AgentLoop {
     if (permanent || occurrences >= AgentLoop.STUCK_ABORT_THRESHOLD) {
       this._circuitBreak = { tool: toolCall.function.name, error: trimmedErr };
       this._aborted = true; // 進行中の生成も止め、 ループ先頭の中断チェックで報告して終了する
-      console.log(chalk.red(
-        `\n  ⛔ stuck-loop 打ち切り: ${toolCall.function.name} が${permanent ? "恒久エラーで" : `${occurrences}回`}失敗。 処理を中断します。`,
-      ));
-      this.notice("error", `stuck-loop 打ち切り: ${toolCall.function.name} (${permanent ? "恒久失敗" : `${occurrences}回`})`);
+      console.log(
+        chalk.red(
+          `\n  ⛔ stuck-loop 打ち切り: ${toolCall.function.name} が${permanent ? "恒久エラーで" : `${occurrences}回`}失敗。 処理を中断します。`,
+        ),
+      );
+      this.notice(
+        "error",
+        `stuck-loop 打ち切り: ${toolCall.function.name} (${permanent ? "恒久失敗" : `${occurrences}回`})`,
+      );
       return;
     }
 
     // 直近 window 内に同じ失敗が既にあった → 学習されていない兆候
     // Phase D-2: T3 では decision-tree mode で binary 二択を提示する。
     // 自由形式の助言は T3 にとって判断負荷が高く、 さらに迷走する原因になるため。
-    const intervention = this.capability.tier === "T3"
-      ? this.buildT3DecisionTreeIntervention(toolCall, trimmedErr, prior.length + 1)
-      : this.buildStandardStuckLoopIntervention(toolCall, trimmedErr, prior.length + 1);
-    console.log(chalk.yellow(`\n  ⚠ stuck-loop 検出: ${toolCall.function.name} が直近${AgentLoop.FAILURE_WINDOW}反復で同一エラー再発 (tier=${this.capability.tier})`));
+    const intervention =
+      this.capability.tier === "T3"
+        ? this.buildT3DecisionTreeIntervention(toolCall, trimmedErr, prior.length + 1)
+        : this.buildStandardStuckLoopIntervention(toolCall, trimmedErr, prior.length + 1);
+    console.log(
+      chalk.yellow(
+        `\n  ⚠ stuck-loop 検出: ${toolCall.function.name} が直近${AgentLoop.FAILURE_WINDOW}反復で同一エラー再発 (tier=${this.capability.tier})`,
+      ),
+    );
     this.notice("warn", `stuck-loop 検出: ${toolCall.function.name} の同一エラー再発`);
     // stuck-loop 介入は in-turn の方向修正なので応答完了時に purge
     this.history.addUserMessage(intervention, { ephemeral: true });
@@ -2003,48 +2044,29 @@ export class AgentLoop {
    * A は「具体的な引数変更」、 B は基本「ask_user で人間に確認」 で固定。
    * 二択の単純化が T3 の迷走を防ぐ。
    */
-  private buildBinaryDecisionOptions(
-    toolName: string,
-    errorMsg: string,
-    _argumentsJson: string,
-  ): [string, string] {
+  private buildBinaryDecisionOptions(toolName: string, errorMsg: string, _argumentsJson: string): [string, string] {
     if (toolName === "file_edit") {
       if (errorMsg.includes("found") && errorMsg.includes("times")) {
-        return [
-          "同じ file_edit に replace_all=true を追加して再実行",
-          "ask_user で「どの箇所を編集するか」 を確認",
-        ];
+        return ["同じ file_edit に replace_all=true を追加して再実行", "ask_user で「どの箇所を編集するか」 を確認"];
       }
       if (errorMsg.includes("not found")) {
-        return [
-          "file_write でファイル全体を書き直す",
-          "ask_user で「ファイルパスが正しいか」 を確認",
-        ];
+        return ["file_write でファイル全体を書き直す", "ask_user で「ファイルパスが正しいか」 を確認"];
       }
     }
     if (toolName === "file_read" && errorMsg.includes("not found")) {
       return [
-        "glob でファイル名を検索 (例: glob({\"pattern\":\"**/<name>\"}))",
+        'glob でファイル名を検索 (例: glob({"pattern":"**/<name>"}))',
         "ask_user で「正しいファイルパス」 を確認",
       ];
     }
     if (toolName === "bash") {
-      return [
-        "コマンドの引数を変えて再実行 (例: 別コマンドや別 path)",
-        "ask_user で「期待する動作」 を確認",
-      ];
+      return ["コマンドの引数を変えて再実行 (例: 別コマンドや別 path)", "ask_user で「期待する動作」 を確認"];
     }
     if (toolName === "grep" || toolName === "glob") {
-      return [
-        "pattern を緩める (例: より一般的な単語、 拡張子なし)",
-        "ask_user で「探したい内容」 を確認",
-      ];
+      return ["pattern を緩める (例: より一般的な単語、 拡張子なし)", "ask_user で「探したい内容」 を確認"];
     }
     // 汎用 fallback
-    return [
-      "ツールの引数を 1 つ変更して再実行 (エラー文の指示に従う)",
-      "ask_user で「どう進めるか」 を確認",
-    ];
+    return ["ツールの引数を 1 つ変更して再実行 (エラー文の指示に従う)", "ask_user で「どう進めるか」 を確認"];
   }
 
   /** P0-A: 失敗ツールごとの具体的助言を返す。 ツール側エラー文の指示を増幅させる役割。 */
@@ -2130,11 +2152,13 @@ export class AgentLoop {
     if (this.bashCumulativeWarned) return;
     if (this.bashCumulativeMs < AgentLoop.BASH_CUMULATIVE_WARN_MS) return;
     const totalSec = Math.round(this.bashCumulativeMs / 1000);
-    console.log(chalk.yellow(`\n  ⚠ bash 累積実行時間が ${totalSec}s に達しました。 重い build/run の連発を見直してください`));
+    console.log(
+      chalk.yellow(`\n  ⚠ bash 累積実行時間が ${totalSec}s に達しました。 重い build/run の連発を見直してください`),
+    );
     this.history.addUserMessage(
       `[ハーネス] このユーザー発話以降、 bash の累積実行時間が ${totalSec}s を超えました。\n` +
-      `  重い検証 (build / 起動 / 全件再実行) を毎 edit ごとに走らせていませんか?\n` +
-      `  対策: (a) 複数 edit をまとめてから 1 回 build (b) syntax check (\`node --check\` / \`tsc --noEmit\` 等) で軽く確認 (c) ホットリロードを活用 (d) 同一コマンドの単純再実行は禁止。`,
+        `  重い検証 (build / 起動 / 全件再実行) を毎 edit ごとに走らせていませんか?\n` +
+        `  対策: (a) 複数 edit をまとめてから 1 回 build (b) syntax check (\`node --check\` / \`tsc --noEmit\` 等) で軽く確認 (c) ホットリロードを活用 (d) 同一コマンドの単純再実行は禁止。`,
       { ephemeral: true },
     );
     this.bashCumulativeWarned = true;
@@ -2164,8 +2188,8 @@ export class AgentLoop {
     console.log(chalk.yellow(`\n  ⚠ 計画/Todo 過多検知: ${reasons.join(" / ")}`));
     this.history.addUserMessage(
       `[ハーネス] このユーザー発話以降、 計画/Todo の更新が過多です:\n` +
-      reasons.map((r) => `  - ${r}`).join("\n") +
-      `\n  対策: 既存の todo を見直し、 必要なら 1 回だけ更新する。 計画モード再突入は禁止 — 既存計画を流用して実装を進めてください。`,
+        reasons.map((r) => `  - ${r}`).join("\n") +
+        `\n  対策: 既存の todo を見直し、 必要なら 1 回だけ更新する。 計画モード再突入は禁止 — 既存計画を流用して実装を進めてください。`,
       { ephemeral: true },
     );
     this.planTodoWarned = true;
@@ -2187,8 +2211,7 @@ export class AgentLoop {
     // 入れ子で独自スピナーを出すツール (second-llm-manager 等)。 外側スピナーと
     // 二重アニメーションになり同じ行で点滅するため、 外側は静的行として残す。
     const isNestedSpinnerTool = toolName === "second_llm_agent";
-    const needsApproval = this.permissions.getPermissionLevel(toolName) === "ask"
-      && this.currentSource === "cli";
+    const needsApproval = this.permissions.getPermissionLevel(toolName) === "ask" && this.currentSource === "cli";
     let outerSpinnerPersisted = false;
     if (needsApproval || (isInteractiveTool && this.currentSource === "cli")) {
       spinner.stop();
@@ -2237,9 +2260,7 @@ export class AgentLoop {
       spinner.fail(chalk.dim(`  ${summary}: ${formatToolError(result.error, result.output)}`));
     }
 
-    let resultContent = result.success
-      ? result.output
-      : `Error: ${result.error}\n${result.output}`;
+    let resultContent = result.success ? result.output : `Error: ${result.error}\n${result.output}`;
 
     this.llmLogger.logToolResult({
       toolCallId: toolCall.id,
@@ -2380,9 +2401,7 @@ export class AgentLoop {
           error: result.error,
           durationMs,
         });
-        let resultContent = result.success
-          ? result.output
-          : `Error: ${result.error}\n${result.output}`;
+        let resultContent = result.success ? result.output : `Error: ${result.error}\n${result.output}`;
 
         // ID-001 §2 + §4 (2026-04-30): 段階的開示。 並列ルートでも同様にガイドを注入。
         // Phase B-3: 並列ルートでも能力ティアを渡す
@@ -2496,7 +2515,12 @@ export class AgentLoop {
     // 入力圧縮 ON 中はキャッシュ済みの圧縮済みテキストを overrides として渡し、 圧縮が裏で
     // 解除される silent な不整合を防ぐ (project/メモは不変なので LLM 再呼出は不要)。
     const systemPrompt = buildSystemPrompt(
-      skills, hasSecondLLM, hasObsidian, profiles, this.capability.tier, this.currentCompressionOverrides(),
+      skills,
+      hasSecondLLM,
+      hasObsidian,
+      profiles,
+      this.capability.tier,
+      this.currentCompressionOverrides(),
     );
     this.history.updateSystemPrompt(systemPrompt);
   }
@@ -2544,7 +2568,11 @@ export class AgentLoop {
     if (!enabled) {
       // 実行時に OFF へ切替えた場合は full に戻す
       const full = buildSystemPrompt(
-        this.builtSkills, this.builtHasSecondLLM, this.builtHasObsidian, this.llmProfiles, this.capability.tier,
+        this.builtSkills,
+        this.builtHasSecondLLM,
+        this.builtHasObsidian,
+        this.llmProfiles,
+        this.capability.tier,
       );
       this.history.updateSystemPrompt(full);
       return;
@@ -2558,17 +2586,38 @@ export class AgentLoop {
     if (rawProject && rawProject.length > limits.project) {
       const r = await compressText(this.provider, this.model, "プロジェクト指示", rawProject);
       if (r.applied) overrides.projectInstructions = r.text;
-      this.compressionState.push({ label: "プロジェクト指示", original: r.original, compressedText: r.applied ? r.text : undefined, beforeTokens: r.beforeTokens, afterTokens: r.afterTokens, applied: r.applied, note: r.note });
+      this.compressionState.push({
+        label: "プロジェクト指示",
+        original: r.original,
+        compressedText: r.applied ? r.text : undefined,
+        beforeTokens: r.beforeTokens,
+        afterTokens: r.afterTokens,
+        applied: r.applied,
+        note: r.note,
+      });
     }
     if (rawMemory && rawMemory.length > limits.memory) {
       const r = await compressText(this.provider, this.model, "メモ", rawMemory);
       if (r.applied) overrides.memory = r.text;
-      this.compressionState.push({ label: "メモ", original: r.original, compressedText: r.applied ? r.text : undefined, beforeTokens: r.beforeTokens, afterTokens: r.afterTokens, applied: r.applied, note: r.note });
+      this.compressionState.push({
+        label: "メモ",
+        original: r.original,
+        compressedText: r.applied ? r.text : undefined,
+        beforeTokens: r.beforeTokens,
+        afterTokens: r.afterTokens,
+        applied: r.applied,
+        note: r.note,
+      });
     }
 
     if (overrides.projectInstructions !== undefined || overrides.memory !== undefined) {
       const compressed = buildSystemPrompt(
-        this.builtSkills, this.builtHasSecondLLM, this.builtHasObsidian, this.llmProfiles, this.capability.tier, overrides,
+        this.builtSkills,
+        this.builtHasSecondLLM,
+        this.builtHasObsidian,
+        this.llmProfiles,
+        this.capability.tier,
+        overrides,
       );
       this.history.updateSystemPrompt(compressed);
     }
@@ -2604,7 +2653,11 @@ export class AgentLoop {
     // Phase B-2: tier 反映。 入力圧縮 ON 中はキャッシュ済み圧縮テキストを引き継ぐ
     // (project/メモは作業フォルダ単位で session を跨いでも不変)。
     const systemPrompt = buildSystemPrompt(
-      this.builtSkills, this.builtHasSecondLLM, this.builtHasObsidian, this.llmProfiles, this.capability.tier,
+      this.builtSkills,
+      this.builtHasSecondLLM,
+      this.builtHasObsidian,
+      this.llmProfiles,
+      this.capability.tier,
       this.currentCompressionOverrides(),
     );
     this.history = new MessageHistory(systemPrompt);
@@ -2619,7 +2672,10 @@ export class AgentLoop {
           msg.tool_calls,
         );
       } else if (msg.role === "tool") {
-        this.history.addToolResult(msg.tool_call_id ?? "", typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content));
+        this.history.addToolResult(
+          msg.tool_call_id ?? "",
+          typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
+        );
       }
     }
     // docs/todo-goal-lifecycle.md §2.3 — in-memory slot 復元 (旧 session は optional のためスキップ)
@@ -2667,8 +2723,12 @@ export class AgentLoop {
     } else {
       // 新規会話: 現在の設定でシステムプロンプトを組み直す
       const systemPrompt = buildSystemPrompt(
-        this.builtSkills, this.builtHasSecondLLM, this.builtHasObsidian,
-        this.llmProfiles, this.capability.tier, this.currentCompressionOverrides(),
+        this.builtSkills,
+        this.builtHasSecondLLM,
+        this.builtHasObsidian,
+        this.llmProfiles,
+        this.capability.tier,
+        this.currentCompressionOverrides(),
       );
       this.history = new MessageHistory(systemPrompt);
       this.history.setSystemPromptComposer((base) => this.composeQuasiSystemPrompt(base));
@@ -2754,9 +2814,7 @@ export class AgentLoop {
     setGoalSlot(goal);
     this.currentMode = "goal-seek";
     if (seedTodos) {
-      setTodosFromGoal(
-        goal.acceptance_criteria.map((c) => ({ content: c, status: "pending" as const })),
-      );
+      setTodosFromGoal(goal.acceptance_criteria.map((c) => ({ content: c, status: "pending" as const })));
     }
     // 準システムプロンプト composer (構築時に注入済) が次回 getMessages() で goal section を含めて再合成する。
     // ここで明示的な updateSystemPrompt は不要。
@@ -2793,8 +2851,13 @@ export class AgentLoop {
     // (docs/prompt-cache-cost-reduction.md)。 キャッシュ境界より後ろの dynamic 側へ移設。
     const now = new Date();
     const localDatetime = now.toLocaleString("ja-JP", {
-      year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
     });
     dynamicParts.push(`# Current datetime\n${localDatetime}`);
     if (this.currentMode === "goal-seek") {
@@ -2961,9 +3024,7 @@ async function askUserOnError(err: Error): Promise<"retry" | "abort"> {
   // 非TTYモード（パイプ等）: テキストメニューにフォールバック
   if (!process.stdin.isTTY) {
     process.stdout.write(
-      `  1: リトライ (同じリクエストを再送信)\n` +
-      `  2: 中止 (プロンプトに戻る)\n` +
-      `選択 [1-2]: `
+      `  1: リトライ (同じリクエストを再送信)\n` + `  2: 中止 (プロンプトに戻る)\n` + `選択 [1-2]: `,
     );
     const answer = await nonTTYReader.readLine();
     return answer === "1" ? "retry" : "abort";
@@ -3167,10 +3228,7 @@ function hasLargeCodeBlock(text: string): boolean {
  * 注意: AsyncGenerator は同時に1つの .next() しか保留できないため、
  * 同じ Promise を再利用してタイムアウトと競争させる。
  */
-async function* abortableIterator<T>(
-  gen: AsyncGenerator<T>,
-  isAborted: () => boolean,
-): AsyncGenerator<T> {
+async function* abortableIterator<T>(gen: AsyncGenerator<T>, isAborted: () => boolean): AsyncGenerator<T> {
   const POLL_INTERVAL = 500;
   // 中断時は放置せず gen.return() で generator の finally (ストリーム cancel 等) を
   // 走らせる。 これが無いと provider 側の HTTP 接続クリーンアップが永久に実行されない。
@@ -3210,24 +3268,41 @@ async function* abortableIterator<T>(
 /** コードファイル（bash検証が意味を持つファイル）かどうかを判定する */
 function isCodeFile(filePath: string): boolean {
   const codeExtensions = new Set([
-    ".ts", ".js", ".tsx", ".jsx", ".mts", ".mjs", ".cjs",
-    ".py", ".rs", ".go", ".java", ".c", ".cpp", ".h", ".hpp",
-    ".css", ".scss", ".html", ".vue", ".svelte",
-    ".json", ".yaml", ".yml", ".toml", ".sql", ".sh", ".bash",
+    ".ts",
+    ".js",
+    ".tsx",
+    ".jsx",
+    ".mts",
+    ".mjs",
+    ".cjs",
+    ".py",
+    ".rs",
+    ".go",
+    ".java",
+    ".c",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".css",
+    ".scss",
+    ".html",
+    ".vue",
+    ".svelte",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".sql",
+    ".sh",
+    ".bash",
   ]);
-  const ext = filePath.lastIndexOf(".") >= 0
-    ? filePath.slice(filePath.lastIndexOf(".")).toLowerCase()
-    : "";
+  const ext = filePath.lastIndexOf(".") >= 0 ? filePath.slice(filePath.lastIndexOf(".")).toLowerCase() : "";
   return codeExtensions.has(ext);
 }
 
 /** ドキュメントファイ���（Evaluatorレビュー対象）かどうかを判定する */
 function isDocumentFile(filePath: string): boolean {
   const docExtensions = new Set([".md", ".txt", ".rst", ".adoc", ".org"]);
-  const ext = filePath.lastIndexOf(".") >= 0
-    ? filePath.slice(filePath.lastIndexOf(".")).toLowerCase()
-    : "";
+  const ext = filePath.lastIndexOf(".") >= 0 ? filePath.slice(filePath.lastIndexOf(".")).toLowerCase() : "";
   return docExtensions.has(ext);
 }
-
-

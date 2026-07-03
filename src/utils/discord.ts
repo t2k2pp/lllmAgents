@@ -18,7 +18,10 @@ export function isValidDiscordWebhookUrl(url: string): boolean {
   return /^https:\/\/discord\.com\/api\/webhooks\/\d+\/.+$/.test(url);
 }
 
-export async function sendDiscordNotification(webhookUrl: string, content: string): Promise<{ success: boolean; error?: string }> {
+export async function sendDiscordNotification(
+  webhookUrl: string,
+  content: string,
+): Promise<{ success: boolean; error?: string }> {
   if (!webhookUrl || !content) return { success: false, error: "URL or content is empty" };
 
   if (!isValidDiscordWebhookUrl(webhookUrl)) {
@@ -173,11 +176,11 @@ function splitIntoChunks(text: string, maxLength: number): string[] {
 
   while (currentPos < text.length) {
     let chunkLength = Math.min(maxLength, text.length - currentPos);
-    
+
     // 区切る際、なるべく単語の途中や文の途中で切れないように直前の改行を探す工夫をする
     // ギリギリで改行が見つかるか確認 (最低でもmaxLength/2 以上で改行を探す)
     if (currentPos + chunkLength < text.length) {
-      const newLinePos = text.lastIndexOf('\n', currentPos + chunkLength);
+      const newLinePos = text.lastIndexOf("\n", currentPos + chunkLength);
       if (newLinePos > currentPos + maxLength / 2) {
         chunkLength = newLinePos - currentPos + 1; // 改行文字を含める
       }

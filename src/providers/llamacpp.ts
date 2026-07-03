@@ -89,15 +89,13 @@ export class LlamaCppProvider extends OpenAICompatProvider {
     const models = await this.listModels();
     const found = models.find((m) => m.name === modelName);
     const ctxFromList = found?.contextLength ?? 0;
-    const contextLength = ctxFromList > 0
-      ? ctxFromList
-      : (inferContextLength(modelName) || FALLBACK_CONTEXT_WINDOW);
+    const contextLength = ctxFromList > 0 ? ctxFromList : inferContextLength(modelName) || FALLBACK_CONTEXT_WINDOW;
     const props = await this.getProps();
     return {
       name: modelName,
       size: found?.size ?? 0,
       contextLength,
-      supportsVision: found?.supportsVision ?? (props?.modalities?.vision === true),
+      supportsVision: found?.supportsVision ?? props?.modalities?.vision === true,
       supportsFunctionCalling: true,
     };
   }

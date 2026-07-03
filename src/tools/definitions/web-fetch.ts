@@ -28,7 +28,11 @@ export const webFetchTool: ToolHandler = {
 
     // セキュリティ: http/https のみ許可（file:// 等によるローカルファイル漏洩を防ぐ）
     if (!/^https?:\/\//i.test(url)) {
-      return { success: false, output: "", error: `セキュリティエラー: URLは http:// または https:// で始まる必要があります（指定値: ${url}）` };
+      return {
+        success: false,
+        output: "",
+        error: `セキュリティエラー: URLは http:// または https:// で始まる必要があります（指定値: ${url}）`,
+      };
     }
 
     try {
@@ -67,9 +71,7 @@ export const webFetchTool: ToolHandler = {
       }
 
       const prompt = params.prompt as string | undefined;
-      const output = prompt
-        ? `[URL: ${url}]\n[Prompt: ${prompt}]\n\n${text}`
-        : `[URL: ${url}]\n\n${text}`;
+      const output = prompt ? `[URL: ${url}]\n[Prompt: ${prompt}]\n\n${text}` : `[URL: ${url}]\n\n${text}`;
 
       return { success: true, output };
     } catch (e) {

@@ -115,7 +115,10 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
     // tools は SDK 側の MCP 経由で公開する (ChatParams.tools の ToolDefinition[] ではなく
     // ToolRegistry / ToolExecutor 経由で渡す設計)。
     // ChatParams.tools は agent-loop からの定義リストだが、 ここでは ToolRegistry をそのまま使う。
-    yield* this.doChat(params, params.tools.map((t) => t.function.name));
+    yield* this.doChat(
+      params,
+      params.tools.map((t) => t.function.name),
+    );
   }
 
   /**
@@ -259,12 +262,13 @@ function flattenMessages(messages: Message[]): { systemPrompt: string; prompt: s
   const convoParts: string[] = [];
 
   for (const m of messages) {
-    const text = typeof m.content === "string"
-      ? m.content
-      : (m.content ?? [])
-          .filter((p) => p.type === "text")
-          .map((p) => p.text ?? "")
-          .join("");
+    const text =
+      typeof m.content === "string"
+        ? m.content
+        : (m.content ?? [])
+            .filter((p) => p.type === "text")
+            .map((p) => p.text ?? "")
+            .join("");
 
     switch (m.role) {
       case "system":
@@ -311,10 +315,15 @@ function resolveClaudeModelArg(modelInput: string): string {
 
 function mapStopReason(reason: string | undefined): string {
   switch (reason) {
-    case "end_turn": return "stop";
-    case "max_tokens": return "length";
-    case "tool_use": return "tool_calls";
-    case "stop_sequence": return "stop";
-    default: return reason ?? "stop";
+    case "end_turn":
+      return "stop";
+    case "max_tokens":
+      return "length";
+    case "tool_use":
+      return "tool_calls";
+    case "stop_sequence":
+      return "stop";
+    default:
+      return reason ?? "stop";
   }
 }

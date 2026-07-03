@@ -1,12 +1,7 @@
 import type { ToolCall } from "../providers/base-provider.js";
 import type { ToolResult } from "../tools/tool-registry.js";
 
-export type HookEvent =
-  | "session_start"
-  | "session_end"
-  | "pre_tool_use"
-  | "post_tool_use"
-  | "pre_compact";
+export type HookEvent = "session_start" | "session_end" | "pre_tool_use" | "post_tool_use" | "pre_compact";
 
 export type HookHandler = (context: HookContext) => Promise<HookAction>;
 

@@ -24,16 +24,10 @@ import { normalizeRoomId } from "../agent/room-types.js";
 import { loadMemory, saveMemory } from "../agent/memory.js";
 import { resolveAtMentions, printMentionFeedback } from "./input-resolver.js";
 import { runGoalLoop } from "../goal-loop/goal-loop-runner.js";
-import {
-  InteractiveInput,
-  SIGINT_SIGNAL,
-} from "./interactive-input.js";
+import { InteractiveInput, SIGINT_SIGNAL } from "./interactive-input.js";
 import { interruptWatcher } from "./interrupt-watcher.js";
 import { progressIndicator } from "./progress-indicator.js";
-import {
-  createCommandMenuProvider,
-  createFileMenuProvider,
-} from "./completer.js";
+import { createCommandMenuProvider, createFileMenuProvider } from "./completer.js";
 import { parseTokenCount } from "../config/types.js";
 import type { Config, LLMEndpoint, SecondLLMEndpoint, SecondLLMProviderType } from "../config/types.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
@@ -59,7 +53,11 @@ import { configureSandboxProxy, getSandboxProxy } from "../security/sandbox-prox
 import { addDomain, removeDomain, resolveAllowedDomains, domainAllowed } from "../security/net-allowlist.js";
 import inquirer from "inquirer";
 import { ProcessSandbox, cleanupStaleSandboxArtifacts, withSandboxState } from "../security/process-sandbox.js";
-import { resetActiveProcessSandbox, reconcileSandboxProxy, getActiveProcessSandbox } from "../security/active-sandbox.js";
+import {
+  resetActiveProcessSandbox,
+  reconcileSandboxProxy,
+  getActiveProcessSandbox,
+} from "../security/active-sandbox.js";
 import { isBashNetworkContained } from "../security/containment.js";
 import { runLocalLLMSetup, connectAndListModels } from "../config/setup-wizard.js";
 import {
@@ -131,7 +129,10 @@ export class REPL {
       : [];
 
     // 登録済みツール名を取得（/permission auto-add 等の補完用）
-    const toolNames = agent.getToolRegistry().getDefinitions().map((d) => d.function.name);
+    const toolNames = agent
+      .getToolRegistry()
+      .getDefinitions()
+      .map((d) => d.function.name);
 
     this.input = new InteractiveInput({
       commandProvider: createCommandMenuProvider(skillInfos, toolNames),
@@ -170,9 +171,7 @@ export class REPL {
           );
         }
         if (!process.stdin.isTTY) {
-          console.log(
-            chalk.yellow(`  非対話モードのため拒否 (fail-closed)。 /sandbox allow ${host} で恒久許可可。`),
-          );
+          console.log(chalk.yellow(`  非対話モードのため拒否 (fail-closed)。 /sandbox allow ${host} で恒久許可可。`));
           return "deny";
         }
         try {
@@ -213,7 +212,11 @@ export class REPL {
         this.agent.saveCurrentSession();
         const msgCount = this.agent.getCurrentSessionMessageCount();
         if (msgCount > 0) {
-          console.log(chalk.dim(`  セッション保存 (${reason}): ${chalk.cyan(this.agent.getCurrentSessionId())} (${msgCount} messages)`));
+          console.log(
+            chalk.dim(
+              `  セッション保存 (${reason}): ${chalk.cyan(this.agent.getCurrentSessionId())} (${msgCount} messages)`,
+            ),
+          );
         }
       } catch (e) {
         console.error(chalk.red(`  セッション保存に失敗: ${String(e).slice(0, 100)}`));
@@ -249,7 +252,9 @@ export class REPL {
           console.log(chalk.yellow("\n  (Ctrl+C) もう一度 Ctrl+C で終了 (/quit でも可)"));
         }
         // 3秒以内に2回目が来なければリセット
-        ctrlCResetTimer = setTimeout(() => { ctrlCCount = 0; }, 3000);
+        ctrlCResetTimer = setTimeout(() => {
+          ctrlCCount = 0;
+        }, 3000);
       } else {
         // 2回目: 終了 (save してから)
         console.log(chalk.yellow("\n  終了します..."));
@@ -370,11 +375,15 @@ export class REPL {
   private async startInteractionServer(): Promise<void> {
     const d = this.config.discord;
     if (!d?.applicationId) {
-      console.log(chalk.yellow("  Application ID が未設定です。/integrations の Discord 連携メニューから設定してください。"));
+      console.log(
+        chalk.yellow("  Application ID が未設定です。/integrations の Discord 連携メニューから設定してください。"),
+      );
       return;
     }
     if (!d.botToken) {
-      console.log(chalk.yellow("  Bot Token が未設定です。/integrations の Discord 連携メニューから設定してください。"));
+      console.log(
+        chalk.yellow("  Bot Token が未設定です。/integrations の Discord 連携メニューから設定してください。"),
+      );
       return;
     }
     if (!this.roomManager || !this.roomQueue) {
@@ -382,10 +391,20 @@ export class REPL {
       return;
     }
     try {
-      this.interactionServer = new DiscordInteractionServer(d, this.agent, this.roomManager, this.roomQueue, this.skillRegistry, this.mcpManager, () => saveConfig(this.config));
+      this.interactionServer = new DiscordInteractionServer(
+        d,
+        this.agent,
+        this.roomManager,
+        this.roomQueue,
+        this.skillRegistry,
+        this.mcpManager,
+        () => saveConfig(this.config),
+      );
       await this.interactionServer.start();
       const botName = this.interactionServer.botUser;
-      console.log(chalk.green(`  ✅ Discord に接続し、呼び出しの受信を開始しました${botName ? ` (Bot: ${botName})` : ""}`));
+      console.log(
+        chalk.green(`  ✅ Discord に接続し、呼び出しの受信を開始しました${botName ? ` (Bot: ${botName})` : ""}`),
+      );
       console.log(chalk.dim("  公開 URL やトンネルは不要です (Bot がこちらから Discord に接続しています)。"));
       console.log(chalk.dim("  注意: Developer Portal の Interactions Endpoint URL は空欄にしてください。"));
       console.log(chalk.dim("        設定されていると、呼び出しがこちらに届かなくなります。"));
@@ -422,11 +441,7 @@ export class REPL {
    * 接続テストを行い、失敗時は警告を出すが処理は続行する（ユーザーがリトライできる）。
    */
   private async applyMainLLMEndpoint(): Promise<void> {
-    await this.ensurePassphraseFor(
-      this.config.mainLLM.apiKey,
-      "メインLLM",
-      this.config.mainLLM.providerType,
-    );
+    await this.ensurePassphraseFor(this.config.mainLLM.apiKey, "メインLLM", this.config.mainLLM.providerType);
     let newProvider;
     try {
       newProvider = createProvider(this.config.mainLLM, this.passphrase);
@@ -439,7 +454,11 @@ export class REPL {
     try {
       const ok = await newProvider.testConnection();
       if (!ok) {
-        console.log(chalk.yellow(`  ⚠ ${this.config.mainLLM.baseUrl} への接続テストに失敗しました。設定は反映しましたが次の応答でエラーになる可能性があります。`));
+        console.log(
+          chalk.yellow(
+            `  ⚠ ${this.config.mainLLM.baseUrl} への接続テストに失敗しました。設定は反映しましたが次の応答でエラーになる可能性があります。`,
+          ),
+        );
       }
     } catch {
       console.log(chalk.yellow(`  ⚠ 接続テスト中にエラーが発生しました。設定は反映済み。`));
@@ -460,7 +479,9 @@ export class REPL {
     try {
       const entry = recordLLMProfile(this.config.mainLLM);
       if (entry) setRegistrySlot("main", entry.id);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   /**
@@ -484,9 +505,11 @@ export class REPL {
     if (await this.maybeOfferProfileHistory(target, provider)) return;
 
     const existing =
-      target === "main" ? this.config.mainLLM
-      : target === "vision" ? this.config.visionLLM ?? undefined
-      : this.config.secondLLM?.endpoint;
+      target === "main"
+        ? this.config.mainLLM
+        : target === "vision"
+          ? (this.config.visionLLM ?? undefined)
+          : this.config.secondLLM?.endpoint;
     const existingIsAzure =
       existing?.providerType === "azure-openai" ||
       existing?.providerType === "azure-gpt" ||
@@ -536,7 +559,7 @@ export class REPL {
           : "モデル識別子 (空欄なら deployment name と同じ):";
     const model = await input({
       message: modelHint,
-      default: existingIsAzure ? existing?.model : (skipDeployment ? undefined : deploymentName),
+      default: existingIsAzure ? existing?.model : skipDeployment ? undefined : deploymentName,
       validate: skipDeployment
         ? (v: string) => v.trim().length > 0 || `${provider} では model 名が必須です`
         : undefined,
@@ -558,12 +581,13 @@ export class REPL {
     if (storageMode === "env") {
       const envName = await input({
         message: "環境変数名 (例: AZURE_OPENAI_API_KEY):",
-        validate: (v: string) =>
-          /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim()) || "有効な環境変数名を入力してください",
+        validate: (v: string) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim()) || "有効な環境変数名を入力してください",
       });
       storedApiKey = `env:${envName.trim()}`;
       if (!process.env[envName.trim()]) {
-        console.log(chalk.yellow(`  ⚠ 環境変数 ${envName.trim()} は現在未設定です。アプリ起動時にセットしてください。`));
+        console.log(
+          chalk.yellow(`  ⚠ 環境変数 ${envName.trim()} は現在未設定です。アプリ起動時にセットしてください。`),
+        );
       }
     } else if (storageMode === "plain") {
       const ok = await confirm({
@@ -679,7 +703,11 @@ export class REPL {
       console.log(chalk.dim(`    Deployment:      ${deploymentName.trim()}`));
     }
     console.log(chalk.dim(`    Model:           ${finalModel}`));
-    console.log(chalk.dim(`    API Key:         ${storageMode === "encrypt" ? "暗号化保存" : storageMode === "env" ? `環境変数 (${storedApiKey})` : "平文保存"}`));
+    console.log(
+      chalk.dim(
+        `    API Key:         ${storageMode === "encrypt" ? "暗号化保存" : storageMode === "env" ? `環境変数 (${storedApiKey})` : "平文保存"}`,
+      ),
+    );
 
     if (needsRestart) {
       console.log(chalk.yellow("\n  ⚠ 暗号化保存のため、反映にはアプリの再起動と合言葉入力が必要です。"));
@@ -732,7 +760,11 @@ export class REPL {
       const active = this.imageService?.getActiveProfile() ?? null;
       const toolOn = this.agent.getToolRegistry().get("image_generate") !== undefined;
       console.log(chalk.bold("\n  === 画像生成 (/image) ==="));
-      console.log(chalk.dim(`  機能:     ${ig.enabled ? chalk.green("有効") : chalk.red("無効")}  /  ツール登録: ${toolOn ? "image_generate ✓" : "なし"}`));
+      console.log(
+        chalk.dim(
+          `  機能:     ${ig.enabled ? chalk.green("有効") : chalk.red("無効")}  /  ツール登録: ${toolOn ? "image_generate ✓" : "なし"}`,
+        ),
+      );
       if (ig.profiles.length === 0) {
         console.log(chalk.dim("  プロファイル: なし — /image setup <azure|sd-webui|comfyui> で追加"));
       } else {
@@ -747,8 +779,16 @@ export class REPL {
           console.log(chalk.yellow("  ⚠ アクティブなプロファイルがありません。/image use <name> で選択してください。"));
         }
       }
-      console.log(chalk.dim("  使い方: /image on|off | setup [type] | set | use <name> | list | remove <name> | test | gen <prompt>"));
-      console.log(chalk.dim("  ヒント: /image setup を引数なしで実行するとバックエンド候補 (Azure / SD-WebUI / ComfyUI) から選べます。"));
+      console.log(
+        chalk.dim(
+          "  使い方: /image on|off | setup [type] | set | use <name> | list | remove <name> | test | gen <prompt>",
+        ),
+      );
+      console.log(
+        chalk.dim(
+          "  ヒント: /image setup を引数なしで実行するとバックエンド候補 (Azure / SD-WebUI / ComfyUI) から選べます。",
+        ),
+      );
       console.log();
     };
 
@@ -762,7 +802,9 @@ export class REPL {
 
       case "on": {
         if (ig.profiles.length === 0) {
-          console.log(chalk.yellow("  プロファイルがありません。先に /image setup で追加してください (引数なしで候補から選択)。"));
+          console.log(
+            chalk.yellow("  プロファイルがありません。先に /image setup で追加してください (引数なしで候補から選択)。"),
+          );
           break;
         }
         ig.enabled = true;
@@ -789,12 +831,12 @@ export class REPL {
       case "setup": {
         const type = (args[1] ?? "").toLowerCase();
         const typeMap: Record<string, ImageProviderType> = {
-          "azure": "azure-image",
+          azure: "azure-image",
           "azure-image": "azure-image",
           "sd-webui": "sd-webui",
-          "sd": "sd-webui",
-          "comfyui": "comfyui",
-          "comfy": "comfyui",
+          sd: "sd-webui",
+          comfyui: "comfyui",
+          comfy: "comfyui",
         };
         let providerType: ImageProviderType | undefined = typeMap[type];
         if (!providerType && !type) {
@@ -911,19 +953,27 @@ export class REPL {
         });
         let size = sizeChoice;
         if (sizeChoice === "custom") {
-          size = (await input({
-            message: "解像度 WxH (例: 1024x1024):",
-            default: presets.includes(currentSize) ? "1024x1024" : currentSize,
-            validate: (v: string) =>
-              /^\d{2,5}x\d{2,5}$/i.test(v.trim()) || "WxH 形式で入力してください (例: 1024x1024)",
-          })).trim().toLowerCase();
+          size = (
+            await input({
+              message: "解像度 WxH (例: 1024x1024):",
+              default: presets.includes(currentSize) ? "1024x1024" : currentSize,
+              validate: (v: string) =>
+                /^\d{2,5}x\d{2,5}$/i.test(v.trim()) || "WxH 形式で入力してください (例: 1024x1024)",
+            })
+          )
+            .trim()
+            .toLowerCase();
         }
         profile.defaultSize = size;
 
         this.config.imageGen = ig;
         saveConfig(this.config);
         const qLabel = profile.providerType === "azure-image" ? `品質=${profile.defaultQuality} / ` : "";
-        console.log(chalk.green(`  ✓ "${profile.name}" の既定を更新しました (${qLabel}解像度=${profile.defaultSize})。API Key は変更していません。`));
+        console.log(
+          chalk.green(
+            `  ✓ "${profile.name}" の既定を更新しました (${qLabel}解像度=${profile.defaultSize})。API Key は変更していません。`,
+          ),
+        );
         break;
       }
 
@@ -940,7 +990,7 @@ export class REPL {
       case "gen": {
         const prompt = args.slice(1).join(" ").trim();
         if (!prompt) {
-          console.log(chalk.yellow('  使い方: /image gen <プロンプト>  (例: /image gen a red dragon, pixel art)'));
+          console.log(chalk.yellow("  使い方: /image gen <プロンプト>  (例: /image gen a red dragon, pixel art)"));
           break;
         }
         if (!this.imageService.isEnabled()) {
@@ -954,7 +1004,13 @@ export class REPL {
           const result = await this.imageService.generateAndSave({ prompt }, outputPath);
           console.log(chalk.green(`  ✓ 生成しました (${result.providerType} / ${result.model}):`));
           for (const p of result.savedPaths) console.log(chalk.dim(`    ${p}`));
-          console.log(chalk.dim(result.costUsd > 0 ? `  推定コスト: ${fmtMoney(result.costUsd, this.config.jpyPerUsd)}` : "  コスト: $0 (ローカル生成)"));
+          console.log(
+            chalk.dim(
+              result.costUsd > 0
+                ? `  推定コスト: ${fmtMoney(result.costUsd, this.config.jpyPerUsd)}`
+                : "  コスト: $0 (ローカル生成)",
+            ),
+          );
           for (const w of result.warnings) console.log(chalk.yellow(`  ⚠ ${w}`));
         } catch (e) {
           console.log(chalk.red(`  生成に失敗しました: ${e instanceof Error ? e.message : String(e)}`));
@@ -963,7 +1019,9 @@ export class REPL {
       }
 
       default: {
-        console.log(chalk.yellow("  使い方: /image [on|off|setup [type]|set|use <name>|list|remove <name>|test|gen <prompt>]"));
+        console.log(
+          chalk.yellow("  使い方: /image [on|off|setup [type]|set|use <name>|list|remove <name>|test|gen <prompt>]"),
+        );
         break;
       }
     }
@@ -977,7 +1035,9 @@ export class REPL {
         // 生成 API を叩くと課金されるため、設定値の検証 (apiKey 解決含む) のみ
         const { createImageProvider } = await import("../image/image-provider-factory.js");
         createImageProvider(profile, this.passphrase);
-        console.log(chalk.green("  ✓ 設定は有効です (endpoint/apiKey/model)。実生成は課金されるため確認していません。"));
+        console.log(
+          chalk.green("  ✓ 設定は有効です (endpoint/apiKey/model)。実生成は課金されるため確認していません。"),
+        );
       } else {
         const base = (profile.baseUrl ?? "").trim().replace(/\/$/, "");
         const pingPath = profile.providerType === "sd-webui" ? "/sdapi/v1/options" : "/system_stats";
@@ -1026,11 +1086,13 @@ export class REPL {
       });
       profile.endpoint = AzureImageProvider.normalizeEndpoint(endpointUrl.trim());
 
-      profile.model = (await input({
-        message: "Deployment 名 (例: gpt-image-2):",
-        default: "gpt-image-2",
-        validate: (v: string) => v.trim().length > 0 || "deployment 名は必須です",
-      })).trim();
+      profile.model = (
+        await input({
+          message: "Deployment 名 (例: gpt-image-2):",
+          default: "gpt-image-2",
+          validate: (v: string) => v.trim().length > 0 || "deployment 名は必須です",
+        })
+      ).trim();
 
       const storageMode = await select({
         message: "API Key の保存方法:",
@@ -1044,12 +1106,13 @@ export class REPL {
       if (storageMode === "env") {
         const envName = await input({
           message: "環境変数名 (例: AZURE_IMAGE_API_KEY):",
-          validate: (v: string) =>
-            /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim()) || "有効な環境変数名を入力してください",
+          validate: (v: string) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim()) || "有効な環境変数名を入力してください",
         });
         profile.apiKey = `env:${envName.trim()}`;
         if (!process.env[envName.trim()]) {
-          console.log(chalk.yellow(`  ⚠ 環境変数 ${envName.trim()} は現在未設定です。アプリ起動時にセットしてください。`));
+          console.log(
+            chalk.yellow(`  ⚠ 環境変数 ${envName.trim()} は現在未設定です。アプリ起動時にセットしてください。`),
+          );
         }
       } else {
         const apiKey = await password({ message: "API Key (入力は表示されません):", mask: "*" });
@@ -1181,7 +1244,9 @@ export class REPL {
 
     if (profiles.length === 0) {
       console.log(chalk.dim("  履歴はまだありません。"));
-      console.log(chalk.dim("  /model setup や /second setup でメイン/セカンドLLM を設定すると自動的に履歴が残ります。"));
+      console.log(
+        chalk.dim("  /model setup や /second setup でメイン/セカンドLLM を設定すると自動的に履歴が残ります。"),
+      );
       return;
     }
 
@@ -1228,13 +1293,14 @@ export class REPL {
         choices: profiles.map((p) => {
           const isMain = curMain && profileMatchesEndpoint(p, curMain);
           const isSec = curSec && profileMatchesEndpoint(p, curSec);
-          const tag = isMain && isSec
-            ? chalk.cyan("  [main + second]")
-            : isMain
-              ? chalk.cyan("  [main]")
-              : isSec
-                ? chalk.cyan("  [second]")
-                : "";
+          const tag =
+            isMain && isSec
+              ? chalk.cyan("  [main + second]")
+              : isMain
+                ? chalk.cyan("  [main]")
+                : isSec
+                  ? chalk.cyan("  [second]")
+                  : "";
           const used = chalk.dim(`  (${formatRelativeTime(p.lastUsedAt)})`);
           return { name: `${p.name}${tag}${used}`, value: p.id };
         }),
@@ -1394,7 +1460,9 @@ export class REPL {
       try {
         const ok = await confirm({ message: "新規追加する?", default: true });
         if (!ok) return "exit";
-      } catch { return "exit"; }
+      } catch {
+        return "exit";
+      }
       await this.modelsAddNew();
       return "continue";
     }
@@ -1425,10 +1493,15 @@ export class REPL {
         choices,
         pageSize: Math.min(15, choices.length),
       });
-    } catch { return "exit"; }
+    } catch {
+      return "exit";
+    }
 
     if (chosen === "exit") return "exit";
-    if (chosen === "add") { await this.modelsAddNew(); return "continue"; }
+    if (chosen === "add") {
+      await this.modelsAddNew();
+      return "continue";
+    }
     if (chosen.startsWith("entry:")) {
       const id = chosen.slice("entry:".length);
       const entry = getRegistryEntry(id);
@@ -1464,7 +1537,9 @@ export class REPL {
           { name: chalk.dim("Back"), value: "back" },
         ],
       });
-    } catch { return; }
+    } catch {
+      return;
+    }
 
     switch (action) {
       case "set-main":
@@ -1594,7 +1669,11 @@ export class REPL {
     try {
       if (isMain || isSec) {
         const t = isMain && isSec ? "main + second" : isMain ? "main" : "second";
-        console.log(chalk.yellow(`  ⚠ このエントリは現在 [${t}] slot に割り当てられています。 削除すると slot は未割当になります。`));
+        console.log(
+          chalk.yellow(
+            `  ⚠ このエントリは現在 [${t}] slot に割り当てられています。 削除すると slot は未割当になります。`,
+          ),
+        );
       }
       const ok = await confirm({ message: `「${entry.name}」 を削除しますか?`, default: false });
       if (!ok) {
@@ -1603,7 +1682,8 @@ export class REPL {
       }
       deleteRegistryEntry(entry.id);
       console.log(chalk.green("  削除しました。"));
-      if (isMain) console.log(chalk.yellow("  main slot が空になりました。 /models から Set as main で再割当してください。"));
+      if (isMain)
+        console.log(chalk.yellow("  main slot が空になりました。 /models から Set as main で再割当してください。"));
       if (isSec) console.log(chalk.yellow("  second slot が空になりました。"));
     } catch (e) {
       if (!(e instanceof Error && e.message.includes("User force closed"))) {
@@ -1631,7 +1711,10 @@ export class REPL {
           { name: "Anthropic API (Claude direct, ANTHROPIC_API_KEY)", value: "anthropic" },
           { name: "Google AI Studio (Gemini, GEMINI_API_KEY)", value: "gemini" },
           { name: "Claude Code CLI (claude -p、 認証は claude login、 tool calling 不可)", value: "claude-cli" },
-          { name: "Claude Agent SDK (in-process MCP、 認証は claude login、 tool calling 対応)", value: "claude-agent-sdk" },
+          {
+            name: "Claude Agent SDK (in-process MCP、 認証は claude login、 tool calling 対応)",
+            value: "claude-agent-sdk",
+          },
           { name: "Azure OpenAI — Chat Completions API", value: "azure-openai" },
           { name: "Azure OpenAI — Responses API (gpt-5/codex系)", value: "azure-gpt" },
           { name: "Azure Claude — Anthropic Messages API", value: "azure-anthropic" },
@@ -1649,8 +1732,10 @@ export class REPL {
       } else if (provider === "gemini") {
         await this.setupGeminiLLM(target);
       } else if (
-        provider === "azure-openai" || provider === "azure-gpt" ||
-        provider === "azure-claude" || provider === "azure-foundry" ||
+        provider === "azure-openai" ||
+        provider === "azure-gpt" ||
+        provider === "azure-claude" ||
+        provider === "azure-foundry" ||
         provider === "azure-anthropic"
       ) {
         await this.setupAzureLLM(target, provider);
@@ -1698,17 +1783,29 @@ export class REPL {
         console.log(chalk.dim(`  設定するには: /model second setup`));
       } else {
         const isAvail = this.secondLLMManager?.isAvailable() ?? false;
-        console.log(chalk.dim(`  状態:         ${cfg.enabled ? (isAvail ? chalk.green("有効 (接続OK)") : chalk.yellow("有効 (接続失敗)")) : chalk.red("無効")}`));
+        console.log(
+          chalk.dim(
+            `  状態:         ${cfg.enabled ? (isAvail ? chalk.green("有効 (接続OK)") : chalk.yellow("有効 (接続失敗)")) : chalk.red("無効")}`,
+          ),
+        );
         console.log(chalk.dim(`  プロバイダー: ${cfg.endpoint.providerType}`));
         console.log(chalk.dim(`  URL:          ${cfg.endpoint.baseUrl ?? "(なし)"}`));
         console.log(chalk.dim(`  モデル:       ${cfg.endpoint.model}`));
         const ctxW = cfg.endpoint.contextWindow;
-        const ctxLabel = ctxW ? (ctxW >= 1000 ? `${Math.round(ctxW / 1000)}K` : `${ctxW}`) : "(未設定 — サーバ側デフォルト)";
+        const ctxLabel = ctxW
+          ? ctxW >= 1000
+            ? `${Math.round(ctxW / 1000)}K`
+            : `${ctxW}`
+          : "(未設定 — サーバ側デフォルト)";
         console.log(chalk.dim(`  コンテキスト: ${ctxLabel}  ${chalk.gray("※会話履歴はメインと独立")}`));
         const secDesc = cfg.endpoint.description?.trim();
-        console.log(chalk.dim(`  特性:         ${secDesc ? chalk.cyan(secDesc) : chalk.yellow("(未設定 — /models Edit から設定)")}`));
+        console.log(
+          chalk.dim(
+            `  特性:         ${secDesc ? chalk.cyan(secDesc) : chalk.yellow("(未設定 — /models Edit から設定)")}`,
+          ),
+        );
         const sp = cfg.endpoint;
-        const fmt = (v: number | undefined) => v !== undefined ? chalk.cyan(String(v)) : chalk.gray("auto");
+        const fmt = (v: number | undefined) => (v !== undefined ? chalk.cyan(String(v)) : chalk.gray("auto"));
         console.log(chalk.dim(`  temperature:  ${fmt(sp.temperature)}    ${chalk.gray("(/models Edit で変更)")}`));
         console.log(chalk.dim(`  top_p:        ${fmt(sp.top_p)}`));
         console.log(chalk.dim(`  top_k:        ${fmt(sp.top_k)}`));
@@ -1749,19 +1846,21 @@ export class REPL {
         }
       }
     } else if (subCmd === "enable") {
-       if (this.config.secondLLM) {
-         this.config.secondLLM.enabled = true;
-         saveConfig(this.config);
-         console.log(chalk.green("  Second LLM を有効化しました (設定に保存)。（再起動後に完全適用される場合があります）"));
-       } else {
-         console.log(chalk.red("  Second LLM の設定が config.json に存在しません。"));
-       }
+      if (this.config.secondLLM) {
+        this.config.secondLLM.enabled = true;
+        saveConfig(this.config);
+        console.log(
+          chalk.green("  Second LLM を有効化しました (設定に保存)。（再起動後に完全適用される場合があります）"),
+        );
+      } else {
+        console.log(chalk.red("  Second LLM の設定が config.json に存在しません。"));
+      }
     } else if (subCmd === "disable") {
-       if (this.config.secondLLM) {
-         this.config.secondLLM.enabled = false;
-         saveConfig(this.config);
-         console.log(chalk.yellow("  Second LLM を無効化しました (設定に保存)。"));
-       }
+      if (this.config.secondLLM) {
+        this.config.secondLLM.enabled = false;
+        saveConfig(this.config);
+        console.log(chalk.yellow("  Second LLM を無効化しました (設定に保存)。"));
+      }
     } else if (subCmd === "model" || subCmd === "list") {
       const newModel = subCmd === "model" ? args.slice(1).join(" ").trim() : "";
       if (!this.config.secondLLM) {
@@ -1820,7 +1919,11 @@ export class REPL {
         console.log(chalk.red("  Second LLM の設定が config.json に存在しません。"));
       } else if (isNaN(val) || val <= 0) {
         const cur = this.config.secondLLM.endpoint.contextWindow;
-        const curLabel = cur ? (cur >= 1000 ? `${Math.round(cur / 1000)}K` : `${cur}`) : "(未設定 — サーバ側デフォルト)";
+        const curLabel = cur
+          ? cur >= 1000
+            ? `${Math.round(cur / 1000)}K`
+            : `${cur}`
+          : "(未設定 — サーバ側デフォルト)";
         console.log(chalk.dim(`  セカンドLLMコンテキスト長: ${curLabel}`));
         console.log(chalk.dim(`  使い方: /model second context <トークン数>`));
         console.log(chalk.dim(`  例: /model second context 128k  /model second context 32000`));
@@ -1831,7 +1934,9 @@ export class REPL {
         saveConfig(this.config);
         await this.applySecondLLMEndpoint();
         const newLabel = val >= 1000 ? `${Math.round(val / 1000)}K` : `${val}`;
-        console.log(chalk.dim(`  セカンドLLMコンテキスト長: ${chalk.yellow(oldLabel)} → ${chalk.cyan(newLabel)} トークン`));
+        console.log(
+          chalk.dim(`  セカンドLLMコンテキスト長: ${chalk.yellow(oldLabel)} → ${chalk.cyan(newLabel)} トークン`),
+        );
       }
     } else if (subCmd === "url") {
       const newUrl = args.slice(1).join(" ").trim();
@@ -1851,7 +1956,22 @@ export class REPL {
       }
     } else if (subCmd === "provider") {
       const newProvider = args[1]?.trim();
-      const validProviders = ["ollama", "lmstudio", "llamacpp", "vllm", "vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli", "claude-agent-sdk", "gemini"];
+      const validProviders = [
+        "ollama",
+        "lmstudio",
+        "llamacpp",
+        "vllm",
+        "vertex-ai",
+        "azure-openai",
+        "azure-gpt",
+        "azure-claude",
+        "azure-foundry",
+        "azure-anthropic",
+        "anthropic",
+        "claude-cli",
+        "claude-agent-sdk",
+        "gemini",
+      ];
       if (!newProvider) {
         console.log(chalk.dim(`  現在のプロバイダー: ${this.config.secondLLM?.endpoint.providerType ?? "(未設定)"}`));
         console.log(chalk.dim(`  使い方: /model second provider <タイプ>`));
@@ -1865,9 +1985,24 @@ export class REPL {
         saveConfig(this.config);
         await this.applySecondLLMEndpoint();
         console.log(chalk.dim(`  プロバイダー: ${chalk.yellow(oldProvider)} → ${chalk.cyan(newProvider)}`));
-        const isCloud = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli", "claude-agent-sdk", "gemini"].includes(newProvider);
+        const isCloud = [
+          "vertex-ai",
+          "azure-openai",
+          "azure-gpt",
+          "azure-claude",
+          "azure-foundry",
+          "azure-anthropic",
+          "anthropic",
+          "claude-cli",
+          "claude-agent-sdk",
+          "gemini",
+        ].includes(newProvider);
         if (isCloud) {
-          console.log(chalk.dim(`  クラウドプロバイダーは追加の認証情報が必要な場合があります。/model second で確認してください。`));
+          console.log(
+            chalk.dim(
+              `  クラウドプロバイダーは追加の認証情報が必要な場合があります。/model second で確認してください。`,
+            ),
+          );
         } else {
           console.log(chalk.green(`  実行時に反映しました。`));
         }
@@ -1876,7 +2011,13 @@ export class REPL {
       }
     } else if (subCmd === "setup") {
       const provider = (args[1] ?? "vllm") as SecondLLMProviderType;
-      if (provider === "azure-openai" || provider === "azure-gpt" || provider === "azure-claude" || provider === "azure-foundry" || provider === "azure-anthropic") {
+      if (
+        provider === "azure-openai" ||
+        provider === "azure-gpt" ||
+        provider === "azure-claude" ||
+        provider === "azure-foundry" ||
+        provider === "azure-anthropic"
+      ) {
         try {
           await this.setupAzureLLM("second", provider);
         } catch (e) {
@@ -1917,7 +2058,9 @@ export class REPL {
           }
           throw e;
         }
-        console.log(chalk.dim("  履歴がありません。 provider/url/model を指定して /model second setup を再実行してください。"));
+        console.log(
+          chalk.dim("  履歴がありません。 provider/url/model を指定して /model second setup を再実行してください。"),
+        );
         console.log(chalk.dim("  例: /model second setup vllm http://localhost:8000 qwen3-8b"));
       } else {
         const url = args[2] ?? "http://localhost:8000";
@@ -1959,7 +2102,10 @@ export class REPL {
         const r = ranges[paramKey];
         const valArg = args[1]?.trim().toLowerCase();
         const cur = this.config.secondLLM.endpoint[paramKey];
-        const curStr = cur !== undefined ? String(cur) : chalk.gray("auto (consult=0.2 / agent=0.2 / evaluator=0.1 を内部既定として使用)");
+        const curStr =
+          cur !== undefined
+            ? String(cur)
+            : chalk.gray("auto (consult=0.2 / agent=0.2 / evaluator=0.1 を内部既定として使用)");
 
         if (!valArg) {
           console.log(chalk.bold(`\n  ── セカンドLLM ${subCmd} ──`));
@@ -1982,21 +2128,25 @@ export class REPL {
             this.config.secondLLM.endpoint[paramKey] = num;
             saveConfig(this.config);
             await this.applySecondLLMEndpoint();
-            console.log(chalk.green(`  セカンドLLM ${subCmd} を ${chalk.cyan(String(num))} に設定しました (次のLLM呼び出しから反映)`));
+            console.log(
+              chalk.green(
+                `  セカンドLLM ${subCmd} を ${chalk.cyan(String(num))} に設定しました (次のLLM呼び出しから反映)`,
+              ),
+            );
           }
         }
       }
     } else {
-       console.log(chalk.yellow("  使い方:"));
-       console.log(chalk.dim("    /model second                 状態確認 (/model second info も同義)"));
-       console.log(chalk.dim("    /model second setup           初期設定 wizard (プロバイダ選択は wizard 内)"));
-       console.log(chalk.dim("    /model second enable          有効化"));
-       console.log(chalk.dim("    /model second disable         無効化"));
-       console.log(chalk.dim("    /model second list            利用可能モデル一覧から選択"));
-       console.log(chalk.dim("    /model second context <128k>  コンテキスト長変更"));
-       console.log(chalk.dim("    /model second description <text>  特性説明"));
-       console.log(chalk.dim("\n  詳細編集 (temperature / top_p / 等) は /models Edit を推奨。"));
-       console.log(chalk.dim("  互換: /second ... も alias として動作中。"));
+      console.log(chalk.yellow("  使い方:"));
+      console.log(chalk.dim("    /model second                 状態確認 (/model second info も同義)"));
+      console.log(chalk.dim("    /model second setup           初期設定 wizard (プロバイダ選択は wizard 内)"));
+      console.log(chalk.dim("    /model second enable          有効化"));
+      console.log(chalk.dim("    /model second disable         無効化"));
+      console.log(chalk.dim("    /model second list            利用可能モデル一覧から選択"));
+      console.log(chalk.dim("    /model second context <128k>  コンテキスト長変更"));
+      console.log(chalk.dim("    /model second description <text>  特性説明"));
+      console.log(chalk.dim("\n  詳細編集 (temperature / top_p / 等) は /models Edit を推奨。"));
+      console.log(chalk.dim("  互換: /second ... も alias として動作中。"));
     }
   }
 
@@ -2026,7 +2176,11 @@ export class REPL {
         }
         const desc = ep.description?.trim();
         if (desc) console.log(chalk.dim(`  特性:         ${chalk.cyan(desc)}`));
-        console.log(chalk.dim(`\n  ※ 画像認識を含むマルチモーダル言語生成 AI を指定 (Claude Sonnet / Gemini Pro / Llama Vision 等)`));
+        console.log(
+          chalk.dim(
+            `\n  ※ 画像認識を含むマルチモーダル言語生成 AI を指定 (Claude Sonnet / Gemini Pro / Llama Vision 等)`,
+          ),
+        );
         console.log(chalk.dim(`  ※ 解除して main にフォールバックする場合は /model vision clear`));
       }
       console.log();
@@ -2072,8 +2226,10 @@ export class REPL {
         } else if (provider === "gemini") {
           await this.setupGeminiLLM("vision");
         } else if (
-          provider === "azure-openai" || provider === "azure-gpt" ||
-          provider === "azure-claude" || provider === "azure-foundry" ||
+          provider === "azure-openai" ||
+          provider === "azure-gpt" ||
+          provider === "azure-claude" ||
+          provider === "azure-foundry" ||
           provider === "azure-anthropic"
         ) {
           await this.setupAzureLLM("vision", provider as any);
@@ -2138,7 +2294,11 @@ export class REPL {
         console.log(chalk.red("  Vision LLM 未設定です。 /model vision setup で設定してください。"));
       } else if (isNaN(val) || val <= 0) {
         const cur = ep.contextWindow;
-        const curLabel = cur ? (cur >= 1000 ? `${Math.round(cur / 1000)}K` : `${cur}`) : "(未設定 — サーバ側デフォルト)";
+        const curLabel = cur
+          ? cur >= 1000
+            ? `${Math.round(cur / 1000)}K`
+            : `${cur}`
+          : "(未設定 — サーバ側デフォルト)";
         console.log(chalk.dim(`  Vision コンテキスト長: ${curLabel}`));
         console.log(chalk.dim(`  使い方: /model vision context <トークン数>`));
       } else {
@@ -2183,7 +2343,9 @@ export class REPL {
     console.log(chalk.dim("    /model vision context <128k>   コンテキスト長変更"));
     console.log(chalk.dim("    /model vision description <text>  特性説明"));
     console.log(chalk.dim("    /model vision clear            未設定に戻す (main にフォールバック)"));
-    console.log(chalk.dim("\n  ※ 画像認識を含むマルチモーダル言語生成 AI を指定します (CLIP/YOLO 等の専用視覚モデルではない)"));
+    console.log(
+      chalk.dim("\n  ※ 画像認識を含むマルチモーダル言語生成 AI を指定します (CLIP/YOLO 等の専用視覚モデルではない)"),
+    );
   }
 
   /**
@@ -2278,7 +2440,9 @@ export class REPL {
         return;
       }
       this.agent.restoreSession(latest);
-      console.log(chalk.dim(`  最新セッションを復元しました: ${latest.meta.id} (${latest.meta.messageCount} messages)`));
+      console.log(
+        chalk.dim(`  最新セッションを復元しました: ${latest.meta.id} (${latest.meta.messageCount} messages)`),
+      );
       return;
     }
 
@@ -2317,7 +2481,9 @@ export class REPL {
       return;
     }
     this.agent.restoreSession(session);
-    console.log(chalk.dim(`  セッション ${chalk.cyan(sessionId)} を復元しました (${session.meta.messageCount} messages)`));
+    console.log(
+      chalk.dim(`  セッション ${chalk.cyan(sessionId)} を復元しました (${session.meta.messageCount} messages)`),
+    );
   }
 
   /**
@@ -2340,17 +2506,27 @@ export class REPL {
         category = await select({
           message: "Permission settings — 編集する対象を選択:",
           choices: [
-            { name: `Pattern rules                              [${rules.deny.length} deny / ${rules.allow.length} allow / ${rules.ask.length} ask]`, value: "rules" },
+            {
+              name: `Pattern rules                              [${rules.deny.length} deny / ${rules.allow.length} allow / ${rules.ask.length} ask]`,
+              value: "rules",
+            },
             { name: `Auto-approve tools (CLI)                   [${auto.length} tools]`, value: "auto" },
             { name: `Require-approval tools (CLI)               [${requireL.length} tools]`, value: "require" },
             { name: `Discord auto-approve tools                 [${discord.length} tools]`, value: "discord" },
             { name: `Slack auto-approve tools                   [${slack.length} tools]`, value: "slack" },
-            { name: chalk.dim(`View all (${ruleCount} rules + ${auto.length + requireL.length + discord.length + slack.length} entries)`), value: "list" },
+            {
+              name: chalk.dim(
+                `View all (${ruleCount} rules + ${auto.length + requireL.length + discord.length + slack.length} entries)`,
+              ),
+              value: "list",
+            },
             { name: chalk.dim("Done"), value: "done" },
           ],
           pageSize: 10,
         });
-      } catch { return; }
+      } catch {
+        return;
+      }
       if (category === "done") return;
       if (category === "list") {
         this.printPermissionAll();
@@ -2412,7 +2588,9 @@ export class REPL {
             { name: chalk.dim("Back"), value: "back" },
           ],
         });
-      } catch { return; }
+      } catch {
+        return;
+      }
       if (action === "back") return;
 
       if (action.startsWith("add-")) {
@@ -2421,7 +2599,10 @@ export class REPL {
           const pattern = await input({
             message: `${kind} ルールのパターン (例: bash(npm *) / file_write(./src/**) / web_fetch(domain:github.com)):`,
           });
-          if (!pattern.trim()) { console.log(chalk.dim("  キャンセル。")); continue; }
+          if (!pattern.trim()) {
+            console.log(chalk.dim("  キャンセル。"));
+            continue;
+          }
           permissions.addRule(kind, pattern);
           this.config.security.rules ??= { allow: [], deny: [], ask: [] };
           if (!this.config.security.rules[kind].includes(pattern)) {
@@ -2430,7 +2611,9 @@ export class REPL {
           saveConfig(this.config);
           const icon = kind === "deny" ? "🚫" : kind === "allow" ? "✅" : "❓";
           console.log(chalk.green(`  ${icon} ${kind}: "${pattern}" を追加`));
-        } catch { /* cancel */ }
+        } catch {
+          /* cancel */
+        }
       } else if (action === "remove") {
         const flat = [
           ...rules.deny.map((p) => ({ act: "deny" as const, pat: p })),
@@ -2454,7 +2637,9 @@ export class REPL {
           }
           saveConfig(this.config);
           console.log(chalk.green(`  ✓ ${a}: "${pat}" を削除`));
-        } catch { /* cancel */ }
+        } catch {
+          /* cancel */
+        }
       }
     }
   }
@@ -2470,10 +2655,14 @@ export class REPL {
     };
     const getList = (): string[] => {
       switch (kind) {
-        case "auto": return permissions.getAutoApproveList();
-        case "require": return permissions.getRequireApprovalList();
-        case "discord": return permissions.getDiscordAutoApproveList();
-        case "slack": return permissions.getSlackAutoApproveList();
+        case "auto":
+          return permissions.getAutoApproveList();
+        case "require":
+          return permissions.getRequireApprovalList();
+        case "discord":
+          return permissions.getDiscordAutoApproveList();
+        case "slack":
+          return permissions.getSlackAutoApproveList();
       }
     };
     const addTo = (tool: string): void => {
@@ -2484,17 +2673,20 @@ export class REPL {
           break;
         case "require":
           permissions.addRequireApproval(tool);
-          if (!this.config.security.requireApprovalTools.includes(tool)) this.config.security.requireApprovalTools.push(tool);
+          if (!this.config.security.requireApprovalTools.includes(tool))
+            this.config.security.requireApprovalTools.push(tool);
           break;
         case "discord":
           permissions.addDiscordAutoApprove(tool);
           this.config.security.discordAutoApproveTools ??= [];
-          if (!this.config.security.discordAutoApproveTools.includes(tool)) this.config.security.discordAutoApproveTools.push(tool);
+          if (!this.config.security.discordAutoApproveTools.includes(tool))
+            this.config.security.discordAutoApproveTools.push(tool);
           break;
         case "slack":
           permissions.addSlackAutoApprove(tool);
           this.config.security.slackAutoApproveTools ??= [];
-          if (!this.config.security.slackAutoApproveTools.includes(tool)) this.config.security.slackAutoApproveTools.push(tool);
+          if (!this.config.security.slackAutoApproveTools.includes(tool))
+            this.config.security.slackAutoApproveTools.push(tool);
           break;
       }
     };
@@ -2506,15 +2698,21 @@ export class REPL {
           break;
         case "require":
           permissions.removeRequireApproval(tool);
-          this.config.security.requireApprovalTools = this.config.security.requireApprovalTools.filter((t) => t !== tool);
+          this.config.security.requireApprovalTools = this.config.security.requireApprovalTools.filter(
+            (t) => t !== tool,
+          );
           break;
         case "discord":
           permissions.removeDiscordAutoApprove(tool);
-          this.config.security.discordAutoApproveTools = (this.config.security.discordAutoApproveTools ?? []).filter((t) => t !== tool);
+          this.config.security.discordAutoApproveTools = (this.config.security.discordAutoApproveTools ?? []).filter(
+            (t) => t !== tool,
+          );
           break;
         case "slack":
           permissions.removeSlackAutoApprove(tool);
-          this.config.security.slackAutoApproveTools = (this.config.security.slackAutoApproveTools ?? []).filter((t) => t !== tool);
+          this.config.security.slackAutoApproveTools = (this.config.security.slackAutoApproveTools ?? []).filter(
+            (t) => t !== tool,
+          );
           break;
       }
     };
@@ -2535,7 +2733,9 @@ export class REPL {
             { name: chalk.dim("Back"), value: "back" },
           ],
         });
-      } catch { return; }
+      } catch {
+        return;
+      }
       if (action === "back") return;
 
       if (action === "add") {
@@ -2554,7 +2754,9 @@ export class REPL {
           addTo(chosen);
           saveConfig(this.config);
           console.log(chalk.green(`  ✓ ${chosen} を追加`));
-        } catch { /* cancel */ }
+        } catch {
+          /* cancel */
+        }
       } else if (action === "remove") {
         try {
           const chosen = await select({
@@ -2565,7 +2767,9 @@ export class REPL {
           removeFrom(chosen);
           saveConfig(this.config);
           console.log(chalk.green(`  ✓ ${chosen} を削除`));
-        } catch { /* cancel */ }
+        } catch {
+          /* cancel */
+        }
       }
     }
   }
@@ -2601,7 +2805,9 @@ export class REPL {
             { name: chalk.dim("設定を終える"), value: "done" },
           ],
         });
-      } catch { return; }
+      } catch {
+        return;
+      }
       if (pick === "done") return;
       if (pick === "discord") await this.integrationsDiscordMenu();
       else if (pick === "slack") await this.integrationsSlackMenu();
@@ -2637,7 +2843,9 @@ export class REPL {
           ],
           pageSize: 16,
         });
-      } catch { return; }
+      } catch {
+        return;
+      }
       if (action === "back") return;
 
       if (["enable", "disable", "test"].includes(action)) {
@@ -2649,9 +2857,14 @@ export class REPL {
       } else if (action === "user-add" || action === "user-remove") {
         try {
           const val = await input({ message: "Discord ユーザー ID を入力 (空欄で取り消し):" });
-          if (!val.trim()) { console.log(chalk.dim("  取り消しました。")); continue; }
+          if (!val.trim()) {
+            console.log(chalk.dim("  取り消しました。"));
+            continue;
+          }
           await this.handleCommand(`/discord ${action} ${val.trim()}`);
-        } catch { /* cancel */ }
+        } catch {
+          /* cancel */
+        }
       } else if (action === "register") {
         // サーバーID を聞いてから登録 (空欄なら全サーバー向け = 反映に最大 1 時間)
         try {
@@ -2659,7 +2872,9 @@ export class REPL {
             message: "登録先サーバーの ID (空欄なら全サーバー向けに登録。サーバー限定なら即時反映):",
           });
           await this.handleCommand(`/discord register ${gid.trim()}`.trim());
-        } catch { /* cancel */ }
+        } catch {
+          /* cancel */
+        }
       } else if (action === "listen-start") {
         await this.handleCommand("/discord listen start");
       } else if (action === "listen-stop") {
@@ -2670,15 +2885,20 @@ export class REPL {
       } else {
         // url / app-id / bot-token — 1 引数
         const fieldLabel: Record<string, string> = {
-          "url": "Webhook URL (Discord のサーバー設定 → 連携サービス → ウェブフック で取得)",
+          url: "Webhook URL (Discord のサーバー設定 → 連携サービス → ウェブフック で取得)",
           "app-id": "Application ID (Discord Developer Portal → General Information)",
           "bot-token": "Bot Token (Discord Developer Portal → Bot)",
         };
         try {
           const val = await input({ message: `${fieldLabel[action] ?? action} を入力 (空欄で取り消し):` });
-          if (!val.trim()) { console.log(chalk.dim("  取り消しました。")); continue; }
+          if (!val.trim()) {
+            console.log(chalk.dim("  取り消しました。"));
+            continue;
+          }
           await this.handleCommand(`/discord ${action} ${val.trim()}`);
-        } catch { /* cancel */ }
+        } catch {
+          /* cancel */
+        }
       }
     }
   }
@@ -2703,8 +2923,13 @@ export class REPL {
         ],
         pageSize: 15,
       });
-    } catch { return; }
-    if (id === "__cancel__") { console.log(chalk.dim("  取り消しました。")); return; }
+    } catch {
+      return;
+    }
+    if (id === "__cancel__") {
+      console.log(chalk.dim("  取り消しました。"));
+      return;
+    }
 
     let act: string;
     try {
@@ -2716,8 +2941,13 @@ export class REPL {
           { name: chalk.dim("取り消す"), value: "__cancel__" },
         ],
       });
-    } catch { return; }
-    if (act === "__cancel__") { console.log(chalk.dim("  取り消しました。")); return; }
+    } catch {
+      return;
+    }
+    if (act === "__cancel__") {
+      console.log(chalk.dim("  取り消しました。"));
+      return;
+    }
     await this.handleCommand(`/discord ${act} ${id}`);
   }
 
@@ -2743,7 +2973,9 @@ export class REPL {
           ],
           pageSize: 12,
         });
-      } catch { return; }
+      } catch {
+        return;
+      }
       if (action === "back") return;
 
       if (["enable", "disable", "test"].includes(action)) {
@@ -2753,21 +2985,31 @@ export class REPL {
       } else if (action === "user-add" || action === "user-remove") {
         try {
           const val = await input({ message: "Slack ユーザー ID を入力 (例: U01234567、空欄で取り消し):" });
-          if (!val.trim()) { console.log(chalk.dim("  取り消しました。")); continue; }
+          if (!val.trim()) {
+            console.log(chalk.dim("  取り消しました。"));
+            continue;
+          }
           await this.handleCommand(`/slack ${action} ${val.trim()}`);
-        } catch { /* cancel */ }
+        } catch {
+          /* cancel */
+        }
       } else {
         // url / bot-token / app-token
         const fieldLabel: Record<string, string> = {
-          "url": "Webhook URL (Slack アプリ設定 → Incoming Webhooks で取得)",
+          url: "Webhook URL (Slack アプリ設定 → Incoming Webhooks で取得)",
           "bot-token": "Bot Token (Slack アプリ設定 → OAuth & Permissions、xoxb- で始まる)",
           "app-token": "App-Level Token (Slack アプリ設定 → Basic Information、xapp- で始まる)",
         };
         try {
           const val = await input({ message: `${fieldLabel[action] ?? action} を入力 (空欄で取り消し):` });
-          if (!val.trim()) { console.log(chalk.dim("  取り消しました。")); continue; }
+          if (!val.trim()) {
+            console.log(chalk.dim("  取り消しました。"));
+            continue;
+          }
           await this.handleCommand(`/slack ${action} ${val.trim()}`);
-        } catch { /* cancel */ }
+        } catch {
+          /* cancel */
+        }
       }
     }
   }
@@ -2787,16 +3029,23 @@ export class REPL {
             { name: chalk.dim("前のメニューに戻る"), value: "back" },
           ],
         });
-      } catch { return; }
+      } catch {
+        return;
+      }
       if (action === "back") return;
       if (action === "enable" || action === "disable") {
         await this.handleCommand(`/chatlog ${action}`);
       } else {
         try {
           const val = await input({ message: "Obsidian Vault のフォルダパス (空欄で取り消し):" });
-          if (!val.trim()) { console.log(chalk.dim("  取り消しました。")); continue; }
+          if (!val.trim()) {
+            console.log(chalk.dim("  取り消しました。"));
+            continue;
+          }
           await this.handleCommand(`/chatlog vault ${val.trim()}`);
-        } catch { /* cancel */ }
+        } catch {
+          /* cancel */
+        }
       }
     }
   }
@@ -2816,7 +3065,9 @@ export class REPL {
             { name: chalk.dim("前のメニューに戻る"), value: "back" },
           ],
         });
-      } catch { return; }
+      } catch {
+        return;
+      }
       if (action === "back") return;
       if (action === "ddg") {
         await this.handleCommand("/search duckduckgo");
@@ -2829,7 +3080,9 @@ export class REPL {
             default: this.config.search?.searxngUrl ?? "",
           });
           await this.handleCommand(`/search searxng ${val.trim()}`.trim());
-        } catch { /* cancel */ }
+        } catch {
+          /* cancel */
+        }
       }
     }
   }
@@ -2849,9 +3102,8 @@ export class REPL {
     const allProfiles = listLLMProfiles();
     if (allProfiles.length === 0) return false;
 
-    const filter = typeof matchProvider === "string"
-      ? (p: LLMProfile) => p.endpoint.providerType === matchProvider
-      : matchProvider;
+    const filter =
+      typeof matchProvider === "string" ? (p: LLMProfile) => p.endpoint.providerType === matchProvider : matchProvider;
     const candidates = filter ? allProfiles.filter(filter) : allProfiles;
     if (candidates.length === 0) return false;
 
@@ -2910,9 +3162,11 @@ export class REPL {
     if (await this.maybeOfferProfileHistory(target, provider)) return;
 
     const existing =
-      target === "main" ? this.config.mainLLM
-      : target === "vision" ? this.config.visionLLM ?? undefined
-      : this.config.secondLLM?.endpoint;
+      target === "main"
+        ? this.config.mainLLM
+        : target === "vision"
+          ? (this.config.visionLLM ?? undefined)
+          : this.config.secondLLM?.endpoint;
     const existingIsClaude =
       existing?.providerType === "anthropic" ||
       existing?.providerType === "claude-cli" ||
@@ -2945,12 +3199,13 @@ export class REPL {
         const envName = await input({
           message: "環境変数名:",
           default: "ANTHROPIC_API_KEY",
-          validate: (v: string) =>
-            /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim()) || "有効な環境変数名を入力してください",
+          validate: (v: string) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim()) || "有効な環境変数名を入力してください",
         });
         storedApiKey = `env:${envName.trim()}`;
         if (!process.env[envName.trim()]) {
-          console.log(chalk.yellow(`  ⚠ 環境変数 ${envName.trim()} は現在未設定です。アプリ起動時にセットしてください。`));
+          console.log(
+            chalk.yellow(`  ⚠ 環境変数 ${envName.trim()} は現在未設定です。アプリ起動時にセットしてください。`),
+          );
         }
       } else if (storageMode === "plain") {
         const ok = await confirm({
@@ -2993,7 +3248,11 @@ export class REPL {
       if (provider === "claude-agent-sdk") {
         console.log(chalk.dim("  in-process MCP で lllmAgent ツールを公開します (tool calling 対応)。"));
       } else {
-        console.log(chalk.dim("  注: claude-cli は tool calling 非対応。 ツール委任には claude-agent-sdk か anthropic を使ってください。"));
+        console.log(
+          chalk.dim(
+            "  注: claude-cli は tool calling 非対応。 ツール委任には claude-agent-sdk か anthropic を使ってください。",
+          ),
+        );
       }
     }
 
@@ -3101,9 +3360,11 @@ export class REPL {
     if (await this.maybeOfferProfileHistory(target, "gemini")) return;
 
     const existing =
-      target === "main" ? this.config.mainLLM
-      : target === "vision" ? this.config.visionLLM ?? undefined
-      : this.config.secondLLM?.endpoint;
+      target === "main"
+        ? this.config.mainLLM
+        : target === "vision"
+          ? (this.config.visionLLM ?? undefined)
+          : this.config.secondLLM?.endpoint;
     const existingIsGemini = existing?.providerType === "gemini";
 
     const chosenModel = await select({
@@ -3132,12 +3393,13 @@ export class REPL {
       const envName = await input({
         message: "環境変数名:",
         default: "GEMINI_API_KEY",
-        validate: (v: string) =>
-          /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim()) || "有効な環境変数名を入力してください",
+        validate: (v: string) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim()) || "有効な環境変数名を入力してください",
       });
       storedApiKey = `env:${envName.trim()}`;
       if (!process.env[envName.trim()]) {
-        console.log(chalk.yellow(`  ⚠ 環境変数 ${envName.trim()} は現在未設定です。 アプリ起動時にセットしてください。`));
+        console.log(
+          chalk.yellow(`  ⚠ 環境変数 ${envName.trim()} は現在未設定です。 アプリ起動時にセットしてください。`),
+        );
       }
     } else if (storageMode === "plain") {
       const ok = await confirm({
@@ -3297,7 +3559,9 @@ export class REPL {
       try {
         const entry = recordLLMProfile(this.config.secondLLM.endpoint);
         if (entry) setRegistrySlot("second", entry.id);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -3318,7 +3582,9 @@ export class REPL {
         try {
           const entry = recordLLMProfile(ep);
           if (entry) setRegistrySlot("vision", entry.id);
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       } else {
         // visionLLM クリア → main provider にフォールバック
         this.visionService.setProvider(this.agent.getProvider(), this.config.mainLLM.model);
@@ -3326,7 +3592,9 @@ export class REPL {
         try {
           const { clearSlot } = await import("../config/model-registry.js");
           clearSlot("vision");
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
     } catch (e) {
       console.log(chalk.red(`  Vision LLM 反映に失敗: ${e instanceof Error ? e.message : String(e)}`));
@@ -3392,7 +3660,12 @@ export class REPL {
    */
   private async previewConnectionAfterEndpointChange(): Promise<void> {
     const providerType = this.config.mainLLM.providerType;
-    if (providerType !== "ollama" && providerType !== "lmstudio" && providerType !== "llamacpp" && providerType !== "vllm") {
+    if (
+      providerType !== "ollama" &&
+      providerType !== "lmstudio" &&
+      providerType !== "llamacpp" &&
+      providerType !== "vllm"
+    ) {
       // クラウド系は host/port では設定しない
       return;
     }
@@ -3418,7 +3691,9 @@ export class REPL {
       console.log(chalk.dim(`  使い方: /model host <ホスト名またはIPアドレス>`));
       console.log(chalk.dim(`  例: /model host 192.168.1.201`));
       console.log(chalk.dim(`      /model host localhost`));
-      console.log(chalk.dim(`  ※ ポートは現状値を維持します。 ポートも変えるなら /model port、 全部やり直すなら /model setup`));
+      console.log(
+        chalk.dim(`  ※ ポートは現状値を維持します。 ポートも変えるなら /model port、 全部やり直すなら /model setup`),
+      );
       return;
     }
     // ホスト名らしさの簡易チェック (先頭がスキームっぽければ案内)
@@ -3500,8 +3775,14 @@ export class REPL {
 
   private async handleModelSetupLocal(): Promise<void> {
     const cur = this.config.mainLLM;
-    const isCloud = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic"]
-      .includes(cur.providerType);
+    const isCloud = [
+      "vertex-ai",
+      "azure-openai",
+      "azure-gpt",
+      "azure-claude",
+      "azure-foundry",
+      "azure-anthropic",
+    ].includes(cur.providerType);
 
     // 履歴がある場合は冒頭で選択肢を提示 (ローカル系プロバイダのみに絞る)
     const localProviders = new Set(["ollama", "lmstudio", "llamacpp", "vllm"]);
@@ -3520,13 +3801,15 @@ export class REPL {
     try {
       const result = await runLocalLLMSetup({
         headline: "メインLLM 再設定",
-        current: isCloud ? undefined : {
-          providerType: cur.providerType,
-          baseUrl: cur.baseUrl,
-          model: cur.model,
-          contextWindow: cur.contextWindow,
-          description: cur.description,
-        },
+        current: isCloud
+          ? undefined
+          : {
+              providerType: cur.providerType,
+              baseUrl: cur.baseUrl,
+              model: cur.model,
+              contextWindow: cur.contextWindow,
+              description: cur.description,
+            },
       });
       // ローカル系に切り替わるのでクラウド用フィールドはクリア
       this.config.mainLLM = {
@@ -3551,7 +3834,9 @@ export class REPL {
         console.log(chalk.yellow("\n  セットアップを中止しました。 設定は変更されていません。"));
       } else {
         console.log(chalk.red(`\n  セットアップに失敗しました: ${e instanceof Error ? e.message : String(e)}`));
-        console.log(chalk.dim("  設定は変更されていません。 サーバー側を確認してから再度 /model setup を実行してください。"));
+        console.log(
+          chalk.dim("  設定は変更されていません。 サーバー側を確認してから再度 /model setup を実行してください。"),
+        );
       }
     }
   }
@@ -3597,7 +3882,9 @@ export class REPL {
       const title = r.title ? chalk.dim(`  "${r.title.slice(0, 40)}"`) : "";
       console.log(`  ${marker} Room ${chalk.cyan(r.id)}  ${chalk.dim(tags.join(" · "))}${title}`);
     }
-    console.log(chalk.dim("\n  移動: /room A|B|C   再開: /room resume [A|B|C]   自動再開: /room autoresume on|off [A|B|C]\n"));
+    console.log(
+      chalk.dim("\n  移動: /room A|B|C   再開: /room resume [A|B|C]   自動再開: /room autoresume on|off [A|B|C]\n"),
+    );
   }
 
   // ─── 入力処理 ──────────────────────────────────────
@@ -3616,15 +3903,15 @@ export class REPL {
     const stopTypeAhead = this.startTypeAhead();
     try {
       if (input.startsWith("@second ")) {
-         if (!this.secondLLMManager || !this.secondLLMManager.isAvailable()) {
-           console.log(chalk.red("  Second LLM is not configured or enabled."));
-           return;
-         }
-         const prompt = input.slice("@second ".length).trim();
-         console.log(chalk.dim("  Delegating to Second LLM..."));
-         const result = await this.secondLLMManager.runAsAgent(prompt);
-         console.log(chalk.cyan(`\n${result}\n`));
-         return;
+        if (!this.secondLLMManager || !this.secondLLMManager.isAvailable()) {
+          console.log(chalk.red("  Second LLM is not configured or enabled."));
+          return;
+        }
+        const prompt = input.slice("@second ".length).trim();
+        console.log(chalk.dim("  Delegating to Second LLM..."));
+        const result = await this.secondLLMManager.runAsAgent(prompt);
+        console.log(chalk.cyan(`\n${result}\n`));
+        return;
       }
 
       // @ファイル/フォルダ参照を解決してコンテキストに展開
@@ -3635,7 +3922,9 @@ export class REPL {
       // A-6: task_complete イベントから構造化レポートを組み立てて通知する
       // (docs/task-report-notification-design.md)。 旧実装の履歴スキャンは廃止。
       let completeEvent: import("../agent/agent-events.js").AgentEventMap["task_complete"] | null = null;
-      const offComplete = this.agent.events.on("task_complete", (e) => { completeEvent = e; });
+      const offComplete = this.agent.events.on("task_complete", (e) => {
+        completeEvent = e;
+      });
       // run 本体: Goal Seek 昇格提案 (room 載せ替え後に行い、 正しい room の goal slot を操作) → run。
       // 画像添付等で ContentPart[] の場合はテキスト主体でないため提案しない。
       const runBody = async (): Promise<void> => {
@@ -3687,11 +3976,8 @@ export class REPL {
           }
         }
       }
-
     } catch (e) {
-      console.error(
-        chalk.red(`\n  Error: ${e instanceof Error ? e.message : String(e)}\n`),
-      );
+      console.error(chalk.red(`\n  Error: ${e instanceof Error ? e.message : String(e)}\n`));
     } finally {
       stopTypeAhead();
       interruptWatcher.stop();
@@ -3723,7 +4009,9 @@ export class REPL {
         if (this.roomQueue.pending > 0) {
           console.log(chalk.dim(`  ⏳ 他サーフェスのジョブ ${this.roomQueue.pending} 件の完了を待っています...`));
         }
-        await this.roomQueue.enqueue(async () => { await job(); }).result;
+        await this.roomQueue.enqueue(async () => {
+          await job();
+        }).result;
       } else {
         await job();
       }
@@ -3767,7 +4055,10 @@ export class REPL {
    * マルチバイトはバイト蓄積→Enter で UTF-8 デコード。 対話品質は手動 TTY 検証が必要。
    */
   private startTypeAhead(): () => void {
-    if (!process.stdin.isTTY) return () => { /* no-op */ };
+    if (!process.stdin.isTTY)
+      return () => {
+        /* no-op */
+      };
     const stdin = process.stdin;
     let bytes: number[] = [];
     const onData = (chunk: Buffer): void => {
@@ -3784,7 +4075,9 @@ export class REPL {
           if (text) {
             this.pendingInputs.push(text);
             process.stdout.write(
-              chalk.dim(`\n  ⏳ キューに追加しました (待ち ${this.pendingInputs.length} 件)。 現在の処理完了後に順次実行します。\n`),
+              chalk.dim(
+                `\n  ⏳ キューに追加しました (待ち ${this.pendingInputs.length} 件)。 現在の処理完了後に順次実行します。\n`,
+              ),
             );
           }
           continue;
@@ -3801,7 +4094,9 @@ export class REPL {
       }
     };
     stdin.on("data", onData);
-    return () => { stdin.removeListener("data", onData); };
+    return () => {
+      stdin.removeListener("data", onData);
+    };
   }
 
   // ─── コマンドハンドラ ──────────────────────────────
@@ -3816,9 +4111,7 @@ export class REPL {
       const prefixMatch = this.skillRegistry.getByPrefix(cmd);
       if (prefixMatch) {
         const { skill, remainingArgs } = prefixMatch;
-        console.log(
-          chalk.dim(`\n  [Skill] ${skill.name}: ${skill.description}`),
-        );
+        console.log(chalk.dim(`\n  [Skill] ${skill.name}: ${skill.description}`));
         const skillPrompt = `${skill.content}\n\n${remainingArgs ? `引数: ${remainingArgs}` : "上記のスキル指示に従ってタスクを実行してください。"}`;
         await this.processInput(skillPrompt);
         return;
@@ -3874,7 +4167,9 @@ export class REPL {
           }
         });
         if (cleared) {
-          console.log(chalk.dim(`  会話履歴・ToDo・Goal slot をクリアしました${replRoom ? ` (Room ${replRoom})` : ""}。`));
+          console.log(
+            chalk.dim(`  会話履歴・ToDo・Goal slot をクリアしました${replRoom ? ` (Room ${replRoom})` : ""}。`),
+          );
         }
         break;
       }
@@ -3895,15 +4190,22 @@ export class REPL {
         }
         if (sub === "resume") {
           const target = args[1] ? normalizeRoomId(args[1]) : (this.roomManager.current() ?? null);
-          if (!target) { console.log(chalk.yellow("  使い方: /room resume [A|B|C]")); break; }
+          if (!target) {
+            console.log(chalk.yellow("  使い方: /room resume [A|B|C]"));
+            break;
+          }
           // H-1: resumeRoom は現 Room なら restoreSession で履歴を差し替える (= アクティブ Room の
           // 再ロード)。 背景ジョブと衝突しないようキューで直列化する。
           let found = false;
-          const done = await this.runRoomMutation(() => { found = this.roomManager!.resumeRoom(target); });
+          const done = await this.runRoomMutation(() => {
+            found = this.roomManager!.resumeRoom(target);
+          });
           if (done) {
-            console.log(found
-              ? chalk.dim(`  Room ${target} の最後の会話を再開しました。`)
-              : chalk.yellow(`  Room ${target} に保存された会話がありません。`));
+            console.log(
+              found
+                ? chalk.dim(`  Room ${target} の最後の会話を再開しました。`)
+                : chalk.yellow(`  Room ${target} に保存された会話がありません。`),
+            );
           }
           break;
         }
@@ -3921,7 +4223,9 @@ export class REPL {
         // 移動
         const room = normalizeRoomId(sub);
         if (!room) {
-          console.log(chalk.yellow("  不明な引数です。 /room [A|B|C] | /room resume [A|B|C] | /room autoresume <on|off> [A|B|C]"));
+          console.log(
+            chalk.yellow("  不明な引数です。 /room [A|B|C] | /room resume [A|B|C] | /room autoresume <on|off> [A|B|C]"),
+          );
           break;
         }
         // H-1: moveSurface("repl", ...) は agent のアクティブ Room を即切り替える。 背景ジョブと
@@ -3939,7 +4243,9 @@ export class REPL {
         if (sub === "clear") {
           const n = this.pendingInputs.length;
           this.pendingInputs = [];
-          console.log(chalk.dim(`  type-ahead の待機入力 ${n} 件を破棄しました。 (実行中/投入済みのジョブは取り消せません)`));
+          console.log(
+            chalk.dim(`  type-ahead の待機入力 ${n} 件を破棄しました。 (実行中/投入済みのジョブは取り消せません)`),
+          );
           break;
         }
         const queued = this.roomQueue?.pending ?? 0;
@@ -3962,9 +4268,7 @@ export class REPL {
           const section = normalizeContextSection(sectionArg);
           if (!section) {
             console.log(chalk.yellow(`  不明な section: ${sectionArg}`));
-            console.log(
-              chalk.dim("  使い方: /context [system|memory|skills|tools|messages]"),
-            );
+            console.log(chalk.dim("  使い方: /context [system|memory|skills|tools|messages]"));
             break;
           }
           process.stdout.write(
@@ -3991,12 +4295,14 @@ export class REPL {
         switch (sub) {
           case "status": {
             const st = cp.getStatus();
-            console.log(
-              chalk.dim(`  checkpoint: ${st.enabled ? chalk.green("ON") : chalk.yellow("OFF")}`),
-            );
+            console.log(chalk.dim(`  checkpoint: ${st.enabled ? chalk.green("ON") : chalk.yellow("OFF")}`));
             console.log(chalk.dim(`  対象フォルダ: ${st.workTree}`));
             if (st.enabled && !(await cp.isGitReady())) {
-              console.log(chalk.red("  ⚠ git が見つかりません → スナップショットは記録されていません (git 導入か /checkpoint off を)"));
+              console.log(
+                chalk.red(
+                  "  ⚠ git が見つかりません → スナップショットは記録されていません (git 導入か /checkpoint off を)",
+                ),
+              );
             }
             if (st.lastError) {
               console.log(chalk.red(`  直近のコミット失敗: ${st.lastError}`));
@@ -4015,7 +4321,9 @@ export class REPL {
             cp.setEnabled(true);
             this.config.checkpoints = { ...(this.config.checkpoints ?? {}), enabled: true };
             saveConfig(this.config);
-            console.log(chalk.dim("  checkpoint enabled (config に保存)。 以降のファイル変更を裏で自動コミットします。"));
+            console.log(
+              chalk.dim("  checkpoint enabled (config に保存)。 以降のファイル変更を裏で自動コミットします。"),
+            );
             break;
           }
           case "off": {
@@ -4063,12 +4371,18 @@ export class REPL {
           case "clear": {
             if (args[1]?.trim() === "--all") {
               const removed = cp.clearAll();
-              console.log(chalk.dim(`  全セッションのチェックポイントを削除しました (${removed} 件)。 作業フォルダのファイルは無傷です。`));
+              console.log(
+                chalk.dim(
+                  `  全セッションのチェックポイントを削除しました (${removed} 件)。 作業フォルダのファイルは無傷です。`,
+                ),
+              );
             } else {
               const ok = cp.clearCurrent();
               console.log(
                 ok
-                  ? chalk.dim("  今セッションのチェックポイント履歴を削除しました。 作業フォルダのファイルは無傷です。 (全削除は /checkpoint clear --all)")
+                  ? chalk.dim(
+                      "  今セッションのチェックポイント履歴を削除しました。 作業フォルダのファイルは無傷です。 (全削除は /checkpoint clear --all)",
+                    )
                   : chalk.yellow("  削除対象のチェックポイントがありませんでした。"),
               );
             }
@@ -4090,21 +4404,35 @@ export class REPL {
         const insideWsl = !!process.env.WSL_DISTRO_NAME;
 
         const printStatus = () => {
-          console.log(chalk.dim(`  bash 封じ込め (sandbox)  —  プラットフォーム: ${process.platform}${insideWsl ? ` (WSL2: ${process.env.WSL_DISTRO_NAME})` : ""}`));
+          console.log(
+            chalk.dim(
+              `  bash 封じ込め (sandbox)  —  プラットフォーム: ${process.platform}${insideWsl ? ` (WSL2: ${process.env.WSL_DISTRO_NAME})` : ""}`,
+            ),
+          );
           if (isWindows) {
             const det = detectWsl();
             console.log(chalk.dim("  方式: Windows ネイティブ (git bash) — OS レベルの封じ込めは非対応"));
             console.log(`  実効: ${chalk.yellow("OFF")} — bash は git bash で実行 (封じ込め無し)`);
             if (det.available) {
-              console.log(chalk.dim(`  💡 WSL2 検出 (${det.defaultDistro ?? "?"}${det.wsl2 ? "" : " / WSL1"})。 封じ込めには WSL2 の中で本アプリを起動 → /sandbox on で processSandbox(bwrap) が効きます。`));
+              console.log(
+                chalk.dim(
+                  `  💡 WSL2 検出 (${det.defaultDistro ?? "?"}${det.wsl2 ? "" : " / WSL1"})。 封じ込めには WSL2 の中で本アプリを起動 → /sandbox on で processSandbox(bwrap) が効きます。`,
+                ),
+              );
             } else {
-              console.log(chalk.dim("  💡 封じ込めには WSL2 が必要です。 WSL2 を導入し、 その中で本アプリを起動してください。"));
+              console.log(
+                chalk.dim("  💡 封じ込めには WSL2 が必要です。 WSL2 を導入し、 その中で本アプリを起動してください。"),
+              );
             }
           } else {
             const cfg = this.config.security.processSandbox ?? { enabled: false, level: "none" as const };
             const sb = new ProcessSandbox(cfg);
             const eff = sb.getAvailability().effectiveLevel;
-            console.log(chalk.dim(`  方式: processSandbox (${isMacOS ? "sandbox-exec" : insideWsl ? "bwrap (WSL2)" : "bwrap/unshare"})  /  設定 enabled=${cfg.enabled}, level=${cfg.level}`));
+            console.log(
+              chalk.dim(
+                `  方式: processSandbox (${isMacOS ? "sandbox-exec" : insideWsl ? "bwrap (WSL2)" : "bwrap/unshare"})  /  設定 enabled=${cfg.enabled}, level=${cfg.level}`,
+              ),
+            );
             // ネットの実態を OS/レベル別に正直に出す（誤認防止）:
             //   fs + macOS → allowlist 経由のみ許可（プロキシ強制）
             //   fs + Linux/WSL2 → 全開（allowlist 未強制。 2b-2 未実装）
@@ -4149,13 +4477,18 @@ export class REPL {
             const blocked = proxyNow?.getBlockedHosts() ?? [];
             if (autoAllowN > 0 || blocked.length) {
               console.log(
-                chalk.dim(`  今セッション: bash 自動許可 ${autoAllowN} 回` + (blocked.length ? ` / 遮断ドメイン ${blocked.length}件 (${blocked.join(", ")})` : "")),
+                chalk.dim(
+                  `  今セッション: bash 自動許可 ${autoAllowN} 回` +
+                    (blocked.length ? ` / 遮断ドメイン ${blocked.length}件 (${blocked.join(", ")})` : ""),
+                ),
               );
             }
             // W1: 一時許可(once)した先を恒久化するナッジ（育てる allowlist）
             const once = proxyNow?.getSessionAllowedHosts() ?? [];
             if (once.length) {
-              console.log(chalk.cyan(`  💡 今セッションで一時許可: ${once.join(", ")} — 恒久化は /sandbox allow <domain>`));
+              console.log(
+                chalk.cyan(`  💡 今セッションで一時許可: ${once.join(", ")} — 恒久化は /sandbox allow <domain>`),
+              );
             }
           }
           console.log(chalk.dim("  使用例: /sandbox on | off | allow <domain> | deny <domain> | status"));
@@ -4168,9 +4501,17 @@ export class REPL {
           case "on": {
             if (isWindows) {
               const det = detectWsl();
-              console.log(chalk.yellow("  Windows ネイティブには OS 封じ込めが無いため、 ここで ON にするものはありません (bash は git bash で実行)。"));
+              console.log(
+                chalk.yellow(
+                  "  Windows ネイティブには OS 封じ込めが無いため、 ここで ON にするものはありません (bash は git bash で実行)。",
+                ),
+              );
               if (det.available) {
-                console.log(chalk.dim(`  封じ込めるには WSL2 (${det.defaultDistro ?? "検出済み"}) の中で本アプリを起動し、 そこで /sandbox on してください。`));
+                console.log(
+                  chalk.dim(
+                    `  封じ込めるには WSL2 (${det.defaultDistro ?? "検出済み"}) の中で本アプリを起動し、 そこで /sandbox on してください。`,
+                  ),
+                );
               } else {
                 console.log(chalk.dim("  封じ込めるには WSL2 を導入し、 その中で本アプリを起動してください。"));
               }
@@ -4190,35 +4531,59 @@ export class REPL {
               resetActiveProcessSandbox();
               reconcileSandboxProxy(); // 実効レベルに合わせ proxy を停止/維持（単一窓口）
               const eff = new ProcessSandbox(this.config.security.processSandbox).getAvailability().effectiveLevel;
-              console.log(chalk.dim(`  封じ込め ON (config 保存、 level=${level})。 ${isMacOS ? "sandbox-exec" : "bwrap/unshare"} で適用 (次の bash から即反映)。`));
+              console.log(
+                chalk.dim(
+                  `  封じ込め ON (config 保存、 level=${level})。 ${isMacOS ? "sandbox-exec" : "bwrap/unshare"} で適用 (次の bash から即反映)。`,
+                ),
+              );
               if (eff === "none") {
-                console.log(chalk.yellow("  ⚠ 隔離ツールが見つからず実効レベルは none です (Linux/WSL2: bwrap, macOS: sandbox-exec が必要)。"));
+                console.log(
+                  chalk.yellow(
+                    "  ⚠ 隔離ツールが見つからず実効レベルは none です (Linux/WSL2: bwrap, macOS: sandbox-exec が必要)。",
+                  ),
+                );
               } else if (eff === "fs") {
                 const enforceable = getActiveProcessSandbox().getAvailability().netAllowlistEnforceable;
                 if (enforceable) {
-                  console.log(chalk.dim("  書込は作業フォルダ等に限定、 ネットは allowlist 経由のみ (npm install / pip 等は通ります)。"));
+                  console.log(
+                    chalk.dim(
+                      "  書込は作業フォルダ等に限定、 ネットは allowlist 経由のみ (npm install / pip 等は通ります)。",
+                    ),
+                  );
                 } else {
                   // socat/ip 不足(Linux)等で allowlist を強制できない → ネット全開。 status 任せにせず即警告。
-                  console.log(chalk.yellow("  ⚠ ネット allowlist を強制できません (Linux は socat と ip が必要)。 現在 fs はネット全開で、 外部送信を防げません。 `sudo apt install socat iproute2` 等で導入してください。"));
+                  console.log(
+                    chalk.yellow(
+                      "  ⚠ ネット allowlist を強制できません (Linux は socat と ip が必要)。 現在 fs はネット全開で、 外部送信を防げません。 `sudo apt install socat iproute2` 等で導入してください。",
+                    ),
+                  );
                 }
                 // Phase 3: fs 封じ込め下では bash 確認が自動許可される副作用を明示（macOS のみ発動）
                 if (isBashNetworkContained()) {
                   console.log(
                     chalk.yellow(
                       "  ⚠ 封じ込め下では bash 実行確認が自動許可されます（破壊的操作・未許可ドメイン通信は確認）。" +
-                      " 切るには /sandbox off、 自動許可だけ無効化は config の autoAllowBashWhenContained: false。",
+                        " 切るには /sandbox off、 自動許可だけ無効化は config の autoAllowBashWhenContained: false。",
                     ),
                   );
                 }
               } else {
-                console.log(chalk.yellow(`  ⚠ level=${eff} はネットワークを遮断します。 npm install / pip / CDN 取得などは通りません (開発作業は level=fs 推奨: /sandbox on fs)。`));
+                console.log(
+                  chalk.yellow(
+                    `  ⚠ level=${eff} はネットワークを遮断します。 npm install / pip / CDN 取得などは通りません (開発作業は level=fs 推奨: /sandbox on fs)。`,
+                  ),
+                );
               }
             }
             break;
           }
           case "off": {
             if (isWindows) {
-              console.log(chalk.dim("  Windows ネイティブでは封じ込めは元々動いていません (git bash 実行)。 WSL2 の中で起動している時のみ /sandbox off が有効です。"));
+              console.log(
+                chalk.dim(
+                  "  Windows ネイティブでは封じ込めは元々動いていません (git bash 実行)。 WSL2 の中で起動している時のみ /sandbox off が有効です。",
+                ),
+              );
             } else {
               this.config.security.processSandbox = withSandboxState(this.config.security.processSandbox, false); // level/allowedHosts/opt-out を保持
               saveConfig(this.config);
@@ -4231,7 +4596,9 @@ export class REPL {
           case "allow": {
             const d = args[1]?.trim();
             if (!d) {
-              console.log(chalk.yellow("  使用方法: /sandbox allow <domain>  (例: /sandbox allow example.com / *.example.com)"));
+              console.log(
+                chalk.yellow("  使用方法: /sandbox allow <domain>  (例: /sandbox allow example.com / *.example.com)"),
+              );
               break;
             }
             const ps = this.config.security.processSandbox ?? { enabled: false, level: "none" as const };
@@ -4264,7 +4631,9 @@ export class REPL {
             break;
           }
           default:
-            console.log(chalk.dim("  使用方法: /sandbox [status | on [fs|network|full] | off | allow <domain> | deny <domain>]"));
+            console.log(
+              chalk.dim("  使用方法: /sandbox [status | on [fs|network|full] | off | allow <domain> | deny <domain>]"),
+            );
         }
         break;
       }
@@ -4294,11 +4663,7 @@ export class REPL {
                   : s.connected
                     ? chalk.green("● active")
                     : chalk.red("✗ failed");
-                const reason = s.configDisabled
-                  ? " (config.disabled)"
-                  : s.runtimeDisabled
-                    ? " (runtime skip)"
-                    : "";
+                const reason = s.configDisabled ? " (config.disabled)" : s.runtimeDisabled ? " (runtime skip)" : "";
                 console.log(chalk.dim(`    ${stateMark} ${s.name}${reason}: ${s.toolCount} tools`));
               }
             }
@@ -4361,9 +4726,7 @@ export class REPL {
 
             // 引数なし = checkbox UI (↑↓ 選択、 space トグル、 enter 確定)
             const initiallyOn = new Set(
-              servers
-                .filter((s) => !s.configDisabled && !s.runtimeDisabled && s.connected)
-                .map((s) => s.name),
+              servers.filter((s) => !s.configDisabled && !s.runtimeDisabled && s.connected).map((s) => s.name),
             );
             let selected: string[];
             try {
@@ -4435,16 +4798,14 @@ export class REPL {
               const builtinCount = all.filter((s) => s.builtIn).length;
               const userCount = all.length - builtinCount;
               const enabledCount = all.filter((s) => s.enabled).length;
-              console.log(chalk.dim(`  Loaded: ${all.length} (builtin=${builtinCount}, user=${userCount}) / Enabled: ${enabledCount}`));
+              console.log(
+                chalk.dim(
+                  `  Loaded: ${all.length} (builtin=${builtinCount}, user=${userCount}) / Enabled: ${enabledCount}`,
+                ),
+              );
               for (const s of all) {
-                const stateMark = s.enabled
-                  ? chalk.green("●")
-                  : chalk.yellow("○");
-                const reason = !enabled
-                  ? " (global OFF)"
-                  : s.runtimeDisabled
-                    ? " (skip)"
-                    : "";
+                const stateMark = s.enabled ? chalk.green("●") : chalk.yellow("○");
+                const reason = !enabled ? " (global OFF)" : s.runtimeDisabled ? " (skip)" : "";
                 const tag = s.builtIn ? chalk.dim("[builtin]") : chalk.dim("[user]");
                 console.log(chalk.dim(`    ${stateMark} ${s.name.padEnd(24)} ${tag}${reason}`));
               }
@@ -4581,10 +4942,11 @@ export class REPL {
             // 試行ごとに履歴をリセット（コンテキスト肥大化を防ぐ）
             this.agent.getHistory().clear();
 
-            const promptForAttempt = tryAttempt === 1
-              ? tryResolved
-              : `${tryResolved}\n\n---\n**再試行 (${tryAttempt}回目):** 前回の試行の問題点:\n${tryLastFeedback}\n\n` +
-                `上記を踏まえて再実装してください。特に file_write ツールを呼び出して実際にファイルを保存してください。`;
+            const promptForAttempt =
+              tryAttempt === 1
+                ? tryResolved
+                : `${tryResolved}\n\n---\n**再試行 (${tryAttempt}回目):** 前回の試行の問題点:\n${tryLastFeedback}\n\n` +
+                  `上記を踏まえて再実装してください。特に file_write ツールを呼び出して実際にファイルを保存してください。`;
 
             await this.agent.run(promptForAttempt);
 
@@ -4592,29 +4954,30 @@ export class REPL {
 
             // file_write が呼ばれたか: ツール結果メッセージで "File written:" を確認
             const allMsgs = this.agent.getHistory().getMessages();
-            const fileWritten = allMsgs.some(m =>
-              m.role === "tool" &&
-              typeof m.content === "string" &&
-              m.content.startsWith("File written:")
+            const fileWritten = allMsgs.some(
+              (m) => m.role === "tool" && typeof m.content === "string" && m.content.startsWith("File written:"),
             );
 
             if (fileWritten) {
               // 書かれたファイルパスを表示
               const writtenPaths = allMsgs
-                .filter(m => m.role === "tool" && typeof m.content === "string" && m.content.startsWith("File written:"))
-                .map(m => (m.content as string).replace("File written: ", "").trim());
+                .filter(
+                  (m) => m.role === "tool" && typeof m.content === "string" && m.content.startsWith("File written:"),
+                )
+                .map((m) => (m.content as string).replace("File written: ", "").trim());
               console.log(chalk.green(`\n  ✓ 試行 ${tryAttempt} 回目で完了`));
-              writtenPaths.forEach(p => console.log(chalk.green(`    → ${p}`)));
+              writtenPaths.forEach((p) => console.log(chalk.green(`    → ${p}`)));
               console.log();
               trySucceeded = true;
               break;
             }
 
             // 失敗した場合: 最後のアシスタント応答をフィードバックとして次回に渡す
-            const lastAssistant = [...allMsgs].reverse().find(m => m.role === "assistant");
-            tryLastFeedback = typeof lastAssistant?.content === "string"
-              ? lastAssistant.content.slice(0, 500)
-              : "ファイルが作成されませんでした";
+            const lastAssistant = [...allMsgs].reverse().find((m) => m.role === "assistant");
+            tryLastFeedback =
+              typeof lastAssistant?.content === "string"
+                ? lastAssistant.content.slice(0, 500)
+                : "ファイルが作成されませんでした";
 
             if (tryAttempt < tryMaxAttempts) {
               console.log(chalk.yellow(`\n  ✗ ファイル未作成。次の試行に進みます...\n`));
@@ -4636,8 +4999,8 @@ export class REPL {
         // ハーネス自身が握る (記事「Write Loops Not Prompts」の思想)。
         const rawArgs = args.join(" ").trim();
         if (!rawArgs) {
-          console.log(chalk.dim("  使用方法: /goal-loop [最大反復数] --check \"<検証コマンド>\" <タスク>"));
-          console.log(chalk.dim("  例: /goal-loop 8 --check \"npm test\" 失敗しているテストを通るように修正して"));
+          console.log(chalk.dim('  使用方法: /goal-loop [最大反復数] --check "<検証コマンド>" <タスク>'));
+          console.log(chalk.dim('  例: /goal-loop 8 --check "npm test" 失敗しているテストを通るように修正して'));
           console.log(chalk.dim("  検証コマンドが exit 0 になるまで反復 (反復数省略時は 8 / Ctrl+C で中断)"));
           console.log(chalk.dim("  関連: /loop=時間反復 / /goal-seek=LLM判定で合格まで / /try=LLMスコアで再試行"));
           break;
@@ -4660,14 +5023,14 @@ export class REPL {
         const glCheckMatch = glRest.match(/--check\s+(?:"([^"]+)"|'([^']+)'|(\S+))/);
         if (glCheckMatch) {
           glCheck = (glCheckMatch[1] ?? glCheckMatch[2] ?? glCheckMatch[3] ?? "").trim();
-          glRest =
-            (glRest.slice(0, glCheckMatch.index) +
-              glRest.slice((glCheckMatch.index ?? 0) + glCheckMatch[0].length)).trim();
+          glRest = (
+            glRest.slice(0, glCheckMatch.index) + glRest.slice((glCheckMatch.index ?? 0) + glCheckMatch[0].length)
+          ).trim();
         }
 
         if (!glCheck) {
-          console.log(chalk.yellow("  --check \"<検証コマンド>\" が必要です。"));
-          console.log(chalk.dim("  例: /goal-loop --check \"npm test\" テストを通して"));
+          console.log(chalk.yellow('  --check "<検証コマンド>" が必要です。'));
+          console.log(chalk.dim('  例: /goal-loop --check "npm test" テストを通して'));
           break;
         }
         const glPrompt = glRest.trim();
@@ -4723,7 +5086,11 @@ export class REPL {
         }
         // 引数なし → 現状表示 + toggle
         console.log(chalk.bold("\n  ── Stream display ──"));
-        console.log(chalk.dim(`  現在: ${current ? chalk.cyan("ストリーミング表示") : chalk.cyan("スピナー+Markdownレンダリング")}`));
+        console.log(
+          chalk.dim(
+            `  現在: ${current ? chalk.cyan("ストリーミング表示") : chalk.cyan("スピナー+Markdownレンダリング")}`,
+          ),
+        );
         try {
           const ok = await confirm({
             message: current ? "スピナー+Markdown に切り替えますか?" : "ストリーミング表示に切り替えますか?",
@@ -4781,11 +5148,15 @@ export class REPL {
           console.log(chalk.dim(`  max_tokens:     ${chalk.yellow(ctxLabel)} (= コンテキスト長から自動設定)`));
           // サンプリングパラメータ: 設定値があれば表示、なければ "auto (サーバーデフォルト)"
           const sp = this.config.mainLLM;
-          const fmt = (v: number | undefined) => v !== undefined ? String(v) : chalk.gray("auto");
-          console.log(chalk.dim(`  temperature:    ${fmt(sp.temperature)}    ${chalk.gray("(/model temperature <値> で変更)")}`));
+          const fmt = (v: number | undefined) => (v !== undefined ? String(v) : chalk.gray("auto"));
+          console.log(
+            chalk.dim(`  temperature:    ${fmt(sp.temperature)}    ${chalk.gray("(/model temperature <値> で変更)")}`),
+          );
           console.log(chalk.dim(`  top_p:          ${fmt(sp.top_p)}    ${chalk.gray("(/model top_p <値>)")}`));
           console.log(chalk.dim(`  top_k:          ${fmt(sp.top_k)}    ${chalk.gray("(/model top_k <値>)")}`));
-          console.log(chalk.dim(`  rep_penalty:    ${fmt(sp.repetition_penalty)}    ${chalk.gray("(/model rep_penalty <値>)")}`));
+          console.log(
+            chalk.dim(`  rep_penalty:    ${fmt(sp.repetition_penalty)}    ${chalk.gray("(/model rep_penalty <値>)")}`),
+          );
           console.log(chalk.dim(`  ストリーミング: ${this.agent.getStreamingDisplay() ? "ON" : "OFF"}`));
 
           // --- サーバーからモデル詳細を取得 ---
@@ -4794,10 +5165,17 @@ export class REPL {
             if (detail.contextLength > 0 || detail.size > 0 || detail.parameterSize || detail.quantizationLevel) {
               console.log(chalk.bold("\n  ── サーバー報告 ──"));
               if (detail.contextLength > 0) {
-                const serverCtx = detail.contextLength >= 1000 ? `${Math.round(detail.contextLength / 1000)}K` : `${detail.contextLength}`;
+                const serverCtx =
+                  detail.contextLength >= 1000
+                    ? `${Math.round(detail.contextLength / 1000)}K`
+                    : `${detail.contextLength}`;
                 // K単位で丸めて比較: 262144 (二進256K) と 262000 (十進262K) のような僅差を許容
                 const mismatch = Math.round(detail.contextLength / 1000) !== Math.round(ctxWindow / 1000);
-                console.log(chalk.dim(`  コンテキスト長: ${mismatch ? chalk.red(serverCtx) : chalk.green(serverCtx)} トークン${mismatch ? chalk.red(" ⚠ 設定値と不一致!") : ""}`));
+                console.log(
+                  chalk.dim(
+                    `  コンテキスト長: ${mismatch ? chalk.red(serverCtx) : chalk.green(serverCtx)} トークン${mismatch ? chalk.red(" ⚠ 設定値と不一致!") : ""}`,
+                  ),
+                );
               }
               if (detail.size > 0) {
                 console.log(chalk.dim(`  モデルサイズ:   ${(detail.size / 1e9).toFixed(1)} GB`));
@@ -4829,11 +5207,17 @@ export class REPL {
             console.log(chalk.dim(`  詳細:   /model vision  /  変更: /model vision setup`));
           } else {
             console.log(chalk.bold("\n  ── Vision LLM ──"));
-            console.log(chalk.dim(`  ${chalk.yellow("未設定")} (main LLM にフォールバック)。 設定: /model vision setup`));
+            console.log(
+              chalk.dim(`  ${chalk.yellow("未設定")} (main LLM にフォールバック)。 設定: /model vision setup`),
+            );
           }
           if (this.config.secondLLM?.enabled) {
             console.log(chalk.bold("\n  ── セカンドLLM ──"));
-            console.log(chalk.dim(`  モデル: ${this.config.secondLLM.endpoint.model} (${this.config.secondLLM.endpoint.providerType})`));
+            console.log(
+              chalk.dim(
+                `  モデル: ${this.config.secondLLM.endpoint.model} (${this.config.secondLLM.endpoint.providerType})`,
+              ),
+            );
             const secDesc = this.config.secondLLM.endpoint.description?.trim();
             if (secDesc) {
               console.log(chalk.dim(`  特性:   ${chalk.cyan(secDesc)}`));
@@ -4857,9 +5241,15 @@ export class REPL {
             console.log(chalk.dim(`  クリア: /model description clear`));
             console.log(chalk.dim(`  推奨: 100〜300文字程度でモデルの得意/不得意、速度感、用途を記載`));
             console.log(chalk.bold("\n  ── 記載例 ──"));
-            console.log(chalk.dim(`    "MoE 32B。日本語堅牢で推論・企画・対話が得意。応答は中速。マルチモーダル非対応"`));
-            console.log(chalk.dim(`    "Dense 13B。高速でコード生成が得意。日本語はやや不自然。長文要約やリファクタリング向き"`));
-            console.log(chalk.dim(`    "Vision対応27B。画像解析+日本語OK。スクリーンショット/図表の読み取りに最適。やや遅い"`));
+            console.log(
+              chalk.dim(`    "MoE 32B。日本語堅牢で推論・企画・対話が得意。応答は中速。マルチモーダル非対応"`),
+            );
+            console.log(
+              chalk.dim(`    "Dense 13B。高速でコード生成が得意。日本語はやや不自然。長文要約やリファクタリング向き"`),
+            );
+            console.log(
+              chalk.dim(`    "Vision対応27B。画像解析+日本語OK。スクリーンショット/図表の読み取りに最適。やや遅い"`),
+            );
             console.log();
           } else if (text.toLowerCase() === "clear") {
             this.config.mainLLM.description = undefined;
@@ -4894,7 +5284,11 @@ export class REPL {
             saveConfig(this.config);
             const oldLabel = old >= 1000 ? `${Math.round(old / 1000)}K` : `${old}`;
             const newLabel = val >= 1000 ? `${Math.round(val / 1000)}K` : `${val}`;
-            console.log(chalk.dim(`  コンテキスト長: ${chalk.yellow(oldLabel)} → ${chalk.cyan(newLabel)} トークン (max_tokensも連動)`));
+            console.log(
+              chalk.dim(
+                `  コンテキスト長: ${chalk.yellow(oldLabel)} → ${chalk.cyan(newLabel)} トークン (max_tokensも連動)`,
+              ),
+            );
           }
         } else if (args[0] === "list") {
           try {
@@ -4922,7 +5316,9 @@ export class REPL {
                 const subAgentMgr = getSubAgentManager();
                 subAgentMgr?.setProvider(this.agent.getProvider(), chosen);
                 this.refreshLLMProfiles();
-                console.log(chalk.dim(`  モデルを ${chalk.yellow(currentModel)} から ${chalk.cyan(chosen)} に切り替えました`));
+                console.log(
+                  chalk.dim(`  モデルを ${chalk.yellow(currentModel)} から ${chalk.cyan(chosen)} に切り替えました`),
+                );
               } else {
                 console.log(chalk.dim(`  モデルは変更されませんでした。`));
               }
@@ -4933,7 +5329,12 @@ export class REPL {
               console.log(chalk.red(`  モデル一覧の取得に失敗しました: ${e instanceof Error ? e.message : String(e)}`));
             }
           }
-        } else if (args[0] === "temperature" || args[0] === "top_p" || args[0] === "top_k" || args[0] === "rep_penalty") {
+        } else if (
+          args[0] === "temperature" ||
+          args[0] === "top_p" ||
+          args[0] === "top_k" ||
+          args[0] === "rep_penalty"
+        ) {
           // ハイパーパラメータ設定（メインLLM）
           // /model temperature [<値>|auto|clear]
           const paramKeyMap: Record<string, "temperature" | "top_p" | "top_k" | "repetition_penalty"> = {
@@ -4975,7 +5376,9 @@ export class REPL {
               this.agent.setSamplingParam(paramKey, num);
               this.config.mainLLM[paramKey] = num;
               saveConfig(this.config);
-              console.log(chalk.green(`  ${args[0]} を ${chalk.cyan(String(num))} に設定しました (次のLLM呼び出しから反映)`));
+              console.log(
+                chalk.green(`  ${args[0]} を ${chalk.cyan(String(num))} に設定しました (次のLLM呼び出しから反映)`),
+              );
             }
           }
         } else if (args[0] === "host" || args[0] === "ip") {
@@ -5001,7 +5404,18 @@ export class REPL {
         } else if (args[0] === "provider") {
           const newProvider = args[1]?.trim();
           const localProviders: ProviderType[] = ["ollama", "lmstudio", "llamacpp", "vllm"];
-          const cloudProviders = ["vertex-ai", "azure-openai", "azure-gpt", "azure-claude", "azure-foundry", "azure-anthropic", "anthropic", "claude-cli", "claude-agent-sdk", "gemini"];
+          const cloudProviders = [
+            "vertex-ai",
+            "azure-openai",
+            "azure-gpt",
+            "azure-claude",
+            "azure-foundry",
+            "azure-anthropic",
+            "anthropic",
+            "claude-cli",
+            "claude-agent-sdk",
+            "gemini",
+          ];
           const validProviders = [...localProviders, ...cloudProviders];
           if (!newProvider) {
             console.log(chalk.dim(`  現在のプロバイダー: ${this.config.mainLLM.providerType}`));
@@ -5009,13 +5423,19 @@ export class REPL {
             console.log(chalk.dim(`         /model setup azure-foundry        (クラウド系は対話セットアップ)`));
             console.log(chalk.dim(`  ローカル: ${localProviders.join(", ")}`));
             console.log(chalk.dim(`  クラウド: ${cloudProviders.join(", ")}`));
-            console.log(chalk.dim(`  デフォルトポート: ${localProviders.map((p) => `${p}=${DEFAULT_PORTS[p]}`).join(", ")}`));
+            console.log(
+              chalk.dim(`  デフォルトポート: ${localProviders.map((p) => `${p}=${DEFAULT_PORTS[p]}`).join(", ")}`),
+            );
           } else if (!validProviders.includes(newProvider)) {
             console.log(chalk.red(`  無効なプロバイダー: ${newProvider}`));
             console.log(chalk.dim(`  選択肢: ${validProviders.join(", ")}`));
           } else if (cloudProviders.includes(newProvider)) {
             // クラウド系は endpoint/apiKey 等の追加情報が必要 → setup フローへ誘導
-            console.log(chalk.yellow(`  ${newProvider} はクラウド系です。endpoint/apiKey 設定が必要なので /model setup ${newProvider} を実行してください。`));
+            console.log(
+              chalk.yellow(
+                `  ${newProvider} はクラウド系です。endpoint/apiKey 設定が必要なので /model setup ${newProvider} を実行してください。`,
+              ),
+            );
           } else {
             const oldProvider = this.config.mainLLM.providerType;
             this.config.mainLLM.providerType = newProvider as ProviderType;
@@ -5031,12 +5451,18 @@ export class REPL {
             this.config.mainLLM.projectId = undefined;
             this.config.mainLLM.region = undefined;
             saveConfig(this.config);
-            console.log(chalk.dim(`  メインLLMプロバイダー: ${chalk.yellow(oldProvider)} → ${chalk.cyan(newProvider)}`));
+            console.log(
+              chalk.dim(`  メインLLMプロバイダー: ${chalk.yellow(oldProvider)} → ${chalk.cyan(newProvider)}`),
+            );
             if (newUrl) {
               console.log(chalk.dim(`  URL: ${chalk.cyan(newUrl)}`));
             } else {
               const port = DEFAULT_PORTS[newProvider as ProviderType];
-              console.log(chalk.dim(`  URL: ${this.config.mainLLM.baseUrl ?? "(未設定)"} (必要なら /model host / /model port で更新。${newProvider}のデフォルトポートは ${port})`));
+              console.log(
+                chalk.dim(
+                  `  URL: ${this.config.mainLLM.baseUrl ?? "(未設定)"} (必要なら /model host / /model port で更新。${newProvider}のデフォルトポートは ${port})`,
+                ),
+              );
             }
             await this.applyMainLLMEndpoint();
             console.log(chalk.green(`  実行時に反映しました。`));
@@ -5088,7 +5514,9 @@ export class REPL {
               await this.setupClaudeLLM("main", targetProvider);
             } catch (e) {
               if (!(e instanceof Error && e.message.includes("User force closed"))) {
-                console.log(chalk.red(`  Claude セットアップ中にエラー: ${e instanceof Error ? e.message : String(e)}`));
+                console.log(
+                  chalk.red(`  Claude セットアップ中にエラー: ${e instanceof Error ? e.message : String(e)}`),
+                );
               } else {
                 console.log(chalk.yellow("  セットアップを中止しました。"));
               }
@@ -5098,7 +5526,9 @@ export class REPL {
               await this.setupGeminiLLM("main");
             } catch (e) {
               if (!(e instanceof Error && e.message.includes("User force closed"))) {
-                console.log(chalk.red(`  Gemini セットアップ中にエラー: ${e instanceof Error ? e.message : String(e)}`));
+                console.log(
+                  chalk.red(`  Gemini セットアップ中にエラー: ${e instanceof Error ? e.message : String(e)}`),
+                );
               } else {
                 console.log(chalk.yellow("  セットアップを中止しました。"));
               }
@@ -5106,10 +5536,22 @@ export class REPL {
           } else {
             console.log(chalk.red(`  対話セットアップ未対応のプロバイダー: ${targetProvider}`));
             console.log(chalk.dim("  使い方:"));
-            console.log(chalk.dim("    /model setup                  ローカル系LLM (ollama/lmstudio/llamacpp/vllm) ウィザード"));
-            console.log(chalk.dim("    /model setup anthropic        Anthropic API (Claude direct, ANTHROPIC_API_KEY)"));
-            console.log(chalk.dim("    /model setup claude-cli       Claude Code CLI (claude -p、 認証は claude login、 tool calling 不可)"));
-            console.log(chalk.dim("    /model setup claude-agent-sdk Claude Agent SDK (in-process MCP、 認証は claude login、 tool calling 対応)"));
+            console.log(
+              chalk.dim("    /model setup                  ローカル系LLM (ollama/lmstudio/llamacpp/vllm) ウィザード"),
+            );
+            console.log(
+              chalk.dim("    /model setup anthropic        Anthropic API (Claude direct, ANTHROPIC_API_KEY)"),
+            );
+            console.log(
+              chalk.dim(
+                "    /model setup claude-cli       Claude Code CLI (claude -p、 認証は claude login、 tool calling 不可)",
+              ),
+            );
+            console.log(
+              chalk.dim(
+                "    /model setup claude-agent-sdk Claude Agent SDK (in-process MCP、 認証は claude login、 tool calling 対応)",
+              ),
+            );
             console.log(chalk.dim("    /model setup gemini           Google AI Studio (Gemini、 GEMINI_API_KEY)"));
             console.log(chalk.dim("    /model setup azure-foundry    Azure AI Foundry (Kimi/Mistral等)"));
             console.log(chalk.dim("    /model setup azure-anthropic  Azure Claude — Anthropic Messages API"));
@@ -5130,9 +5572,7 @@ export class REPL {
             subAgentMgr?.setProvider(this.agent.getProvider(), newModel);
             this.refreshLLMProfiles();
             console.log(
-              chalk.dim(
-                `  モデルを ${chalk.yellow(oldModel)} から ${chalk.cyan(newModel)} に切り替えました`,
-              ),
+              chalk.dim(`  モデルを ${chalk.yellow(oldModel)} から ${chalk.cyan(newModel)} に切り替えました`),
             );
           }
         }
@@ -5172,7 +5612,9 @@ export class REPL {
         }
         if (this.agent.getMode() === "goal-seek") {
           const existing = getGoalSlot();
-          console.log(chalk.yellow(`  既に Goal Seek mode 中です (goal: ${existing?.statement.slice(0, 60) ?? "?"}...)`));
+          console.log(
+            chalk.yellow(`  既に Goal Seek mode 中です (goal: ${existing?.statement.slice(0, 60) ?? "?"}...)`),
+          );
           console.log(chalk.dim(`  別の goal に切り替えるには先に /exit-goal-seek を実行してください。`));
           break;
         }
@@ -5182,14 +5624,12 @@ export class REPL {
           // Step 1: LLM に acceptance criteria を抽出させる
           // (B-1 で goal-promotion.ts の共通関数に集約 — docs/goal-promotion-design.md §3)
           console.log(chalk.cyan("\n  ── /goal-seek: acceptance criteria を抽出中 ──"));
-          const criteria = await extractAcceptanceCriteria(
-            this.agent.getProvider(),
-            this.agent.getModel(),
-            goalText,
-          );
+          const criteria = await extractAcceptanceCriteria(this.agent.getProvider(), this.agent.getModel(), goalText);
 
           if (criteria.length === 0) {
-            console.log(chalk.yellow(`  criteria が抽出できませんでした。 goal 文を再確認するか、 LLM 設定を確認してください。`));
+            console.log(
+              chalk.yellow(`  criteria が抽出できませんでした。 goal 文を再確認するか、 LLM 設定を確認してください。`),
+            );
             break;
           }
 
@@ -5211,7 +5651,9 @@ export class REPL {
           }
 
           if (!proceed) {
-            console.log(chalk.yellow("  キャンセルしました。 criteria を修正したい場合は /goal-seek を再実行してください。\n"));
+            console.log(
+              chalk.yellow("  キャンセルしました。 criteria を修正したい場合は /goal-seek を再実行してください。\n"),
+            );
             break;
           }
 
@@ -5248,11 +5690,14 @@ export class REPL {
       case "/second": {
         // 2026-05-27: /model second ... に統合 (docs/model-registry.md §4.1)。
         // /second 系は alias として動作するが deprecation を 1 行表示する。
-        console.log(chalk.dim("  ℹ /second は /model second ... に統合されました (alias として動作中)。 詳細: docs/model-registry.md"));
+        console.log(
+          chalk.dim(
+            "  ℹ /second は /model second ... に統合されました (alias として動作中)。 詳細: docs/model-registry.md",
+          ),
+        );
         await this.handleSecondLLMCommand(args);
         break;
       }
-
 
       case "/swap":
       case "/switch": {
@@ -5264,7 +5709,9 @@ export class REPL {
         const cur = this.config.mainLLM;
         const sec = this.config.secondLLM.endpoint;
         if (!sec.model || !sec.providerType) {
-          console.log(chalk.red("\n  セカンドLLM のモデル/プロバイダーが未設定です。先に /second model 等で設定してください。\n"));
+          console.log(
+            chalk.red("\n  セカンドLLM のモデル/プロバイダーが未設定です。先に /second model 等で設定してください。\n"),
+          );
           break;
         }
         if (!cur.model || !cur.providerType) {
@@ -5310,7 +5757,9 @@ export class REPL {
         await this.applySecondLLMEndpoint();
         const isAvail = this.secondLLMManager?.isAvailable() ?? false;
         if (!isAvail && this.config.secondLLM.enabled) {
-          console.log(chalk.yellow("  ※ セカンドLLM の接続テストに失敗しています。/second status で確認してください。"));
+          console.log(
+            chalk.yellow("  ※ セカンドLLM の接続テストに失敗しています。/second status で確認してください。"),
+          );
         }
         console.log();
         break;
@@ -5326,7 +5775,11 @@ export class REPL {
       case "/profiles":
       case "/profile": {
         // 2026-05-27: /models へ統合された。 alias として動作するが deprecation を表示。
-        console.log(chalk.dim("  ℹ /profiles は /models に名称変更されました (alias として動作中)。 詳細: docs/model-registry.md"));
+        console.log(
+          chalk.dim(
+            "  ℹ /profiles は /models に名称変更されました (alias として動作中)。 詳細: docs/model-registry.md",
+          ),
+        );
         await this.handleProfilesCommand(args);
         break;
       }
@@ -5355,14 +5808,22 @@ export class REPL {
           console.log(chalk.dim(`  通知 (Webhook): ${dEnabled ? chalk.green("オン") : chalk.yellow("オフ")}`));
           console.log(chalk.dim(`  Webhook URL:    ${dUrl}`));
           console.log(chalk.dim(`  生成画像の添付: ${dAttach ? chalk.green("オン") : chalk.yellow("オフ")}`));
-          console.log(chalk.dim(`  Bot 接続:       ${dListening ? chalk.green(`接続中${dBotName ? ` (${dBotName})` : ""}`) : chalk.yellow("停止中")}`));
+          console.log(
+            chalk.dim(
+              `  Bot 接続:       ${dListening ? chalk.green(`接続中${dBotName ? ` (${dBotName})` : ""}`) : chalk.yellow("停止中")}`,
+            ),
+          );
           console.log(chalk.dim(`  Application ID: ${dAppId}`));
           console.log(chalk.dim(`  Bot Token:      ${dToken}`));
           console.log();
         } else if (subCmd === "enable") {
           if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
           if (!this.config.discord.webhookUrl) {
-            console.log(chalk.yellow("  注意: 通知の送り先 (Webhook URL) が未設定です。/integrations の Discord 連携メニューから設定してください。"));
+            console.log(
+              chalk.yellow(
+                "  注意: 通知の送り先 (Webhook URL) が未設定です。/integrations の Discord 連携メニューから設定してください。",
+              ),
+            );
           }
           this.config.discord.enabled = true;
           saveConfig(this.config);
@@ -5392,12 +5853,23 @@ export class REPL {
         } else if (subCmd === "test") {
           const webhookUrl = this.config.discord?.webhookUrl ?? "";
           if (!webhookUrl) {
-            console.log(chalk.yellow("  通知の送り先 (Webhook URL) が未設定です。/integrations の Discord 連携メニューから設定してください。"));
+            console.log(
+              chalk.yellow(
+                "  通知の送り先 (Webhook URL) が未設定です。/integrations の Discord 連携メニューから設定してください。",
+              ),
+            );
           } else if (!isValidDiscordWebhookUrl(webhookUrl)) {
-            console.log(chalk.red("  ❌ 設定されている URL が無効です。/integrations の Discord 連携メニューから正しい Webhook URL を設定してください。"));
+            console.log(
+              chalk.red(
+                "  ❌ 設定されている URL が無効です。/integrations の Discord 連携メニューから正しい Webhook URL を設定してください。",
+              ),
+            );
           } else {
             console.log(chalk.dim("  Discord にテストメッセージを送信中..."));
-            const result = await sendDiscordNotification(webhookUrl, "🤖 lllmAgents テスト通知\nDiscord通知が正常に動作しています！");
+            const result = await sendDiscordNotification(
+              webhookUrl,
+              "🤖 lllmAgents テスト通知\nDiscord通知が正常に動作しています！",
+            );
             if (result.success) {
               console.log(chalk.green("  ✅ テストメッセージを送信しました。Discordを確認してください。"));
             } else {
@@ -5418,7 +5890,9 @@ export class REPL {
           }
         } else if (subCmd === "public-key") {
           // Gateway 方式 (docs/discord-gateway-design.md) への移行で署名検証が不要になった
-          console.log(chalk.dim("  Public Key の設定は不要になりました (受信方式の変更により署名検証を使わなくなったため)。"));
+          console.log(
+            chalk.dim("  Public Key の設定は不要になりました (受信方式の変更により署名検証を使わなくなったため)。"),
+          );
           console.log(chalk.dim("  必要な設定は Application ID と Bot Token の 2 つだけです。"));
         } else if (subCmd === "bot-token") {
           // Bot Token 設定 (コマンド登録・follow-up 送信用)
@@ -5434,7 +5908,9 @@ export class REPL {
           }
         } else if (subCmd === "port") {
           // Gateway 方式への移行で受信ポートが不要になった
-          console.log(chalk.dim("  ポート設定は不要になりました (Bot がこちらから Discord に接続する方式に変わったため)。"));
+          console.log(
+            chalk.dim("  ポート設定は不要になりました (Bot がこちらから Discord に接続する方式に変わったため)。"),
+          );
         } else if (subCmd === "register") {
           // スラッシュコマンドを Discord に登録
           const guildId = args[1]; // 省略時はグローバル登録
@@ -5455,7 +5931,9 @@ export class REPL {
               console.log(chalk.cyan(`    ${inviteUrl}`));
               if (!guildId) {
                 console.log(chalk.dim("  全サーバー向けの登録は、反映まで最大 1 時間かかります。"));
-                console.log(chalk.dim("  すぐ試したい場合は、もう一度登録を実行してサーバーIDを指定してください (即時反映)。"));
+                console.log(
+                  chalk.dim("  すぐ試したい場合は、もう一度登録を実行してサーバーIDを指定してください (即時反映)。"),
+                );
               }
             } else {
               console.log(chalk.red(`  ❌ 登録失敗: ${result.error}`));
@@ -5488,9 +5966,10 @@ export class REPL {
             if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
             this.config.discord.listenEnabled = on;
             saveConfig(this.config);
-            console.log(on
-              ? chalk.green("  ✅ 次回起動時から自動で受信を開始します。")
-              : chalk.yellow("  受信の自動開始をオフにしました。"),
+            console.log(
+              on
+                ? chalk.green("  ✅ 次回起動時から自動で受信を開始します。")
+                : chalk.yellow("  受信の自動開始をオフにしました。"),
             );
           } else {
             console.log(chalk.yellow("  使い方: /discord listen [start|stop|auto-start [off]]"));
@@ -5513,7 +5992,9 @@ export class REPL {
             } else if (subCmd === "user-add") {
               if (!/^\d{15,21}$/.test(id)) {
                 // 失敗の典型: ユーザー名 (osia4782 等) を入れてしまう。 ID は数値 snowflake。
-                console.log(chalk.yellow(`  ⚠ "${id}" は Discord ユーザー ID の形式 (15〜21桁の数字) ではありません。`));
+                console.log(
+                  chalk.yellow(`  ⚠ "${id}" は Discord ユーザー ID の形式 (15〜21桁の数字) ではありません。`),
+                );
                 console.log(chalk.dim("    ユーザー名ではなく数値の ID を指定してください (一致せず利用できません)。"));
                 console.log(chalk.dim("    ID 入力が面倒な場合は、相手に Discord から /ask を一度実行してもらい、"));
                 console.log(chalk.dim("    待機リスト (/discord waitlist) から承認する方法が確実です。"));
@@ -5542,10 +6023,12 @@ export class REPL {
             } else {
               console.log(chalk.bold("  待機リスト (利用申請):"));
               for (const u of pending) {
-                console.log(chalk.dim(
-                  `    - ${u.username ?? "(名前不明)"} (ID: ${u.id})  ` +
-                  `試行 ${u.attempts} 回 / 最終 ${u.lastSeen.replace("T", " ").slice(0, 16)}`,
-                ));
+                console.log(
+                  chalk.dim(
+                    `    - ${u.username ?? "(名前不明)"} (ID: ${u.id})  ` +
+                      `試行 ${u.attempts} 回 / 最終 ${u.lastSeen.replace("T", " ").slice(0, 16)}`,
+                  ),
+                );
               }
               console.log(chalk.dim("  承認: /discord approve <ID>  却下: /discord reject <ID>"));
             }
@@ -5572,7 +6055,9 @@ export class REPL {
           const action = args[1];
           if (!action) {
             const on = this.config.discord.attachGeneratedImages !== false;
-            console.log(chalk.dim(`  生成画像の自動添付: ${on ? chalk.green("オン") : chalk.yellow("オフ")} (既定: オン)`));
+            console.log(
+              chalk.dim(`  生成画像の自動添付: ${on ? chalk.green("オン") : chalk.yellow("オフ")} (既定: オン)`),
+            );
             console.log(chalk.dim("  切替: /discord images on | off"));
           } else if (action === "on") {
             this.config.discord.attachGeneratedImages = true;
@@ -5616,7 +6101,11 @@ export class REPL {
         } else if (subCmd === "enable") {
           if (!this.config.slack) this.config.slack = { enabled: false, webhookUrl: "" };
           if (!this.config.slack.webhookUrl) {
-            console.log(chalk.yellow("  注意: 通知の送り先 (Webhook URL) が未設定です。/integrations の Slack 連携メニューから設定してください。"));
+            console.log(
+              chalk.yellow(
+                "  注意: 通知の送り先 (Webhook URL) が未設定です。/integrations の Slack 連携メニューから設定してください。",
+              ),
+            );
           }
           this.config.slack.enabled = true;
           saveConfig(this.config);
@@ -5646,12 +6135,23 @@ export class REPL {
         } else if (subCmd === "test") {
           const webhookUrl = this.config.slack?.webhookUrl ?? "";
           if (!webhookUrl) {
-            console.log(chalk.yellow("  通知の送り先 (Webhook URL) が未設定です。/integrations の Slack 連携メニューから設定してください。"));
+            console.log(
+              chalk.yellow(
+                "  通知の送り先 (Webhook URL) が未設定です。/integrations の Slack 連携メニューから設定してください。",
+              ),
+            );
           } else if (!isValidSlackWebhookUrl(webhookUrl)) {
-            console.log(chalk.red("  設定されている URL が無効です。/integrations の Slack 連携メニューから正しい Webhook URL を設定してください。"));
+            console.log(
+              chalk.red(
+                "  設定されている URL が無効です。/integrations の Slack 連携メニューから正しい Webhook URL を設定してください。",
+              ),
+            );
           } else {
             console.log(chalk.dim("  Slack にテストメッセージを送信中..."));
-            const result = await sendSlackNotification(webhookUrl, "lllmAgents テスト通知\nSlack通知が正常に動作しています！");
+            const result = await sendSlackNotification(
+              webhookUrl,
+              "lllmAgents テスト通知\nSlack通知が正常に動作しています！",
+            );
             if (result.success) {
               console.log(chalk.green("  テストメッセージを送信しました。Slackを確認してください。"));
             } else {
@@ -5728,7 +6228,10 @@ export class REPL {
         } else if (subCmd === "searxng") {
           const url = args[1] ?? "http://localhost:8888";
           if (!this.config.search) this.config.search = { provider: "searxng", searxngUrl: url };
-          else { this.config.search.provider = "searxng"; this.config.search.searxngUrl = url; }
+          else {
+            this.config.search.provider = "searxng";
+            this.config.search.searxngUrl = url;
+          }
           saveConfig(this.config);
           console.log(chalk.green(`  検索プロバイダーを SearXNG に変更しました (${url})`));
           console.log(chalk.dim("  反映には再起動が必要です。"));
@@ -5747,7 +6250,12 @@ export class REPL {
             const result = await tool.execute({ query: "test", max_results: 3 });
             if (result.success) {
               console.log(chalk.green("  テスト成功:"));
-              console.log(result.output.split("\n").map((l: string) => `    ${l}`).join("\n"));
+              console.log(
+                result.output
+                  .split("\n")
+                  .map((l: string) => `    ${l}`)
+                  .join("\n"),
+              );
             } else {
               console.log(chalk.red(`  テスト失敗: ${result.error}`));
             }
@@ -5817,7 +6325,8 @@ export class REPL {
               console.log(chalk.dim("    (なし)"));
             } else {
               for (const r of rules[action]) {
-                const icon = action === "deny" ? chalk.red("✗") : action === "allow" ? chalk.green("✓") : chalk.yellow("?");
+                const icon =
+                  action === "deny" ? chalk.red("✗") : action === "allow" ? chalk.green("✓") : chalk.yellow("?");
                 console.log(`    ${icon} ${r}`);
               }
             }
@@ -5879,7 +6388,9 @@ export class REPL {
           console.log(chalk.green(`  ✅ ${toolName} を requireApprovalTools に追加しました`));
         } else if (subCmd === "require-remove" && toolName) {
           permissions.removeRequireApproval(toolName);
-          this.config.security.requireApprovalTools = this.config.security.requireApprovalTools.filter((t) => t !== toolName);
+          this.config.security.requireApprovalTools = this.config.security.requireApprovalTools.filter(
+            (t) => t !== toolName,
+          );
           saveConfig(this.config);
           console.log(chalk.green(`  ✅ ${toolName} を requireApprovalTools から削除しました`));
         } else if (subCmd === "discord-add" && toolName) {
@@ -5895,7 +6406,9 @@ export class REPL {
         } else if (subCmd === "discord-remove" && toolName) {
           permissions.removeDiscordAutoApprove(toolName);
           if (this.config.security.discordAutoApproveTools) {
-            this.config.security.discordAutoApproveTools = this.config.security.discordAutoApproveTools.filter((t) => t !== toolName);
+            this.config.security.discordAutoApproveTools = this.config.security.discordAutoApproveTools.filter(
+              (t) => t !== toolName,
+            );
           }
           saveConfig(this.config);
           console.log(chalk.green(`  ✅ ${toolName} を discordAutoApproveTools から削除しました`));
@@ -5962,7 +6475,9 @@ export class REPL {
                 };
                 console.log(`    ノート数: ${chalk.yellow(String(countMd(basePath)))}`);
               }
-            } catch { /* ignore */ }
+            } catch {
+              /* ignore */
+            }
           }
         } else if (subCmd === "vault") {
           const vaultPath = args.slice(1).join(" ").trim();
@@ -6000,13 +6515,19 @@ export class REPL {
           try {
             const { getKnowledgeBasePath } = await import("../tools/definitions/knowledge-save.js");
             const basePath = getKnowledgeBasePath();
-            if (!basePath) { console.log(chalk.yellow("  ナレッジディレクトリがありません。")); break; }
+            if (!basePath) {
+              console.log(chalk.yellow("  ナレッジディレクトリがありません。"));
+              break;
+            }
             const tagCounts = new Map<string, number>();
             const walkAndCountTags = (dir: string) => {
               if (!fs.existsSync(dir)) return;
               for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
                 const fp = path.join(dir, e.name);
-                if (e.isDirectory()) { walkAndCountTags(fp); continue; }
+                if (e.isDirectory()) {
+                  walkAndCountTags(fp);
+                  continue;
+                }
                 if (!e.name.endsWith(".md")) continue;
                 const head = fs.readFileSync(fp, "utf-8").slice(0, 1500);
                 const tagMatch = head.match(/tags:\n((?:\s+-\s+.+\n?)+)/);
@@ -6033,18 +6554,27 @@ export class REPL {
           }
         } else if (subCmd === "recent") {
           const obs = this.config.obsidian;
-          if (!obs?.vaultPath) { console.log(chalk.yellow("  Vault が未設定です。")); break; }
+          if (!obs?.vaultPath) {
+            console.log(chalk.yellow("  Vault が未設定です。"));
+            break;
+          }
           const limit = parseInt(args[1] ?? "10", 10);
           try {
             const { getKnowledgeBasePath } = await import("../tools/definitions/knowledge-save.js");
             const basePath = getKnowledgeBasePath();
-            if (!basePath) { console.log(chalk.dim("  ナレッジノートはまだありません。")); break; }
+            if (!basePath) {
+              console.log(chalk.dim("  ナレッジノートはまだありません。"));
+              break;
+            }
             const files: { path: string; mtime: number }[] = [];
             const walk = (dir: string) => {
               if (!fs.existsSync(dir)) return;
               for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
                 const fp = path.join(dir, e.name);
-                if (e.isDirectory()) { walk(fp); continue; }
+                if (e.isDirectory()) {
+                  walk(fp);
+                  continue;
+                }
                 if (e.name.endsWith(".md")) files.push({ path: fp, mtime: fs.statSync(fp).mtimeMs });
               }
             };
@@ -6068,7 +6598,10 @@ export class REPL {
           }
         } else if (subCmd === "search") {
           const query = args.slice(1).join(" ").trim();
-          if (!query) { console.log(chalk.yellow("  使い方: /knowledge search <キーワード>")); break; }
+          if (!query) {
+            console.log(chalk.yellow("  使い方: /knowledge search <キーワード>"));
+            break;
+          }
           try {
             const { knowledgeSearchTool } = await import("../tools/definitions/knowledge-search.js");
             const result = await knowledgeSearchTool.execute({ query, limit: 10 });
@@ -6082,7 +6615,10 @@ export class REPL {
           }
         } else if (subCmd === "open") {
           const obs = this.config.obsidian;
-          if (!obs?.vaultPath) { console.log(chalk.yellow("  Vault が未設定です。")); break; }
+          if (!obs?.vaultPath) {
+            console.log(chalk.yellow("  Vault が未設定です。"));
+            break;
+          }
           const knPath = path.join(obs.vaultPath, obs.knowledgeDir ?? "Knowledge");
           try {
             const { exec } = await import("node:child_process");
@@ -6205,7 +6741,9 @@ export class REPL {
             }
             const chatLogger = this.agent.getChatLogger();
             if (chatLogger) {
-              console.log(`    現在:   ${chalk.dim(chatLogger.getCurrentFilePath())} (Part ${chatLogger.getPartNumber()})`);
+              console.log(
+                `    現在:   ${chalk.dim(chatLogger.getCurrentFilePath())} (Part ${chatLogger.getPartNumber()})`,
+              );
             }
           }
         } else if (subArg === "vault") {
@@ -6333,11 +6871,7 @@ export class REPL {
           });
           console.log(diff || "  変更なし");
         } catch {
-          console.log(
-            chalk.yellow(
-              "  gitリポジトリではないか、git diffの実行に失敗しました。",
-            ),
-          );
+          console.log(chalk.yellow("  gitリポジトリではないか、git diffの実行に失敗しました。"));
         }
         break;
       }
@@ -6367,7 +6901,7 @@ export class REPL {
         const m = this.agent.getMetrics();
         const cap = this.agent.getCapability();
         const tok = globalTokenTracker.getSessionTotal();
-        const flag = (b: boolean): string => b ? chalk.yellow("●") : chalk.dim("○");
+        const flag = (b: boolean): string => (b ? chalk.yellow("●") : chalk.dim("○"));
         const ctxK = cap.contextWindow >= 1000 ? `${Math.round(cap.contextWindow / 1000)}K` : `${cap.contextWindow}`;
 
         console.log(chalk.bold("\n  === Session Status ==="));
@@ -6388,7 +6922,9 @@ export class REPL {
           const sec = this.config.secondLLM.endpoint;
           const secLoc = sec.baseUrl ?? sec.endpoint ?? "(クラウド)";
           const secState = this.config.secondLLM.enabled
-            ? (this.secondLLMManager?.isAvailable() ? chalk.green("有効") : chalk.yellow("有効 (接続失敗)"))
+            ? this.secondLLMManager?.isAvailable()
+              ? chalk.green("有効")
+              : chalk.yellow("有効 (接続失敗)")
             : chalk.red("無効");
           console.log(chalk.dim(`  Second:  ${sec.providerType}:${sec.model} @ ${secLoc}  [${secState}]`));
         } else {
@@ -6410,18 +6946,38 @@ export class REPL {
 
         // ─── Capability (main) ───
         console.log(chalk.dim("\n  ── Capability (main) ──"));
-        console.log(chalk.dim(`  tier=${cap.tier}  promptStyle=${cap.promptStyle}  toolCalling=${cap.supportsToolCalling}  parallel=${cap.supportsParallelTools}`));
-        console.log(chalk.dim(`  maxIterations=${cap.maxIterations}  compress@${Math.round(cap.compressionThreshold * 100)}%  truncate>${Math.round(cap.toolResultTruncateBytes / 1024)}KB  keepRecent=${cap.keepRecentMessages}`));
+        console.log(
+          chalk.dim(
+            `  tier=${cap.tier}  promptStyle=${cap.promptStyle}  toolCalling=${cap.supportsToolCalling}  parallel=${cap.supportsParallelTools}`,
+          ),
+        );
+        console.log(
+          chalk.dim(
+            `  maxIterations=${cap.maxIterations}  compress@${Math.round(cap.compressionThreshold * 100)}%  truncate>${Math.round(cap.toolResultTruncateBytes / 1024)}KB  keepRecent=${cap.keepRecentMessages}`,
+          ),
+        );
         console.log(chalk.dim(`  判定根拠: ${cap.reason}`));
 
         // ─── Metrics ───
         console.log(chalk.dim("\n  ── Metrics (this session) ──"));
-        console.log(chalk.dim(`  iteration=${m.iteration} / softCap=${m.softCap} / hardCap=${m.hardCap}  register=${m.register}  mode=${m.mode === "goal-seek" ? chalk.cyan(m.mode) : m.mode}`));
-        console.log(chalk.dim(`  warnings:  softCap=${flag(m.softCapWarned)}  bash=${flag(m.bashWarned)} (${Math.round(m.bashCumulativeMs / 1000)}s)  plan/todo=${flag(m.planTodoWarned)}  stuck-loop=${m.recentFailures}/10`));
+        console.log(
+          chalk.dim(
+            `  iteration=${m.iteration} / softCap=${m.softCap} / hardCap=${m.hardCap}  register=${m.register}  mode=${m.mode === "goal-seek" ? chalk.cyan(m.mode) : m.mode}`,
+          ),
+        );
+        console.log(
+          chalk.dim(
+            `  warnings:  softCap=${flag(m.softCapWarned)}  bash=${flag(m.bashWarned)} (${Math.round(m.bashCumulativeMs / 1000)}s)  plan/todo=${flag(m.planTodoWarned)}  stuck-loop=${m.recentFailures}/10`,
+          ),
+        );
 
         // ─── Cost ───
         console.log(chalk.dim("\n  ── Cost ──"));
-        console.log(chalk.dim(`  Requests: ${tok.recordCount}  /  tokens in=${tok.totalInputTokens.toLocaleString()}  out=${tok.totalOutputTokens.toLocaleString()}  /  estimated: ${fmtMoney(tok.totalCostUsd, this.config.jpyPerUsd)}`));
+        console.log(
+          chalk.dim(
+            `  Requests: ${tok.recordCount}  /  tokens in=${tok.totalInputTokens.toLocaleString()}  out=${tok.totalOutputTokens.toLocaleString()}  /  estimated: ${fmtMoney(tok.totalCostUsd, this.config.jpyPerUsd)}`,
+          ),
+        );
 
         // ─── Tasks ───
         if (todoSummary.includes("pending") || todoSummary.includes("in_progress")) {
@@ -6448,7 +7004,10 @@ export class REPL {
         let period: PeriodSpec = { type: "window" };
         for (const tok of lower) {
           const p = resolvePeriod(tok);
-          if (p) { period = p; break; }
+          if (p) {
+            period = p;
+            break;
+          }
         }
         const sessionRecords = globalTokenTracker.getRecords();
 
@@ -6492,10 +7051,12 @@ export class REPL {
         if (sub === "reset") {
           const ts = resetWindow();
           globalTokenTracker.clearSession();
-          console.log(chalk.green(
-            `\n  計測窓をリセットしました (${new Date(ts).toLocaleString()})。`,
-          ));
-          console.log(chalk.dim("  履歴 jsonl (~/.localllm/usage/) は保持されています。 過去は /cost all や /cost yesterday, /cost 2026-05 等で参照可。\n"));
+          console.log(chalk.green(`\n  計測窓をリセットしました (${new Date(ts).toLocaleString()})。`));
+          console.log(
+            chalk.dim(
+              "  履歴 jsonl (~/.localllm/usage/) は保持されています。 過去は /cost all や /cost yesterday, /cost 2026-05 等で参照可。\n",
+            ),
+          );
           break;
         }
 
@@ -6619,28 +7180,22 @@ export class REPL {
           break;
         }
 
-        const loopId = this.loopManager.start(
-          loopPrompt,
-          intervalMs,
-          intervalStr,
-          async (p: string) => {
-            if (this.agentBusy) {
-              console.log(
-                chalk.dim(`\n  [Loop ${loopId}] エージェント実行中のためスキップ (${new Date().toLocaleTimeString()})`),
-              );
-              return;
-            }
+        const loopId = this.loopManager.start(loopPrompt, intervalMs, intervalStr, async (p: string) => {
+          if (this.agentBusy) {
             console.log(
-              chalk.bold(`\n  [Loop ${loopId}] 実行開始 (${new Date().toLocaleTimeString()}): `) +
-                chalk.white(p),
+              chalk.dim(`\n  [Loop ${loopId}] エージェント実行中のためスキップ (${new Date().toLocaleTimeString()})`),
             );
-            if (p.startsWith("/")) {
-              await this.handleCommand(p);
-            } else {
-              await this.processInput(p);
-            }
-          },
-        );
+            return;
+          }
+          console.log(
+            chalk.bold(`\n  [Loop ${loopId}] 実行開始 (${new Date().toLocaleTimeString()}): `) + chalk.white(p),
+          );
+          if (p.startsWith("/")) {
+            await this.handleCommand(p);
+          } else {
+            await this.processInput(p);
+          }
+        });
 
         console.log(
           chalk.green(`  ✅ ループ [${loopId}] を開始しました。`) +
@@ -6687,11 +7242,13 @@ function formatSamplingHint(ep: LLMEndpoint): string {
 /** プロファイルが endpoint と「同じ接続」 を指しているか判定 */
 function profileMatchesEndpoint(profile: LLMProfile, ep: LLMEndpoint): boolean {
   const a = profile.endpoint;
-  return a.providerType === ep.providerType
-    && (a.model ?? "") === (ep.model ?? "")
-    && (a.baseUrl ?? "") === (ep.baseUrl ?? "")
-    && (a.endpoint ?? "") === (ep.endpoint ?? "")
-    && (a.deploymentName ?? "") === (ep.deploymentName ?? "");
+  return (
+    a.providerType === ep.providerType &&
+    (a.model ?? "") === (ep.model ?? "") &&
+    (a.baseUrl ?? "") === (ep.baseUrl ?? "") &&
+    (a.endpoint ?? "") === (ep.endpoint ?? "") &&
+    (a.deploymentName ?? "") === (ep.deploymentName ?? "")
+  );
 }
 
 function progressBar(pct: number): string {
@@ -6699,8 +7256,7 @@ function progressBar(pct: number): string {
   const clamped = Math.max(0, Math.min(100, pct));
   const filled = Math.round((clamped / 100) * width);
   const empty = width - filled;
-  const color =
-    pct > 80 ? chalk.red : pct > 60 ? chalk.yellow : chalk.green;
+  const color = pct > 80 ? chalk.red : pct > 60 ? chalk.yellow : chalk.green;
   const overflow = pct > 100 ? chalk.red(" ⚠ over") : "";
   return `[${color("█".repeat(filled))}${chalk.dim("░".repeat(empty))}] ${pct}%${overflow}`;
 }

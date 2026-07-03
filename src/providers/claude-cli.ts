@@ -121,12 +121,7 @@ export class ClaudeCliProvider implements LLMProvider {
     const prompt = flattenMessagesToPrompt(params.messages);
     const modelArg = resolveClaudeModelArg(params.model || this.config.model);
 
-    const args = [
-      "-p",
-      "--output-format", "stream-json",
-      "--verbose",
-      "--model", modelArg,
-    ];
+    const args = ["-p", "--output-format", "stream-json", "--verbose", "--model", modelArg];
     if (this.config.allowTools === false) {
       args.push("--disallowedTools", "*");
     }
@@ -135,7 +130,9 @@ export class ClaudeCliProvider implements LLMProvider {
     }
 
     if (process.env.LLM_DEBUG_HTTP) {
-      console.error(`[LLM_DEBUG_HTTP] spawn ${this.config.binPath ?? DEFAULT_BIN} ${args.join(" ")}  promptLen=${prompt.length}`);
+      console.error(
+        `[LLM_DEBUG_HTTP] spawn ${this.config.binPath ?? DEFAULT_BIN} ${args.join(" ")}  promptLen=${prompt.length}`,
+      );
     }
 
     let proc;
@@ -242,7 +239,11 @@ export class ClaudeCliProvider implements LLMProvider {
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       yield { type: "error", error: `claude CLI 読み取り失敗: ${err.message}` };
-      try { proc.kill("SIGTERM"); } catch { /* ignore */ }
+      try {
+        proc.kill("SIGTERM");
+      } catch {
+        /* ignore */
+      }
       return;
     }
 
@@ -308,12 +309,13 @@ interface ClaudeStreamEvent {
 function flattenMessagesToPrompt(messages: Message[]): string {
   const parts: string[] = [];
   for (const m of messages) {
-    const text = typeof m.content === "string"
-      ? m.content
-      : (m.content ?? [])
-          .filter((p) => p.type === "text")
-          .map((p) => p.text ?? "")
-          .join("");
+    const text =
+      typeof m.content === "string"
+        ? m.content
+        : (m.content ?? [])
+            .filter((p) => p.type === "text")
+            .map((p) => p.text ?? "")
+            .join("");
     if (!text) continue;
     switch (m.role) {
       case "system":
@@ -349,10 +351,15 @@ function resolveClaudeModelArg(modelInput: string): string {
 
 function mapClaudeStopReason(reason: string | undefined): string {
   switch (reason) {
-    case "end_turn": return "stop";
-    case "max_tokens": return "length";
-    case "tool_use": return "tool_calls";
-    case "stop_sequence": return "stop";
-    default: return reason ?? "stop";
+    case "end_turn":
+      return "stop";
+    case "max_tokens":
+      return "length";
+    case "tool_use":
+      return "tool_calls";
+    case "stop_sequence":
+      return "stop";
+    default:
+      return reason ?? "stop";
   }
 }

@@ -14,7 +14,8 @@ export const sandboxInfoTool: ToolHandler = {
     type: "function",
     function: {
       name: "sandbox_info",
-      description: "現在自分がアクセス可能なサンドボックス（ディレクトリ）のリストとOSレベルのサンドボックス状態を取得します。存在しないパスや許可されていないパスにアクセスしてエラーになった場合、このツールで自身が操作可能なスコープを確認してください。",
+      description:
+        "現在自分がアクセス可能なサンドボックス（ディレクトリ）のリストとOSレベルのサンドボックス状態を取得します。存在しないパスや許可されていないパスにアクセスしてエラーになった場合、このツールで自身が操作可能なスコープを確認してください。",
       parameters: {
         type: "object",
         properties: {},
@@ -23,11 +24,7 @@ export const sandboxInfoTool: ToolHandler = {
   },
   async execute(): Promise<ToolResult> {
     const config = loadConfig();
-    const dirs = [
-      process.cwd(),
-      path.join(os.homedir(), ".localllm"),
-      ...config.security.allowedDirectories,
-    ];
+    const dirs = [process.cwd(), path.join(os.homedir(), ".localllm"), ...config.security.allowedDirectories];
 
     // OS-level サンドボックス状態を取得（bash 実行・確認自動許可と同一の単一ソースを参照）
     const sbConfig = config.security.processSandbox ?? { enabled: false, level: "none" };
@@ -66,7 +63,7 @@ export const sandboxInfoTool: ToolHandler = {
       `- ネットワーク: ${netNote}\n` +
       `- プラットフォーム: ${avail.platform}\n` +
       `- ツール状態: ${toolStatus}\n` +
-      ((avail.effectiveLevel === "fs" || avail.effectiveLevel === "full")
+      (avail.effectiveLevel === "fs" || avail.effectiveLevel === "full"
         ? `- 機密読取ブロック: ~/.ssh, ~/.aws, ~/.gnupg, ~/.kube, ~/.docker, ~/.config/gcloud は読み取り不可\n`
         : "") +
       `- bash 確認自動許可: ${isBashNetworkContained() ? "有効（封じ込め下。 破壊的操作・allowlist 外通信は確認）" : "無効"}\n` +

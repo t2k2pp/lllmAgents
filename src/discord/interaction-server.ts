@@ -102,7 +102,7 @@ export class DiscordInteractionServer implements InteractionBridge {
     if (!this.config.allowedUserIds || this.config.allowedUserIds.length === 0) {
       console.warn(
         "  [警告] discord.allowedUserIds が未設定です。 fail-closed のため誰のメッセージ・コマンドも受け付けません。\n" +
-        "         config の discord.allowedUserIds に許可するユーザー ID を設定してください。",
+          "         config の discord.allowedUserIds に許可するユーザー ID を設定してください。",
       );
     }
 
@@ -215,8 +215,9 @@ export class DiscordInteractionServer implements InteractionBridge {
       // 新規申請は REPL 操作者にすぐ気付いてもらう。
       console.log(
         `\n  [Discord] 🔔 利用申請: ${username ?? "(名前不明)"} (ID: ${userId})\n` +
-        "           承認するには /integrations の Discord 連携メニュー → 待機リスト、" +
-        "または /discord approve " + userId,
+          "           承認するには /integrations の Discord 連携メニュー → 待機リスト、" +
+          "または /discord approve " +
+          userId,
       );
     }
     try {
@@ -257,7 +258,7 @@ export class DiscordInteractionServer implements InteractionBridge {
     // その後非同期で処理して follow-up を送信する
     await this.respondInteraction(interaction, { type: 5 }); // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
 
-    const prompt = interaction.data?.options?.[0]?.value as string ?? "";
+    const prompt = (interaction.data?.options?.[0]?.value as string) ?? "";
     const token = interaction.token as string;
     const channelId = (interaction.channel_id as string) ?? "unknown";
     const username = interaction.member?.user?.username ?? interaction.user?.username ?? "Unknown";
@@ -302,11 +303,11 @@ export class DiscordInteractionServer implements InteractionBridge {
     this.sendFollowUp(token, "🤖 受け付けました。処理してこのチャンネルに回答します。").catch(() => {});
 
     // 受信順グローバル FIFO キューに積む (docs/room-model-design.md §11)。 拒否せず並ばせる。
-    const { position, result } = this.roomQueue.enqueue(() =>
-      this.processPrompt(prompt, token, userId, channelId),
-    );
+    const { position, result } = this.roomQueue.enqueue(() => this.processPrompt(prompt, token, userId, channelId));
     if (position > 0) {
-      this.postChannelMessage(channelId, `⏳ キューに追加しました（前に ${position} 件）。順番に処理します。`).catch(() => {});
+      this.postChannelMessage(channelId, `⏳ キューに追加しました（前に ${position} 件）。順番に処理します。`).catch(
+        () => {},
+      );
     }
     result.catch((e) => {
       logger.error("Discord prompt processing error:", e);
@@ -322,8 +323,7 @@ export class DiscordInteractionServer implements InteractionBridge {
       completeEvent = e;
     });
     // A-4: 進捗の中間報告。 deferred 応答 (@original) を編集し続け、 完了時に最終応答が上書きする
-    const tracker = new ChannelProgressTracker((text) => this.sendFollowUp(token, text))
-      .attach(this.agentLoop.events);
+    const tracker = new ChannelProgressTracker((text) => this.sendFollowUp(token, text)).attach(this.agentLoop.events);
     // 最終応答は assistant_text 全件の結合 (finalResponse だけだと途中ターンの本文が欠落する)
     const collector = new ChannelResponseCollector().attach(this.agentLoop.events);
     this.current = { token, userId };
@@ -350,7 +350,12 @@ export class DiscordInteractionServer implements InteractionBridge {
       // (コード全文など) は 14 通の分割スパムにせず、 ファイル添付で1つにまとめて配達する
       // (Q4: 「貼り付けて利用」。 受信側はダウンロードできる)。
       if (responseText.length > DISCORD_MAX_LENGTH) {
-        await this.postChannelFile(channelId, "response.md", responseText, "📄 応答が長いため、全文をファイルで添付します。");
+        await this.postChannelFile(
+          channelId,
+          "response.md",
+          responseText,
+          "📄 応答が長いため、全文をファイルで添付します。",
+        );
       } else {
         await this.postChannelMessage(channelId, responseText);
       }
@@ -430,11 +435,12 @@ export class DiscordInteractionServer implements InteractionBridge {
     let display: string;
     if (pending.kind === "permission") {
       resolved = value;
-      display = value === "allow_once"
-        ? "✅ 許可 (今回のみ)"
-        : value === "allow_session"
-          ? "✅ 許可 (セッション中)"
-          : "⛔ 拒否";
+      display =
+        value === "allow_once"
+          ? "✅ 許可 (今回のみ)"
+          : value === "allow_session"
+            ? "✅ 許可 (セッション中)"
+            : "⛔ 拒否";
     } else {
       const idx = parseInt(value.slice(1), 10);
       resolved = pending.choices?.[idx] ?? value;
@@ -509,7 +515,15 @@ export class DiscordInteractionServer implements InteractionBridge {
       ],
     });
 
-    const choice = await this.waitForComponent(nonce, ctx.userId, "permission", undefined, timeoutMs, ctx.token, msg?.id);
+    const choice = await this.waitForComponent(
+      nonce,
+      ctx.userId,
+      "permission",
+      undefined,
+      timeoutMs,
+      ctx.token,
+      msg?.id,
+    );
     if (choice === null) {
       throw new Error(`権限確認がタイムアウトしました (${timeoutMs / 1000}s)`);
     }
@@ -635,7 +649,7 @@ export class DiscordInteractionServer implements InteractionBridge {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bot ${botToken}`,
+          Authorization: `Bot ${botToken}`,
           "User-Agent": "lllmAgents/1.0",
         },
         body: JSON.stringify({ content }),
@@ -667,7 +681,7 @@ export class DiscordInteractionServer implements InteractionBridge {
       const res = await fetch(url, {
         method: "POST",
         // Content-Type は fetch が multipart boundary 付きで自動設定する (手動指定しない)。
-        headers: { "Authorization": `Bot ${botToken}`, "User-Agent": "lllmAgents/1.0" },
+        headers: { Authorization: `Bot ${botToken}`, "User-Agent": "lllmAgents/1.0" },
         body: form,
       });
       if (!res.ok) {

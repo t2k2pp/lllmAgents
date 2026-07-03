@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  classifyTaskComplexity,
-  recommendTier,
-  explainRecommendation,
-} from "../../src/agent/task-complexity.js";
+import { classifyTaskComplexity, recommendTier, explainRecommendation } from "../../src/agent/task-complexity.js";
 
 describe("classifyTaskComplexity", () => {
   it("極短メッセージは simple-lookup (挨拶等)", () => {

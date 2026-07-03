@@ -20,7 +20,7 @@ describe("TokenTracker", () => {
     it("記録した使用量が集計される", () => {
       const tracker = new TokenTracker();
       tracker.record(createRecord({ inputTokens: 1000, outputTokens: 500, estimatedCostUsd: 0.005 }));
-      tracker.record(createRecord({ inputTokens: 2000, outputTokens: 1000, estimatedCostUsd: 0.010 }));
+      tracker.record(createRecord({ inputTokens: 2000, outputTokens: 1000, estimatedCostUsd: 0.01 }));
 
       const total = tracker.getSessionTotal();
       expect(total.totalInputTokens).toBe(3000);

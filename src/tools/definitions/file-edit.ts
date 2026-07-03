@@ -60,7 +60,8 @@ export const fileEditTool: ToolHandler = {
       return {
         success: false,
         output: `ファイルの現在の内容 (${lineCount}行):\n${preview}`,
-        error: "old_string not found in file. 正しい文字列で再試行するか、file_writeでファイル全体を書き直してください。",
+        error:
+          "old_string not found in file. 正しい文字列で再試行するか、file_writeでファイル全体を書き直してください。",
       };
     }
 

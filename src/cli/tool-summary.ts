@@ -33,7 +33,9 @@ function shortenPath(p: string): string {
       const rel = p.slice(cwd.length).replace(/^[\\/]+/, "");
       return rel || ".";
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return p;
 }
 
