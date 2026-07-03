@@ -43,6 +43,10 @@ jobs:
         run: npm run lint
       - name: Test
         run: npm test
+      # アプリ全体をモック LLM + 非TTYパイプモードで起動する E2E スモーク (PR-08)。
+      # CPU 競合 flake を避けるためユニットテストと分離して直列実行する。
+      - name: E2E smoke test
+        run: npm run test:e2e
       # 実行時依存の既知脆弱性 (High 以上) で fail させる (PR-05)。
       # devDependencies はビルド時のみ使うため対象外 (--omit=dev)。
       - name: Audit runtime dependencies

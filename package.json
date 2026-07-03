@@ -16,6 +16,8 @@
     "setup": "tsx src/index.ts --setup",
     "dev": "tsx watch src/index.ts",
     "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:all": "vitest run && vitest run --config vitest.e2e.config.ts",
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
     "analyze:loop": "node scripts/analyze-loop.mjs"

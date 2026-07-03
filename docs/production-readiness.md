@@ -110,7 +110,9 @@
 
 **改善方針**: Biome (単体で lint+format、高速、設定が軽い) を導入し、CI に組み込む。既存コードへの一括適用は差分が巨大になるので、(1) format は一括適用を1コミットで実施、(2) lint ルールは error でなく warn から始めて段階的に締める。
 
-### [PR-08] E2E スモークテストが無い 【優先度: 中】
+### [PR-08] E2E スモークテストが無い 【優先度: 中】 — ✅ 実装済み (2026-07-04)
+
+> 実装: `tests/e2e/mock-llm.ts` (OpenAI 互換モックサーバー、SSE canned response) + `tests/e2e/repl-smoke.test.ts`。HOME/USERPROFILE を一時ディレクトリへ隔離し、`tsx src/index.ts --no-mcp` を非TTYパイプモードで子プロセス起動。シナリオ1=1ターン会話→/quit→exit 0 + セッション永続化確認、シナリオ2=file_write ツール呼び出し→権限確認に数値応答 "1"→実ファイル書き込み→完了報告。モック応答は毎回 `response_complete` を添えてターンを決定的に終了させる (テキストのみ応答だと自己点検/classifier の追加 LLM 呼び出しが走り非決定的になるため)。ユニットテストとの CPU 競合 flake が実測されたため `vitest.e2e.config.ts` で分離・直列実行 (`npm run test:e2e`、CI では全 OS で別ステップ)。なお docs/checkpoint-and-smoke-design.md の `game_smoke` は成果物ゲーム向けで本件とは別物。
 
 **現状**: 71ファイルのテストはユニット中心。「アプリを起動して1ターン会話して終了する」経路を自動で通すテストが無い。REPL には非TTYパイプモードがあり (CLAUDE.md のテスト規約参照)、LLM をモックサーバー (OpenAI 互換の canned response) に向ければ自動化できる素地はある。
 
@@ -201,7 +203,7 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 | | PR-04 | シークレットのパーミッション強制+表示マスク統一 | 小〜中 | 🔶 方針1+3 済 |
 | | PR-05 | npm audit fix + CI audit ゲート + Dependabot | 小 | ✅ 2026-07-04 |
 | | PR-06 | Windows CI 追加 | 小 | ✅ 2026-07-04 |
-| **P2: 品質の網** | PR-08 | E2E スモークテスト (モック LLM+パイプモード) | 中 |
+| **P2: 品質の網** | PR-08 | E2E スモークテスト (モック LLM+パイプモード) | 中 | ✅ 2026-07-04 |
 | | PR-07 | Biome 導入 | 中 |
 | | PR-03 | config の zod 検証 | 中 |
 | | PR-12 | CHANGELOG+リリースタグ+バージョン埋め込み | 小 |

@@ -402,8 +402,14 @@ REPL での切替:
 ## テスト
 
 ```bash
-# 全テスト実行
+# ユニットテスト実行
 npm test
+
+# E2E スモークテスト (モック LLM + 非TTYパイプモードでアプリ全体を起動)
+npm run test:e2e
+
+# ユニット + E2E をまとめて実行
+npm run test:all
 
 # ウォッチモード
 npm run test:watch
