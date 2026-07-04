@@ -269,6 +269,7 @@ export const configSchema = z
           .partial(),
       })
       .partial(),
+    updateCheck: z.object({ enabled: z.boolean() }).partial(),
     modelCapabilities: z.record(z.string(), modelCapabilityOverrideSchema),
     mcpEnabled: z.boolean(),
     disabledMcpServers: z.array(z.string()),

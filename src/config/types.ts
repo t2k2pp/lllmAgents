@@ -464,6 +464,12 @@ export interface Config {
   /** ログ設定 (運用ログ等)。詳細: docs/llm-logging.md */
   logging?: LoggingConfig;
   /**
+   * 起動時の更新チェック (docs/production-readiness.md PR-14)。
+   * GitHub の最新リリースタグを非同期で確認し、新しければ1行通知する。
+   * 対話セッション (TTY) のみ実行、失敗は黙ってスキップ。enabled: false でオフ (既定 on)
+   */
+  updateCheck?: { enabled?: boolean };
+  /**
    * モデル別の能力ティア override (Phase A-5)。
    * fine-tune 等で自動判定が誤る場合に modelId をキーに上書きできる。
    * 詳細: docs/multi-tier-harness-roadmap.md §3.3

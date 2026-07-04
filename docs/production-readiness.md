@@ -178,7 +178,16 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 
 **改善方針**: 個人配布の範囲では自己署名+手順書 (「詳細情報→実行」の案内) が現実解。README/install.bat に初回警告の説明を追加する。組織配布に進むならコード署名証明書 (Windows) / Developer ID + notarization (macOS) を導入する。コストがかかるため、配布規模が決まった時点で判断する。
 
-### [PR-14] 更新の仕組み・通知が無い 【優先度: 低】
+### [PR-14] 更新の仕組み・通知が無い 【優先度: 低】 — ✅ 実装済み (2026-07-04)
+
+> 実装: `src/utils/update-check.ts` (checkForUpdate)。起動時に GitHub releases/latest を非同期チェック (3秒タイムアウト・await しない) し、semver で新しければ1行通知。オフライン/API失敗/レート制限は黙ってスキップ。**TTY 対話セッションのみ実行** (パイプモード・CI・E2E では走らせない — 出力の決定性とテストごとの API 呼び出しを避ける)。`updateCheck.enabled: false` でオフ (既定 on)。テスト: `tests/utils/update-check.test.ts`。
+>
+> **リリース手順 (GitHub Releases)**: exe ビルドはユーザーが行う ([[feedback_user_does_deploy_build]])。
+> 1. package.json / src/version.ts / CHANGELOG.md のバージョンを揃えて更新しコミット
+> 2. `git tag v<version> && git push --tags`
+> 3. `npm run build:deploy` で deploy/ を組み立て
+> 4. `gh release create v<version> deploy/localllm.exe --title "v<version>" --notes "CHANGELOG.md の該当セクション"`
+> リリースを公開すると、旧バージョン利用者には次回起動時に更新通知が出る。
 
 **現状**: deploy フォルダの exe は手動ビルド・手動差し替え。利用者が古いバージョンを使い続けても気づけない。
 
@@ -225,7 +234,7 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 | | PR-11 | docs 索引+status ヘッダ+issues.md 棚卸し | 中 |
 | | PR-15 | ログローテーション | 小 | ✅ 2026-07-04 |
 | **P4: 配布成熟** | PR-13 | 署名方針の決定と初回警告の案内整備 | 小〜中 |
-| | PR-14 | GitHub Releases+更新通知 | 中 |
+| | PR-14 | GitHub Releases+更新通知 | 中 | ✅ 2026-07-04 |
 | | PR-09 | カバレッジ可視化 | 小 | ✅ 2026-07-04 |
 | | PR-16 | /doctor | 中 | ✅ 2026-07-04 |
 

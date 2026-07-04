@@ -64,6 +64,7 @@ import { initOpsLogger, getOpsLogger, parseOpsLogLevel } from "./utils/ops-logge
 import { shutdownHttpClient } from "./utils/http-client.js";
 import { installCrashHandlers, setCrashContext } from "./utils/crash-handler.js";
 import { applyLogRetention } from "./utils/log-rotation.js";
+import { checkForUpdate } from "./utils/update-check.js";
 import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "./providers/utils/context-length.js";
 
 async function main(): Promise<void> {
@@ -462,6 +463,14 @@ async function main(): Promise<void> {
   } catch (e) {
     // 掃除の失敗で起動を止めない
     getOpsLogger().warn("retention", "log retention failed", { error: String(e) });
+  }
+
+  // 更新通知 (PR-14)。対話セッションのみ・非同期・失敗は黙ってスキップ。
+  // await しない (起動をネットワーク待ちにしない)。
+  if (process.stdout.isTTY && config.updateCheck?.enabled !== false) {
+    void checkForUpdate().then((notice) => {
+      if (notice) console.log(chalk.yellow(`  ${notice}`));
+    });
   }
 
   const agent = new AgentLoop(
