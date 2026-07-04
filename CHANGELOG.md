@@ -13,6 +13,7 @@
 - `/doctor` 環境診断コマンド: LLM接続 / Playwright / Discord / Slack / 画像生成 / ディスク使用量を読み取り専用で一括チェック (PR-16)
 - 更新通知: 起動時に GitHub の最新リリースを確認し、新しければ1行通知 (TTY のみ、`updateCheck.enabled: false` でオフ) (PR-14)
 - 配布物の初回警告案内: SmartScreen / Gatekeeper の回避手順を deploy README と install.bat に追記。署名は個人配布の間は見送りを決定 (PR-13)
+- docs 索引: `docs/README.md` で 70+ 本の設計書を Status 付きで分類。issues.md は棚卸しして凍結 (PR-11)
 
 ## [0.4.0] - 2026-07-04
 

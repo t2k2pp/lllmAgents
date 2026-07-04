@@ -148,7 +148,9 @@
 3. 新規コマンドは必ず新方式で追加し、既存コマンドは触るついでに移設する
 agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責務境界で分割候補を洗い出すところから始める (先に PR-08 のスモークで安全網を張る)。
 
-### [PR-11] docs 70+ 本にライフサイクル管理が無い 【優先度: 中】
+### [PR-11] docs 70+ 本にライフサイクル管理が無い 【優先度: 中】 — ✅ 実装済み (2026-07-04)
+
+> 実装: `docs/README.md` を索引として新規作成 — 正典 7 本 (external/internal/security/config-reference/workspace-separation/production-readiness/issues) と機能別設計書をカテゴリ分類し、全ファイルに Status (implemented/in-progress/proposal/record/reference/superseded) を付与。**Status は索引で一元管理する方式に変更** (70+ ファイルへのヘッダ一斉付与は差分が巨大で blame を汚すため、各ファイルへのヘッダは触るついでに追加)。運用ルール「新規設計書は索引に1行追加」を索引冒頭に明記。issues.md は 10 件を棚卸し — 9 件解消 (ISSUE-01/03〜10)、ISSUE-02 の一部 (BROWSER-01/PERF-01/CTX-01/WEB-03) のみバックログとして残置し、以後 issues.md は凍結 (新規課題は本ドキュメントか GitHub Issues へ)。
 
 **現状**: docs 配下に設計書が 70 本超あるが、索引が無く、どれが「実装済みの正」でどれが「未着手の構想」「廃止済み」か外形から判別できない。docs/issues.md (2026-03) も ISSUE-05 (web_fetch スキーム制限) のように実装解消済みの項目が未更新のまま残る。「設計書と実装の整合性を常に保つ」というプロジェクトルールが規模に対してスケールしていない。
 
@@ -233,7 +235,7 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 | | PR-03 | config の zod 検証 | 中 | ✅ 2026-07-04 |
 | | PR-12 | CHANGELOG+リリースタグ+バージョン埋め込み | 小 | ✅ 2026-07-04 |
 | **P3: 構造改善** | PR-10 | コマンドレジストリ方式への漸進移行 | 大 (漸進) | 🔶 基盤+3コマンド移設 2026-07-04 |
-| | PR-11 | docs 索引+status ヘッダ+issues.md 棚卸し | 中 |
+| | PR-11 | docs 索引+status ヘッダ+issues.md 棚卸し | 中 | ✅ 2026-07-04 |
 | | PR-15 | ログローテーション | 小 | ✅ 2026-07-04 |
 | **P4: 配布成熟** | PR-13 | 署名方針の決定と初回警告の案内整備 | 小〜中 | ✅ 2026-07-04 (無署名+案内で確定) |
 | | PR-14 | GitHub Releases+更新通知 | 中 | ✅ 2026-07-04 |

@@ -1,12 +1,14 @@
 # 設計書整理時の気づき・Issue一覧
 
 > **作成日**: 2026-03-15（設計書統合整理作業中に記録）
-> これらは設計書のレビュー時に発見した技術的負債・不整合・改善余地です。
-> 実装タスクに変換する際は GitHub Issues に移行してください。
+> **棚卸し**: 2026-07-04 (docs/production-readiness.md PR-11) — 各 Issue に現状を追記した。
+> 10 件中 9 件は解消済み。残 1 件 (ISSUE-02 の一部バックログ) は下記に現状を記載し、本ファイルはこれ以上更新しない (新規課題は production-readiness.md か GitHub Issues へ)。
 
 ---
 
-## [ISSUE-01] ツール数の表記不整合
+## [ISSUE-01] ツール数の表記不整合 — ✅ 解消 (2026-07-04 棚卸し)
+
+> ツール数の正はソースコード (`src/tools/definitions/`)。external_design.md 統合版で表記は修正済みで、以降は設計書側に固定の個数を書かず「ソースが正」とする運用。
 
 **発見箇所**: `external_design.md` (旧版) §3、`internal_design.md` §2.5、`claude_code_comparison.md`
 
@@ -21,7 +23,9 @@
 
 ---
 
-## [ISSUE-02] `improvement-plan.md` のフェーズ3以降が未実装のまま放置
+## [ISSUE-02] `improvement-plan.md` のフェーズ3以降が未実装のまま放置 — 🔶 一部解消 (2026-07-04 棚卸し)
+
+> improvement-plan.md 自体は既に削除済み。Discord 双方向連携は実装済み (docs/discord-gateway-design.md が正)。BROWSER-01 / PERF-01 / CTX-01 / WEB-03 の4件は未実装のバックログとして残る (実装するかは需要が出た時点で判断。管理はこの4行が正)。
 
 **発見箇所**: `improvement-plan.md` Phase 3, Phase 5
 
@@ -40,7 +44,9 @@
 
 ---
 
-## [ISSUE-03] v0.3.0 セカンドLLM機能の実装状況が不明
+## [ISSUE-03] v0.3.0 セカンドLLM機能の実装状況が不明 — ✅ 解消 (2026-07-04 棚卸し)
+
+> 実装済み。`src/second-llm/` / `src/providers/` (vertex-ai, azure 系) が存在し、consult / agent / evaluator 委任が動作している。
 
 **発見箇所**: `v030_second_llm_design.md`
 
@@ -55,7 +61,9 @@
 
 ---
 
-## [ISSUE-04] `skill-creator` スキルの実装状況が不明
+## [ISSUE-04] `skill-creator` スキルの実装状況が不明 — ✅ 解消 (2026-07-04 棚卸し)
+
+> `src/skills/builtin/skill-creator/SKILL.md` として実装済み (Python スクリプト群方式ではなく SKILL.md 主体の現行スキル形式)。ビルトインは 18 スキルに拡大している。
 
 **発見箇所**: `skill_architecture_design.md` §3
 
@@ -68,7 +76,9 @@
 
 ---
 
-## [ISSUE-05] `web_fetch` の URLスキーム制限が未成熟
+## [ISSUE-05] `web_fetch` の URLスキーム制限が未成熟 — ✅ 解消 (2026-07-04 棚卸し)
+
+> 実装済み。web_fetch は http/https のみに制限されている (security_assessment.md / production-readiness.md §0 参照)。
 
 **発見箇所**: `security_assessment.md` §3.3
 
@@ -80,7 +90,9 @@
 
 ---
 
-## [ISSUE-06] `browser_screenshot` の `save_path` 未指定時の挙動とセキュリティ
+## [ISSUE-06] `browser_screenshot` の `save_path` 未指定時の挙動とセキュリティ — ✅ 解消 (2026-07-04 棚卸し)
+
+> 実装済み。`save_path` 未指定時は OS 一時ディレクトリへ自動保存する (improvement-plan BROWSER-02 の方針を採用。`src/tools/definitions/browser.ts` 参照)。
 
 **発見箇所**: `browser_screenshot_design.md`、`improvement-plan.md` §BROWSER-02
 
@@ -93,7 +105,9 @@
 
 ---
 
-## [ISSUE-07] セカンドLLM（クラウドLLM）利用時のプライバシーリスクが未文書化
+## [ISSUE-07] セカンドLLM（クラウドLLM）利用時のプライバシーリスクが未文書化 — ✅ 解消 (2026-07-04 棚卸し)
+
+> security_assessment.md §5「セカンドLLM（クラウドLLM）利用時のデータプライバシーリスク」として文書化済み (既定無効・ローカル LLM 推奨の警告を含む)。
 
 **発見箇所**: `external_design.md` §1.2（Claude Code比較）、`v030_second_llm_design.md`
 
@@ -107,7 +121,9 @@
 
 ---
 
-## [ISSUE-08] AgentLoop の最大イテレーション数（50回）の根拠が不明確
+## [ISSUE-08] AgentLoop の最大イテレーション数（50回）の根拠が不明確 — ✅ 解消 (2026-07-04 棚卸し)
+
+> 固定 50 回は廃止され、能力ティア別の `capability.maxIterations` (hard cap) + レジスター別ソフトキャップに置き換わっている。設計は docs/multi-tier-harness-roadmap.md / docs/lightweight-register-anchors-design.md、override は `modelCapabilities` 設定で可能。
 
 **発見箇所**: `internal_design.md` §2.1
 
@@ -120,7 +136,9 @@
 
 ---
 
-## [ISSUE-09] Discord双方向連携の設計書が `improvement-plan.md` にしか存在しない
+## [ISSUE-09] Discord双方向連携の設計書が `improvement-plan.md` にしか存在しない — ✅ 解消 (2026-07-04 棚卸し)
+
+> 独立設計書 docs/discord-gateway-design.md (Gateway/WS 方式) が存在し、実装済み。
 
 **発見箇所**: `improvement-plan.md` §Phase 3
 
@@ -132,7 +150,9 @@
 
 ---
 
-## [ISSUE-10] CLAUDE.md の `src/agent/` と `src/agents/` の区別が混乱しやすい
+## [ISSUE-10] CLAUDE.md の `src/agent/` と `src/agents/` の区別が混乱しやすい — ✅ 解消 (2026-07-04 棚卸し)
+
+> CLAUDE.md は改訂され Architecture セクション自体が README/internal_design 参照に移行した。モジュール構成の正は internal_design.md (`src/agent/` = コアロジック、`src/agents/` = エージェント定義とローダー)。
 
 **発見箇所**: `CLAUDE.md` の Architecture セクション
 
