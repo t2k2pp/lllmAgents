@@ -32,7 +32,7 @@
     "glob": "^11.0.1",
     "inquirer": "^12.3.2",
     "jimp": "^1.6.1",
-    "marked": "^15.0.6",
+    "marked": "^18.0.5",
     "marked-terminal": "^7.3.0",
     "ora": "^8.1.1",
     "playwright": "^1.50.1",
