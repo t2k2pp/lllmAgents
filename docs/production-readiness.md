@@ -172,7 +172,9 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 
 ## 5. リリース工学 — 配布と更新
 
-### [PR-13] Windows exe が無署名 【優先度: 中】
+### [PR-13] Windows exe が無署名 【優先度: 中】 — ✅ 方針決定・案内整備済み (2026-07-04)
+
+> 決定: **個人配布の範囲では無署名 (macOS は ad-hoc) + 初回警告の案内で運用する**。コード署名証明書 (Windows OV/EV) / Apple Developer ID + notarization は年間コストと管理負担が配布規模に見合わないため、組織配布・不特定多数への公開に進む時点で再判断する。整備: `scripts/deploy-assets/README.md` に SmartScreen (詳細情報→実行、zip のブロック解除) と macOS Gatekeeper (右クリック→開く / xattr -d com.apple.quarantine) の手順を追記、`install.bat` の完了メッセージにも SmartScreen 案内を追加。サポート窓口をリポジトリ URL に更新し、不具合報告に `--version` と `/doctor` を添える運用を明記。
 
 **現状**: macOS は ad-hoc `codesign` (build-exe.js:115) だが、Windows exe は signtool 処理が無い。配布先で SmartScreen 警告が出る。macOS の ad-hoc 署名も他マシンでは Gatekeeper に止められる。
 
@@ -233,7 +235,7 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 | **P3: 構造改善** | PR-10 | コマンドレジストリ方式への漸進移行 | 大 (漸進) | 🔶 基盤+3コマンド移設 2026-07-04 |
 | | PR-11 | docs 索引+status ヘッダ+issues.md 棚卸し | 中 |
 | | PR-15 | ログローテーション | 小 | ✅ 2026-07-04 |
-| **P4: 配布成熟** | PR-13 | 署名方針の決定と初回警告の案内整備 | 小〜中 |
+| **P4: 配布成熟** | PR-13 | 署名方針の決定と初回警告の案内整備 | 小〜中 | ✅ 2026-07-04 (無署名+案内で確定) |
 | | PR-14 | GitHub Releases+更新通知 | 中 | ✅ 2026-07-04 |
 | | PR-09 | カバレッジ可視化 | 小 | ✅ 2026-07-04 |
 | | PR-16 | /doctor | 中 | ✅ 2026-07-04 |

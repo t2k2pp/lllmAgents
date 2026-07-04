@@ -57,6 +57,18 @@ localllm --setup
 
 exe は署名されていないため、初回起動時に「Windows によって PC が保護されました」と
 表示されることがあります。「詳細情報」→「実行」で起動できます。
+ダウンロードした zip 経由の場合は、zip を右クリック → プロパティ → 「許可する」に
+チェックしてから展開すると警告を減らせます。
+
+### macOS Gatekeeper 警告
+
+macOS 版バイナリは ad-hoc 署名のみのため、別マシンでは初回起動時に
+「開発元を検証できないため開けません」と表示されることがあります。
+Finder でアプリを右クリック →「開く」を選ぶか、以下で隔離属性を外してください:
+
+```bash
+xattr -d com.apple.quarantine ./localllm
+```
 
 ### Playwright (ブラウザ自動化) を使う場合
 
@@ -86,4 +98,7 @@ localllm --install-browser
 
 ## サポート
 
-リポジトリ: https://github.com/(TBD)
+リポジトリ: https://github.com/t2k2pp/lllmAgents
+
+不具合報告には `localllm --version` の出力 (バージョン+コミット) と、
+可能なら REPL の `/doctor` 診断結果を添えてください。

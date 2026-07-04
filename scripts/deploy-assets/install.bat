@@ -54,5 +54,9 @@ echo.
 echo Or add manually: Control Panel -^> User Accounts -^> Change env variables
 echo.
 echo Then restart your terminal and run: localllm --setup
+echo.
+echo NOTE: localllm.exe is not code-signed. On first run Windows
+echo SmartScreen may show "Windows protected your PC".
+echo Click "More info" then "Run anyway" to start.
 echo =========================================
 endlocal

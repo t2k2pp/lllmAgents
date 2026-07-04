@@ -12,6 +12,7 @@
 - REPL コマンドレジストリ: `src/cli/commands/` に1コマンド=1ファイル方式を新設。補完・/help を自動生成し、`/parallel` `/autorun` `/loglevel` を移設 (PR-10 漸進移行の基盤)
 - `/doctor` 環境診断コマンド: LLM接続 / Playwright / Discord / Slack / 画像生成 / ディスク使用量を読み取り専用で一括チェック (PR-16)
 - 更新通知: 起動時に GitHub の最新リリースを確認し、新しければ1行通知 (TTY のみ、`updateCheck.enabled: false` でオフ) (PR-14)
+- 配布物の初回警告案内: SmartScreen / Gatekeeper の回避手順を deploy README と install.bat に追記。署名は個人配布の間は見送りを決定 (PR-13)
 
 ## [0.4.0] - 2026-07-04
 
