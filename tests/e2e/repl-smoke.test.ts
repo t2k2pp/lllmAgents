@@ -12,6 +12,7 @@
  *   1. Q→A 1ターン: ユーザー入力 → テキスト応答 → /quit → exit 0
  *   2. ツール実行+権限確認: file_write のツール呼び出し → 数値応答 "1" (今回のみ許可)
  *      → ファイルが実際に書かれる → 完了報告 → /quit → exit 0
+ *   3. /doctor 環境診断: モック LLM への疎通 ✔ と診断表の描画 → /quit → exit 0 (PR-16)
  *
  * モデル応答は毎回 response_complete を添えてターンを決定的に終了させる
  * (テキストのみ応答だと自己点検ループ/intent classifier の追加 LLM 呼び出しが発生するため)。
@@ -181,6 +182,24 @@ describe("E2E smoke — 非TTYパイプモード起動", () => {
       // ツール結果を受けた完了報告が表示された
       expect(r.stdout, diag(r)).toContain("WRITE-DONE-PLUGH");
       expect(r.stdout, diag(r)).not.toContain("MOCK-FALLBACK");
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "シナリオ3: /doctor が診断表を表示して正常終了する",
+    async () => {
+      const r = await runApp(["/doctor", "/quit"]);
+
+      expect(r.timedOut, diag(r)).toBe(false);
+      expect(r.code, diag(r)).toBe(0);
+      expect(r.stdout, diag(r)).toContain("環境診断 (/doctor):");
+      // モック LLM への疎通が ✔ になる (メインLLM は生きた provider で検証)
+      expect(r.stdout, diag(r)).toMatch(/✔ メインLLM\s+mock-model/);
+      // 未設定の統合は − (skip) で表示される
+      expect(r.stdout, diag(r)).toContain("Discord");
+      expect(r.stdout, diag(r)).toContain("Slack");
+      expect(r.stdout, diag(r)).toContain("ディスク使用量");
     },
     TEST_TIMEOUT_MS,
   );

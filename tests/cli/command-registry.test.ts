@@ -39,13 +39,14 @@ describe("コマンドレジストリ (PR-10)", () => {
     expect(registry.get("/parallel")).toBeDefined();
     expect(registry.get("/autorun")).toBeDefined();
     expect(registry.get("/loglevel")).toBeDefined();
+    expect(registry.get("/doctor")).toBeDefined();
     expect(registry.get("/no-such-command")).toBeUndefined();
   });
 
   it("補完候補とヘルプ項目が全登録コマンド分自動生成される", () => {
     const completions = getRegistryCompletions();
     const helpEntries = getRegistryHelpEntries();
-    for (const name of ["/parallel", "/autorun", "/loglevel"]) {
+    for (const name of ["/parallel", "/autorun", "/loglevel", "/doctor"]) {
       expect(completions.some((c) => c.command === name)).toBe(true);
       expect(helpEntries.some((e) => e.name === name)).toBe(true);
     }

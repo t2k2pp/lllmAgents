@@ -196,7 +196,9 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 
 **改善方針**: 起動時に軽量な世代管理を走らせる: 既定で「30日より古い ops/LLM ログを削除、セッションは直近100件保持」。上限は config で変更可能にし、削除時は「古いログをN件削除しました」と1行出す (黙って消さない)。
 
-### [PR-16] 環境診断コマンド (`/doctor`) が無い 【優先度: 低】
+### [PR-16] 環境診断コマンド (`/doctor`) が無い 【優先度: 低】 — ✅ 実装済み (2026-07-04)
+
+> 実装: `src/cli/commands/doctor.ts` (PR-10 のレジストリ方式第1号の新規コマンド)。チェック項目: メインLLM (セッションの復号済み provider で疎通 — 暗号化キー config でも動く)、セカンド/ビジョンLLM (createProvider で疎通、暗号化キーは「検証不可」と区別表示)、Playwright+Chromium (probeBrowserCapability、launch なし)、Discord (users/@me で Bot トークン失効検出)、Slack (auth.test)、画像生成 (設定整合のみ — 課金回避で疎通は /image test へ委譲)、logs サイズ+セッション件数。すべて読み取り専用 (メッセージ投稿等の副作用なし)、各チェック 8 秒タイムアウトで並列実行。E2E: repl-smoke シナリオ3。
 
 **現状**: LLM サーバー不達・Playwright 未導入・Discord トークン失効などの障害は、実際に使おうとして初めてエラーになる。個々の設定コマンドに test サブコマンドは散在するが、一括診断が無い。
 
@@ -225,7 +227,7 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 | **P4: 配布成熟** | PR-13 | 署名方針の決定と初回警告の案内整備 | 小〜中 |
 | | PR-14 | GitHub Releases+更新通知 | 中 |
 | | PR-09 | カバレッジ可視化 | 小 | ✅ 2026-07-04 |
-| | PR-16 | /doctor | 中 |
+| | PR-16 | /doctor | 中 | ✅ 2026-07-04 |
 
 ### 実装時の共通ルール
 

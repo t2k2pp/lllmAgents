@@ -10,6 +10,7 @@
 - シークレット分離: API キー・Bot/App トークン・Webhook URL を `~/.localllm/credentials.json` (自ユーザーのみ) へ分離。旧 config.json からは初回起動時に自動移行 (PR-04 方針2)
 - カバレッジ可視化: `npm run test:coverage` と CI レポート出力 (閾値ゲートなし) (PR-09)
 - REPL コマンドレジストリ: `src/cli/commands/` に1コマンド=1ファイル方式を新設。補完・/help を自動生成し、`/parallel` `/autorun` `/loglevel` を移設 (PR-10 漸進移行の基盤)
+- `/doctor` 環境診断コマンド: LLM接続 / Playwright / Discord / Slack / 画像生成 / ディスク使用量を読み取り専用で一括チェック (PR-16)
 
 ## [0.4.0] - 2026-07-04
 
