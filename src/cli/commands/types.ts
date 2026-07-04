@@ -46,5 +46,6 @@ export interface ReplCommandDef {
    * コマンド本体。args はコマンド名を除く空白区切りトークン。
    * "quit" を返すと REPL ループが終了する (旧 handleCommand と同じ規約)。
    */
+  // biome-ignore lint/suspicious/noConfusingVoidType: 「何も返さない」handler 実装 (推論 void) を許容するための union
   handler(ctx: ReplCommandContext, args: string[]): Promise<string | void> | string | void;
 }

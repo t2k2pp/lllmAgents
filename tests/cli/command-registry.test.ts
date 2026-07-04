@@ -26,6 +26,13 @@ function makeContext(): { ctx: ReplCommandContext; config: Config; saveConfig: R
   return { ctx, config, saveConfig };
 }
 
+/** 登録済みコマンドを取得 (未登録ならテスト失敗として throw) */
+function mustGet(name: string) {
+  const def = getCommandRegistry().get(name);
+  if (!def) throw new Error(`コマンドが未登録: ${name}`);
+  return def;
+}
+
 describe("コマンドレジストリ (PR-10)", () => {
   it("登録コマンドを名前で引ける (小文字キー)", () => {
     const registry = getCommandRegistry();
@@ -49,7 +56,7 @@ describe("コマンドレジストリ (PR-10)", () => {
 
   it("/parallel <n> は agent と config を更新して保存する", async () => {
     const { ctx, config, saveConfig } = makeContext();
-    await getCommandRegistry().get("/parallel")!.handler(ctx, ["5"]);
+    await mustGet("/parallel").handler(ctx, ["5"]);
     expect(ctx.agent.getMaxParallelTools()).toBe(5);
     expect(config.maxParallelTools).toBe(5);
     expect(saveConfig).toHaveBeenCalledOnce();
@@ -57,13 +64,13 @@ describe("コマンドレジストリ (PR-10)", () => {
 
   it("/parallel (引数なし) は表示のみで保存しない", async () => {
     const { ctx, saveConfig } = makeContext();
-    await getCommandRegistry().get("/parallel")!.handler(ctx, []);
+    await mustGet("/parallel").handler(ctx, []);
     expect(saveConfig).not.toHaveBeenCalled();
   });
 
   it("/autorun は引数なしで toggle し config へ永続化する", async () => {
     const { ctx, config, saveConfig } = makeContext();
-    const def = getCommandRegistry().get("/autorun")!;
+    const def = mustGet("/autorun");
     await def.handler(ctx, []);
     expect(ctx.agent.getPermissions().isAutorunMode()).toBe(true);
     expect(config.autorunMode).toBe(true);
@@ -75,7 +82,7 @@ describe("コマンドレジストリ (PR-10)", () => {
 
   it("/autorun on / off は明示指定どおりに設定する", async () => {
     const { ctx, config } = makeContext();
-    const def = getCommandRegistry().get("/autorun")!;
+    const def = mustGet("/autorun");
     await def.handler(ctx, ["on"]);
     expect(config.autorunMode).toBe(true);
     await def.handler(ctx, ["off"]);
@@ -84,8 +91,6 @@ describe("コマンドレジストリ (PR-10)", () => {
 
   it("/loglevel の不正引数はエラー案内のみで例外を出さない", async () => {
     const { ctx } = makeContext();
-    await expect(
-      Promise.resolve(getCommandRegistry().get("/loglevel")!.handler(ctx, ["bogus"])),
-    ).resolves.toBeUndefined();
+    await expect(Promise.resolve(mustGet("/loglevel").handler(ctx, ["bogus"]))).resolves.toBeUndefined();
   });
 });
