@@ -9,6 +9,7 @@
     "drawdot": {
       "name": "drawdot",
       "command": "node",
+      "disabled": true ,
       "args": [
         "/Users/osia/Documents/claude/lllmAgents/proj/drawDot Cli/dist/src/mcp-server.js"
       ],

@@ -133,7 +133,7 @@ export class OpenAICompatProvider implements LLMProvider {
   ): AsyncGenerator<ChatChunk> {
     const body: Record<string, unknown> = {
       model: params.model,
-      messages: params.messages.map((m) => this.formatMessage(m)),
+      messages: mergeSystemMessages(params.messages).map((m) => this.formatMessage(m)),
       stream: true,
       // ストリーミングでusage情報を取得するためのオプション
       stream_options: { include_usage: true },
@@ -332,6 +332,30 @@ export class OpenAICompatProvider implements LLMProvider {
 
     return formatted;
   }
+}
+
+/**
+ * 複数の system メッセージ (MessageHistory.getMessages() が prompt cache 最適化のため
+ * stable/dynamic に分割して返す, docs/prompt-cache-cost-reduction.md) を 1 通に統合する。
+ *
+ * Qwen系のチャットテンプレートは messages[0] のみを system として取り出し、
+ * それ以降に role=system が現れると raise_exception('System message must be at
+ * the beginning.') で拒否する (Gemma等の他テンプレートにはこの制約がない)。
+ * OpenAI互換API (llama.cpp/vLLM/LM Studio/Ollama等) はサーバ側でjinjaテンプレートを
+ * 適用するため、送信前にここで単一の system メッセージへ統合する。
+ */
+function mergeSystemMessages(messages: Message[]): Message[] {
+  const systemParts: string[] = [];
+  const rest: Message[] = [];
+  for (const m of messages) {
+    if (m.role === "system") {
+      if (typeof m.content === "string" && m.content.length > 0) systemParts.push(m.content);
+    } else {
+      rest.push(m);
+    }
+  }
+  if (systemParts.length === 0) return rest;
+  return [{ role: "system", content: systemParts.join("\n\n") }, ...rest];
 }
 
 /**
