@@ -7,7 +7,13 @@
  * 受信時に onInterrupt() を一度だけ呼び出す。
  *
  * 非 TTY (パイプ) では no-op として振る舞う。
+ *
+ * stdin の raw mode は ScreenManager がセッション単位で保持する
+ * (docs/stdin-ownership.md §3.2)。保持されている間は stop() で cooked に戻さない。
+ * 戻すと「監視終了から次の入力待ちまで」 が cooked になり、打鍵が Enter まで届かなくなる。
  */
+
+import { screen } from "./screen-manager.js";
 
 const ESC = 0x1b;
 const CTRL_C = 0x03;
@@ -37,6 +43,8 @@ class InterruptWatcherImpl implements InterruptWatcher {
   private pendingTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private wasRawMode = false;
+  /** ScreenManager への「生 stdin を読んでいる」 登録の解除関数 (§3.3 の `\x03` 保険を止める) */
+  private releaseStdinConsumer: (() => void) | null = null;
 
   isActive(): boolean {
     return this.active;
@@ -56,6 +64,9 @@ class InterruptWatcherImpl implements InterruptWatcher {
     }
     stdin.resume();
     this.active = true;
+    // Ctrl+C は下の dataListener が自分で拾って SIGINT を合成する。
+    // ScreenManager の最下位 `\x03` 保険が二重に発火しないよう、その間は止めておく (§3.3)。
+    this.releaseStdinConsumer = screen.registerStdinConsumer("interrupt-watcher");
 
     const fire = () => {
       this.stop();
@@ -138,6 +149,14 @@ class InterruptWatcherImpl implements InterruptWatcher {
       stdin.removeListener("end", this.endListener);
       this.endListener = null;
     }
+    if (this.releaseStdinConsumer) {
+      this.releaseStdinConsumer();
+      this.releaseStdinConsumer = null;
+    }
+    // ScreenManager がセッション単位で raw を保持している間は cooked に戻さない
+    // (docs/stdin-ownership.md §3.2)。ここで戻すと監視終了から次の入力待ちまでの
+    // 一瞬が cooked になり、その間の打鍵が Enter まで届かなくなる。
+    if (screen.holdsStdinRaw()) return;
     if (stdin.isTTY && stdin.isRaw && !this.wasRawMode) {
       stdin.setRawMode(false);
     }

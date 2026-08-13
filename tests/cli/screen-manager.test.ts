@@ -441,75 +441,314 @@ describe("ScreenManager: 代替画面でのスピナー状態行 (§5 補足)", 
   });
 });
 
-describe("ScreenManager: stdin の一元化 (§7.2)", () => {
-  function fakeStdin() {
-    const state = { isTTY: true, isRaw: false, resumed: 0, calls: [] as boolean[] };
-    const stdin = {
-      get isTTY() {
-        return state.isTTY;
-      },
-      get isRaw() {
-        return state.isRaw;
-      },
-      setRawMode(v: boolean) {
-        state.isRaw = v;
-        state.calls.push(v);
-        return stdin as unknown as NodeJS.ReadStream;
-      },
-      resume() {
-        state.resumed++;
-        return stdin as unknown as NodeJS.ReadStream;
-      },
-    };
-    return { stdin: stdin as unknown as NodeJS.ReadStream, state };
-  }
+// ─── stdin 所有権の一元化 (docs/stdin-ownership.md) ───────────────────
 
-  it("ソフト所有の取得で raw mode を強制再適用し resume する", () => {
+/** 差し替え用の stdin。raw mode の呼び出し履歴と data 購読者を記録する */
+function fakeStdin() {
+  const listeners: ((chunk: Buffer) => void)[] = [];
+  const state = { isTTY: true, isRaw: false, resumed: 0, calls: [] as boolean[], listeners };
+  const stdin = {
+    get isTTY() {
+      return state.isTTY;
+    },
+    get isRaw() {
+      return state.isRaw;
+    },
+    setRawMode(v: boolean) {
+      state.isRaw = v;
+      state.calls.push(v);
+      return stdin;
+    },
+    resume() {
+      state.resumed++;
+      return stdin;
+    },
+    on(event: string, listener: (chunk: Buffer) => void) {
+      if (event === "data") listeners.push(listener);
+      return stdin;
+    },
+    off(event: string, listener: (chunk: Buffer) => void) {
+      if (event !== "data") return stdin;
+      const i = listeners.indexOf(listener);
+      if (i !== -1) listeners.splice(i, 1);
+      return stdin;
+    },
+  };
+  /** 端末からの入力を模す */
+  const emitData = (chunk: Buffer): void => {
+    for (const l of [...listeners]) l(chunk);
+  };
+  return { stdin: stdin as unknown as NodeJS.ReadStream, state, emitData };
+}
+
+/** process.emit を差し替えて発火したイベント名を集める (本物の SIGINT を飛ばさない) */
+function captureProcessEmit() {
+  const events: string[] = [];
+  const spy = vi.spyOn(process, "emit").mockImplementation(((event: string | symbol) => {
+    events.push(String(event));
+    return true;
+  }) as typeof process.emit);
+  return { events, restore: () => spy.mockRestore() };
+}
+
+describe("ScreenManager: stdin をセッション単位で保持する (§3.1)", () => {
+  it("start() で raw mode を取得し resume する", () => {
     const { stdin, state } = fakeStdin();
     const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
-    const release = screen.acquireLive({ name: "input", redraw: () => {} });
+    screen.start();
     expect(state.isRaw).toBe(true);
     expect(state.resumed).toBe(1);
-    release();
-    expect(state.isRaw).toBe(false);
+    expect(screen.holdsStdinRaw()).toBe(true);
+    screen.stop();
   });
 
   it("既に raw のときは一度 false に落としてから true にする (libuv キャッシュ対策)", () => {
     const { stdin, state } = fakeStdin();
     state.isRaw = true;
     const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
+    expect(state.calls).toEqual([false, true]);
+    screen.stop();
+  });
+
+  it("所有者を解放しても cooked に戻さない (所有者と所有者のあいだを塞ぐ)", () => {
+    const { stdin, state } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
     const release = screen.acquireLive({ name: "input", redraw: () => {} });
+    release();
+    expect(state.isRaw).toBe(true);
+    expect(screen.holdsStdinRaw()).toBe(true);
+    screen.stop();
+  });
+
+  it("排他所有 (inquirer) でも raw を再確認する (段階 4 の早期 return を撤去)", () => {
+    const { stdin, state } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
+    state.calls.length = 0;
+    const release = screen.acquireLive({ name: "inquirer" });
+    // 排他所有者でもスキップせずに raw を張り直す
     expect(state.calls).toEqual([false, true]);
     release();
+    screen.stop();
   });
 
-  it("排他所有 (inquirer) では stdin に触らない", () => {
+  it("inquirer が終了時に cooked へ戻しても release() で raw に戻る (§3.2)", () => {
     const { stdin, state } = fakeStdin();
     const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
     const release = screen.acquireLive({ name: "inquirer" });
-    expect(state.calls).toEqual([]);
-    expect(state.resumed).toBe(0);
+    // inquirer は外部ライブラリなので自前で cooked へ戻す。これは防げない
+    stdin.setRawMode(false);
     release();
+    expect(state.isRaw).toBe(true);
   });
 
-  it("入れ子の所有では最後の 1 人が抜けるまで raw mode を解除しない", () => {
+  it("入れ子の所有をすべて解放しても保持は続く", () => {
     const { stdin, state } = fakeStdin();
     const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
     const outer = screen.acquireLive({ name: "input", redraw: () => {} });
     const inner = screen.acquireLive({ name: "progress", redraw: () => {} });
     inner();
-    expect(state.isRaw).toBe(true);
     outer();
+    expect(state.isRaw).toBe(true);
+    screen.stop();
+  });
+
+  it("stop() で初めて cooked に戻る", () => {
+    const { stdin, state } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
+    expect(state.isRaw).toBe(true);
+    screen.stop();
+    expect(state.isRaw).toBe(false);
+    expect(screen.holdsStdinRaw()).toBe(false);
+    // 監視も外れている (リスナーの取り残しがない)
+    expect(state.listeners.length).toBe(0);
+  });
+
+  it("stop() 後の release() は raw を張り直さない", () => {
+    const { stdin, state } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
+    const release = screen.acquireLive({ name: "input", redraw: () => {} });
+    screen.stop();
+    state.calls.length = 0;
+    release();
+    expect(state.calls).toEqual([]);
     expect(state.isRaw).toBe(false);
   });
 
-  it("非TTY では stdin に触らない (パイプモードを壊さない)", () => {
+  it("非TTY では stdin に一切触らない (パイプモードを壊さない)", () => {
     const { stdin, state } = fakeStdin();
     state.isTTY = false;
     const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
     const release = screen.acquireLive({ name: "input", redraw: () => {} });
-    expect(state.calls).toEqual([]);
     release();
+    screen.stop();
+    expect(state.calls).toEqual([]);
+    expect(state.resumed).toBe(0);
+    expect(state.listeners.length).toBe(0);
+    expect(screen.holdsStdinRaw()).toBe(false);
+  });
+
+  it("stdin を渡さない (null) 構成でも start/stop が壊れない", () => {
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin: null });
+    expect(() => {
+      screen.start();
+      screen.acquireLive({ name: "input", redraw: () => {} })();
+      screen.stop();
+    }).not.toThrow();
+    expect(screen.holdsStdinRaw()).toBe(false);
+  });
+});
+
+describe("ScreenManager: suspendStdin / resumeStdin (§3.4)", () => {
+  it("suspend で cooked に戻し、resume で raw に戻す", () => {
+    const { stdin, state } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
+    screen.suspendStdin();
+    expect(state.isRaw).toBe(false);
+    expect(screen.holdsStdinRaw()).toBe(false);
+    expect(state.listeners.length).toBe(0);
+
+    screen.resumeStdin();
+    expect(state.isRaw).toBe(true);
+    expect(screen.holdsStdinRaw()).toBe(true);
+    expect(state.listeners.length).toBe(1);
+    screen.stop();
+  });
+
+  it("suspend 中は release() で raw を張り直さない (子プロセスの入力を奪わない)", () => {
+    const { stdin, state } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
+    screen.suspendStdin();
+    state.calls.length = 0;
+    screen.acquireLive({ name: "input", redraw: () => {} })();
+    expect(state.calls).toEqual([]);
+    expect(state.isRaw).toBe(false);
+    screen.stop();
+  });
+
+  it("start() していなければ suspend / resume は何もしない", () => {
+    const { stdin, state } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.suspendStdin();
+    screen.resumeStdin();
+    expect(state.calls).toEqual([]);
+  });
+});
+
+describe("ScreenManager: Ctrl+C の保険 (§3.3)", () => {
+  it("誰も所有していない間に \\x03 が来たら SIGINT を合成する", () => {
+    const { stdin, emitData } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
+    const cap = captureProcessEmit();
+    try {
+      emitData(Buffer.from([0x03]));
+      expect(cap.events).toEqual(["SIGINT"]);
+    } finally {
+      cap.restore();
+      screen.stop();
+    }
+  });
+
+  it("所有者が 1 人でもいる間は何もしない (既存の Ctrl+C 処理と競合させない)", () => {
+    const { stdin, emitData } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
+    const release = screen.acquireLive({ name: "input", redraw: () => {} });
+    const cap = captureProcessEmit();
+    try {
+      emitData(Buffer.from([0x03]));
+      expect(cap.events).toEqual([]);
+    } finally {
+      cap.restore();
+      release();
+      screen.stop();
+    }
+  });
+
+  it("排他所有 (inquirer) 中も何もしない (inquirer が自分で処理する)", () => {
+    const { stdin, emitData } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
+    const release = screen.acquireLive({ name: "inquirer" });
+    const cap = captureProcessEmit();
+    try {
+      emitData(Buffer.from([0x03]));
+      expect(cap.events).toEqual([]);
+    } finally {
+      cap.restore();
+      release();
+      screen.stop();
+    }
+  });
+
+  it("生 stdin の担い手 (InterruptWatcher) が登録中は何もしない", () => {
+    const { stdin, emitData } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
+    const unregister = screen.registerStdinConsumer("interrupt-watcher");
+    expect(screen.stdinConsumerCount()).toBe(1);
+    const cap = captureProcessEmit();
+    try {
+      emitData(Buffer.from([0x03]));
+      expect(cap.events).toEqual([]);
+      // 担い手が抜けたら保険が再び働く
+      unregister();
+      unregister(); // 二重解除しても数が壊れない
+      expect(screen.stdinConsumerCount()).toBe(0);
+      emitData(Buffer.from([0x03]));
+      expect(cap.events).toEqual(["SIGINT"]);
+    } finally {
+      cap.restore();
+      screen.stop();
+    }
+  });
+
+  it("Ctrl+C 以外の入力では発火しない", () => {
+    const { stdin, emitData } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
+    const cap = captureProcessEmit();
+    try {
+      emitData(Buffer.from("hello", "utf8"));
+      emitData(Buffer.from([0x1b]));
+      expect(cap.events).toEqual([]);
+    } finally {
+      cap.restore();
+      screen.stop();
+    }
+  });
+
+  it("stop() 後は監視が外れて発火しない", () => {
+    const { stdin, emitData } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
+    screen.stop();
+    const cap = captureProcessEmit();
+    try {
+      emitData(Buffer.from([0x03]));
+      expect(cap.events).toEqual([]);
+    } finally {
+      cap.restore();
+    }
+  });
+
+  it("非TTY では監視を張らない", () => {
+    const { stdin, state } = fakeStdin();
+    state.isTTY = false;
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    screen.start();
+    expect(state.listeners.length).toBe(0);
+    screen.stop();
   });
 });
 

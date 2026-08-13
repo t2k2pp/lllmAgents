@@ -11,6 +11,17 @@
  * - 段階 3: ソフト所有 (`redraw` を持つ所有者は割り込み出力で消えない)
  * - 段階 4: ライブ領域の取得・解放に stdin の状態遷移を結び付ける
  *
+ * ## stdin はセッション単位で持ち続ける (docs/stdin-ownership.md)
+ *
+ * 段階 4 では所有者ごとに raw mode を付け外ししていたが、raw mode は端末というプロセス
+ * 全体で 1 つしかない資源であり、「使う人が来たら on、帰ったら off」 では **誰も持って
+ * いない一瞬**が必ずできる。その一瞬に打鍵すると OS の行バッファに溜まり、Enter を押す
+ * まで届かない (不具合 4 の残存症状)。
+ *
+ * そこで `start()` で取得したら `stop()` まで **保持し続ける**。
+ * `acquireLive()` / `release()` は所有者の種別を問わず「保持を再確認する」 だけにする
+ * (inquirer は終了時に自前で cooked へ戻すため、再確認が必要)。
+ *
  * ## 描画は必ず「全画面再描画」 にする
  *
  * 差分描画は「前回描いた行数ぶん戻る」 前提を持ち込むことになり、それはまさに不具合 1 の
@@ -186,6 +197,17 @@ export interface ScreenManager {
   scrollDown(lines?: number): void;
   /** 最下部 (追従状態) へ戻す */
   scrollToBottom(): void;
+  /** stdin の raw mode を ScreenManager が保持しているか (docs/stdin-ownership.md §3.1) */
+  holdsStdinRaw(): boolean;
+  /** stdin を継承する子プロセスへ端末を渡す前に raw を手放す (§3.4) */
+  suspendStdin(): void;
+  /** suspendStdin() で手放した raw を取り戻す (§3.4) */
+  resumeStdin(): void;
+  /**
+   * 生 stdin を自分で読む担い手を登録する (§3.3)。
+   * 登録されている間は最下位の `\x03` 保険を止める。解除関数を返す。
+   */
+  registerStdinConsumer(name: string): () => void;
 }
 
 export interface ScreenManagerOptions {
@@ -200,8 +222,16 @@ export interface ScreenManagerOptions {
   /** 画面の桁数。既定は process.stdout.columns */
   columns?: () => number;
   /** stdin の状態遷移対象 (§7)。既定は process.stdin。テストで差し替える */
-  stdin?: Pick<NodeJS.ReadStream, "isTTY" | "isRaw" | "setRawMode" | "resume"> | null;
+  stdin?: ManagedStdin | null;
 }
+
+/**
+ * ScreenManager が面倒を見る stdin。
+ * `on` / `off` は `\x03` 保険 (docs/stdin-ownership.md §3.3) の購読に使う。
+ * 実装していない差し替え stdin (テスト等) でも壊れないよう任意扱いにする。
+ */
+export type ManagedStdin = Pick<NodeJS.ReadStream, "isTTY" | "isRaw" | "setRawMode" | "resume"> &
+  Partial<Pick<NodeJS.ReadStream, "on" | "off">>;
 
 /**
  * カーソル移動 / 行消去 / カーソル表示制御 を含むかどうか。
@@ -225,6 +255,20 @@ const STATUS_LINE_TTL_MS = 1_000;
 
 /** ライブ領域の高さ変化を追いかけて描き直す回数の上限 (暴走防止) */
 const MAX_RENDER_PASSES = 3;
+
+/**
+ * raw mode 中の Ctrl+C。端末が SIGINT を生成しないのでバイトとして届く
+ * (docs/stdin-ownership.md §3.3)。
+ */
+const CTRL_C_BYTE = 0x03;
+
+/** stdin のチャンクに Ctrl+C が含まれるか。encoding 設定次第で文字列で届くことがある */
+function containsCtrlC(chunk: Buffer | string | null | undefined): boolean {
+  if (chunk == null) return false;
+  if (typeof chunk === "string") return chunk.includes("\x03");
+  if (typeof chunk.includes !== "function") return false;
+  return chunk.includes(CTRL_C_BYTE);
+}
 
 interface OwnerEntry {
   owner: LiveOwner;
@@ -267,8 +311,17 @@ export class ScreenManagerImpl implements ScreenManager {
   private rendering = false;
   /** ライブ領域の高さ変化を追いかけて描き直した回数 (暴走防止) */
   private renderPass = 0;
-  /** stdin を ScreenManager が握っているか (§7.2) */
-  private stdinOwned = false;
+  /**
+   * stdin の raw mode を ScreenManager が保持しているか
+   * (docs/stdin-ownership.md §3.1)。start() で立ち stop() で降りる。
+   */
+  private stdinRawHeld = false;
+  /** suspendStdin() で一時的に手放しているか (§3.4) */
+  private stdinSuspended = false;
+  /** 生 stdin を自分で読む担い手の数 (§3.3 の `\x03` 保険を止める条件) */
+  private stdinConsumers = 0;
+  /** 最下位の `\x03` 監視 (§3.3)。保持中だけ購読する */
+  private sigintFallback: ((chunk: Buffer | string) => void) | null = null;
   /** 代替画面で表示するスピナーの最新フレーム (ライブ領域の所有者がいないときだけ描く) */
   private statusLine = "";
   private statusAtMs = 0;
@@ -289,6 +342,9 @@ export class ScreenManagerImpl implements ScreenManager {
   start(): void {
     if (this.started) return;
     this.started = true;
+    // stdin はセッションの間ずっと保持する (docs/stdin-ownership.md §3.1)。
+    // 代替画面を使うかどうかとは独立。素通しモードでも「誰も持っていない一瞬」 は作らない。
+    this.acquireStdinRaw();
     this.alternate = this.forcedAlternate ?? shouldUseAlternateScreen(readAlternateScreenEnv());
     if (!this.alternate) return;
 
@@ -315,7 +371,10 @@ export class ScreenManagerImpl implements ScreenManager {
   stop(): void {
     this.owners = [];
     this.cancelRender();
-    this.releaseStdin();
+    // ここで初めて cooked に戻す (docs/stdin-ownership.md §3.1)。
+    // stop() は tui-alternate-screen.md §8 の全経路 (exit / SIGINT / SIGTERM / 未捕捉例外)
+    // から呼ばれるので、異常終了でも端末が raw のまま残らない。
+    this.releaseStdinRaw();
     const wasAlternate = this.alternate;
     this.alternate = false;
 
@@ -454,7 +513,10 @@ export class ScreenManagerImpl implements ScreenManager {
   acquireLive(owner: LiveOwner): () => void {
     const entry: OwnerEntry = { owner };
     this.owners.push(entry);
-    this.acquireStdin(owner);
+    // 所有者の種別を問わず raw を再確認する (docs/stdin-ownership.md §3.1)。
+    // 段階 4 は `if (!owner.redraw) return` で inquirer をスキップしていたが、
+    // 塞ぎたいのは「inquirer が自分で raw にする前の一瞬」 なのでスキップしてはいけない。
+    this.ensureStdinRaw();
 
     if (this.alternate) {
       if (owner.redraw) {
@@ -473,7 +535,10 @@ export class ScreenManagerImpl implements ScreenManager {
       released = true;
       const index = this.owners.indexOf(entry);
       if (index !== -1) this.owners.splice(index, 1);
-      this.releaseStdinIfIdle();
+      // cooked に戻さない。代わりに raw を再確認し直す (docs/stdin-ownership.md §3.2)。
+      // inquirer は終了時に自前で cooked へ戻すため、ここで塞がないと
+      // 「次の所有者が来るまでの一瞬」 が cooked になる。
+      this.ensureStdinRaw();
       // 入れ子の内側が解けただけならまだ流さない。外側の排他所有者が残っている
       if (this.isExclusive()) return;
       if (this.alternate) {
@@ -527,40 +592,64 @@ export class ScreenManagerImpl implements ScreenManager {
     for (const text of pending) this.sink(text);
   }
 
-  // ─── stdin の一元化 (§7.2) ───────────────────────────
+  // ─── stdin の一元化 (§7.2 / docs/stdin-ownership.md §3) ───────────
+
+  /** stdin の raw mode を保持しているか (§3.1)。他の担い手が解除を控える判断に使う */
+  holdsStdinRaw(): boolean {
+    return this.stdinRawHeld && !this.stdinSuspended;
+  }
 
   /**
-   * ライブ領域の取得に stdin の状態遷移を結び付ける。
-   *
-   * 排他所有 (inquirer) は自分で stdin を扱うので触らない。
-   * 溜まっている入力は読み捨てない (捨てるとユーザーが先に打った文字が消える)。
+   * セッションの開始時に raw mode を取得し、以後 stop() まで保持する (§3.1)。
+   * 非 TTY (パイプ・リダイレクト) では何もしない。
    */
-  private acquireStdin(owner: LiveOwner): void {
-    if (!owner.redraw) return;
+  private acquireStdinRaw(): void {
     const stdin = this.stdin;
     if (!stdin?.isTTY) return;
+    if (!this.applyRawMode()) return;
+    this.stdinRawHeld = true;
+    this.stdinSuspended = false;
+    this.installSigintFallback();
+  }
+
+  /**
+   * 保持しているはずの raw mode が外れていないか確認し、外れていたら戻す (§3.1)。
+   * 所有者の取得・解放のたびに呼ぶ。保持していない (start 前 / stop 後 / suspend 中) なら何もしない。
+   */
+  private ensureStdinRaw(): void {
+    if (!this.stdinRawHeld || this.stdinSuspended) return;
+    this.applyRawMode();
+  }
+
+  /**
+   * 実際に raw mode を適用する。成功したら true。
+   *
+   * libuv は要求モードが内部キャッシュと一致すると何もしないため、子プロセスや
+   * inquirer が実コンソールのモードを変えた後は setRawMode(true) 単発では復旧
+   * できないことがある。一度 false に落としてから true にして実モードと同期させる。
+   *
+   * 溜まっている入力は読み捨てない (捨てるとユーザーが先に打った文字が消える)。
+   */
+  private applyRawMode(): boolean {
+    const stdin = this.stdin;
+    if (!stdin?.isTTY) return false;
     try {
-      // libuv は要求モードが内部キャッシュと一致すると何もしないため、子プロセスや
-      // inquirer が実コンソールのモードを変えた後は setRawMode(true) 単発では復旧
-      // できないことがある。一度 false に落としてから true にして実モードと同期させる。
       if (stdin.isRaw) stdin.setRawMode(false);
       stdin.setRawMode(true);
       stdin.resume();
-      this.stdinOwned = true;
+      return true;
     } catch {
       /* raw mode を扱えない端末では諦める (readline フォールバックが受ける) */
+      return false;
     }
   }
 
-  /** 所有者がいなくなったら raw mode を解除する */
-  private releaseStdinIfIdle(): void {
-    if (this.owners.length > 0) return;
-    this.releaseStdin();
-  }
-
-  private releaseStdin(): void {
-    if (!this.stdinOwned) return;
-    this.stdinOwned = false;
+  /** セッション終了。ここで初めて cooked に戻す (§3.1) */
+  private releaseStdinRaw(): void {
+    this.uninstallSigintFallback();
+    if (!this.stdinRawHeld) return;
+    this.stdinRawHeld = false;
+    this.stdinSuspended = false;
     const stdin = this.stdin;
     if (!stdin?.isTTY) return;
     try {
@@ -569,6 +658,100 @@ export class ScreenManagerImpl implements ScreenManager {
       /* ignore */
     }
     // pause() はしない。溜まっている入力を落とさないため (§7.2)
+  }
+
+  /**
+   * stdin を継承する子プロセスへ端末を渡す前に raw を手放す (§3.4)。
+   *
+   * 現状 `bash` ツールは `stdio: ["ignore", ...]` で stdin を子に渡していないため
+   * 呼び出し側は無い。将来 stdin を継承する実行経路を足すときに前後で挟むこと。
+   */
+  suspendStdin(): void {
+    if (!this.stdinRawHeld || this.stdinSuspended) return;
+    this.stdinSuspended = true;
+    this.uninstallSigintFallback();
+    const stdin = this.stdin;
+    if (!stdin?.isTTY) return;
+    try {
+      stdin.setRawMode(false);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** suspendStdin() で手放した raw を取り戻す (§3.4) */
+  resumeStdin(): void {
+    if (!this.stdinRawHeld || !this.stdinSuspended) return;
+    this.stdinSuspended = false;
+    this.applyRawMode();
+    this.installSigintFallback();
+  }
+
+  /**
+   * 生 stdin を自分で読む担い手を登録する (§3.3)。
+   *
+   * `InterruptWatcher` のようにライブ領域の所有者ではないが Ctrl+C を自分で処理する
+   * 担い手は、ここに登録して `\x03` 保険の二重発火を防ぐ。
+   * 名前はデバッグ用で、動作には使わない。
+   */
+  registerStdinConsumer(_name: string): () => void {
+    this.stdinConsumers++;
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      this.stdinConsumers = Math.max(0, this.stdinConsumers - 1);
+    };
+  }
+
+  /** 生 stdin を読む担い手の数 (テスト・診断用) */
+  stdinConsumerCount(): number {
+    return this.stdinConsumers;
+  }
+
+  /**
+   * 最下位の `\x03` 監視を張る (§3.3)。
+   *
+   * raw mode では Ctrl+C が SIGINT にならず `\x03` バイトとして届く。
+   * raw を保持し続ける以上、誰も読んでいない一瞬があると Ctrl+C が効かなくなる。
+   * **他の担い手が 1 人もいない間だけ** SIGINT を合成して既存のハンドラに委ねる。
+   * 担い手がいる間は何もしないので、既存の Ctrl+C 処理と競合しない。
+   */
+  private installSigintFallback(): void {
+    if (this.sigintFallback) return;
+    const stdin = this.stdin;
+    if (!stdin?.isTTY || typeof stdin.on !== "function") return;
+    const listener = (chunk: Buffer | string): void => {
+      if (!this.stdinRawHeld || this.stdinSuspended) return;
+      // ライブ領域の所有者 (入力欄 / inquirer) や生 stdin の担い手 (InterruptWatcher) が
+      // いる間は、その人が自分で Ctrl+C を処理する。保険は黙っている。
+      if (this.owners.length > 0 || this.stdinConsumers > 0) return;
+      if (!containsCtrlC(chunk)) return;
+      try {
+        process.emit("SIGINT");
+      } catch {
+        /* ignore */
+      }
+    };
+    this.sigintFallback = listener;
+    try {
+      stdin.on("data", listener);
+    } catch {
+      this.sigintFallback = null;
+    }
+  }
+
+  private uninstallSigintFallback(): void {
+    const listener = this.sigintFallback;
+    if (!listener) return;
+    this.sigintFallback = null;
+    const stdin = this.stdin;
+    if (typeof stdin?.off !== "function") return;
+    try {
+      stdin.off("data", listener);
+    } catch {
+      /* ignore */
+    }
   }
 
   // ─── スクロールバックの保持 (§3.4) ───────────────────

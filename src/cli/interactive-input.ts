@@ -206,9 +206,10 @@ export class InteractiveInput {
       // stdin を pause すると、プロンプト表示中なのに入力が反応しなくなる。
       // 定期検査で自動復旧し、「一度改行しないと入力できない」状態を防ぐ。
       //
-      // §7.3: stdin の所有権が ScreenManager に一元化された今、これは本来不要な当て木で
-      // ある。いきなり外すと退行が怖いので 1 リリースの間は残すが、**発火したらログに
-      // 残す**。発火しなくなったことを確認できたら削除する。
+      // §7.3 / docs/stdin-ownership.md §4: raw mode を ScreenManager がセッション単位で
+      // 保持するようになった今、これは本来不要な当て木である。いきなり外すと想定漏れの
+      // 経路で穴が開いたときに無防備になるので残すが、**発火したらログに残す**。
+      // 発火しなくなったことを実運用で確認できてから削除する。
       const rawModeWatchdog = setInterval(() => {
         if (!stdin.isTTY) return;
         if (!stdin.isRaw) {
@@ -657,7 +658,10 @@ export class InteractiveInput {
         out("\x1b[?2004l");
         stdin.removeListener("keypress", onKeypress);
         stdin.removeListener("end", onEnd);
-        // ライブ領域の解放。raw mode の解除は ScreenManager が行う (§7.2)
+        // ライブ領域を解放するだけで、cooked には戻さない (docs/stdin-ownership.md §3.2)。
+        // raw mode は ScreenManager がセッション単位で保持しており、解除は stop() だけが行う。
+        // ここで戻すと「入力確定からエージェント実行までの一瞬」 が cooked になり、
+        // その間の打鍵が OS の行バッファに溜まって Enter まで届かなくなる (不具合 4)。
         releaseLive?.();
         releaseLive = null;
       };
