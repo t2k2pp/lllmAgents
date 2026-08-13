@@ -66,7 +66,7 @@ import { ChatLogger } from "./agent/chat-logger.js";
 import { createSessionId } from "./agent/llm-logger.js";
 import { initOpsLogger, getOpsLogger, parseOpsLogLevel } from "./utils/ops-logger.js";
 import { shutdownHttpClient } from "./utils/http-client.js";
-import { installCrashHandlers, setCrashContext } from "./utils/crash-handler.js";
+import { installCrashHandlers, setCrashContext, setTerminalRestore } from "./utils/crash-handler.js";
 import { applyLogRetention } from "./utils/log-rotation.js";
 import { checkForUpdate } from "./utils/update-check.js";
 import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "./providers/utils/context-length.js";
@@ -87,6 +87,20 @@ async function main(): Promise<void> {
     uninstallOutputRouter();
   };
   process.on("exit", restoreOutput);
+  // 未捕捉例外 / unhandledRejection 経路でも代替画面から必ず抜ける (§8)。
+  // 代替画面の中でスタックを出すと画面ごと消えて読めないため、crash-handler が
+  // スタックを出す前にここを呼ぶ。
+  setTerminalRestore(restoreOutput);
+  // シグナルで落ちるとき (§8)。REPL 側にも SIGINT/SIGTERM の購読があるので、
+  // 自分だけのときに限り後始末して終了する。REPL がいる場合はそちらに任せる
+  // (二重に process.exit するとセッション保存が飛ぶ)。
+  for (const sig of ["SIGINT", "SIGTERM"] as const) {
+    process.on(sig, () => {
+      if (process.listenerCount(sig) > 1) return;
+      restoreOutput();
+      process.exit(sig === "SIGINT" ? 130 : 143);
+    });
+  }
 
   const args = process.argv.slice(2);
 

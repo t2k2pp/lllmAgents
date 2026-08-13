@@ -16,6 +16,13 @@
 import * as readline from "node:readline";
 import chalk from "chalk";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
+import { getDisplayWidth, stripAnsi, truncateToWidth } from "../utils/display-width.js";
+import { screen } from "./screen-manager.js";
+import { getOpsLogger } from "../utils/ops-logger.js";
+
+// 幅計算は共通実装を使う (docs/tui-alternate-screen.md §11: 幅計算を 2 箇所に書かない)。
+// 既存の import 元を壊さないよう、ここから再エクスポートする。
+export { getDisplayWidth } from "../utils/display-width.js";
 
 // ─── 公開型 ─────────────────────────────────────────────
 
@@ -93,9 +100,32 @@ export class InteractiveInput {
    */
   private lineSubmitUntilMs = 0;
 
+  /** rawModeWatchdog が発火した回数 (§7.3 — 0 のままなら当て木を外せる) */
+  private watchdogFireCount = 0;
+
   constructor(options: InteractiveInputOptions = {}) {
     this.commandProvider = options.commandProvider ?? (() => []);
     this.filePathProvider = options.filePathProvider ?? (() => []);
+  }
+
+  /**
+   * rawModeWatchdog の発火をログに残す (§7.3)。
+   *
+   * 所有権を ScreenManager に一元化した以上、ここが発火するのは「誰かがまだ勝手に
+   * stdin を触っている」 という設計違反の証拠である。黙って直すと気付けないので記録する。
+   * 500ms ごとに走るためログが溢れないよう、最初の数回だけ出す。
+   */
+  private logWatchdogFired(reason: string): void {
+    this.watchdogFireCount++;
+    if (this.watchdogFireCount > 5) return;
+    try {
+      getOpsLogger().warn("tui", `rawModeWatchdog fired: ${reason}`, {
+        count: this.watchdogFireCount,
+        note: "docs/tui-alternate-screen.md §7.3 — stdin の所有権が一元化されていれば発火しないはず",
+      });
+    } catch {
+      /* ログ失敗で入力を止めない */
+    }
   }
 
   /**
@@ -125,7 +155,23 @@ export class InteractiveInput {
   private interactiveQuestion(prefix: string, disableMenu: boolean): Promise<string> {
     return new Promise<string>((resolve) => {
       const stdin = process.stdin;
-      const stdout = process.stdout;
+      /**
+       * 入力欄の描画はすべてここを通す (docs/tui-alternate-screen.md §4.2)。
+       *
+       * `process.stdout.write` は OutputRouter に差し替えられており、そのまま使うと
+       * 自分の描画がスクロールバックへ記録され、代替画面では再描画が自分を呼び返す。
+       * `writeLive` はスクロールバックに記録せず、排他所有 (inquirer) 中は描かない。
+       */
+      const out = (text: string): void => screen.writeLive(text);
+      /** 行全体を消す (旧 stdout.clearLine(0) 相当) */
+      const clearLine = (): void => out("\x1b[2K");
+      /** 絶対桁へカーソルを移す (旧 stdout.cursorTo(col) 相当。col は 0 起点) */
+      const cursorToCol = (col: number): void => out(`\x1b[${Math.max(0, col) + 1}G`);
+      /**
+       * 1 行下へ移る。代替画面ではライブ領域の行が ScreenManager によって確保済みなので
+       * カーソル移動で足りる。改行を書くと画面全体がスクロールして描画がズレる。
+       */
+      const newRow = (): void => out(screen.isAlternate() ? "\x1b[1B" : "\n");
 
       // emitKeypressEvents は一度だけ呼ぶ
       if (!this.keypressInitialized) {
@@ -155,35 +201,26 @@ export class InteractiveInput {
         this.dataListenerInstalled = true;
       }
 
-      // raw mode を「強制再適用」する。libuv は要求モードが内部キャッシュと一致すると
-      // 何もしないため、子プロセスや inquirer が実コンソールのモードを変えた後は
-      // setRawMode(true) 単発では復旧できないことがある（Node は raw のつもりでも実際は
-      // cooked のまま → Enter を押すまで入力が届かない症状）。一度 false に落としてから
-      // true を適用し、実モードと内部キャッシュを確実に同期させる。
-      if (stdin.isRaw) {
-        stdin.setRawMode(false);
-      }
-      stdin.setRawMode(true);
-      stdin.resume();
-
       // 入力待ち中のウォッチドッグ: バックグラウンド処理（Discord/Slack/ループ経由の
       // processInput）が interruptWatcher.stop() や inquirer 後始末で raw mode を外したり
       // stdin を pause すると、プロンプト表示中なのに入力が反応しなくなる。
       // 定期検査で自動復旧し、「一度改行しないと入力できない」状態を防ぐ。
+      //
+      // §7.3: stdin の所有権が ScreenManager に一元化された今、これは本来不要な当て木で
+      // ある。いきなり外すと退行が怖いので 1 リリースの間は残すが、**発火したらログに
+      // 残す**。発火しなくなったことを確認できたら削除する。
       const rawModeWatchdog = setInterval(() => {
         if (!stdin.isTTY) return;
         if (!stdin.isRaw) {
           stdin.setRawMode(true);
+          this.logWatchdogFired("raw mode が解除されていたので再適用した");
         }
         if (stdin.isPaused()) {
           stdin.resume();
+          this.logWatchdogFired("stdin が pause されていたので resume した");
         }
       }, 500);
       rawModeWatchdog.unref?.();
-      // ブラケット貼り付けモードを有効化（モダンターミナル: Windows Terminal/iTerm2/kitty/mintty等）
-      // マルチライン貼り付け時、端末は \x1b[200~ ... \x1b[201~ で内容を囲む。
-      // これによりペースト内の \r を Enter と誤認せず改行として取り込める。
-      stdout.write("\x1b[?2004h");
 
       // ─── 状態 ──────────────────────────────────
 
@@ -214,8 +251,10 @@ export class InteractiveInput {
       const contPrefixStr = " ".repeat(prefixLen);
       const contPrefixLen = prefixLen;
 
-      // 初期プロンプト描画
-      stdout.write(prefix);
+      /** ライブ領域の解放関数 (acquireLive の戻り)。cleanup で必ず呼ぶ */
+      let releaseLive: (() => void) | null = null;
+      /** 直近に ScreenManager へ通知したライブ領域の高さ */
+      let lastLiveHeight = 1;
 
       // ─── レイアウトヘルパー ─────────────────────
 
@@ -301,9 +340,9 @@ export class InteractiveInput {
       /** cursorTermRow から targetRow へターミナル行を移動 */
       const moveToRow = (targetRow: number): void => {
         if (targetRow > cursorTermRow) {
-          stdout.write(`\x1b[${targetRow - cursorTermRow}B`);
+          out(`\x1b[${targetRow - cursorTermRow}B`);
         } else if (targetRow < cursorTermRow) {
-          stdout.write(`\x1b[${cursorTermRow - targetRow}A`);
+          out(`\x1b[${cursorTermRow - targetRow}A`);
         }
         cursorTermRow = targetRow;
       };
@@ -414,21 +453,21 @@ export class InteractiveInput {
         const maxLines = Math.max(oldInputLines, newInputLines);
 
         for (let i = 0; i < maxLines; i++) {
-          stdout.write("\r");
-          stdout.clearLine(0);
+          out("\r");
+          clearLine();
           if (i < screenLines.length) {
-            stdout.write(getLinePrefixLayout(i) + screenLines[i].text);
+            out(getLinePrefixLayout(i) + screenLines[i].text);
           } else if (i === 0 && screenLines.length === 0) {
-            stdout.write(prefix);
+            out(prefix);
           }
 
           if (i < maxLines - 1) {
             if (i < oldInputLines - 1) {
               // 既存行へ移動（スクロールしない）
-              stdout.write("\x1b[1B");
+              out("\x1b[1B");
             } else {
-              // 新規行作成（スクロールする可能性あり）
-              stdout.write("\n");
+              // 新規行作成（代替画面では確保済みの行へ移動、素通しでは改行）
+              newRow();
             }
             cursorTermRow = i + 1;
           }
@@ -439,7 +478,8 @@ export class InteractiveInput {
         // Step 3: カーソルを正しい入力位置に配置
         // 現在 cursorTermRow は maxLines - 1 にいる
         moveToRow(cRow);
-        stdout.cursorTo(getTerminalColumn(cRow, cCol, screenLines));
+        cursorToCol(getTerminalColumn(cRow, cCol, screenLines));
+        notifyLiveHeight();
       };
 
       /** ドロップダウンメニューを描画 */
@@ -474,14 +514,14 @@ export class InteractiveInput {
         for (let i = 0; i < totalToVisit; i++) {
           // 1行下へ移動
           if (i < renderedMenuLines) {
-            stdout.write("\x1b[1B");
+            out("\x1b[1B");
           } else {
-            stdout.write("\n");
+            newRow();
           }
           cursorTermRow = renderedInputLines + i;
 
-          stdout.write("\r");
-          stdout.clearLine(0);
+          out("\r");
+          clearLine();
 
           if (i < maxVisible) {
             const idx = startIdx + i;
@@ -496,15 +536,15 @@ export class InteractiveInput {
             const descText = item.description ? truncateToWidth(item.description, Math.max(0, descBudget)) : "";
 
             if (isSelected) {
-              stdout.write(`  ${chalk.bgBlue.white(` ${labelTruncated} `)}`);
+              out(`  ${chalk.bgBlue.white(` ${labelTruncated} `)}`);
             } else {
-              stdout.write(chalk.dim(`   ${labelTruncated} `));
+              out(chalk.dim(`   ${labelTruncated} `));
             }
             if (descText) {
-              stdout.write(chalk.dim(` ${descText}`));
+              out(chalk.dim(` ${descText}`));
             }
           } else if (i === maxVisible && hasScroll) {
-            stdout.write(chalk.dim(`  ↕ ${selectedIndex + 1}/${menuItems.length}`));
+            out(chalk.dim(`  ↕ ${selectedIndex + 1}/${menuItems.length}`));
           }
           // else: 旧メニューの余剰行 → clearLine で消去済み
         }
@@ -513,7 +553,8 @@ export class InteractiveInput {
 
         // カーソルを入力位置に戻す
         moveToRow(cRow);
-        stdout.cursorTo(getTerminalColumn(cRow, cCol, screenLines));
+        cursorToCol(getTerminalColumn(cRow, cCol, screenLines));
+        notifyLiveHeight();
       };
 
       /** メニュー表示をクリア */
@@ -526,16 +567,86 @@ export class InteractiveInput {
         moveToRow(renderedInputLines - 1);
 
         for (let i = 0; i < renderedMenuLines; i++) {
-          stdout.write("\x1b[1B\r");
-          stdout.clearLine(0);
+          out("\x1b[1B\r");
+          clearLine();
           cursorTermRow = renderedInputLines + i;
         }
 
         // カーソルを入力位置に戻す
         moveToRow(cRow);
-        stdout.cursorTo(getTerminalColumn(cRow, cCol, screenLines));
+        cursorToCol(getTerminalColumn(cRow, cCol, screenLines));
         renderedMenuLines = 0;
+        notifyLiveHeight();
       };
+
+      // ─── ライブ領域の所有 (§4.2) ────────────────
+      //
+      // 入力欄は「ソフト所有者」。割り込み出力が来ても ScreenManager が
+      // 「スクロールバック更新 → redraw()」 の順で描き直すので入力中の文字列が消えない。
+
+      /**
+       * ライブ領域の高さが変わったら ScreenManager に知らせる。
+       * 代替画面では確保する行数が変わるため、次のフレームで描き直してもらう。
+       */
+      const notifyLiveHeight = (): void => {
+        const h = Math.max(1, renderedInputLines + renderedMenuLines);
+        if (h === lastLiveHeight) return;
+        lastLiveHeight = h;
+        screen.refreshLive();
+      };
+
+      /**
+       * ScreenManager からの再描画要求 (ライブ領域は消去済み・カーソルは領域先頭)。
+       * 自前の行数キャッシュを捨てて先頭から描き直す。
+       */
+      const redrawLive = (): void => {
+        cursorTermRow = 0;
+        renderedInputLines = 1;
+        renderedMenuLines = 0;
+        renderInput();
+        if (menuVisible) renderMenu();
+      };
+
+      /**
+       * 素通しモードで割り込み出力を差し込む前に、自分の描画を消して行頭へ戻す。
+       * (代替画面では全画面再描画で足りるので呼ばれない)
+       */
+      const clearLive = (): void => {
+        clearMenuDisplay();
+        moveToRow(0);
+        const drawn = renderedInputLines;
+        for (let i = 0; i < drawn; i++) {
+          out("\r");
+          clearLine();
+          if (i < drawn - 1) {
+            out("\x1b[1B");
+            cursorTermRow = i + 1;
+          }
+        }
+        moveToRow(0);
+        out("\r");
+        renderedInputLines = 1;
+        lastLiveHeight = 1;
+      };
+
+      releaseLive = screen.acquireLive({
+        name: "interactive-input",
+        redraw: () => redrawLive(),
+        height: () => Math.max(1, renderedInputLines + renderedMenuLines),
+        clear: () => clearLive(),
+      });
+
+      // ブラケット貼り付けモードを有効化（モダンターミナル: Windows Terminal/iTerm2/kitty/mintty等）
+      // マルチライン貼り付け時、端末は \x1b[200~ ... \x1b[201~ で内容を囲む。
+      // これによりペースト内の \r を Enter と誤認せず改行として取り込める。
+      out("\x1b[?2004h");
+
+      // 初期プロンプト描画。代替画面では ScreenManager が位置を決めて redraw を呼ぶ
+      if (screen.isAlternate()) {
+        screen.refreshLive();
+      } else {
+        out(prefix);
+      }
 
       // ─── 終了処理 ─────────────────────────────
 
@@ -543,29 +654,46 @@ export class InteractiveInput {
         clearInterval(rawModeWatchdog);
         clearMenuDisplay();
         // ブラケット貼り付けモードを無効化
-        stdout.write("\x1b[?2004l");
-        if (stdin.isTTY) {
-          stdin.setRawMode(false);
-        }
+        out("\x1b[?2004l");
         stdin.removeListener("keypress", onKeypress);
         stdin.removeListener("end", onEnd);
+        // ライブ領域の解放。raw mode の解除は ScreenManager が行う (§7.2)
+        releaseLive?.();
+        releaseLive = null;
       };
 
-      /** カーソルを最終入力行の下まで移動してから改行 */
+      /**
+       * カーソルを最終入力行の下まで移動してから改行。
+       * 代替画面ではライブ領域を ScreenManager が管理しているので何もしない
+       * (確定した入力は echoToScrollback でスクロールバックへ移す)。
+       */
       const moveToEndAndNewline = (): void => {
+        if (screen.isAlternate()) return;
         if (renderedInputLines > 1) {
           const { row: cRow } = getLayout();
           const linesToBottom = renderedInputLines - 1 - cRow;
           if (linesToBottom > 0) {
-            stdout.write(`\x1b[${linesToBottom}B`);
+            out(`\x1b[${linesToBottom}B`);
           }
         }
-        stdout.write("\n");
+        out("\n");
+      };
+
+      /**
+       * 代替画面では入力欄はライブ領域にしか無く、確定してもスクロールバックに残らない。
+       * 「何を打ったか」 が履歴から消えるのは現行方式にない退行なので、確定時に
+       * プロンプト付きで 1 度だけスクロールバックへ書き出す。
+       */
+      const echoToScrollback = (result: string): void => {
+        if (!screen.isAlternate()) return;
+        const body = result.split("\n").join(`\n${contPrefixStr}`);
+        screen.write(`${prefix}${body}\n`);
       };
 
       const finish = (result: string): void => {
         cleanup();
         moveToEndAndNewline();
+        echoToScrollback(result);
         if (result.trim()) {
           this.history.push(result);
         }
@@ -644,7 +772,7 @@ export class InteractiveInput {
         // ── Ctrl+D (EOF) ──
         if (key.ctrl && key.name === "d" && buffer === "") {
           cleanup();
-          stdout.write("\n");
+          if (!screen.isAlternate()) out("\n");
           resolve("");
           return;
         }
@@ -724,6 +852,18 @@ export class InteractiveInput {
               renderMenu();
             }
           }
+          return;
+        }
+
+        // ── PgUp / PgDn → スクロールバックを遡る (§3.4) ──
+        // 代替画面では端末自身のスクロールバックが使えないので、ScreenManager の
+        // 行配列を遡る。素通しモードでは端末に任せる (ScreenManager 側で no-op)。
+        if (key.name === "pageup") {
+          screen.scrollUp();
+          return;
+        }
+        if (key.name === "pagedown") {
+          screen.scrollDown();
           return;
         }
 
@@ -917,69 +1057,4 @@ export class InteractiveInput {
       stdin.on("keypress", onKeypress);
     });
   }
-}
-
-// ─── ユーティリティ ─────────────────────────────────────
-
-function stripAnsi(str: string): string {
-  // eslint-disable-next-line no-control-regex
-  return str.replace(/\x1b\[[0-9;]*m/g, "");
-}
-
-/**
- * Unicode East Asian Width に基づく全角判定。
- * CJK統合漢字、ひらがな、カタカナ、全角記号、ハングル等を検出。
- */
-function isFullwidthCodePoint(code: number): boolean {
-  return (
-    code >= 0x1100 &&
-    (code <= 0x115f || // Hangul Jamo
-      code === 0x2329 ||
-      code === 0x232a ||
-      (code >= 0x2e80 && code <= 0x303e) || // CJK Radicals, Kangxi, Symbols
-      (code >= 0x3040 && code <= 0x33bf) || // Hiragana, Katakana, CJK Compat
-      (code >= 0x3400 && code <= 0x4dbf) || // CJK Extension A
-      (code >= 0x4e00 && code <= 0xa4cf) || // CJK Unified + Yi
-      (code >= 0xac00 && code <= 0xd7af) || // Hangul Syllables
-      (code >= 0xf900 && code <= 0xfaff) || // CJK Compat Ideographs
-      (code >= 0xfe10 && code <= 0xfe19) || // Vertical forms
-      (code >= 0xfe30 && code <= 0xfe6f) || // CJK Compat Forms
-      (code >= 0xff01 && code <= 0xff60) || // Fullwidth ASCII
-      (code >= 0xffe0 && code <= 0xffe6) || // Fullwidth Signs
-      (code >= 0x1f000 && code <= 0x1faff) || // Emoticons, Symbols
-      (code >= 0x20000 && code <= 0x2fffd) || // CJK Extension B+
-      (code >= 0x30000 && code <= 0x3fffd))
-  );
-}
-
-/**
- * 文字列のターミナル表示幅を計算する。
- * 全角文字(CJK, ひらがな, カタカナ等) = 2カラム、半角 = 1カラム。
- */
-export function getDisplayWidth(str: string): number {
-  let width = 0;
-  for (const char of str) {
-    const code = char.codePointAt(0) ?? 0;
-    if (code < 32) continue; // 制御文字は幅0
-    width += isFullwidthCodePoint(code) ? 2 : 1;
-  }
-  return width;
-}
-
-/**
- * 表示幅でstrを切り詰める。maxCols を超える場合は末尾に "…" を付けて返す。
- * メニュー行がターミナル幅を超えて折り返すと描画が崩れるため使用。
- */
-function truncateToWidth(str: string, maxCols: number): string {
-  if (maxCols <= 0) return "";
-  if (getDisplayWidth(str) <= maxCols) return str;
-  let w = 0;
-  let out = "";
-  for (const ch of str) {
-    const cw = getDisplayWidth(ch);
-    if (w + cw + 1 > maxCols) break; // "…"の1カラム分を確保
-    out += ch;
-    w += cw;
-  }
-  return out + "…";
 }

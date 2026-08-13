@@ -353,9 +353,11 @@ release()     →  所有者がいなくなったら raw mode を解除
 | `src/cli/prompt-gate.ts` | **新規**。 `withPrompt()` (§4.3) |
 | `src/cli/output-router.ts` | **新規**。 `console` / `stdout.write` の差し替え (§3.3) |
 | `src/index.ts` | 起動直後に router を仕込み `screen.start()`。 終了処理 (§8) |
-| `src/cli/interactive-input.ts` | ソフト所有者として `acquireLive` (§4.2) |
+| `src/cli/interactive-input.ts` | ソフト所有者として `acquireLive` (§4.2)。 描画は `writeLive` 経由。 PgUp/PgDn |
 | `src/cli/progress-indicator.ts` | ソフト所有者化 |
-| `src/utils/spinner.ts` | 排他所有中は描かない |
+| `src/utils/spinner.ts` | 排他所有中は描かない。 代替画面では出力先を ScreenManager へ |
+| `src/utils/display-width.ts` | **新規**。 幅計算の共通化 (§11) |
+| `src/utils/crash-handler.ts` | 未捕捉例外でスタックを出す前に代替画面から抜ける (§8) |
 | `src/tools/definitions/ask-user.ts` | `withPrompt()` で包む |
 | `src/security/permission-manager.ts` | 同上 |
 | `src/agent/plan-mode.ts` / `goal-promotion.ts` / `agent-loop.ts` | 同上 |
@@ -371,11 +373,24 @@ release()     →  所有者がいなくなったら raw mode を解除
 | 段階 | 内容 | これだけで得られるもの |
 |------|------|----------------------|
 | **1** ✅ | `output-router` + `prompt-gate` + 排他キューイング (代替画面なし) | **不具合 1・2 が直る** |
-| **2** | `ScreenManager` + 代替画面 + スクロールバック描画 | TUI 化。 環境変数で戻せる |
-| **3** | ソフト所有 (`InteractiveInput` / 進捗インジケータ) | 入力中の割り込み出力が壊さない |
-| **4** | stdin 一元化 | **不具合 4 が直る** |
+| **2** ✅ | `ScreenManager` + 代替画面 + スクロールバック描画 | TUI 化。 環境変数で戻せる |
+| **3** ✅ | ソフト所有 (`InteractiveInput` / 進捗インジケータ) | 入力中の割り込み出力が壊さない |
+| **4** ✅ | stdin 一元化 | **不具合 4 が直る** |
 
 段階 1 を先に置くのは、 **不具合の修正を代替画面の完成に人質に取らない**ため。
+
+### 10.1 実装で設計から足したもの (段階 2〜4)
+
+いずれも本文の意図を満たすために必要になった追加であり、 方針の変更ではない。
+
+| 追加 | 場所 | 理由 |
+|------|------|------|
+| `LiveOwner.clear?()` | §3.2 の API に 1 つ追加 | passthrough では全画面再描画が無いので、 割り込み出力を差し込む前に所有者自身に描画を消させる必要がある。 これが無いと §4.2 の「入力中の文字列が消えない」 が代替画面でしか成立しない |
+| `ScreenManager.writeLive()` | 同上 | ライブ領域の所有者の描画をスクロールバックに記録しないための入口。 所有者が `process.stdout.write` を使うと、 自分の描画が履歴に混ざり、 代替画面では再描画が自分を呼び返して無限再帰する |
+| `ScreenManager.refreshLive()` / `scrollUp` / `scrollDown` / `scrollToBottom` | 同上 | ライブ領域の高さ変化の通知 (§3.5 の再確保) と PgUp/PgDn (§3.4) |
+| スピナーの「状態行」 | §5 の補足 | `ora` の既定の出力先は **stderr** であり OutputRouter を素通りする。 代替画面ではそのままだと画面が壊れ、 捨てると「考え中...」 が消える。 代替画面のときだけ出力先を ScreenManager に向け、 最新フレームをライブ領域の 1 行として描く。 素通しモードでは既定の stderr のまま (パイプ実行に ANSI を混ぜないため) |
+| 確定した入力のスクロールバックへの転記 | `interactive-input.ts` | 代替画面では入力欄はライブ領域にしか無く、 確定しても履歴に残らない。 「何を打ったか」 が消えるのは現行方式に無い退行なので、 確定時に 1 度だけ書き出す |
+| 幅計算の共通化 (`src/utils/display-width.ts`) | §11 の対策の実体 | `interactive-input.ts` にあった実装をそのまま移設し、 ScreenManager と共用する。 新規に書き直していない |
 
 ---
 
@@ -406,3 +421,18 @@ release()     →  所有者がいなくなったら raw mode を解除
 7. PgUp/PgDn でスクロールバックを遡れる。 遡り中に新出力が来ても視点が飛ばない
 8. Ctrl+C 2 回・未捕捉例外で終了しても端末が壊れない
 9. 日本語・絵文字混じりの入力で描画が崩れない
+10. LLM 思考中のスピナー (「考え中...」) が画面下端に 1 行で出て、 応答が始まると消える
+
+### 12.1 段階 2〜4 実装時点の確認状況 (2026-08-13)
+
+| # | 状況 |
+|---|------|
+| 1 | **未確認** (TTY 実機のみ)。 代替画面への入退場と書き戻しの ANSI 列は自動テストで確認済み |
+| 2 | 確認済み (パイプモードで起動→終了、 exit 0) |
+| 3・4 | **未確認** (TTY 実機のみ)。 段階 1 の排他キューイングは自動テストで確認済み |
+| 5 | **未確認** (TTY 実機のみ) |
+| 6 | **未確認** (TTY 実機のみ)。 所有権・再描画の呼び出し順は自動テストで確認済み |
+| 7 | **未確認** (TTY 実機のみ)。 `viewOffset` の算術と案内表示は自動テストで確認済み |
+| 8 | 未捕捉例外は擬似 TTY で確認済み (代替画面を抜けてから stderr にスタック)。 Ctrl+C 2 回は**未確認** |
+| 9 | **未確認** (TTY 実機のみ)。 全角の桁計算と切り詰めは自動テストで確認済み |
+| 10 | **未確認** (TTY 実機のみ)。 stderr が TTY でないと `ora` が非対話フォールバックに落ちるため、 擬似 TTY では検証できない |

@@ -6,9 +6,19 @@
  * end() で行をクリアして次の出力に影響を残さない。
  *
  * 非 TTY (パイプ) では何も描画しない。
+ *
+ * ## ライブ領域のソフト所有者 (docs/tui-alternate-screen.md §5)
+ *
+ * スピナーは「一定間隔で勝手に書く」 という、所有権にとって最も厄介な存在である。
+ * 自前描画なので `redraw()` を渡せる = ソフト所有者になれる。ライブ領域を所有している
+ * 間は、割り込み出力が来ても ScreenManager が描き直してくれる。
+ *
+ * 描画は必ず `screen.writeLive()` を通す。`process.stdout.write` は OutputRouter に
+ * 差し替えられており、そのまま使うと自分のフレームがスクロールバックへ記録される。
  */
 
 import chalk from "chalk";
+import { screen } from "./screen-manager.js";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_INTERVAL_MS = 80;
@@ -31,6 +41,8 @@ class ProgressIndicatorImpl implements ProgressIndicator {
   private currentSummary = "";
   private rendered = false;
   private hintShown = false;
+  /** ライブ領域の解放関数 (§4.2) */
+  private releaseLive: (() => void) | null = null;
 
   isActive(): boolean {
     return this.active;
@@ -50,12 +62,26 @@ class ProgressIndicatorImpl implements ProgressIndicator {
     this.rendered = false;
     this.hintShown = false;
     this.frameIndex = 0;
+    // ライブ領域をソフト所有する。割り込み出力が来ても消えず、
+    // inquirer が排他所有している間は writeLive が自動的に黙る。
+    this.releaseLive = screen.acquireLive({
+      name: "progress-indicator",
+      // 最初の 1 秒間はまだ何も描かない (rendered=false)。所有はしていても高さ 0
+      redraw: () => {
+        if (this.rendered) this.render();
+      },
+      height: () => (this.rendered ? 1 : 0),
+      clear: () => {
+        if (this.rendered) this.clearLine();
+      },
+    });
     this.firstRenderTimer = setTimeout(() => {
       this.firstRenderTimer = null;
-      this.render();
+      this.rendered = true;
+      this.tick();
       this.spinnerTimer = setInterval(() => {
         this.frameIndex = (this.frameIndex + 1) % SPINNER_FRAMES.length;
-        this.render();
+        this.tick();
       }, SPINNER_INTERVAL_MS);
     }, FIRST_RENDER_DELAY_MS);
   }
@@ -71,9 +97,25 @@ class ProgressIndicatorImpl implements ProgressIndicator {
       clearInterval(this.spinnerTimer);
       this.spinnerTimer = null;
     }
-    if (this.rendered) {
+    if (this.rendered && !screen.isAlternate()) {
       this.clearLine();
     }
+    this.rendered = false;
+    this.releaseLive?.();
+    this.releaseLive = null;
+  }
+
+  /**
+   * タイマーからの 1 コマ更新。
+   * 代替画面ではカーソル位置を握っているのは ScreenManager なので、自分で描かず
+   * 再描画を要求する (ScreenManager が位置を決めて redraw() を呼び返す)。
+   */
+  private tick(): void {
+    if (screen.isAlternate()) {
+      screen.refreshLive();
+      return;
+    }
+    this.render();
   }
 
   private render(): void {
@@ -87,12 +129,11 @@ class ProgressIndicatorImpl implements ProgressIndicator {
       line += chalk.dim("  · ESC で中断 / Ctrl+C で強制");
     }
     this.clearLine();
-    process.stdout.write(line);
-    this.rendered = true;
+    screen.writeLive(line);
   }
 
   private clearLine(): void {
-    process.stdout.write("\r\x1b[2K");
+    screen.writeLive("\r\x1b[2K");
   }
 
   private truncate(s: string, max: number): string {

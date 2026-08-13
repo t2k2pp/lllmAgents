@@ -1,13 +1,20 @@
 /**
  * ScreenManager — 端末出力の唯一の受け口。
  * 設計: docs/tui-alternate-screen.md §3 (ScreenManager) / §4 (ライブ領域の排他制御)
+ *       / §6 (passthrough) / §7 (stdin の一元化) / §8 (終了処理)
  *
- * ## 段階 1 (docs/tui-alternate-screen.md §10) の実装範囲
+ * ## 実装範囲 (段階 1〜4)
  *
- * - 代替画面 (alternate screen) はまだ持たない。`write()` は生 stdout へ素通しする
- * - ライブ領域の「所有権」 と、排他所有中の出力キューイングは完全に実装する
- *   ← 不具合 1 (選択肢の行が複製される) / 2 (選択肢が他の出力に埋もれる) の直接の修正
- * - スクロールバックの行配列だけは先に保持しておく (段階 2 の描画で使う)
+ * - 段階 1: ライブ領域の「所有権」 と、排他所有中の出力キューイング
+ *           ← 不具合 1 (選択肢の行が複製される) / 2 (選択肢が他の出力に埋もれる) の修正
+ * - 段階 2: 代替画面バッファ (`\x1b[?1049h`) + スクロールバックの全画面再描画 + 16ms 集約
+ * - 段階 3: ソフト所有 (`redraw` を持つ所有者は割り込み出力で消えない)
+ * - 段階 4: ライブ領域の取得・解放に stdin の状態遷移を結び付ける
+ *
+ * ## 描画は必ず「全画面再描画」 にする
+ *
+ * 差分描画は「前回描いた行数ぶん戻る」 前提を持ち込むことになり、それはまさに不具合 1 の
+ * 構造そのものである (§3.5)。速度は 16ms のフレーム集約で担保し、差分描画は入れない。
  *
  * ## 無限再帰を避ける約束
  *
@@ -15,8 +22,12 @@
  * 差し替えて、すべての出力をこの ScreenManager に集約する。
  * したがって ScreenManager 自身が `console.log` や `process.stdout.write` を呼ぶと
  * 自分自身に戻ってきて無限再帰する。実際の書き出しには、モジュール読み込み時 (=差し替え前)
- * に捕まえた `originalStdoutWrite` だけを使うこと。
+ * に捕まえた `originalStdoutWrite` (= `rawWrite`) だけを使うこと。
+ *
+ * ライブ領域の所有者 (入力欄・進捗インジケータ) も同じ理由で `process.stdout.write` では
+ * なく `screen.writeLive()` を使う。ライブ領域の描画はスクロールバックには記録しない。
  */
+import { getDisplayWidth, truncateAnsiToWidth } from "../utils/display-width.js";
 
 /**
  * 差し替え前に捕まえた生の書き出し口。
@@ -61,6 +72,76 @@ export function getRawStdout(): NodeJS.WriteStream {
   return rawStdoutView;
 }
 
+// ─── 代替画面を使ってよいかの判定 (§6.1 / §11) ─────────────────
+
+/** `shouldUseAlternateScreen` に渡す環境。テストから差し替えられるよう引数にする */
+export interface AlternateScreenEnv {
+  /** LLLMAGENT_DISABLE_ALTERNATE_SCREEN */
+  disable?: string;
+  /** process.stdout.isTTY */
+  isTTY?: boolean;
+  /** TERM */
+  term?: string;
+  /** process.platform */
+  platform?: string;
+  /** Windows Terminal (WT_SESSION) */
+  wtSession?: string;
+  /** TERM_PROGRAM (VS Code / iTerm2 等) */
+  termProgram?: string;
+  /** ConEmuANSI */
+  conEmuANSI?: string;
+  /** ANSICON */
+  ansicon?: string;
+}
+
+/**
+ * 代替画面バッファを使ってよいかを判定する (§6.1)。
+ *
+ * 以下のいずれかで passthrough (= false):
+ *   1. 環境変数 LLLMAGENT_DISABLE_ALTERNATE_SCREEN が設定されている
+ *   2. process.stdout.isTTY が false (パイプ・リダイレクト・CI)
+ *   3. TERM=dumb
+ *
+ * さらに §11 のリスク表に従い、**判定が不明なときは passthrough に倒す**。
+ * 具体的には Windows で「ANSI が効くと分かっている端末」 の印
+ * (WT_SESSION / TERM_PROGRAM / ConEmuANSI / ANSICON / TERM) が 1 つも無い場合は
+ * legacy conhost の可能性があるため代替画面に入らない。画面が壊れるより、
+ * 表示が素朴になる方がまだ良い (安全側に倒す)。
+ */
+export function shouldUseAlternateScreen(env: AlternateScreenEnv): boolean {
+  const disable = env.disable;
+  if (disable !== undefined && disable !== "" && disable !== "0" && disable.toLowerCase() !== "false") {
+    return false;
+  }
+  if (!env.isTTY) return false;
+  const term = env.term ?? "";
+  if (term === "dumb") return false;
+
+  if (env.platform === "win32") {
+    // Windows は端末の実装差が大きい。ANSI が効くと分かっている印がある時だけ使う
+    const known = env.wtSession || env.termProgram || env.conEmuANSI || env.ansicon || term;
+    return !!known;
+  }
+  // POSIX 系。TERM が空 = 端末種別不明なので使わない
+  return term !== "";
+}
+
+/** 実際の process.env / process.stdout から判定材料を集める */
+function readAlternateScreenEnv(): AlternateScreenEnv {
+  return {
+    disable: process.env.LLLMAGENT_DISABLE_ALTERNATE_SCREEN,
+    isTTY: !!process.stdout.isTTY,
+    term: process.env.TERM,
+    platform: process.platform,
+    wtSession: process.env.WT_SESSION,
+    termProgram: process.env.TERM_PROGRAM,
+    conEmuANSI: process.env.ConEmuANSI,
+    ansicon: process.env.ANSICON,
+  };
+}
+
+// ─── 型 ────────────────────────────────────────────────
+
 export interface LiveOwner {
   /** 所有者の名前 (デバッグ・ログ用) */
   name: string;
@@ -68,25 +149,43 @@ export interface LiveOwner {
    * ライブ領域を描き直す。これを実装できる所有者は「ソフト所有」 になり、
    * 割り込み出力があっても消えない (§4.2)。
    * 実装できない所有者 (inquirer 等) は undefined を渡して「排他所有」 になる。
+   *
+   * 呼ばれる時点で「ライブ領域は消去済み・カーソルは領域の先頭」 が保証される。
    */
   redraw?: () => void;
   /** ライブ領域が今何行あるか (排他所有では使わない) */
   height?: () => number;
+  /**
+   * 自分の描画を消す。passthrough モード (代替画面なし) で割り込み出力を
+   * 差し込む前に呼ばれる。設計 §4.2 の「入力中の文字列が消えない」 を
+   * 代替画面なしでも成立させるために必要 (代替画面では全画面再描画で足りる)。
+   */
+  clear?: () => void;
 }
 
 export interface ScreenManager {
-  /** 起動。alt screen に入る (段階 1 / passthrough では何もしない) */
+  /** 起動。alt screen に入る (passthrough では何もしない) */
   start(): void;
   /** 終了。alt screen を抜けて内容をスクロールバックへ書き戻す */
   stop(): void;
   /** 出力を 1 つ受け取る。console.log 相当 */
   write(text: string): void;
+  /** ライブ領域の所有者による描画。スクロールバックに記録しない */
+  writeLive(text: string): void;
+  /** ライブ領域の高さが変わった等で描き直しを要求する (代替画面のみ有効) */
+  refreshLive(): void;
   /** ライブ領域を取得する。解放関数を返す */
   acquireLive(owner: LiveOwner): () => void;
   /** 今ライブ領域を持っている所有者 (いなければ undefined) */
   currentOwner(): string | undefined;
   /** 代替画面が有効か */
   isAlternate(): boolean;
+  /** スクロールバックを遡る (代替画面のみ)。行数省略で 1 画面ぶん */
+  scrollUp(lines?: number): void;
+  /** スクロールバックを戻す (代替画面のみ)。行数省略で 1 画面ぶん */
+  scrollDown(lines?: number): void;
+  /** 最下部 (追従状態) へ戻す */
+  scrollToBottom(): void;
 }
 
 export interface ScreenManagerOptions {
@@ -94,6 +193,14 @@ export interface ScreenManagerOptions {
   sink?: (text: string) => void;
   /** スクロールバックとして保持する最大行数 */
   maxLines?: number;
+  /** 代替画面を使うかを明示指定する (省略時は §6.1 の自動判定)。テスト用 */
+  alternate?: boolean;
+  /** 画面の行数。既定は process.stdout.rows */
+  rows?: () => number;
+  /** 画面の桁数。既定は process.stdout.columns */
+  columns?: () => number;
+  /** stdin の状態遷移対象 (§7)。既定は process.stdin。テストで差し替える */
+  stdin?: Pick<NodeJS.ReadStream, "isTTY" | "isRaw" | "setRawMode" | "resume"> | null;
 }
 
 /**
@@ -107,20 +214,37 @@ const CURSOR_CONTROL_PATTERN = /[\r\b]|\x1b\[[0-9;]*[A-HJKSTfsu]|\x1b\[\?25[lh]/
 // biome-ignore lint/suspicious/noControlCharactersInRegex: 同上
 const ANSI_SEQUENCE_PATTERN = /\x1b\[[0-9;?]*[a-zA-Z]/g;
 
+/** 描画のフレーム集約間隔 (§3.5)。連続する write() を 1 回の描画にまとめる */
+const FRAME_INTERVAL_MS = 16;
+
+/**
+ * スピナー由来の状態行を表示し続ける上限。
+ * ora が止まると新しいフレームが来なくなるので、古い行を出しっぱなしにしない。
+ */
+const STATUS_LINE_TTL_MS = 1_000;
+
+/** ライブ領域の高さ変化を追いかけて描き直す回数の上限 (暴走防止) */
+const MAX_RENDER_PASSES = 3;
+
 interface OwnerEntry {
   owner: LiveOwner;
 }
 
 /**
- * 段階 1 の ScreenManager 実装。
+ * ScreenManager 実装。
  *
- * - 排他所有者がいない間: `write()` は sink へ素通し (従来どおりの表示)
  * - 排他所有者がいる間  : `write()` はキューに退避し、解放時に FIFO でフラッシュ
+ * - 代替画面あり        : `write()` はスクロールバックへ積み、16ms 後に全画面再描画
+ * - 代替画面なし (素通し): `write()` は sink へそのまま流す (従来どおりの表示)
  * - どちらの場合も、スピナー由来の一過性フレームは記録もキューもしない (§5)
  */
 export class ScreenManagerImpl implements ScreenManager {
   private readonly sink: (text: string) => void;
   private readonly maxLines: number;
+  private readonly forcedAlternate?: boolean;
+  private readonly rowsOf: () => number;
+  private readonly columnsOf: () => number;
+  private readonly stdin: ScreenManagerOptions["stdin"];
 
   /** 表示済みの全行 (ANSI 込み)。末尾要素は「改行待ちの書きかけ行」 */
   private lines: string[] = [""];
@@ -131,55 +255,217 @@ export class ScreenManagerImpl implements ScreenManager {
   /** 直前の書き込みがカーソル制御だけだったか (スピナーのフレーム判定に使う) */
   private pendingFrameControl = false;
   private started = false;
+  /** 代替画面に入っているか */
+  private alternate = false;
+  /** 0 = 最下部に追従。>0 で遡り中 (§3.4) */
+  private viewOffset = 0;
+  /** 遡り始めてから増えた行数 (下端の「▼ 新しい出力が N 行」 に使う) */
+  private newLinesWhileScrolled = 0;
+  /** 描画のフレーム集約タイマー */
+  private renderTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 描画中フラグ (redraw() 内からの再入を防ぐ) */
+  private rendering = false;
+  /** ライブ領域の高さ変化を追いかけて描き直した回数 (暴走防止) */
+  private renderPass = 0;
+  /** stdin を ScreenManager が握っているか (§7.2) */
+  private stdinOwned = false;
+  /** 代替画面で表示するスピナーの最新フレーム (ライブ領域の所有者がいないときだけ描く) */
+  private statusLine = "";
+  private statusAtMs = 0;
+  /** 端末リサイズ購読 (stop で外す) */
+  private resizeHandler: (() => void) | null = null;
 
   constructor(options: ScreenManagerOptions = {}) {
     this.sink = options.sink ?? rawWrite;
     this.maxLines = options.maxLines ?? 10_000;
+    this.forcedAlternate = options.alternate;
+    this.rowsOf = options.rows ?? (() => process.stdout.rows || 24);
+    this.columnsOf = options.columns ?? (() => process.stdout.columns || 80);
+    this.stdin = options.stdin === undefined ? process.stdin : options.stdin;
   }
+
+  // ─── 起動・終了 (§8) ──────────────────────────────────
 
   start(): void {
-    // 段階 1 では代替画面に入らないので状態を立てるだけ。
-    // 段階 2 でここに \x1b[?1049h と初回描画が入る。
+    if (this.started) return;
     this.started = true;
+    this.alternate = this.forcedAlternate ?? shouldUseAlternateScreen(readAlternateScreenEnv());
+    if (!this.alternate) return;
+
+    // 代替画面へ入り、画面を消してから初回描画する
+    this.sink("\x1b[?1049h\x1b[2J\x1b[H");
+    this.resizeHandler = () => this.renderNow();
+    try {
+      process.stdout.on("resize", this.resizeHandler);
+    } catch {
+      this.resizeHandler = null;
+    }
+    this.renderNow();
   }
 
+  /**
+   * 終了処理 (§8)。
+   *
+   * 代替画面を抜けたあと、**スクロールバックの内容を通常画面へ書き戻す**。
+   * これをしないと「セッション終了後にログが何も残らない」 という、
+   * 現行方式には無い退行が起きる。
+   *
+   * 何度呼ばれても壊れないこと (正常終了 / process.on("exit") / SIGINT / 例外が重なる)。
+   */
   stop(): void {
-    // 溜めたままの出力を捨てないこと (feedback: silent な欠損の禁止)。
     this.owners = [];
-    this.flush();
+    this.cancelRender();
+    this.releaseStdin();
+    const wasAlternate = this.alternate;
+    this.alternate = false;
+
+    if (wasAlternate) {
+      // カーソルを戻し、ブラケット貼り付けを解除してから通常画面へ
+      this.sink("\x1b[?25h\x1b[?2004l\x1b[?1049l");
+      // 退避中の出力はすべてスクロールバックにも記録済み。書き戻しに含まれるので
+      // ここで再度流すと二重になる。捨てているのではなく下で必ず出力される
+      this.queue = [];
+      this.writeBackScrollback();
+    } else {
+      // 溜めたままの出力を捨てないこと (feedback: silent な欠損の禁止)
+      this.flush();
+    }
+    if (this.resizeHandler) {
+      try {
+        process.stdout.off("resize", this.resizeHandler);
+      } catch {
+        /* ignore */
+      }
+      this.resizeHandler = null;
+    }
     this.started = false;
   }
 
-  /** start() 済みか (段階 2 で代替画面の入退場判定に使う) */
+  /** start() 済みか */
   isStarted(): boolean {
     return this.started;
   }
+
+  /** 代替画面の内容を通常画面のスクロールバックへ書き戻す (§8) */
+  private writeBackScrollback(): void {
+    const body = this.lines.join("\n");
+    if (body.length === 0) return;
+    this.sink(body.endsWith("\n") ? body : `${body}\n`);
+  }
+
+  // ─── 出力 ────────────────────────────────────────────
 
   write(text: string): void {
     if (!text) return;
 
     // スピナー / 進捗インジケータのフレームは一過性の表示であり記録する価値がない (§5)。
     // 排他所有中はキューに積まず捨てる。素通し中はそのまま流す (スピナーは見えてよい)。
+    // 代替画面ではカーソル位置を ScreenManager が握っているので直接は描かせず、
+    // 「最新のフレーム = 状態行」 として覚えておいてライブ領域に描く (下の drawStatus)。
     if (this.isTransientFrame(text)) {
       if (this.isExclusive()) return;
+      if (this.alternate) {
+        this.captureStatusLine(text);
+        return;
+      }
       this.sink(text);
       return;
     }
 
-    // 段階 2 の描画のためにスクロールバックへ記録する。
-    // キューへ退避する場合も記録はここで 1 回だけ行い、順序を保つ。
+    // 確定した出力が来たらスピナーの役目は終わり。状態行を消す
+    this.statusLine = "";
+
+    // スクロールバックへ記録する。キューへ退避する場合も記録はここで 1 回だけ行い、順序を保つ。
     this.appendLines(text);
 
     if (this.isExclusive()) {
       this.queue.push(text);
       return;
     }
+
+    if (this.alternate) {
+      this.scheduleRender();
+      return;
+    }
+
+    // ── 素通しモード ──
+    // ソフト所有者 (入力欄など) がいるなら、その描画を一度消してから割り込み出力を差し込み、
+    // 描き直す。これで「入力中の文字列が消えない」 (§4.2) が代替画面なしでも成立する。
+    const soft = this.softOwner();
+    if (soft?.redraw) {
+      soft.clear?.();
+      this.sink(text);
+      if (!text.endsWith("\n")) this.sink("\n");
+      soft.redraw();
+      return;
+    }
     this.sink(text);
   }
+
+  /**
+   * ライブ領域の所有者による描画 (§4.2)。
+   * スクロールバックには記録せず、排他所有者がいる間は描かない
+   * (inquirer が画面を完全に持っている最中に入力欄が割り込むのを防ぐ)。
+   */
+  writeLive(text: string): void {
+    if (!text) return;
+    if (this.isExclusive()) return;
+    this.sink(text);
+  }
+
+  /** ライブ領域の高さが変わった等で描き直しを要求する (代替画面のみ) */
+  refreshLive(): void {
+    if (!this.alternate) return;
+    this.scheduleRender();
+  }
+
+  /**
+   * 代替画面で ora のスピナーを消さないための「状態行」 (§5 の補足)。
+   *
+   * ora はライブラリ内部で stdout に 1 行を上書きし続ける。代替画面ではカーソル位置を
+   * ScreenManager が握っているため素通しさせると画面が壊れる。かといって捨てるだけだと
+   * 「考え中...」 が一切見えなくなり、現行方式からの退行になる。そこで最新フレームの
+   * 本文だけを覚えておき、ライブ領域の所有者がいないときに 1 行として描く。
+   *
+   * カーソル制御だけのチャンク (ora は `cursorTo` と本文を別々に書く) は無視し、
+   * 本文を含むチャンクだけを採用する。
+   */
+  private captureStatusLine(text: string): void {
+    const visible = text
+      .replace(ANSI_SEQUENCE_PATTERN, "")
+      .replace(/[\r\b]/g, "")
+      .trim();
+    if (!visible) return;
+    // 行を上書きする類の制御は落として本文 (色は残す) だけを持つ
+    this.statusLine = text.replace(/[\r\b]/g, "");
+    this.statusAtMs = Date.now();
+    this.scheduleRender();
+  }
+
+  /** 表示すべき状態行 (古くなったものは出さない) */
+  private activeStatusLine(): string {
+    if (!this.statusLine) return "";
+    if (Date.now() - this.statusAtMs > STATUS_LINE_TTL_MS) return "";
+    return this.statusLine;
+  }
+
+  // ─── ライブ領域の所有権 (§4) ─────────────────────────
 
   acquireLive(owner: LiveOwner): () => void {
     const entry: OwnerEntry = { owner };
     this.owners.push(entry);
+    this.acquireStdin(owner);
+
+    if (this.alternate) {
+      if (owner.redraw) {
+        this.scheduleRender();
+      } else {
+        // 排他所有 = inquirer に画面を明け渡す。直前までの内容を上から並べ、
+        // カーソルを内容の直後に置いて「そこから下は inquirer のもの」 にする
+        this.renderForPrompt();
+      }
+    }
+
     let released = false;
     return () => {
       // 二重解放は無視する (withPrompt の finally が例外経路と重なることがある)
@@ -187,8 +473,16 @@ export class ScreenManagerImpl implements ScreenManager {
       released = true;
       const index = this.owners.indexOf(entry);
       if (index !== -1) this.owners.splice(index, 1);
+      this.releaseStdinIfIdle();
       // 入れ子の内側が解けただけならまだ流さない。外側の排他所有者が残っている
-      if (!this.isExclusive()) this.flush();
+      if (this.isExclusive()) return;
+      if (this.alternate) {
+        // 内容はスクロールバックに記録済み。全画面再描画で一度に出る
+        this.queue = [];
+        this.renderNow();
+      } else {
+        this.flush();
+      }
     };
   }
 
@@ -197,8 +491,7 @@ export class ScreenManagerImpl implements ScreenManager {
   }
 
   isAlternate(): boolean {
-    // 段階 1 では代替画面を持たない。段階 2 で本実装する。
-    return false;
+    return this.alternate;
   }
 
   /**
@@ -210,23 +503,281 @@ export class ScreenManagerImpl implements ScreenManager {
     return this.owners.some((entry) => !entry.owner.redraw);
   }
 
+  /** 一番上のソフト所有者 (排他所有者がいるときは undefined) */
+  private softOwner(): LiveOwner | undefined {
+    if (this.isExclusive()) return undefined;
+    return this.owners.at(-1)?.owner;
+  }
+
   /** 退避中の出力の件数 (テスト・診断用) */
   pendingCount(): number {
     return this.queue.length;
   }
 
-  /** スクロールバックの写し (テスト・段階 2 の描画用)。末尾は書きかけ行 */
+  /** スクロールバックの写し (テスト・診断用)。末尾は書きかけ行 */
   snapshotLines(): string[] {
     return [...this.lines];
   }
 
-  /** 溜めた出力を FIFO でまとめて流す */
+  /** 溜めた出力を FIFO でまとめて流す (素通しモード用) */
   private flush(): void {
     if (this.queue.length === 0) return;
     const pending = this.queue;
     this.queue = [];
     for (const text of pending) this.sink(text);
   }
+
+  // ─── stdin の一元化 (§7.2) ───────────────────────────
+
+  /**
+   * ライブ領域の取得に stdin の状態遷移を結び付ける。
+   *
+   * 排他所有 (inquirer) は自分で stdin を扱うので触らない。
+   * 溜まっている入力は読み捨てない (捨てるとユーザーが先に打った文字が消える)。
+   */
+  private acquireStdin(owner: LiveOwner): void {
+    if (!owner.redraw) return;
+    const stdin = this.stdin;
+    if (!stdin?.isTTY) return;
+    try {
+      // libuv は要求モードが内部キャッシュと一致すると何もしないため、子プロセスや
+      // inquirer が実コンソールのモードを変えた後は setRawMode(true) 単発では復旧
+      // できないことがある。一度 false に落としてから true にして実モードと同期させる。
+      if (stdin.isRaw) stdin.setRawMode(false);
+      stdin.setRawMode(true);
+      stdin.resume();
+      this.stdinOwned = true;
+    } catch {
+      /* raw mode を扱えない端末では諦める (readline フォールバックが受ける) */
+    }
+  }
+
+  /** 所有者がいなくなったら raw mode を解除する */
+  private releaseStdinIfIdle(): void {
+    if (this.owners.length > 0) return;
+    this.releaseStdin();
+  }
+
+  private releaseStdin(): void {
+    if (!this.stdinOwned) return;
+    this.stdinOwned = false;
+    const stdin = this.stdin;
+    if (!stdin?.isTTY) return;
+    try {
+      stdin.setRawMode(false);
+    } catch {
+      /* ignore */
+    }
+    // pause() はしない。溜まっている入力を落とさないため (§7.2)
+  }
+
+  // ─── スクロールバックの保持 (§3.4) ───────────────────
+
+  /**
+   * 受け取ったテキストを改行で分割して行配列へ追加する (§3.4)。
+   * 末尾が改行で終わらない書き込み (ストリーミング中の逐次出力) は最終行に追記する。
+   * これをしないと 1 文字ごとに行が増える。
+   */
+  private appendLines(text: string): void {
+    const parts = text.split("\n");
+    if (this.lines.length === 0) this.lines.push("");
+    this.lines[this.lines.length - 1] += parts[0];
+    const added = parts.length - 1;
+    for (let i = 1; i < parts.length; i++) {
+      this.lines.push(parts[i]);
+    }
+    if (this.lines.length > this.maxLines) {
+      this.lines.splice(0, this.lines.length - this.maxLines);
+    }
+    // 遡り中は視点を動かさない (§3.4)。増えたぶんだけオフセットも押し上げる
+    if (added > 0 && this.viewOffset > 0) {
+      this.viewOffset += added;
+      this.newLinesWhileScrolled += added;
+    }
+  }
+
+  // ─── スクロール操作 (§3.4) ───────────────────────────
+
+  scrollUp(lines?: number): void {
+    if (!this.alternate) return;
+    const step = lines ?? Math.max(1, this.viewportHeight() - 1);
+    const max = Math.max(0, this.lines.length - this.viewportHeight());
+    this.viewOffset = Math.min(max, this.viewOffset + step);
+    this.renderNow();
+  }
+
+  scrollDown(lines?: number): void {
+    if (!this.alternate) return;
+    const step = lines ?? Math.max(1, this.viewportHeight() - 1);
+    this.viewOffset = Math.max(0, this.viewOffset - step);
+    if (this.viewOffset === 0) this.newLinesWhileScrolled = 0;
+    this.renderNow();
+  }
+
+  scrollToBottom(): void {
+    if (!this.alternate) return;
+    if (this.viewOffset === 0) return;
+    this.viewOffset = 0;
+    this.newLinesWhileScrolled = 0;
+    this.renderNow();
+  }
+
+  /** 遡り中か (テスト・診断用) */
+  scrollOffset(): number {
+    return this.viewOffset;
+  }
+
+  /** スクロールバック表示に使える行数 (ライブ領域を除いた高さ) */
+  private viewportHeight(): number {
+    const rows = Math.max(2, this.rowsOf());
+    const live = Math.min(Math.max(0, this.liveHeight()), rows - 1);
+    return Math.max(1, rows - live);
+  }
+
+  /**
+   * ライブ領域が何行必要か。
+   * ソフト所有者がいればその高さ。いなければスピナーの状態行 1 行 (あれば)。
+   */
+  private liveHeight(): number {
+    const owner = this.softOwner();
+    if (owner?.height) {
+      try {
+        return Math.max(0, owner.height());
+      } catch {
+        return 0;
+      }
+    }
+    if (owner) return 0;
+    return this.activeStatusLine() ? 1 : 0;
+  }
+
+  // ─── 描画 (§3.5) ─────────────────────────────────────
+
+  /** 16ms のフレーム集約。連続する write() を 1 回の描画にまとめる */
+  private scheduleRender(): void {
+    if (!this.alternate || this.rendering) return;
+    if (this.renderTimer) return;
+    this.renderTimer = setTimeout(() => {
+      this.renderTimer = null;
+      this.render();
+    }, FRAME_INTERVAL_MS);
+    this.renderTimer.unref?.();
+  }
+
+  private cancelRender(): void {
+    if (!this.renderTimer) return;
+    clearTimeout(this.renderTimer);
+    this.renderTimer = null;
+  }
+
+  /** 集約を待たずに即描画する (起動時・所有権の変化時・スクロール操作時) */
+  private renderNow(): void {
+    this.cancelRender();
+    this.render();
+  }
+
+  /**
+   * 全画面再描画 (§3.5)。
+   *   1. カーソルを隠す
+   *   2. ライブ領域の高さ h を所有者から取得
+   *   3. viewport 高 = rows - h
+   *   4. lines の該当範囲を上から書く (行ごとに \x1b[2K で消してから)
+   *   5. ライブ領域を所有者の redraw() で描かせる
+   *   6. カーソルを表示
+   */
+  private render(): void {
+    if (!this.alternate || !this.started) return;
+    if (this.rendering) return;
+    if (this.isExclusive()) return; // inquirer が画面を持っている間は触らない
+    this.rendering = true;
+    try {
+      const owner = this.softOwner();
+      const rows = Math.max(2, this.rowsOf());
+      const columns = Math.max(1, this.columnsOf());
+      const reserved = Math.min(Math.max(0, this.liveHeight()), rows - 1);
+      const viewH = Math.max(1, rows - reserved);
+      // 遡り中は最下行を案内表示に使う
+      const scrolled = this.viewOffset > 0;
+      const contentH = scrolled ? Math.max(1, viewH - 1) : viewH;
+
+      const total = this.lines.length;
+      const maxOffset = Math.max(0, total - contentH);
+      if (this.viewOffset > maxOffset) this.viewOffset = maxOffset;
+      const end = total - this.viewOffset;
+      const start = Math.max(0, end - contentH);
+      const visible = this.lines.slice(start, end);
+
+      let out = "\x1b[?25l";
+      for (let i = 0; i < contentH; i++) {
+        out += `\x1b[${i + 1};1H\x1b[2K`;
+        const line = visible[i];
+        if (line) out += truncateAnsiToWidth(line, columns);
+      }
+      if (scrolled) {
+        out += `\x1b[${viewH};1H\x1b[2K`;
+        out += truncateAnsiToWidth(this.scrollHint(), columns);
+      }
+      // ライブ領域を消してから所有者に渡す
+      for (let i = 0; i < reserved; i++) {
+        out += `\x1b[${viewH + 1 + i};1H\x1b[2K`;
+      }
+      out += `\x1b[${reserved > 0 ? viewH + 1 : viewH};1H`;
+      this.sink(out);
+
+      if (owner?.redraw) {
+        try {
+          owner.redraw();
+        } catch {
+          /* 所有者の描画失敗で画面全体を落とさない */
+        }
+      } else if (reserved > 0) {
+        // 所有者がいない = スピナーの状態行を描く枠
+        this.sink(truncateAnsiToWidth(this.activeStatusLine(), columns));
+      }
+      this.sink("\x1b[?25h");
+
+      // 描いた結果ライブ領域の高さが変わっていたら、確保し直してもう一度描く。
+      // (入力が折り返して行数が増えた場合など。通常は 2 パスで収束する)
+      // 万一収束しない実装の所有者がいても画面を止めないよう、パス数に上限を設ける。
+      if (Math.min(Math.max(0, this.liveHeight()), rows - 1) !== reserved && this.renderPass < MAX_RENDER_PASSES) {
+        this.renderPass++;
+        this.rendering = false;
+        try {
+          this.renderNow();
+        } finally {
+          this.renderPass--;
+        }
+      }
+    } finally {
+      this.rendering = false;
+    }
+  }
+
+  /** 遡り中に最下行へ出す案内 (§3.4) */
+  private scrollHint(): string {
+    const n = this.newLinesWhileScrolled;
+    const text = n > 0 ? `▼ 新しい出力が ${n} 行 (PgDn で最下部へ)` : `▼ 下に ${this.viewOffset} 行 (PgDn で最下部へ)`;
+    // 反転表示。桁計算は共通の getDisplayWidth を使う (§11)
+    const pad = Math.max(0, Math.min(this.columnsOf(), 200) - getDisplayWidth(text));
+    return `\x1b[7m${text}${" ".repeat(pad)}\x1b[0m`;
+  }
+
+  /**
+   * 排他所有 (inquirer) に画面を明け渡すための描画。
+   * 直前までの内容を上から並べ、カーソルを内容の直後に置く。
+   * inquirer はそこから下に自分のプロンプトを描き、自前の行数管理で描き直す。
+   */
+  private renderForPrompt(): void {
+    this.cancelRender();
+    const rows = Math.max(2, this.rowsOf());
+    const columns = Math.max(1, this.columnsOf());
+    const keep = Math.max(1, rows - 1);
+    const start = Math.max(0, this.lines.length - keep);
+    const visible = this.lines.slice(start).map((l) => truncateAnsiToWidth(l, columns));
+    this.sink(`\x1b[?25h\x1b[2J\x1b[H${visible.join("\r\n")}`);
+  }
+
+  // ─── 一過性フレームの判定 (§5) ───────────────────────
 
   /**
    * 一過性のフレーム (スピナー・進捗インジケータ) かどうかを判定する。
@@ -255,23 +806,6 @@ export class ScreenManagerImpl implements ScreenManager {
     }
     // ANSI エスケープだけで表示文字が無い書き込み (色リセット等) も記録しない
     return text.replace(ANSI_SEQUENCE_PATTERN, "").length === 0;
-  }
-
-  /**
-   * 受け取ったテキストを改行で分割して行配列へ追加する (§3.4)。
-   * 末尾が改行で終わらない書き込み (ストリーミング中の逐次出力) は最終行に追記する。
-   * これをしないと 1 文字ごとに行が増える。
-   */
-  private appendLines(text: string): void {
-    const parts = text.split("\n");
-    if (this.lines.length === 0) this.lines.push("");
-    this.lines[this.lines.length - 1] += parts[0];
-    for (let i = 1; i < parts.length; i++) {
-      this.lines.push(parts[i]);
-    }
-    if (this.lines.length > this.maxLines) {
-      this.lines.splice(0, this.lines.length - this.maxLines);
-    }
   }
 }
 

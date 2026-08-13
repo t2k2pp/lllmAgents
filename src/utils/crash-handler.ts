@@ -25,10 +25,20 @@ export interface CrashContext {
 let context: CrashContext = {};
 let installed = false;
 let handling = false;
+let terminalRestore: (() => void) | null = null;
 
 /** クラッシュ時に使う情報を登録する (起動処理の進行に応じて後から追記できる)。 */
 export function setCrashContext(ctx: CrashContext): void {
   context = { ...context, ...ctx };
+}
+
+/**
+ * 端末の描画状態を戻す処理を登録する。
+ * docs/tui-alternate-screen.md §8 — 代替画面の中でスタックを出すと画面ごと消えて
+ * 読めなくなるので、スタックを出す前にここを呼んで通常画面へ戻す。
+ */
+export function setTerminalRestore(fn: () => void): void {
+  terminalRestore = fn;
 }
 
 /** クラッシュレポート本文を組み立てる (テスト可能な純関数)。 */
@@ -63,10 +73,16 @@ export function writeCrashLog(kind: string, err: unknown, dir: string = CRASH_LO
   }
 }
 
-/** raw mode 解除・カーソル表示・色リセット。REPL がどんな状態でも端末を返せるように。 */
+/** raw mode 解除・代替画面からの復帰・カーソル表示・色リセット。REPL がどんな状態でも端末を返せるように。 */
 function restoreTerminal(): void {
   try {
     if (process.stdin.isTTY) process.stdin.setRawMode?.(false);
+  } catch {
+    /* ignore */
+  }
+  try {
+    // 代替画面を抜けてスクロールバックを書き戻す (§8)。console の差し替えも解除される
+    terminalRestore?.();
   } catch {
     /* ignore */
   }
