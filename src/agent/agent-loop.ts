@@ -43,7 +43,8 @@ import { loadProjectInstructions } from "./project-context.js";
 import { createSession, saveSession, type SessionData } from "./session-manager.js";
 import type { RoomId } from "./room-types.js";
 import { PlanManager } from "./plan-mode.js";
-import type { SamplingParams } from "../config/types.js";
+import type { LLMEndpoint, SamplingParams } from "../config/types.js";
+import { makeLiveBinding, type LiveModelBinding } from "./model-drift.js";
 import { loadConfig } from "../config/config-manager.js";
 import { CheckpointManager } from "../checkpoint/checkpoint-manager.js";
 import * as logger from "../utils/logger.js";
@@ -330,6 +331,11 @@ export class AgentLoop {
   private previousUserMessage = "";
   /** 区切り指紋の採番用カウンタ (同じ区切りを二度確認しないための識別子) */
   private breakSeq = 0;
+  /**
+   * いま動いている provider を生成したときの接続情報 (docs/model-apply-immediacy.md §3.1)。
+   * config の設定値と比較して「設定したのに反映されていない」 を検出するために持つ。
+   */
+  private liveBinding: LiveModelBinding | null = null;
 
   constructor(
     private provider: LLMProvider,
@@ -3294,9 +3300,12 @@ export class AgentLoop {
    * メインLLMのProviderを差し替える。/model url, /model provider 経由で
    * 接続先を実行時に変更する際に呼ぶ。modelも同時に渡せば一括反映される。
    */
-  setProvider(provider: LLMProvider, model?: string): void {
+  setProvider(provider: LLMProvider, model?: string, endpoint?: LLMEndpoint): void {
     this.provider = provider;
     if (model) this.model = model;
+    // 実行中バインディングを更新 (docs/model-apply-immediacy.md §3.1)。
+    // endpoint を渡さない旧来の呼び出しでは前の記録を残す (= 誤警告より検出漏れを取る)。
+    if (endpoint) this.liveBinding = makeLiveBinding(endpoint, this.model);
     this.contextManager.setProvider(provider, this.model);
     this.intentClassifier.setProvider(provider, this.model);
     this.evaluator.setMainProvider(provider, this.model);
@@ -3315,6 +3324,22 @@ export class AgentLoop {
     this.contextManager.setThreshold(this.capability.compressionThreshold);
     this.contextManager.setKeepRecentMessages(this.capability.keepRecentMessages);
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, this.model)} (${this.capability.reason})`);
+  }
+
+  /**
+   * 実行中の provider を生成したときの接続情報を記録する
+   * (docs/model-apply-immediacy.md §3.1)。 起動直後は index.ts が config.mainLLM で 1 回呼ぶ。
+   */
+  setLiveBinding(endpoint: LLMEndpoint, model?: string): void {
+    this.liveBinding = makeLiveBinding(endpoint, model ?? this.model);
+  }
+
+  /**
+   * いま動いている provider の接続情報。 未記録なら null。
+   * null は「ズレ判定の材料が無い」 という意味で、 呼び出し側はズレなしとして扱う。
+   */
+  getLiveBinding(): LiveModelBinding | null {
+    return this.liveBinding ? { ...this.liveBinding } : null;
   }
 
   /** Phase A: 現在の能力プロファイルを取得 (REPL の /capability コマンド用) */

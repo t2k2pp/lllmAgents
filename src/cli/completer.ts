@@ -94,6 +94,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   //   - /model setup <provider> の各バリアントは /models Add new... の wizard へ集約 → 補完から除外。
   { command: "/model", description: "main / second / 他 slot の状態を 1 画面で表示 (詳細編集は /models)" },
   { command: "/model list", description: "main slot の利用可能モデル一覧から選択" },
+  { command: "/model apply", description: "main slot の設定値を実行中に反映 (設定と実行中がズレた時)" },
   { command: "/model context", description: "main slot のコンテキスト長を変更 (例: 128k)", needsArg: true },
   { command: "/model description", description: "main slot の特性説明 (サブエージェント選択の材料)", needsArg: true },
   { command: "/model temperature", description: "main slot の temperature (0〜2、推論重視は低め)", needsArg: true },

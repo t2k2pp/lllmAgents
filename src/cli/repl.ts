@@ -84,7 +84,14 @@ import {
   isValidSlotName,
   RESERVED_SLOT_NAMES,
 } from "../config/model-registry.js";
-import { invalidateModelCache } from "../config/model-resolver.js";
+import { invalidateModelCache, setResolverPassphrase } from "../config/model-resolver.js";
+import {
+  describeEndpoint,
+  detectModelDrift,
+  formatApplyFailureLines,
+  formatBindingLines,
+  formatDriftWarningLine,
+} from "../agent/model-drift.js";
 import type { LLMRegistryEntry } from "../config/types.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
@@ -286,6 +293,9 @@ export class REPL {
     }
     try {
       while (true) {
+        // モデル設定が実行中に反映されていない間は、 入力を受け付ける前に毎ターン警告する
+        // (docs/model-apply-immediacy.md §3.3)。 マルチライン入力の途中では出さない。
+        if (!this.isMultiline) this.printModelDriftWarning();
         const prefix = this.getPromptPrefix();
         // マルチラインモード中はドロップダウンを抑制
         const raw = await this.input.question(prefix, {
@@ -441,7 +451,62 @@ export class REPL {
       message: `${label} (${providerType ?? ""})の暗号化キーを復号するための合言葉:`,
       mask: "*",
     });
-    this.passphrase = secret;
+    this.adoptPassphrase(secret);
+  }
+
+  /**
+   * 合言葉をセッションの合言葉として採用する (docs/model-apply-immediacy.md §2.1 / §4)。
+   *
+   * 暗号化保存を選んだ直後に呼ぶと、 その場で ensurePassphraseFor() が再入力を求めなくなり、
+   * 再起動なしで反映できる。 model-resolver 側にも渡さないと、 暗号化 apiKey の entry が
+   * named slot から解決できないまま残る (resolver は合言葉が無いと解決を拒否する仕様)。
+   */
+  private adoptPassphrase(passphrase: string): void {
+    this.passphrase = passphrase;
+    try {
+      setResolverPassphrase(passphrase);
+    } catch {
+      /* resolver への伝播失敗で設定操作自体を止めない */
+    }
+  }
+
+  /**
+   * 反映失敗の共通表示 (docs/model-apply-immediacy.md §2.2)。
+   * 「再起動してください」 で終わらせず、 いま動いているのが何かを必ず併記する。
+   */
+  private reportApplyFailure(reason: string): void {
+    for (const line of formatApplyFailureLines(reason, this.agent.getLiveBinding())) {
+      console.log(chalk.yellow(`  ${line}`));
+    }
+  }
+
+  /**
+   * メインLLM の「設定値」 と「実行中」 のズレ (docs/model-apply-immediacy.md §3.2)。
+   * 実行中バインディングが未記録なら null (= ズレなし扱い)。
+   */
+  private currentModelDrift(): ReturnType<typeof detectModelDrift> {
+    return detectModelDrift(this.config.mainLLM, this.agent.getLiveBinding());
+  }
+
+  /**
+   * 「設定値」 と「実行中」 を 2 行に分けて表示する (docs/model-apply-immediacy.md §3.3)。
+   * 一致していても 2 行出す。 1 行にまとめると、 どちらを見せているのか分からなくなる。
+   */
+  private printMainLLMBinding(label: string, indent: string): void {
+    const lines = formatBindingLines(label, this.config.mainLLM, this.agent.getLiveBinding());
+    console.log(chalk.dim(`${indent}${lines.configured}`));
+    console.log(lines.drifted ? chalk.red(`${indent}${lines.live}`) : chalk.dim(`${indent}${lines.live}`));
+    if (lines.hint) console.log(chalk.yellow(`${indent}${" ".repeat(label.length + 2)}${lines.hint}`));
+  }
+
+  /**
+   * ユーザー入力を受け付ける直前に出す 1 行警告 (docs/model-apply-immediacy.md §3.3)。
+   * ズレている間は毎ターン出す。 うるさいが、 うるさくないと気づかない不具合なので意図的。
+   * 反映すれば消えるため恒常的なノイズにはならない。
+   */
+  private printModelDriftWarning(): void {
+    const drift = this.currentModelDrift();
+    if (drift) console.log(chalk.red(`  ${formatDriftWarningLine(drift)}`));
   }
 
   /**
@@ -449,15 +514,18 @@ export class REPL {
    * Configを保存後に呼ぶと、新しいProviderインスタンスを作成して AgentLoop と
    * SubAgentManager に注入し、システムプロンプトのプロファイル情報も更新する。
    * 接続テストを行い、失敗時は警告を出すが処理は続行する（ユーザーがリトライできる）。
+   *
+   * 反映できたら true。 provider 生成に失敗したら false を返し、 §2.2 の文言
+   * (いま動いているのは何か) を出す。 設定の保存自体は呼び出し側で済んでいる。
    */
-  private async applyMainLLMEndpoint(): Promise<void> {
+  private async applyMainLLMEndpoint(): Promise<boolean> {
     await this.ensurePassphraseFor(this.config.mainLLM.apiKey, "メインLLM", this.config.mainLLM.providerType);
     let newProvider;
     try {
       newProvider = createProvider(this.config.mainLLM, this.passphrase);
     } catch (e) {
-      console.log(chalk.red(`  Provider生成に失敗しました: ${e instanceof Error ? e.message : String(e)}`));
-      return;
+      this.reportApplyFailure(`Provider 生成に失敗 (${e instanceof Error ? e.message : String(e)})`);
+      return false;
     }
 
     // 接続テスト
@@ -474,7 +542,8 @@ export class REPL {
       console.log(chalk.yellow(`  ⚠ 接続テスト中にエラーが発生しました。設定は反映済み。`));
     }
 
-    this.agent.setProvider(newProvider, this.config.mainLLM.model);
+    // 第3引数の endpoint で実行中バインディングを更新する (docs/model-apply-immediacy.md §3.1)
+    this.agent.setProvider(newProvider, this.config.mainLLM.model, this.config.mainLLM);
     // contextWindow も切り替える。 ollama 32K → anthropic 200K 等の急変で
     // 古い値が残ると context 圧縮や max_tokens 計算が壊れる (= 旧バグ)
     if (this.config.mainLLM.contextWindow && this.config.mainLLM.contextWindow > 0) {
@@ -491,6 +560,39 @@ export class REPL {
       if (entry) setRegistrySlot("main", entry.id);
     } catch {
       /* ignore */
+    }
+    // F1 との整合 (docs/model-apply-immediacy.md §4): resolver の provider キャッシュを捨てる
+    invalidateModelCache();
+    return true;
+  }
+
+  /**
+   * セットアップ wizard 完了後に、 保存した設定を実行中へ反映する共通処理。
+   * 設計: docs/model-apply-immediacy.md §2
+   *
+   * 暗号化保存でも再起動は要求しない (合言葉は adoptPassphrase() で採用済み)。
+   * 反映に失敗しても設定の保存は済んでいる状態を保ち、 §2.2 の文言で
+   * 「いま動いているのは何か」 を伝える。
+   */
+  private async applyAfterSetup(target: "main" | "second" | "vision"): Promise<void> {
+    try {
+      if (target === "main") {
+        if (await this.applyMainLLMEndpoint()) {
+          console.log(chalk.green("  実行時に反映しました。"));
+        }
+      } else if (target === "vision") {
+        await this.applyVisionLLMEndpoint();
+        console.log(chalk.green("  実行時に反映しました。"));
+      } else {
+        await this.applySecondLLMEndpoint();
+        if (this.secondLLMManager?.isAvailable() ?? false) {
+          console.log(chalk.green("  実行時に反映しました。"));
+        } else {
+          console.log(chalk.yellow("  反映時に接続失敗しました。 /model second で確認してください。"));
+        }
+      }
+    } catch (e) {
+      this.reportApplyFailure(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -586,7 +688,6 @@ export class REPL {
     });
 
     let storedApiKey = "";
-    let needsRestart = false;
 
     if (storageMode === "env") {
       const envName = await input({
@@ -644,7 +745,9 @@ export class REPL {
         return;
       }
       storedApiKey = CredentialVault.encrypt(apiKey.trim(), passphrase);
-      needsRestart = true; // 暗号化済みは初回起動時に合言葉を聞くため再起動が必要
+      // 復号に必要な合言葉はいま手元にある。 セッションの合言葉として採用すれば
+      // 再起動なしで反映できる (docs/model-apply-immediacy.md §2.1)
+      this.adoptPassphrase(passphrase);
     }
 
     // 全 Azure プロバイダ共通: 完全URLを貼られても protocol+host だけに正規化する
@@ -719,26 +822,8 @@ export class REPL {
       ),
     );
 
-    if (needsRestart) {
-      console.log(chalk.yellow("\n  ⚠ 暗号化保存のため、反映にはアプリの再起動と合言葉入力が必要です。"));
-    } else {
-      // 平文 / 環境変数参照 ならその場で反映可能
-      if (target === "main") {
-        await this.applyMainLLMEndpoint();
-        console.log(chalk.green("  実行時に反映しました。"));
-      } else if (target === "vision") {
-        await this.applyVisionLLMEndpoint();
-        console.log(chalk.green("  実行時に反映しました。"));
-      } else {
-        await this.applySecondLLMEndpoint();
-        const isAvail = this.secondLLMManager?.isAvailable() ?? false;
-        if (isAvail) {
-          console.log(chalk.green("  実行時に反映しました。"));
-        } else {
-          console.log(chalk.yellow("  反映時に接続失敗しました。/model second で確認してください。"));
-        }
-      }
-    }
+    // 暗号化保存でも合言葉は手元にあるので、 その場で反映する (再起動は要求しない)
+    await this.applyAfterSetup(target);
     console.log();
   }
 
@@ -3332,7 +3417,6 @@ export class REPL {
     });
 
     let storedApiKey: string | undefined;
-    let needsRestart = false;
 
     if (provider === "anthropic") {
       const storageMode = await select({
@@ -3389,7 +3473,8 @@ export class REPL {
           return;
         }
         storedApiKey = CredentialVault.encrypt(apiKey.trim(), passphrase);
-        needsRestart = true;
+        // 合言葉をセッションに採用して再起動不要にする (docs/model-apply-immediacy.md §2.1)
+        this.adoptPassphrase(passphrase);
       }
     } else {
       // claude-cli / claude-agent-sdk は事前に `claude login` 済みである必要がある旨を案内
@@ -3471,25 +3556,8 @@ export class REPL {
       console.log(chalk.dim(`    API Key: ${kind}`));
     }
 
-    if (needsRestart) {
-      console.log(chalk.yellow("\n  ⚠ 暗号化保存のため、 反映にはアプリの再起動と合言葉入力が必要です。"));
-    } else {
-      if (target === "main") {
-        await this.applyMainLLMEndpoint();
-        console.log(chalk.green("  実行時に反映しました。"));
-      } else if (target === "vision") {
-        await this.applyVisionLLMEndpoint();
-        console.log(chalk.green("  実行時に反映しました。"));
-      } else {
-        await this.applySecondLLMEndpoint();
-        const isAvail = this.secondLLMManager?.isAvailable() ?? false;
-        if (isAvail) {
-          console.log(chalk.green("  実行時に反映しました。"));
-        } else {
-          console.log(chalk.yellow("  反映時に接続失敗しました。 /model second で確認してください。"));
-        }
-      }
-    }
+    // 暗号化保存でも合言葉は手元にあるので、 その場で反映する (再起動は要求しない)
+    await this.applyAfterSetup(target);
     console.log();
   }
 
@@ -3537,7 +3605,6 @@ export class REPL {
     });
 
     let storedApiKey: string | undefined;
-    let needsRestart = false;
 
     if (storageMode === "env") {
       const envName = await input({
@@ -3583,7 +3650,8 @@ export class REPL {
         return;
       }
       storedApiKey = CredentialVault.encrypt(apiKey.trim(), passphrase);
-      needsRestart = true;
+      // 合言葉をセッションに採用して再起動不要にする (docs/model-apply-immediacy.md §2.1)
+      this.adoptPassphrase(passphrase);
     }
 
     // コンテキストウィンドウ: モデル既定値を提示しつつユーザが上書きできるようにする
@@ -3650,25 +3718,8 @@ export class REPL {
       console.log(chalk.dim(`    API Key: ${kind}`));
     }
 
-    if (needsRestart) {
-      console.log(chalk.yellow("\n  ⚠ 暗号化保存のため、 反映にはアプリの再起動と合言葉入力が必要です。"));
-    } else {
-      if (target === "main") {
-        await this.applyMainLLMEndpoint();
-        console.log(chalk.green("  実行時に反映しました。"));
-      } else if (target === "vision") {
-        await this.applyVisionLLMEndpoint();
-        console.log(chalk.green("  実行時に反映しました。"));
-      } else {
-        await this.applySecondLLMEndpoint();
-        const isAvail = this.secondLLMManager?.isAvailable() ?? false;
-        if (isAvail) {
-          console.log(chalk.green("  実行時に反映しました。"));
-        } else {
-          console.log(chalk.yellow("  反映時に接続失敗しました。 /model second で確認してください。"));
-        }
-      }
-    }
+    // 暗号化保存でも合言葉は手元にあるので、 その場で反映する (再起動は要求しない)
+    await this.applyAfterSetup(target);
     console.log();
   }
 
@@ -3713,6 +3764,8 @@ export class REPL {
         /* ignore */
       }
     }
+    // F1 との整合 (docs/model-apply-immediacy.md §4): resolver の provider キャッシュを捨てる
+    invalidateModelCache();
   }
 
   /**
@@ -3749,6 +3802,8 @@ export class REPL {
     } catch (e) {
       console.log(chalk.red(`  Vision LLM 反映に失敗: ${e instanceof Error ? e.message : String(e)}`));
     }
+    // F1 との整合 (docs/model-apply-immediacy.md §4): resolver の provider キャッシュを捨てる
+    invalidateModelCache();
   }
 
   /**
@@ -5297,17 +5352,38 @@ export class REPL {
           await this.handleVisionLLMCommand(args.slice(1));
           break;
         }
+        // /model apply: 設定値を実行中へ明示的に反映する (docs/model-apply-immediacy.md §3.4)。
+        // ズレ警告からたどれる操作が無いと、 ユーザーは結局アプリを再起動してしまう。
+        if (args[0] === "apply") {
+          console.log(chalk.bold("\n  ── メインLLM 設定の反映 ──"));
+          console.log(chalk.dim(`  設定値: ${describeEndpoint(this.config.mainLLM)}`));
+          try {
+            if (await this.applyMainLLMEndpoint()) {
+              if (this.currentModelDrift()) {
+                console.log(chalk.yellow("  反映しましたが、 設定値と実行中がまだ一致していません。"));
+              } else {
+                console.log(chalk.green("  ✓ 反映しました。 設定値と実行中が一致しています。"));
+              }
+            }
+          } catch (e) {
+            this.reportApplyFailure(e instanceof Error ? e.message : String(e));
+          }
+          this.printMainLLMBinding("メインLLM", "  ");
+          console.log();
+          break;
+        }
         if (args.length === 0 || args[0] === "info") {
           // --- 基本情報 ---
           const modelName = this.agent.getModel();
           const ctxWindow = this.agent.getContextWindow();
           const ctxLabel = ctxWindow >= 1000 ? `${Math.round(ctxWindow / 1000)}K` : `${ctxWindow}`;
           console.log(chalk.bold("\n  ── モデル情報 ──"));
-          console.log(chalk.dim(`  モデル:         ${chalk.cyan(modelName)}`));
+          // 「設定値」 と「実行中」 は別物なので必ず 2 行に分けて出す
+          // (docs/model-apply-immediacy.md §3.3)。 混ぜると画面が嘘をつく。
+          this.printMainLLMBinding("メインLLM", "  ");
+          console.log(chalk.dim(`  実行中モデル:   ${chalk.cyan(modelName)}`));
           {
             const m = this.config.mainLLM;
-            const loc = m.baseUrl ?? m.endpoint ?? "(クラウド)";
-            console.log(chalk.dim(`  プロバイダー:   ${m.providerType} @ ${loc}`));
             if (m.deploymentName) console.log(chalk.dim(`  Deployment:     ${m.deploymentName}`));
             if (m.apiKey) {
               const kind = m.apiKey.startsWith("encrypted:")
@@ -7028,9 +7104,8 @@ export class REPL {
 
         // ─── Slots ───
         console.log(chalk.dim("\n  ── Slots ──"));
-        const main = this.config.mainLLM;
-        const mainLoc = main.baseUrl ?? main.endpoint ?? "(クラウド)";
-        console.log(chalk.dim(`  Main:    ${main.providerType}:${main.model} @ ${mainLoc}`));
+        // Main は「設定値」 と「実行中」 を分けて出す (docs/model-apply-immediacy.md §3.3)
+        this.printMainLLMBinding("Main", "  ");
         if (this.config.secondLLM) {
           const sec = this.config.secondLLM.endpoint;
           const secLoc = sec.baseUrl ?? sec.endpoint ?? "(クラウド)";

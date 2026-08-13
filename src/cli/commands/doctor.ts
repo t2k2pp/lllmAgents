@@ -12,6 +12,7 @@ import * as os from "node:os";
 import chalk from "chalk";
 import { createProvider } from "../../providers/provider-factory.js";
 import { probeBrowserCapability } from "../../browser/browser-capability.js";
+import { detectModelDrift } from "../../agent/model-drift.js";
 import type { ReplCommandDef, ReplCommandContext } from "./types.js";
 
 const CHECK_TIMEOUT_MS = 8_000;
@@ -54,6 +55,31 @@ async function checkMainLLM(ctx: ReplCommandContext): Promise<DoctorResult> {
   } catch (e) {
     return { label, status: "ng", detail: `${target} 接続失敗: ${errText(e)}` };
   }
+}
+
+/**
+ * config.mainLLM (設定値) と AgentLoop が握っている provider (実行中) が一致しているか。
+ * 設計: docs/model-apply-immediacy.md §3.3
+ *
+ * ここは疎通ではなく整合の確認。 設定したのに反映されていない状態を、
+ * 「なぜか品質が上がらない」 と悩む前に見つけるための項目。
+ */
+function checkModelBinding(ctx: ReplCommandContext): DoctorResult {
+  const label = "モデル設定の反映状態";
+  const live = ctx.agent.getLiveBinding();
+  if (!live) {
+    // 実行中バインディングが未記録 = 比較材料が無い。 誤検出を避けて skip 扱いにする
+    return { label, status: "skip", detail: "実行中の接続情報が未記録のため判定できません" };
+  }
+  const drift = detectModelDrift(ctx.config.mainLLM, live);
+  if (!drift) {
+    return { label, status: "ok", detail: `設定値と実行中が一致 (${live.label})` };
+  }
+  return {
+    label,
+    status: "ng",
+    detail: `設定 ${drift.wantLabel} に対し実行中は ${drift.liveLabel}。 /model apply で反映してください`,
+  };
 }
 
 /** LLM エンドポイントへの疎通 (provider の testConnection を利用) */
@@ -236,6 +262,16 @@ export const doctorCommand: ReplCommandDef = {
       checkDiscord(ctx),
       checkSlack(ctx),
     ]);
-    renderResults([main, second, vision, browser, discord, slack, checkImageGen(ctx), checkDiskUsage()]);
+    renderResults([
+      main,
+      checkModelBinding(ctx),
+      second,
+      vision,
+      browser,
+      discord,
+      slack,
+      checkImageGen(ctx),
+      checkDiskUsage(),
+    ]);
   },
 };

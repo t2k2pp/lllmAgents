@@ -532,6 +532,10 @@ async function main(): Promise<void> {
     llmProfiles,
   );
 
+  // 起動時の provider は config.mainLLM から作っているので、実行中バインディングとして記録する
+  // (docs/model-apply-immediacy.md §3.1)。これが無いと「設定したのに反映されていない」を検出できない。
+  agent.setLiveBinding(config.mainLLM);
+
   // クラッシュ時の緊急セッション保存 (agent 確定後に登録)。saveCurrentSession は同期処理。
   setCrashContext({ saveSession: () => agent.saveCurrentSession() });
 

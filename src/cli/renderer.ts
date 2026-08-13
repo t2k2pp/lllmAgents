@@ -76,6 +76,7 @@ export function displayHelp(skills?: SkillSummary[], registryEntries?: RegistryH
     ${chalk.cyan("/model")}          現在のモデル情報
     ${chalk.cyan("/model <name>")}   モデルを切り替え
     ${chalk.cyan("/model list")}     利用可能なモデル一覧
+    ${chalk.cyan("/model apply")}    設定値を実行中に反映 (設定と実行中がズレている時)
     ${chalk.cyan("/model setup")}    ローカル系LLMをウィザードで再設定 (npm run setup と同等)
     ${chalk.cyan("/model host")}     接続先のホスト or IP を変更（ポートは保持）
     ${chalk.cyan("/model port")}     接続先のポート番号を変更
