@@ -49,6 +49,9 @@ import { responseCompleteTool } from "./tools/definitions/response-complete.js";
 
 import { displayWelcome } from "./cli/renderer.js";
 import { REPL } from "./cli/repl.js";
+import { screen } from "./cli/screen-manager.js";
+import { installOutputRouter, uninstallOutputRouter } from "./cli/output-router.js";
+import { withPrompt } from "./cli/prompt-gate.js";
 import { PROVIDER_LABELS } from "./config/types.js";
 import { buildLLMProfiles } from "./agent/llm-profiles.js";
 import { DiscordInteractionServer } from "./discord/interaction-server.js";
@@ -72,6 +75,18 @@ async function main(): Promise<void> {
   // 未捕捉例外での即死時にセッション保存・端末復元・クラッシュログを行う
   // (docs/production-readiness.md PR-01)。最初に登録する。
   installCrashHandlers();
+
+  // 端末出力を ScreenManager に集約する (docs/tui-alternate-screen.md §3.3)。
+  // 以降の console.log / process.stdout.write はすべてこの経路に乗り、
+  // プロンプト表示中 (排他所有中) は自動的にキューへ退避される。
+  // 差し替えは起動直後の 1 回だけ。終了時・異常終了時に必ず元へ戻す (§8 / §11)。
+  installOutputRouter();
+  screen.start();
+  const restoreOutput = (): void => {
+    screen.stop();
+    uninstallOutputRouter();
+  };
+  process.on("exit", restoreOutput);
 
   const args = process.argv.slice(2);
 
@@ -141,15 +156,17 @@ async function main(): Promise<void> {
   // セカンドLLM 側でも同じパスフレーズを使い回せるよう shared scope で保持。
   let sharedPassphrase: string | undefined = undefined;
   if (config.mainLLM.apiKey && CredentialVault.isEncrypted(config.mainLLM.apiKey)) {
-    const { default: inquirer } = await import("inquirer");
-    const { secret } = await inquirer.prompt([
-      {
-        type: "password",
-        name: "secret",
-        message: `メインLLM (${config.mainLLM.providerType})の暗号化キーを復号するための合言葉:\n >`,
-        mask: "*",
-      },
-    ]);
+    const { inquirer } = await import("./cli/prompt-gate.js");
+    const { secret } = await withPrompt(() =>
+      inquirer.prompt([
+        {
+          type: "password",
+          name: "secret",
+          message: `メインLLM (${config.mainLLM.providerType})の暗号化キーを復号するための合言葉:\n >`,
+          mask: "*",
+        },
+      ]),
+    );
     sharedPassphrase = secret;
   }
 
@@ -383,15 +400,17 @@ async function main(): Promise<void> {
       const testDecrypt = passphrase ? CredentialVault.resolve(secondLlmConfig.endpoint.apiKey, passphrase) : "";
       if (!testDecrypt) {
         // メイン用と異なる、もしくは未設定なので別途プロンプト
-        const { default: inquirer } = await import("inquirer");
-        const { secret } = await inquirer.prompt([
-          {
-            type: "password",
-            name: "secret",
-            message: `Second LLM (${secondLlmConfig.endpoint.providerType})の暗号化キーを復号するための合言葉:\n >`,
-            mask: "*",
-          },
-        ]);
+        const { inquirer } = await import("./cli/prompt-gate.js");
+        const { secret } = await withPrompt(() =>
+          inquirer.prompt([
+            {
+              type: "password",
+              name: "secret",
+              message: `Second LLM (${secondLlmConfig.endpoint.providerType})の暗号化キーを復号するための合言葉:\n >`,
+              mask: "*",
+            },
+          ]),
+        );
         passphrase = secret;
       }
     }
@@ -701,6 +720,9 @@ async function main(): Promise<void> {
   // プール済みソケットが open handle として残り、/quit 後にイベントループが枯渇せず
   // プロセスが終了しない (= "Goodbye!" 表示後ターミナルに戻らない) 原因になる。
   await shutdownHttpClient();
+
+  // 出力の差し替えを元に戻す (process.on("exit") でも保険をかけてある)
+  restoreOutput();
 }
 
 main().catch((e) => {

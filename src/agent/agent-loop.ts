@@ -7,7 +7,8 @@ import { formatSelfCheck, rephraseUserIntent } from "./self-check-messages.js";
 import { isLikelyPermanentToolError } from "./tool-error-classification.js";
 import { globalTokenTracker } from "../cost/token-tracker.js";
 import { globalCostCalculator } from "../cost/cost-calculator.js";
-import { select } from "@inquirer/prompts";
+// プロンプト表示中はライブ領域を排他所有する (docs/tui-alternate-screen.md §4.3)
+import { select } from "../cli/prompt-gate.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";

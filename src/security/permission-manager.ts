@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import inquirer from "inquirer";
+import { inquirer, withPrompt } from "../cli/prompt-gate.js";
 import chalk from "chalk";
 import type { SecurityConfig, SecurityRuleConfig } from "../config/types.js";
 import type { PermissionLevel } from "./rules.js";
@@ -597,20 +597,22 @@ export class PermissionManager {
       // TTYモード: inquirer インタラクティブリスト
       let action: string;
       try {
-        const result = await inquirer.prompt<{ action: string }>([
-          {
-            type: "list",
-            name: "action",
-            message: "実行を許可しますか？",
-            choices: [
-              { name: "許可 (今回のみ)", value: "once" },
-              { name: `許可 (${toolName} をセッション中常に許可)`, value: "always" },
-              { name: `許可 (${toolName} を設定に保存して常に許可)`, value: "permanent" },
-              { name: "拒否", value: "deny" },
-              { name: "中止 (Agentを中断してプロンプトに戻る)", value: "abort" },
-            ],
-          },
-        ]);
+        const result = await withPrompt(() =>
+          inquirer.prompt<{ action: string }>([
+            {
+              type: "list",
+              name: "action",
+              message: "実行を許可しますか？",
+              choices: [
+                { name: "許可 (今回のみ)", value: "once" },
+                { name: `許可 (${toolName} をセッション中常に許可)`, value: "always" },
+                { name: `許可 (${toolName} を設定に保存して常に許可)`, value: "permanent" },
+                { name: "拒否", value: "deny" },
+                { name: "中止 (Agentを中断してプロンプトに戻る)", value: "abort" },
+              ],
+            },
+          ]),
+        );
         action = result.action;
       } catch (e) {
         // stdinが閉じられた場合などのフォールバック

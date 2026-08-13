@@ -1,4 +1,4 @@
-import inquirer from "inquirer";
+import { inquirer, withPrompt } from "../../cli/prompt-gate.js";
 import { nonTTYReader } from "../../utils/non-tty-reader.js";
 import type { ToolHandler, ToolResult, ToolExecutionContext } from "../tool-registry.js";
 import { getInteractionBridge } from "../../agent/interaction-bridge-registry.js";
@@ -185,44 +185,52 @@ async function executeTTY(
   otherLabel: string,
 ): Promise<ToolResult> {
   if (!options || options.length === 0) {
-    const { answer } = await inquirer.prompt<{ answer: string }>([
-      { type: "input", name: "answer", message: question },
-    ]);
+    const { answer } = await withPrompt(() =>
+      inquirer.prompt<{ answer: string }>([{ type: "input", name: "answer", message: question }]),
+    );
     return { success: true, output: answer };
   }
 
   const choices = [...options.map(formatInquirerChoice), { name: otherLabel, value: otherLabel }];
 
   if (multiSelect) {
-    const { answer } = await inquirer.prompt<{ answer: string[] }>([
-      {
-        type: "checkbox",
-        name: "answer",
-        message: question,
-        choices,
-      },
-    ]);
+    const { answer } = await withPrompt(() =>
+      inquirer.prompt<{ answer: string[] }>([
+        {
+          type: "checkbox",
+          name: "answer",
+          message: question,
+          choices,
+        },
+      ]),
+    );
     const selected = [...answer];
     const otherIdx = selected.indexOf(otherLabel);
     if (otherIdx !== -1) {
       selected.splice(otherIdx, 1);
-      const { text } = await inquirer.prompt<{ text: string }>([{ type: "input", name: "text", message: "回答:" }]);
+      const { text } = await withPrompt(() =>
+        inquirer.prompt<{ text: string }>([{ type: "input", name: "text", message: "回答:" }]),
+      );
       selected.push(text);
     }
     return { success: true, output: selected.join(", ") };
   }
 
-  const { answer } = await inquirer.prompt<{ answer: string }>([
-    {
-      type: "list",
-      name: "answer",
-      message: question,
-      choices,
-    },
-  ]);
+  const { answer } = await withPrompt(() =>
+    inquirer.prompt<{ answer: string }>([
+      {
+        type: "list",
+        name: "answer",
+        message: question,
+        choices,
+      },
+    ]),
+  );
 
   if (answer === otherLabel) {
-    const { text } = await inquirer.prompt<{ text: string }>([{ type: "input", name: "text", message: "回答:" }]);
+    const { text } = await withPrompt(() =>
+      inquirer.prompt<{ text: string }>([{ type: "input", name: "text", message: "回答:" }]),
+    );
     return { success: true, output: text };
   }
   return { success: true, output: answer };

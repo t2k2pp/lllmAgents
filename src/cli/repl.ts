@@ -40,7 +40,9 @@ import { formatTaskReport } from "../agent/task-reporter.js";
 import { maybePromoteToGoal, extractAcceptanceCriteria } from "../agent/goal-promotion.js";
 import { DiscordInteractionServer } from "../discord/interaction-server.js";
 import { registerAskCommand } from "../discord/slash-commands.js";
-import { select, input, password, confirm, checkbox, Separator } from "@inquirer/prompts";
+// プロンプトは prompt-gate 経由で呼ぶ (docs/tui-alternate-screen.md §4.3)。
+// 表示中はライブ領域を排他所有し、他の出力をキューへ退避させる。
+import { select, input, password, confirm, checkbox, Separator, inquirer, withPrompt } from "./prompt-gate.js";
 import { CredentialVault } from "../security/credential-vault.js";
 import { AzureFoundryProvider } from "../providers/azure-foundry.js";
 import { AzureAnthropicProvider } from "../providers/azure-anthropic.js";
@@ -53,7 +55,6 @@ import { maskWebhookUrl } from "../utils/mask.js";
 import { detectWsl } from "../security/wsl.js";
 import { configureSandboxProxy, getSandboxProxy } from "../security/sandbox-proxy.js";
 import { addDomain, removeDomain, resolveAllowedDomains, domainAllowed } from "../security/net-allowlist.js";
-import inquirer from "inquirer";
 import { ProcessSandbox, cleanupStaleSandboxArtifacts, withSandboxState } from "../security/process-sandbox.js";
 import {
   resetActiveProcessSandbox,
@@ -182,18 +183,20 @@ export class REPL {
           return "deny";
         }
         try {
-          const { action } = await inquirer.prompt<{ action: "once" | "always" | "deny" }>([
-            {
-              type: "list",
-              name: "action",
-              message: `${host} への接続を許可しますか？`,
-              choices: [
-                { name: "許可 (今回のセッションのみ)", value: "once" },
-                { name: "許可 (allowlist に保存して常に)", value: "always" },
-                { name: "拒否", value: "deny" },
-              ],
-            },
-          ]);
+          const { action } = await withPrompt(() =>
+            inquirer.prompt<{ action: "once" | "always" | "deny" }>([
+              {
+                type: "list",
+                name: "action",
+                message: `${host} への接続を許可しますか？`,
+                choices: [
+                  { name: "許可 (今回のセッションのみ)", value: "once" },
+                  { name: "許可 (allowlist に保存して常に)", value: "always" },
+                  { name: "拒否", value: "deny" },
+                ],
+              },
+            ]),
+          );
           return action;
         } catch {
           return "deny";

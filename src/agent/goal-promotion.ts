@@ -7,7 +7,8 @@
  */
 
 import chalk from "chalk";
-import { confirm } from "@inquirer/prompts";
+// プロンプト表示中はライブ領域を排他所有する (docs/tui-alternate-screen.md §4.3)
+import { confirm } from "../cli/prompt-gate.js";
 import type { LLMProvider } from "../providers/base-provider.js";
 import { collectResponse } from "../providers/base-provider.js";
 import type { GoalDefinition } from "./goal-slot.js";

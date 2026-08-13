@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import inquirer from "inquirer";
+import { inquirer, withPrompt } from "../cli/prompt-gate.js";
 import chalk from "chalk";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 
@@ -76,18 +76,20 @@ export class PlanManager {
       const map: Record<string, string> = { "1": "approve", "2": "feedback", "3": "reject" };
       action = map[answer?.trim()] ?? "approve";
     } else {
-      const result = await inquirer.prompt<{ action: string }>([
-        {
-          type: "list",
-          name: "action",
-          message: "この計画を承認しますか？",
-          choices: [
-            { name: "承認して実装開始", value: "approve" },
-            { name: "フィードバックを追加", value: "feedback" },
-            { name: "却下", value: "reject" },
-          ],
-        },
-      ]);
+      const result = await withPrompt(() =>
+        inquirer.prompt<{ action: string }>([
+          {
+            type: "list",
+            name: "action",
+            message: "この計画を承認しますか？",
+            choices: [
+              { name: "承認して実装開始", value: "approve" },
+              { name: "フィードバックを追加", value: "feedback" },
+              { name: "却下", value: "reject" },
+            ],
+          },
+        ]),
+      );
       action = result.action;
     }
 
@@ -102,13 +104,15 @@ export class PlanManager {
         process.stdout.write(`フィードバック: `);
         feedback = await nonTTYReader.readLine();
       } else {
-        const result = await inquirer.prompt<{ feedback: string }>([
-          {
-            type: "input",
-            name: "feedback",
-            message: "フィードバック:",
-          },
-        ]);
+        const result = await withPrompt(() =>
+          inquirer.prompt<{ feedback: string }>([
+            {
+              type: "input",
+              name: "feedback",
+              message: "フィードバック:",
+            },
+          ]),
+        );
         feedback = result.feedback;
       }
       this.currentPlan.state = "planning";
