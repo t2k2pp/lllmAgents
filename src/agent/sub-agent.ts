@@ -16,6 +16,8 @@ import {
 } from "./delegation-context.js";
 import { HarnessState, enrichToolResult } from "./harness-intervention.js";
 import { formatSelfCheck, SUB_AGENT_ACTION_HINT } from "./self-check-messages.js";
+import { resolveModelRef } from "../config/model-resolver.js";
+import { getSlot } from "../config/model-registry.js";
 
 const MAX_SUB_ITERATIONS = 30;
 
@@ -108,6 +110,19 @@ export interface SubAgentResult {
   description: string;
   result: string;
   success: boolean;
+}
+
+/**
+ * サブエージェント 1 回分のモデル選択結果 (docs/model-orchestration.md §4.2)。
+ * 解決に失敗しても起動は止めず、 main で走らせた事実を note で返す (silent な差し替えをしない)。
+ */
+export interface SubAgentModelChoice {
+  provider: LLMProvider;
+  model: string;
+  /** main 以外のモデルで走る場合のみ設定される表示用ラベル (例: "review → azure-anthropic:claude-sonnet-4-6") */
+  display?: string;
+  /** 解決できなかった場合の注記。 task ツールが modelNote として結果に載せる */
+  note?: string;
 }
 
 /** スキルのcontext:forkで使用するカスタム設定のオーバーライド */
@@ -332,15 +347,55 @@ export class SubAgentManager {
     this.model = model;
   }
 
+  /**
+   * このサブエージェントを走らせる provider/model を決める (docs/model-orchestration.md §4.2)。
+   *
+   * 優先順位: 呼出時の明示指定 > エージェント定義の modelRef > main (自分の provider)。
+   * 解決先が main slot と同じ entry なら自分の provider をそのまま使う
+   * (/model url 等でランタイム差し替えされた接続を尊重するため)。
+   *
+   * ここではログを出さない。 解決失敗は note で返し、 起動側 (launch*) が 1 回だけ警告する。
+   */
+  resolveModelFor(type: SubAgentType, explicitRef?: string): SubAgentModelChoice {
+    const fallback: SubAgentModelChoice = { provider: this.provider, model: this.model };
+    const ref = explicitRef?.trim() || getLoader().get(type)?.modelRef;
+    if (!ref) return fallback;
+
+    const resolved = resolveModelRef(ref);
+    if (!resolved) {
+      return {
+        ...fallback,
+        note:
+          `指定された model '${ref}' は未割当のため main で実行しました。 ` +
+          `/models slot ${ref} <モデル> で割り当てられます。`,
+      };
+    }
+
+    // main と同じ entry に解決された場合は従来経路 (自分の provider) を使う
+    const mainId = getSlot("main");
+    if (mainId && resolved.entryId === mainId) return fallback;
+
+    return { provider: resolved.provider, model: resolved.model, display: `${ref} → ${resolved.label}` };
+  }
+
+  /** launch* 共通: モデルを解決し、 解決失敗なら 1 回だけ警告する。 */
+  private pickModel(type: SubAgentType, modelRef?: string): SubAgentModelChoice {
+    const choice = this.resolveModelFor(type, modelRef);
+    if (choice.note) logger.warn(choice.note);
+    return choice;
+  }
+
   launchBackground(
     type: SubAgentType,
     description: string,
     prompt: string,
     parentAncestors: AncestorTypes = ROOT_ANCESTORS,
+    modelRef?: string,
   ): string {
+    const picked = this.pickModel(type, modelRef);
     const agent = new SubAgent(
-      this.provider,
-      this.model,
+      picked.provider,
+      picked.model,
       this.toolRegistry,
       this.permissions,
       type,
@@ -359,10 +414,12 @@ export class SubAgentManager {
     description: string,
     prompt: string,
     parentAncestors: AncestorTypes = ROOT_ANCESTORS,
+    modelRef?: string,
   ): Promise<SubAgentResult> {
+    const picked = this.pickModel(type, modelRef);
     const agent = new SubAgent(
-      this.provider,
-      this.model,
+      picked.provider,
+      picked.model,
       this.toolRegistry,
       this.permissions,
       type,
@@ -374,13 +431,14 @@ export class SubAgentManager {
   }
 
   async launchParallel(
-    tasks: Array<{ type: SubAgentType; description: string; prompt: string }>,
+    tasks: Array<{ type: SubAgentType; description: string; prompt: string; modelRef?: string }>,
     parentAncestors: AncestorTypes = ROOT_ANCESTORS,
   ): Promise<SubAgentResult[]> {
     const promises = tasks.map((task) => {
+      const picked = this.pickModel(task.type, task.modelRef);
       const agent = new SubAgent(
-        this.provider,
-        this.model,
+        picked.provider,
+        picked.model,
         this.toolRegistry,
         this.permissions,
         task.type,
@@ -415,10 +473,12 @@ export class SubAgentManager {
     allowedTools: string[] | undefined,
     prompt: string,
     parentAncestors: AncestorTypes = ROOT_ANCESTORS,
+    modelRef?: string,
   ): Promise<SubAgentResult> {
+    const picked = this.pickModel("general-purpose", modelRef);
     const agent = new SubAgent(
-      this.provider,
-      this.model,
+      picked.provider,
+      picked.model,
       this.toolRegistry,
       this.permissions,
       "general-purpose",

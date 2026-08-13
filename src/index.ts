@@ -4,6 +4,7 @@ import chalk from "chalk";
 import { configExists, loadConfig, saveConfig } from "./config/config-manager.js";
 import { setDisplayJpyRate } from "./cost/money-format.js";
 import { reconcileSlotsFromConfig } from "./config/model-registry.js";
+import { setResolverPassphrase } from "./config/model-resolver.js";
 import { runSetupWizard } from "./config/setup-wizard.js";
 import { createProvider } from "./providers/provider-factory.js";
 import { AgentLoop } from "./agent/agent-loop.js";
@@ -164,6 +165,11 @@ async function main(): Promise<void> {
     );
     process.exit(1);
   }
+
+  // ModelResolver に合言葉を預ける (docs/model-orchestration.md §3.4)。
+  // named slot 経由でサブエージェントを別モデルで起動する際、 暗号化 apiKey の復号に使う。
+  // ここで渡さないと、 ツール実行中に合言葉を聞く羽目になり描画が壊れる。
+  setResolverPassphrase(sharedPassphrase);
 
   // Create tool registry with ALL tools
   const toolRegistry = new ToolRegistry();

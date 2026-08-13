@@ -4,6 +4,8 @@ import { loadProjectInstructions, getGitInfo } from "./project-context.js";
 import { isWindows } from "../utils/platform.js";
 import { getBrowserCapability } from "../browser/browser-capability.js";
 import { RuleLoader } from "../rules/rule-loader.js";
+import { listResolvableSlots } from "../config/model-resolver.js";
+import { listEntries as listRegistryEntries } from "../config/model-registry.js";
 import type { Tier } from "./capability-tier.js";
 import {
   buildRegisterRules,
@@ -48,6 +50,37 @@ export interface LLMProfiles {
 export interface SystemPromptOverrides {
   projectInstructions?: string;
   memory?: string;
+}
+
+/** system prompt に列挙する named slot の上限 (docs/model-orchestration.md §10)。 */
+const MAX_LISTED_SLOTS = 5;
+
+/**
+ * 「委任先に指名できるモデル slot」 のブロックを組み立てる (docs/model-orchestration.md §6)。
+ *
+ * registry に 2 件以上の entry があり、 かつ自由 named slot が 1 つ以上あるときだけ返す。
+ * 単一モデル運用の user にとっては完全なノイズであり、 毎ターン数十トークンを恒久的に
+ * 消費する価値がないため (docs/system-prompt-redesign.md の 「再肥大を防ぐ原則」)。
+ */
+function buildModelSlotSection(): string | undefined {
+  let slots: ReturnType<typeof listResolvableSlots>;
+  try {
+    if (listRegistryEntries().length < 2) return undefined;
+    slots = listResolvableSlots();
+  } catch {
+    // registry が読めない環境 (テスト等) では黙って何も足さない
+    return undefined;
+  }
+  if (slots.length === 0) return undefined;
+
+  const lines = slots
+    .slice(0, MAX_LISTED_SLOTS)
+    .map((s) => `- ${s.slot}: ${s.label}${s.description ? ` — ${s.description}` : ""}`);
+
+  return `
+# Available model slots
+When you delegate with the task tool, you may name one of these in its \`model\` argument. If you omit it, the task runs on the current model.
+${lines.join("\n")}`;
 }
 
 export function buildSystemPrompt(
@@ -287,6 +320,12 @@ ${skillLines}`);
     // llmProfiles未提供だがセカンドLLMあり（旧経路・フォールバック）
     parts.push(`
 Second LLM available: delegate via second_llm_agent (no_tools:true for a tool-less one-shot consult / review / summary). Use it proactively for context saving, review, and bouncing ideas.`);
+  }
+
+  // 追加モデル slot (Model Registry Phase 6)。 named slot が 0 個なら何も足さない = 既定では変化なし
+  const modelSlotSection = buildModelSlotSection();
+  if (modelSlotSection) {
+    parts.push(modelSlotSection);
   }
 
   // Obsidian Knowledge (詳細ガイドは初回使用時に注入)

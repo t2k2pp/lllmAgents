@@ -313,6 +313,59 @@ export function setSlot(slot: "main" | "second" | string, entryId: string): bool
   return true;
 }
 
+/**
+ * 予約 slot 名。 これらは config.json への同期書込みと provider 再生成を伴うため、
+ * `/models slot <name>` の自由 slot としては使わせない (docs/model-orchestration.md §2.1)。
+ */
+export const RESERVED_SLOT_NAMES = ["main", "second", "vision"] as const;
+
+/** slot 名として使える文字列か (英小文字始まり + 英小文字/数字/ハイフン、 2〜20 文字)。 */
+export function isValidSlotName(name: string): boolean {
+  return /^[a-z][a-z0-9-]{1,19}$/.test(name);
+}
+
+/**
+ * named slot (slots.named) を slot 名の昇順で返す。
+ * 既定では予約 named slot (vision) を除いた 「自由 slot」 のみを返す。
+ * docs/model-orchestration.md §2.1
+ */
+export function listNamedSlots(options: { includeReserved?: boolean } = {}): Array<{ slot: string; entryId: string }> {
+  const named = readStore().slots.named ?? {};
+  const reserved = new Set<string>(RESERVED_SLOT_NAMES);
+  return Object.entries(named)
+    .filter(([slot, entryId]) => !!entryId && (options.includeReserved || !reserved.has(slot)))
+    .map(([slot, entryId]) => ({ slot, entryId }))
+    .sort((a, b) => a.slot.localeCompare(b.slot));
+}
+
+/**
+ * user 入力から registry entry を 1 件特定する。 `/models slot <name> <query>` 等で使う。
+ * 解決順序: 番号 (listEntries() の 1 始まり) → id 完全一致 → id 前方一致 → 名前完全一致 → 名前部分一致。
+ * 一意に絞れなかった場合は undefined (曖昧なまま採用しない)。
+ */
+export function resolveEntryQuery(query: string): LLMRegistryEntry | undefined {
+  const q = (query ?? "").trim();
+  if (!q) return undefined;
+  const entries = listEntries();
+
+  if (/^\d+$/.test(q)) {
+    return entries[Number(q) - 1];
+  }
+
+  const byIdExact = entries.find((e) => e.id === q);
+  if (byIdExact) return byIdExact;
+
+  const byIdPrefix = entries.filter((e) => e.id.startsWith(q));
+  if (byIdPrefix.length === 1) return byIdPrefix[0];
+
+  const lower = q.toLowerCase();
+  const byNameExact = entries.filter((e) => e.name.toLowerCase() === lower);
+  if (byNameExact.length === 1) return byNameExact[0];
+
+  const byNamePartial = entries.filter((e) => e.name.toLowerCase().includes(lower));
+  return byNamePartial.length === 1 ? byNamePartial[0] : undefined;
+}
+
 export function clearSlot(slot: "main" | "second" | string): void {
   const store = readStore();
   if (slot === "main") {

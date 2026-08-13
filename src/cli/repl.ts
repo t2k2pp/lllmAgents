@@ -76,7 +76,13 @@ import {
   deleteEntry as deleteRegistryEntry,
   recordEntry as recordRegistryEntry,
   getSlots as getRegistrySlots,
+  clearSlot as clearRegistrySlot,
+  listNamedSlots,
+  resolveEntryQuery,
+  isValidSlotName,
+  RESERVED_SLOT_NAMES,
 } from "../config/model-registry.js";
+import { invalidateModelCache } from "../config/model-resolver.js";
 import type { LLMRegistryEntry } from "../config/types.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
@@ -1392,6 +1398,11 @@ export class REPL {
     if (sub === "help" || sub === "--help" || sub === "-h") {
       console.log(chalk.bold("\n  ── /models ──"));
       console.log(chalk.dim("    /models          レジストリ一覧 → アクション選択"));
+      console.log(chalk.dim("    /models list     一覧表示のみ"));
+      console.log(chalk.dim("    /models slot     全 slot の割当状況を一覧表示"));
+      console.log(chalk.dim("    /models slot <name>          対話ピッカーで <name> slot に割当"));
+      console.log(chalk.dim("    /models slot <name> <query>  番号 / id / 名前で非対話割当"));
+      console.log(chalk.dim("    /models slot clear <name>    slot を解除"));
       console.log(chalk.dim("    /models help     このヘルプ"));
       console.log(chalk.dim("\n  アクション:"));
       console.log(chalk.dim("    Set as main / second   現在の slot 割当を更新"));
@@ -1400,8 +1411,13 @@ export class REPL {
       console.log(chalk.dim("    Delete                 エントリ削除 (slot は未割当に)"));
       console.log(chalk.dim("    Add new                プロバイダ選択 → setup wizard で新規追加"));
       console.log(chalk.dim("\n  接続情報の編集 (provider / model / URL 等) は当面 Duplicate + Add new で対応。"));
-      console.log(chalk.dim("  詳細: docs/model-registry.md"));
+      console.log(chalk.dim("  詳細: docs/model-registry.md / docs/model-orchestration.md"));
       console.log();
+      return;
+    }
+
+    if (sub === "slot") {
+      await this.handleModelsSlotCommand(args.slice(1));
       return;
     }
 
@@ -1447,6 +1463,136 @@ export class REPL {
       console.log(`  ${chalk.bold(e.name)}${tagStr}${sp ? "  " + chalk.dim(sp) : ""}`);
       console.log(chalk.dim(`    id: ${e.id}  last used: ${formatRelativeTime(e.lastUsedAt)}`));
     }
+    console.log();
+  }
+
+  // ─── /models slot (Model Registry Phase 6) ───────────────────
+  //
+  // docs/model-orchestration.md §7
+  //   /models slot                 全 slot の割当状況を一覧
+  //   /models slot <name>          対話ピッカーで entry を選び <name> に割当
+  //   /models slot <name> <query>  番号 / id 前方一致 / 名前部分一致で非対話割当
+  //   /models slot clear <name>    slot を解除
+
+  private async handleModelsSlotCommand(args: string[]): Promise<void> {
+    const first = (args[0] ?? "").trim();
+
+    if (!first) {
+      this.modelsPrintSlots();
+      return;
+    }
+
+    if (first.toLowerCase() === "clear") {
+      const name = (args[1] ?? "").trim().toLowerCase();
+      if (!name) {
+        console.log(chalk.yellow("  解除する slot 名を指定してください。 例: /models slot clear deep"));
+        return;
+      }
+      if (!this.assertFreeSlotName(name)) return;
+      const current = getRegistrySlots().named?.[name];
+      if (!current) {
+        console.log(chalk.dim(`  slot '${name}' は元から未割当です。`));
+        return;
+      }
+      clearRegistrySlot(name);
+      invalidateModelCache(current);
+      console.log(chalk.green(`  slot '${name}' を解除しました。`));
+      return;
+    }
+
+    const name = first.toLowerCase();
+    if (!this.assertFreeSlotName(name)) return;
+
+    const entries = listRegistryEntries();
+    if (entries.length === 0) {
+      console.log(chalk.yellow("  登録モデルがありません。 /models の Add new から追加してください。"));
+      return;
+    }
+
+    const query = args.slice(1).join(" ").trim();
+    let entry: LLMRegistryEntry | undefined;
+
+    if (query) {
+      entry = resolveEntryQuery(query);
+      if (!entry) {
+        console.log(chalk.yellow(`  '${query}' に一致するモデルを 1 件に絞れませんでした。`));
+        console.log(chalk.dim("  /models list で番号 / id / 名前を確認してください。"));
+        return;
+      }
+    } else {
+      try {
+        const chosen = await select<string>({
+          message: `slot '${name}' に割り当てるモデル:`,
+          choices: [...entries.map((e) => ({ name: e.name, value: e.id })), { name: chalk.dim("Cancel"), value: "" }],
+          pageSize: Math.min(15, entries.length + 1),
+        });
+        if (!chosen) return;
+        entry = getRegistryEntry(chosen);
+      } catch {
+        return;
+      }
+    }
+
+    if (!entry) return;
+    if (!setRegistrySlot(name, entry.id)) {
+      console.log(chalk.red("  割当に失敗しました (エントリが見つかりません)。"));
+      return;
+    }
+    invalidateModelCache(entry.id);
+    console.log(chalk.green(`  slot '${name}' に 「${entry.name}」 を割り当てました。`));
+    console.log(
+      chalk.dim(`  task ツールの model 引数、 またはエージェント定義の frontmatter 'model: ${name}' で指名できます。`),
+    );
+  }
+
+  /** 自由 named slot として使える名前かを検証する。 駄目なら理由を表示して false。 */
+  private assertFreeSlotName(name: string): boolean {
+    if ((RESERVED_SLOT_NAMES as readonly string[]).includes(name)) {
+      // main/second/vision は config.json への同期書込みと provider 再生成を伴うため、
+      // 単なる slot 参照の付け替えでは済まない。 それぞれの正規経路へ誘導する。
+      const how =
+        name === "main"
+          ? "/models の Set as main"
+          : name === "second"
+            ? "/models の Set as second (または /model second setup)"
+            : "/models の Set as vision (または /model vision setup)";
+      console.log(chalk.yellow(`  '${name}' は予約 slot です。 /models slot からは変更できません。`));
+      console.log(chalk.dim(`  ${how} から設定してください。`));
+      return false;
+    }
+    if (!isValidSlotName(name)) {
+      console.log(chalk.yellow(`  slot 名 '${name}' は使えません。`));
+      console.log(
+        chalk.dim("  英小文字で始まり、 英小文字 / 数字 / ハイフンのみ、 2〜20 文字 (例: fast, deep, review)。"),
+      );
+      console.log(chalk.dim("  大文字や日本語を許すと task ツール引数での取り違えが増えるため制限しています。"));
+      return false;
+    }
+    return true;
+  }
+
+  /** 全 slot の割当状況を表示する。 */
+  private modelsPrintSlots(): void {
+    const slots = getRegistrySlots();
+    const nameOf = (id: string | undefined, fallback: string): string => {
+      if (!id) return chalk.dim(fallback);
+      const e = getRegistryEntry(id);
+      return e ? e.name : chalk.red(`(削除済みエントリ: ${id})`);
+    };
+
+    console.log(chalk.bold("\n  ── Slots ──"));
+    console.log(`  ${"main".padEnd(8)} ${nameOf(slots.main || undefined, "(未割当)")}`);
+    console.log(`  ${"second".padEnd(8)} ${nameOf(slots.second, "(未割当)")}`);
+    console.log(`  ${"vision".padEnd(8)} ${nameOf(slots.named?.vision, "(未割当 → main にフォールバック)")}`);
+
+    const free = listNamedSlots();
+    for (const { slot, entryId } of free) {
+      console.log(`  ${slot.padEnd(8)} ${nameOf(entryId, "(未割当)")}`);
+    }
+    if (free.length === 0) {
+      console.log(chalk.dim("\n  自由 slot はまだありません。"));
+    }
+    console.log(chalk.dim("\n  /models slot <name> <モデル> で割当 / /models slot clear <name> で解除"));
     console.log();
   }
 

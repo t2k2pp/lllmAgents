@@ -28,6 +28,9 @@ const {
   getSlots,
   setSlot,
   clearSlot,
+  listNamedSlots,
+  resolveEntryQuery,
+  isValidSlotName,
   swapMainSecond,
   reconcileSlotsFromConfig,
   endpointSignature,
@@ -216,6 +219,61 @@ describe("model-registry: slots", () => {
     setSlot("main", a.id);
     expect(swapMainSecond()).toBe(false);
     expect(getSlot("main")).toBe(a.id);
+  });
+});
+
+describe("model-registry: named slot / entry query (Phase 6)", () => {
+  it("listNamedSlots は既定で予約 slot (vision) を除いた自由 slot のみ返す", () => {
+    const a = recordEntry({ providerType: "ollama", model: "a", baseUrl: "http://h1" })!;
+    const b = recordEntry({ providerType: "ollama", model: "b", baseUrl: "http://h2" })!;
+    setSlot("main", a.id);
+    setSlot("second", b.id);
+    setSlot("vision", a.id);
+    setSlot("deep", a.id);
+    setSlot("fast", b.id);
+
+    expect(listNamedSlots()).toEqual([
+      { slot: "deep", entryId: a.id },
+      { slot: "fast", entryId: b.id },
+    ]);
+    expect(listNamedSlots({ includeReserved: true }).map((s) => s.slot)).toEqual(["deep", "fast", "vision"]);
+  });
+
+  it("listNamedSlots: named slot が無ければ空配列", () => {
+    const a = recordEntry({ providerType: "ollama", model: "a", baseUrl: "http://h1" })!;
+    setSlot("main", a.id);
+    expect(listNamedSlots()).toEqual([]);
+  });
+
+  it("isValidSlotName: 英小文字始まり + 2〜20 文字のみ許可", () => {
+    expect(isValidSlotName("fast")).toBe(true);
+    expect(isValidSlotName("deep-2")).toBe(true);
+    expect(isValidSlotName("f")).toBe(false); // 1 文字は短すぎる
+    expect(isValidSlotName("Fast")).toBe(false); // 大文字
+    expect(isValidSlotName("2fast")).toBe(false); // 数字始まり
+    expect(isValidSlotName("速い")).toBe(false); // 日本語
+    expect(isValidSlotName("a".repeat(21))).toBe(false); // 21 文字
+  });
+
+  it("resolveEntryQuery: 番号 (listEntries の 1 始まり) で特定できる", () => {
+    const a = recordEntry({ providerType: "ollama", model: "a", baseUrl: "http://h1" })!;
+    expect(resolveEntryQuery("1")?.id).toBe(a.id);
+    expect(resolveEntryQuery("9")).toBeUndefined();
+  });
+
+  it("resolveEntryQuery: id 前方一致 / 名前部分一致 (大小無視)", () => {
+    const a = recordEntry({ providerType: "ollama", model: "Qwen3-32B", baseUrl: "http://h1" })!;
+    recordEntry({ providerType: "gemini", model: "gemini-2.5-pro" });
+    expect(resolveEntryQuery(a.id)?.id).toBe(a.id);
+    expect(resolveEntryQuery(a.id.slice(0, 8))?.id).toBe(a.id);
+    expect(resolveEntryQuery("qwen3")?.id).toBe(a.id);
+  });
+
+  it("resolveEntryQuery: 一意に絞れなければ undefined (曖昧なまま採用しない)", () => {
+    recordEntry({ providerType: "ollama", model: "qwen3-32b", baseUrl: "http://h1" });
+    recordEntry({ providerType: "ollama", model: "qwen3-9b", baseUrl: "http://h2" });
+    expect(resolveEntryQuery("qwen3")).toBeUndefined();
+    expect(resolveEntryQuery("")).toBeUndefined();
   });
 });
 

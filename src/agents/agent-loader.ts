@@ -11,6 +11,11 @@ export interface AgentDefinition {
   allowedTools: string[];
   systemPrompt: string;
   source: string;
+  /**
+   * このエージェントを走らせるモデル参照 (frontmatter の `model:`)。 ModelRef 文法は
+   * docs/model-orchestration.md §3.1。 未指定ならメインLLM で起動する (従来通り)。
+   */
+  modelRef?: string;
 }
 
 /**
@@ -73,6 +78,9 @@ function loadAgentFile(filePath: string): AgentDefinition | null {
     const description = (meta.description as string) ?? "";
     const tools = (meta.tools as string[]) ?? [];
     const allowedTools = (meta.allowedTools as string[]) ?? tools;
+    // model: は optional。 文字列以外 (flow 配列など) が来たら無視して従来動作にする。
+    const rawModel = meta.model;
+    const modelRef = typeof rawModel === "string" && rawModel.trim() !== "" ? rawModel.trim() : undefined;
 
     return {
       name,
@@ -81,6 +89,7 @@ function loadAgentFile(filePath: string): AgentDefinition | null {
       allowedTools,
       systemPrompt: body,
       source: filePath,
+      modelRef,
     };
   } catch (e) {
     logger.debug(`Failed to load agent file ${filePath}: ${e instanceof Error ? e.message : String(e)}`);

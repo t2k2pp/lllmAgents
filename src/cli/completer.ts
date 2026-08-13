@@ -213,6 +213,14 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
     description: "Model Registry: 登録済モデル一覧 → Set as main/second / Edit / Duplicate / Delete / Add new",
   },
   { command: "/models list", description: "Model Registry の一覧表示のみ ([main]/[second] タグ付き)" },
+  // Phase 6 (docs/model-orchestration.md §7): 任意 named slot への割当。
+  // task ツールの model 引数 / エージェント定義の frontmatter model: から指名できるようになる。
+  { command: "/models slot", description: "全 slot (main/second/vision + 自由 slot) の割当状況を表示" },
+  {
+    command: "/models slot clear",
+    description: "自由 slot を解除 (例: /models slot clear deep)",
+    needsArg: true,
+  },
   { command: "/models help", description: "/models の使い方を表示" },
   { command: "/profiles", description: "[非推奨] /models の alias。 旧 LLM プロファイル履歴コマンド" },
   { command: "/profiles list", description: "[非推奨] 保存済みプロファイル一覧を表示" },
