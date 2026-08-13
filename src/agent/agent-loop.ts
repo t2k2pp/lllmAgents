@@ -17,7 +17,9 @@ import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager, RequestSource } from "../security/permission-manager.js";
 import type { HookManager } from "../hooks/hook-manager.js";
 import { MessageHistory } from "./message-history.js";
-import { ContextManager } from "./context-manager.js";
+import { ContextManager, formatReduceOutcome } from "./context-manager.js";
+import type { ForgetDryRunReport, ForgetResult } from "./forgetting.js";
+import type { ReductionMode } from "../config/types.js";
 import { resolveCapability, formatCapabilityLabel, type CapabilityProfile } from "./capability-tier.js";
 import { normalizeToolCalls } from "./tool-call-normalizer.js";
 import { classifyTaskComplexity, recommendTier, explainRecommendation } from "./task-complexity.js";
@@ -342,12 +344,17 @@ export class AgentLoop {
     // 引数の compressionThreshold は無視され、 capability の値が常に勝つ。
     // (ユーザが明示的に変えたい場合は config.json modelCapabilities.<modelId>.* で override 可能)
     void compressionThreshold; // 後方互換: 引数は受け付けるが capability 由来を使う
+    // 縮約手段 (圧縮 / 忘却) は config.context から。 未設定なら hybrid
+    // (docs/context-forgetting.md §6 — 忘却が失敗しても圧縮に落ちるので後退しない)。
+    const ctxCfg = loadConfig().context;
     this.contextManager = new ContextManager(
       provider,
       model,
       contextWindow,
       this.capability.compressionThreshold,
       this.capability.keepRecentMessages,
+      ctxCfg?.reduction ?? "hybrid",
+      ctxCfg?.forgetting ?? {},
     );
     // 自動チェックポイント。 main ループのみで版管理する。
     // スコープは成果物フォルダ限定 (設計書 §4.5): 既定は <cwd>/sandbox/output、 無ければ cwd。
@@ -609,17 +616,25 @@ export class AgentLoop {
           this.purgeEphemeralAtSpanEnd("user_abort");
           return;
         }
-        // Context compression check
-        if (this.contextManager.shouldCompress(this.history)) {
-          const compressSpinner = createSpinner("コンテキストを圧縮中...").start();
+        // Context reduction check — mode に応じて忘却 / 圧縮を選ぶ (docs/context-forgetting.md §6)
+        this.contextManager.noteTurn();
+        if (this.contextManager.shouldReduce(this.history)) {
+          const reduceSpinner = createSpinner("コンテキストを整理中...").start();
           try {
-            await this.contextManager.compress(this.history);
-            compressSpinner.succeed("コンテキストを圧縮しました");
-            // チャットログのパート分割
-            this.chatLogger?.onCompressed();
+            const outcome = await this.contextManager.reduce(this.history);
+            reduceSpinner.succeed(formatReduceOutcome(outcome));
+            // 何を忘却したかは silent にしない。 検証で弾いた内容も含めて可視化する
+            if (outcome.forget?.applied) {
+              this.notice("info", formatReduceOutcome(outcome));
+              for (const w of outcome.forget.plan?.warnings ?? []) {
+                logger.warn(`[forget] ${w}`);
+              }
+            }
+            // チャットログのパート分割 (圧縮が走ったときのみ)
+            if (outcome.compressed) this.chatLogger?.onCompressed();
           } catch (e) {
-            compressSpinner.fail("圧縮に失敗しました");
-            logger.error("Context compression failed:", e);
+            reduceSpinner.fail("コンテキストの整理に失敗しました");
+            logger.error("Context reduction failed:", e);
           }
         }
 
@@ -2468,6 +2483,34 @@ export class AgentLoop {
   async forceCompress(): Promise<void> {
     await this.contextManager.compress(this.history);
     this.chatLogger?.onCompressed();
+  }
+
+  /**
+   * 手動忘却 (/forget)。 mode に関係なく忘却だけを試す。
+   * 失敗しても履歴は変わらない (ForgettingEngine がロールバックする)。
+   * docs/context-forgetting.md §8
+   */
+  async forceForget(): Promise<ForgetResult> {
+    return await this.contextManager.forget(this.history);
+  }
+
+  /** 忘却プランだけ出して適用しない (/forget dry)。 何が消えるかの事前確認用 */
+  async forgetDryRun(): Promise<ForgetDryRunReport> {
+    return await this.contextManager.forgetDryRun(this.history);
+  }
+
+  /** 縮約手段の切替 (/forget mode) */
+  setReductionMode(mode: ReductionMode): void {
+    this.contextManager.setReductionMode(mode);
+  }
+
+  getReductionMode(): ReductionMode {
+    return this.contextManager.getReductionMode();
+  }
+
+  /** 直近の忘却実績 (/forget status) */
+  getLastForgetResult(): { result: ForgetResult; at: number } | null {
+    return this.contextManager.getLastForgetResult();
   }
 
   saveCurrentSession(): void {

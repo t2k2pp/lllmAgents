@@ -165,9 +165,33 @@ export interface SecurityConfig {
   processSandbox?: ProcessSandboxConfig;
 }
 
+/**
+ * コンテキスト縮約の手段 (docs/context-forgetting.md §6)。
+ *  - compress: 従来通り常に要約圧縮
+ *  - forget: 常に忘却。 忘却が失敗したらその回だけ圧縮にフォールバック
+ *  - hybrid (既定): まず忘却を試し、 削減が目標の 60% に届かなければ続けて圧縮
+ */
+export type ReductionMode = "compress" | "forget" | "hybrid";
+
+/** 忘却機能の詳細設定 (docs/context-forgetting.md §4 / §6.1 / §10) */
+export interface ForgettingConfig {
+  /** 直近何セグメントを忘却対象外にするか (既定 6) */
+  keepRecentSegments?: number;
+  /** 目標削減量を閾値の何ポイント下に置くか (既定 0.15 = 15 ポイント) */
+  targetMarginRatio?: number;
+  /** hybrid で圧縮まで続行するかの判定比 (目標に対する達成率、 既定 0.6) */
+  sufficiencyRatio?: number;
+  /** 自動忘却の最短間隔 (ターン数、 既定 3)。 毎ターン忘却が走るのを防ぐ */
+  minIntervalTurns?: number;
+}
+
 export interface ContextConfig {
   compressionThreshold: number;
   maxHistoryMessages: number;
+  /** 縮約手段。 未設定なら "hybrid" (docs/context-forgetting.md §6) */
+  reduction?: ReductionMode;
+  /** 忘却機能の詳細設定 */
+  forgetting?: ForgettingConfig;
 }
 
 /**
@@ -744,6 +768,9 @@ export function getDefaultConfig(): Config {
     context: {
       compressionThreshold: 0.8,
       maxHistoryMessages: 100,
+      // docs/context-forgetting.md §6 — 既定は hybrid。 忘却が失敗しても圧縮に落ちるので
+      // 最悪でも従来と同じ動作になる。 従来動作に固定したい場合は /forget mode compress
+      reduction: "hybrid",
     },
     discord: {
       enabled: false,

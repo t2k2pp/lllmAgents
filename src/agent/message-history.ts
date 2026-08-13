@@ -234,6 +234,52 @@ export class MessageHistory {
     return this.ephemeralMessages.has(msg);
   }
 
+  /**
+   * 忘却の結果でメッセージ列を置き換える (docs/context-forgetting.md §5)。
+   * tool_calls / tool_result のペア整合を検証し、 壊れていれば例外を投げて
+   * 呼び出し側にロールバックさせる (壊れた履歴を送ると provider が 400 を返すため)。
+   *
+   * 呼び出し側 (ForgettingEngine) は適用前に getRawMessages() の控えを取り、
+   * ここが投げたら控えを渡し直す。 忘却の失敗で会話が壊れることはない。
+   */
+  replaceMessages(next: Message[]): void {
+    MessageHistory.assertToolPairing(next);
+    this.messages = [...next];
+  }
+
+  /**
+   * tool_calls を持つ assistant の直後に、 その全 tool_call_id に対応する
+   * role="tool" が揃っていることを検証する。 孤立した tool 結果も弾く。
+   */
+  private static assertToolPairing(messages: Message[]): void {
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i];
+      if (m.role === "tool") {
+        // ここに来る tool は直前の assistant(tool_calls) に回収されていないもの = 孤立
+        throw new Error(`[message-history] 孤立した tool_result があります (index=${i})`);
+      }
+      if (m.role !== "assistant" || !Array.isArray(m.tool_calls) || m.tool_calls.length === 0) continue;
+
+      const pending = new Set(m.tool_calls.map((c) => c.id));
+      let j = i + 1;
+      while (j < messages.length && messages[j].role === "tool") {
+        const id = messages[j].tool_call_id;
+        if (!id || !pending.delete(id)) {
+          throw new Error(
+            `[message-history] 対応する tool_call の無い tool_result です (index=${j}, tool_call_id=${id ?? "なし"})`,
+          );
+        }
+        j++;
+      }
+      if (pending.size > 0) {
+        throw new Error(
+          `[message-history] tool_result が欠落しています (assistant index=${i}, 未対応 id=${[...pending].join(", ")})`,
+        );
+      }
+      i = j - 1; // 回収した tool 群は再走査しない
+    }
+  }
+
   replaceOlderMessages(summary: string, keepRecent: number): void {
     if (this.messages.length <= keepRecent) return;
 

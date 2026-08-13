@@ -13,8 +13,9 @@ import { parallelCommand } from "./parallel.js";
 import { autorunCommand } from "./autorun.js";
 import { loglevelCommand } from "./loglevel.js";
 import { doctorCommand } from "./doctor.js";
+import { forgetCommand } from "./forget.js";
 
-const COMMANDS: ReplCommandDef[] = [parallelCommand, autorunCommand, loglevelCommand, doctorCommand];
+const COMMANDS: ReplCommandDef[] = [parallelCommand, autorunCommand, loglevelCommand, doctorCommand, forgetCommand];
 
 let lookupCache: Map<string, ReplCommandDef> | null = null;
 

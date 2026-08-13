@@ -5,6 +5,7 @@ import chalk from "chalk";
 import type { AgentLoop } from "../agent/agent-loop.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { MCPManager } from "../mcp/mcp-manager.js";
+import type { ReductionMode } from "../config/types.js";
 import { estimateTokens, estimateMessageTokens } from "../agent/token-counter.js";
 
 /**
@@ -50,6 +51,8 @@ export interface ContextBreakdown {
     count: number;
   };
   freeSpace: number;
+  /** コンテキスト縮約の手段 (docs/context-forgetting.md §6)。 既定変更を初見で確認できるよう表示する */
+  reductionMode: ReductionMode;
 }
 
 const SECTION_HEADERS = [
@@ -266,6 +269,7 @@ export function buildContextBreakdown(
       count: userMessages.length,
     },
     freeSpace,
+    reductionMode: agent.getReductionMode(),
   };
 }
 
@@ -399,7 +403,8 @@ export function formatContextBreakdown(b: ContextBreakdown, cwd: string = proces
 
   out.push("");
   out.push(chalk.dim("    /context <section> で中身を確認: system / memory / skills / tools / messages"));
-  out.push(chalk.dim("    トークン値は推定 (CJK=1, ASCII≈4字/トークン)。 圧縮は /compact"));
+  out.push(chalk.dim("    トークン値は推定 (CJK=1, ASCII≈4字/トークン)。 圧縮は /compact、 忘却は /forget"));
+  out.push(chalk.dim(`    自動縮約の手段: ${b.reductionMode} (変更は /forget mode [compress|forget|hybrid])`));
   out.push("");
   return out.join("\n");
 }

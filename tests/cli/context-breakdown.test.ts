@@ -47,6 +47,8 @@ function makeAgent(opts: {
     getToolRegistry: () => toolRegistry,
     getInputCompressionEnabled: () => false,
     getCompressionState: () => [],
+    // docs/context-forgetting.md §6 — /context に縮約手段を出すため
+    getReductionMode: () => "hybrid",
   } as unknown as AgentLoop;
 }
 
