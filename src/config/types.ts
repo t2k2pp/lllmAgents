@@ -185,6 +185,22 @@ export interface ForgettingConfig {
   minIntervalTurns?: number;
 }
 
+/**
+ * 区切り検出でのコンテキスト整理モード (docs/context-strategy.md §5.1)。
+ *  - off: 区切り検出を行わない (従来通り閾値のみ)
+ *  - auto (既定): 区切りで自動実行。 ただし clear は確認を取る
+ *  - aggressive: clear も確認なしで実行
+ */
+export type ContextStrategyMode = "off" | "auto" | "aggressive";
+
+/** 区切りでのコンテキスト戦略の設定 (docs/context-strategy.md §5) */
+export interface ContextStrategyConfig {
+  /** 未設定なら "auto" */
+  mode?: ContextStrategyMode;
+  /** 区切り整理の最短間隔 (ターン数、 既定 3)。 連続発火で毎ターン待たされるのを防ぐ */
+  minIntervalTurns?: number;
+}
+
 export interface ContextConfig {
   compressionThreshold: number;
   maxHistoryMessages: number;
@@ -192,6 +208,8 @@ export interface ContextConfig {
   reduction?: ReductionMode;
   /** 忘却機能の詳細設定 */
   forgetting?: ForgettingConfig;
+  /** 区切り検出での整理 (docs/context-strategy.md)。 未設定なら mode="auto" */
+  strategy?: ContextStrategyConfig;
 }
 
 /**
@@ -771,6 +789,9 @@ export function getDefaultConfig(): Config {
       // docs/context-forgetting.md §6 — 既定は hybrid。 忘却が失敗しても圧縮に落ちるので
       // 最悪でも従来と同じ動作になる。 従来動作に固定したい場合は /forget mode compress
       reduction: "hybrid",
+      // docs/context-strategy.md §5.1 — 既定は auto。 forget-thinking は待ち時間がほぼ無く
+      // 失うのも読み直せる情報だけなので自動で困らない。 clear だけは必ず人が承認する。
+      strategy: { mode: "auto" },
     },
     discord: {
       enabled: false,

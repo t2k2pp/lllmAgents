@@ -457,6 +457,134 @@ export function insertTombstone(next: Message[], text: string, insertAt: number)
   return [...next.slice(0, at), { role: "system", content: text }, ...next.slice(at)];
 }
 
+// ─── forget-thinking (決定論版・LLM 不使用) ───
+
+/**
+ * 再取得可能な読取系ツール (docs/context-strategy.md §2.1)。
+ * これらの結果は **もう一度実行すれば同じものが手に入る**ので、 本文を落としてよい。
+ * 逆に file_write / file_edit / bash などの「どう変更したか」 は履歴にしか残らないため残す。
+ */
+export const READONLY_TOOL_NAMES = new Set(["file_read", "grep", "glob", "web_fetch", "web_search"]);
+
+/**
+ * forget-thinking の対象セグメントを機械的に選ぶ。
+ *   - user / assistant_text は全て残す (無劣化)
+ *   - 読取系ツールのみで構成される tool_batch を thin する
+ *   - 書込・実行を 1 つでも含む tool_batch は残す
+ * モデルに問い合わせないので待ち時間はほぼゼロ。 ここが速さの肝。
+ */
+export function selectThinkingTargets(segments: Segment[]): number[] {
+  const thin: number[] = [];
+  for (const s of segments) {
+    if (s.protected) continue;
+    if (s.kind !== "tool_batch") continue;
+    const names = s.toolNames ?? [];
+    if (names.length === 0) continue;
+    if (!names.every((n) => READONLY_TOOL_NAMES.has(n))) continue;
+    thin.push(s.index);
+  }
+  return thin;
+}
+
+export interface ForgetThinkingResult {
+  applied: boolean;
+  /** 実削減トークン数 (適用前後の推定差) */
+  freedTokens: number;
+  /** thin した tool_batch の数 */
+  thinnedSegments: number;
+  /** 削除した assistant.thinking の数 */
+  clearedThinking: number;
+  reason?: string;
+}
+
+/**
+ * 「探索は捨てる、 やったことと言ったことは残す」 を LLM 無しで適用する
+ * (docs/context-strategy.md §2.1)。
+ *
+ * 実測上コンテキストの最大の占有源である読取系ツールの結果本文が消えるので、
+ * 区切りのたびに気軽に走らせられる = そもそも閾値に到達しなくなる。
+ */
+export function forgetThinking(
+  history: MessageHistory,
+  keepRecentSegments = DEFAULT_KEEP_RECENT_SEGMENTS,
+): ForgetThinkingResult {
+  // 送信時の実サイズで測る。 thinking は getMessages() で本文に inline されるため、
+  // getRawMessages() ではなくこちらを使わないと thinking 削除分が計上されない。
+  const beforeTokens = estimateMessageTokens(history.getMessages());
+  const before = history.getRawMessages();
+
+  // 思考は区切りを越えたら不要 (span 内で消費し終えた scratch)。
+  // 注: clearAllThinking() は Message を直接書き換えるため、 以降のロールバックでも
+  // thinking は戻らない。 thinking はもともと span 境界で破棄される scratch なので許容する。
+  const clearedThinking = history.clearAllThinking();
+
+  const segments = buildSegments(history.getRawMessages(), keepRecentSegments);
+  const thin = selectThinkingTargets(segments);
+
+  if (thin.length === 0) {
+    const freedTokens = Math.max(0, beforeTokens - estimateMessageTokens(history.getMessages()));
+    return {
+      applied: clearedThinking > 0,
+      freedTokens,
+      thinnedSegments: 0,
+      clearedThinking,
+      reason: clearedThinking > 0 ? undefined : "忘却できる読取系ツール結果がありません",
+    };
+  }
+
+  const { next, thinnedTools, droppedDigests } = applyPlanToMessages(history.getRawMessages(), segments, thin, []);
+  const firstSeg = segments.find((s) => s.index === thin[0]);
+  const insertAt = firstSeg ? Math.min(firstSeg.range[0], next.length) : next.length;
+  const tombstone = buildTombstoneText({
+    segmentCount: thin.length,
+    freedTokens: Math.max(0, estimateMessageTokens(history.getRawMessages()) - estimateMessageTokens(next)),
+    thinnedTools,
+    droppedDigests,
+  });
+  const withTombstone = insertTombstone(next, tombstone, insertAt);
+
+  try {
+    history.replaceMessages(withTombstone);
+  } catch (e) {
+    logger.error(`[forget-thinking] 適用後の履歴が不整合のためロールバックしました: ${e}`);
+    try {
+      history.replaceMessages(before);
+    } catch (e2) {
+      logger.error(`[forget-thinking] ロールバック先の履歴も不整合でした: ${e2}`);
+    }
+    return {
+      applied: false,
+      freedTokens: 0,
+      thinnedSegments: 0,
+      clearedThinking,
+      reason: `適用後の履歴が不整合のためロールバックしました: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+
+  const freedTokens = beforeTokens - estimateMessageTokens(history.getMessages());
+  if (freedTokens <= 0) {
+    // 情報だけ失って削減が無いなら忘却する意味がない (トゥームストーンの方が大きいケース)
+    logger.info(`[forget-thinking] 実質削減が ${freedTokens} トークンのため適用を取り消しました`);
+    try {
+      history.replaceMessages(before);
+    } catch (e) {
+      logger.error(`[forget-thinking] ロールバック先の履歴も不整合でした: ${e}`);
+    }
+    return {
+      applied: false,
+      freedTokens: 0,
+      thinnedSegments: 0,
+      clearedThinking,
+      reason: "実質的にトークンが削減できないため適用しませんでした",
+    };
+  }
+
+  logger.info(
+    `[forget-thinking] thin=${thin.length} thinking=${clearedThinking} 削減=${freedTokens} トークン (LLM 呼び出しなし)`,
+  );
+  return { applied: true, freedTokens, thinnedSegments: thin.length, clearedThinking };
+}
+
 // ─── エンジン ───
 
 export interface ForgettingEngineOptions {

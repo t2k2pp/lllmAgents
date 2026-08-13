@@ -85,9 +85,10 @@ $ npm start
 | `/clear` | 会話履歴クリア（現在の Room） |
 | `/room` | 会話 Room (A/B/C) の表示・移動・再開。`/room A\|B\|C` で移動、`/room resume [A\|B\|C]` で再開、`/room autoresume <on\|off> [A\|B\|C]`。既定 REPL=A / Discord=B / Slack=C（docs/room-model-design.md） |
 | `/queue` | 受信順キューの待ち状況を表示（`/queue clear` で REPL の type-ahead 待機入力を破棄） |
-| `/context` | コンテキスト使用状況の内訳（トークン数・進捗バー）。`/context <system\|memory\|skills\|tools\|messages>` で各カテゴリの中身をダンプ |
+| `/context` | コンテキスト使用状況の内訳（トークン数・進捗バー）。`/context <system\|memory\|skills\|tools\|messages>` で各カテゴリの中身をダンプ。`/context strategy [off\|auto\|aggressive]` で区切り整理のモード表示・切替（既定 auto、詳細: docs/context-strategy.md） |
 | `/compact` | コンテキストを手動圧縮 |
 | `/forget` | コンテキストを忘却で整理（要約せず捨てる）。`/forget dry` で何が消えるか事前確認、`/forget mode <compress\|forget\|hybrid>` で自動縮約の手段を切替（既定 hybrid）、`/forget status` で実績確認。詳細: docs/context-forgetting.md |
+| `/handoff` | 引き継ぎメモを残してコンテキストをリセット。`/handoff dry` でメモを表示するだけ（リセットしない）。メモの生成に失敗した場合は履歴を変更しない。詳細: docs/context-strategy.md |
 | `/model` | 現在のモデル情報 / `/model list` / `/model <name>` / `/model url <URL>` / `/model provider <type>` / `/model description <text>` / `/model temperature <値>` / `/model top_p <値>` / `/model top_k <値>` / `/model rep_penalty <値>` |
 | `/second` | セカンドLLM管理 (status/enable/disable/setup/url/provider/model/context/description) |
 | `/profiles` | LLM 接続プロファイル履歴 (`/profiles` で選択、`list` / `delete` / `help`)。 詳細: docs/llm-profiles.md |

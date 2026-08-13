@@ -17,8 +17,20 @@ import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager, RequestSource } from "../security/permission-manager.js";
 import type { HookManager } from "../hooks/hook-manager.js";
 import { MessageHistory } from "./message-history.js";
-import { ContextManager, formatReduceOutcome } from "./context-manager.js";
+import { ContextManager, formatReduceOutcome, type StrategyOutcome } from "./context-manager.js";
 import type { ForgetDryRunReport, ForgetResult } from "./forgetting.js";
+import {
+  ContextStrategy,
+  formatDowngradeNotice,
+  formatStrategyReport,
+  needsConfirmation,
+  pickStrongest,
+  type BreakSignalId,
+  type PendingBreak,
+  type StrategyDecision,
+  type StrategyMode,
+} from "./context-strategy.js";
+import { generateHandoffNote, type HandoffResult } from "./handoff.js";
 import type { ReductionMode } from "../config/types.js";
 import { resolveCapability, formatCapabilityLabel, type CapabilityProfile } from "./capability-tier.js";
 import { normalizeToolCalls } from "./tool-call-normalizer.js";
@@ -39,7 +51,7 @@ import { LLMLogger } from "./llm-logger.js";
 import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
 import { getFirstUseGuide, getFailureGuide } from "./tool-guides.js";
-import { IntentClassifier } from "./intent-classifier.js";
+import { IntentClassifier, type CompletionType } from "./intent-classifier.js";
 import { Evaluator } from "./evaluator.js";
 import { judgeProgress, buildRecentSummary } from "./progress-judge.js";
 import { checkCoherence, buildCoherenceNudge } from "./coherence-check.js";
@@ -61,6 +73,7 @@ import {
   type TodoItem,
   setTodos as setTodosFromGoal,
   getTodos as getTodosCurrent,
+  setTodoChangeListener,
   clearTodos,
   buildTodoSection,
   formatTodos,
@@ -298,6 +311,24 @@ export class AgentLoop {
   }> = [];
   /** 自動チェックポイント (シャドウ Git)。 docs/checkpoint-and-smoke-design.md §4 */
   private checkpointManager: CheckpointManager;
+  /**
+   * 区切りでのコンテキスト戦略 (docs/context-strategy.md)。
+   * 閾値超過による整理 (contextManager.reduce) とは別経路で、 作業の区切りを検出して
+   * 「捨てられるものが多い瞬間」 に整理する。
+   */
+  private contextStrategy: ContextStrategy;
+  /** 検出済みの区切りシグナル待ち行列。 反復の先頭と span 終了で消費する */
+  private pendingBreaks: PendingBreak[] = [];
+  /** span 終了フックが記録した理由 (B5 の判定に使う) */
+  private lastSpanEndReason: string | null = null;
+  /** 直近の完了判定 (IntentClassifier の既存呼び出し結果を流用。 追加の LLM 呼び出しはしない) */
+  private lastCompletionType: CompletionType | null = null;
+  /** 直前の反復で plan mode だったか (P2: 計画 → 実装の移行検出用) */
+  private wasInPlanMode = false;
+  /** 直前のユーザー発話 (B6: 話題転換の検出用) */
+  private previousUserMessage = "";
+  /** 区切り指紋の採番用カウンタ (同じ区切りを二度確認しないための識別子) */
+  private breakSeq = 0;
 
   constructor(
     private provider: LLMProvider,
@@ -356,6 +387,13 @@ export class AgentLoop {
       ctxCfg?.reduction ?? "hybrid",
       ctxCfg?.forgetting ?? {},
     );
+    // 区切り検出でのコンテキスト整理 (docs/context-strategy.md §5.1)。 既定は auto
+    this.contextStrategy = new ContextStrategy({
+      mode: ctxCfg?.strategy?.mode ?? "auto",
+      minIntervalTurns: ctxCfg?.strategy?.minIntervalTurns,
+    });
+    // ToDo 遷移フック (B1 / B4 / P1)。 tool の通り道に検出を 1 本足すだけで新しいループは作らない
+    setTodoChangeListener((before, after) => this.onTodoChange(before, after));
     // 自動チェックポイント。 main ループのみで版管理する。
     // スコープは成果物フォルダ限定 (設計書 §4.5): 既定は <cwd>/sandbox/output、 無ければ cwd。
     // 既定の有効化: 明示設定があればそれ。 未設定なら「成果物フォルダに解決できた時のみ ON」
@@ -535,6 +573,20 @@ export class AgentLoop {
       } catch {
         /* 推奨は best-effort、 失敗しても続行 */
       }
+      // 区切り / 山場シグナル B6・P3 (docs/context-strategy.md §3.3)。
+      // ユーザー発話を受けた時点で判定する。 山場の直前に先回りして枠を空けるのが狙い。
+      try {
+        this.lastCompletionType = null;
+        if (classifyTaskComplexity(userMessageText) === "complex") {
+          this.queueBreak("P3", `P3:${++this.breakSeq}`);
+        }
+        if (this.detectTopicSwitch(userMessageText, this.previousUserMessage)) {
+          this.queueBreak("B6", `B6:${++this.breakSeq}`);
+        }
+        this.previousUserMessage = userMessageText;
+      } catch (e) {
+        logger.debug(`[strategy] ユーザー発話からの区切り検出に失敗 (無視): ${e}`);
+      }
       // <think>タグフィルター（古いOllama向け、ストリーム跨ぎ対応）
       const filterThinkingTags = createThinkingFilter();
       let emptyResponseRetries = 0;
@@ -618,6 +670,18 @@ export class AgentLoop {
         }
         // Context reduction check — mode に応じて忘却 / 圧縮を選ぶ (docs/context-forgetting.md §6)
         this.contextManager.noteTurn();
+        this.contextStrategy.noteTurn();
+        // P2: plan mode を抜けた = 計画から実装への移行 (docs/context-strategy.md §3.2)。
+        // 実装はツール結果で急速に膨らむので、 入る前に枠を確保しておきたい。
+        try {
+          const inPlanMode = this.planManager?.isInPlanMode() ?? false;
+          if (this.wasInPlanMode && !inPlanMode) this.queueBreak("P2", `P2:${++this.breakSeq}`);
+          this.wasInPlanMode = inPlanMode;
+        } catch (e) {
+          logger.debug(`[strategy] plan mode 退出の検出に失敗 (無視): ${e}`);
+        }
+        // 区切りシグナルによる整理。 閾値超過による下の安全網とは独立した経路
+        await this.runContextStrategy(true);
         if (this.contextManager.shouldReduce(this.history)) {
           const reduceSpinner = createSpinner("コンテキストを整理中...").start();
           try {
@@ -1289,6 +1353,8 @@ export class AgentLoop {
               const allDone = todos.length > 0 && todos.every((t) => t.status === "completed");
               if (allDone) {
                 console.log(chalk.green(`  ✓ Goal Seek: acceptance 全項目達成 — mode 終了`));
+                // B3: 目標達成 = 最も強い区切り (docs/context-strategy.md §3.1)
+                this.queueBreak("B3", `B3:${++this.breakSeq}`);
                 this.exitGoalSeek("completed");
               } else if (forceFlag) {
                 console.log(chalk.yellow(`  ⚠ Goal Seek: force=true で強制完了 — mode 終了 (acceptance 未充足)`));
@@ -1450,6 +1516,8 @@ export class AgentLoop {
           ]);
           isTask = intent === "task";
           isCompleted = completion === "completed";
+          // B5 の判定材料として控える。 ここで既に呼んでいる分を流用し、 追加の LLM 呼び出しはしない
+          this.lastCompletionType = completion;
         }
 
         if (shouldReprompt && isTask && !isCompleted) {
@@ -1736,7 +1804,245 @@ export class AgentLoop {
         tokensOut: this.runStats.tokensOut,
         costUsd: this.runStats.costUsd,
       });
+      // span 終了の区切り (B5) を評価してコンテキストを整理する。
+      // ここは「ユーザーへの応答が済んだ直後」 = 捨てられるものが最も多い瞬間。
+      await this.runSpanEndStrategy();
     }
+  }
+
+  // ─── 区切り検出とコンテキスト戦略 (docs/context-strategy.md) ───
+
+  /** 区切りシグナルを待ち行列に積む。 検出フックはここだけを呼ぶ */
+  private queueBreak(signal: BreakSignalId, fingerprint: string): void {
+    if (!this.contextStrategy.isEnabled()) return;
+    if (this.pendingBreaks.some((p) => p.signal === signal && p.fingerprint === fingerprint)) return;
+    this.pendingBreaks.push({ signal, fingerprint });
+  }
+
+  /**
+   * ToDo 遷移から B1 / B4 / P1 を検出する (docs/context-strategy.md §3.3)。
+   * todo-write.ts のリスナから呼ばれる。 失敗しても tool 実行は止めない。
+   */
+  private onTodoChange(before: TodoItem[], after: TodoItem[]): void {
+    try {
+      const count = (list: TodoItem[], status: TodoItem["status"]): number =>
+        list.filter((t) => t.status === status).length;
+      const completedBefore = count(before, "completed");
+      const completedAfter = count(after, "completed");
+      const wasAllCompleted = before.length > 0 && completedBefore === before.length;
+      const isAllCompleted = after.length > 0 && completedAfter === after.length;
+
+      if (isAllCompleted && !wasAllCompleted) {
+        // B1: 一連の作業が終わった最も明確な証拠
+        this.queueBreak("B1", `B1:${++this.breakSeq}`);
+      } else if (completedAfter > completedBefore) {
+        // B4: 小さな区切り (残りあり)
+        this.queueBreak("B4", `B4:${++this.breakSeq}`);
+      }
+
+      // P1: 3 件以上の pending が新たに積まれた = これから多段の作業が始まる
+      const addedPending = count(after, "pending") - count(before, "pending");
+      if (addedPending >= 3) this.queueBreak("P1", `P1:${++this.breakSeq}`);
+    } catch (e) {
+      logger.debug(`[strategy] ToDo 遷移からの区切り検出に失敗 (無視): ${e}`);
+    }
+  }
+
+  /**
+   * B2: bash の結果から git commit の成功を検出する (docs/context-strategy.md §3.1)。
+   * 本プロジェクトの運用そのものが「作業の区切り毎にコミット」 なので、 最も信頼できる強い区切り。
+   * --dry-run は誤爆するので除外し、 成功 (exit 0) を必須にする (docs §8)。
+   */
+  private maybeDetectCommitBreak(toolCall: ToolCall, success: boolean): void {
+    try {
+      if (toolCall.function.name !== "bash" || !success) return;
+      const args = JSON.parse(toolCall.function.arguments || "{}") as Record<string, unknown>;
+      const command = typeof args.command === "string" ? args.command : "";
+      if (!/\bgit\s+(?:-\S+\s+)*commit\b/.test(command)) return;
+      if (command.includes("--dry-run")) return;
+      this.queueBreak("B2", `B2:${++this.breakSeq}`);
+    } catch (e) {
+      logger.debug(`[strategy] git commit の検出に失敗 (無視): ${e}`);
+    }
+  }
+
+  /**
+   * B6: 新しいユーザー発話が直前の話題と連続していないか (docs/context-strategy.md §3.1)。
+   *
+   * 文字 2-gram の Jaccard 係数で判定する。 IntentClassifier に聞くと発話のたびに
+   * LLM 呼び出しが増えて「速さの肝」 を損なうため、 ここは決定論的な近似で済ませる。
+   * 誤検出しても最悪 forget-thinking (失うのは読み直せる情報のみ) なので割に合う。
+   */
+  private detectTopicSwitch(current: string, previous: string): boolean {
+    const bigrams = (text: string): Set<string> => {
+      const flat = text.replace(/\s+/g, "").toLowerCase();
+      const set = new Set<string>();
+      for (let i = 0; i + 2 <= flat.length; i++) set.add(flat.slice(i, i + 2));
+      return set;
+    };
+    if (current.trim().length < 15 || previous.trim().length < 15) return false;
+    const a = bigrams(previous);
+    const b = bigrams(current);
+    if (a.size === 0 || b.size === 0) return false;
+    let shared = 0;
+    for (const g of b) if (a.has(g)) shared++;
+    const jaccard = shared / (a.size + b.size - shared);
+    return jaccard < 0.12;
+  }
+
+  /** clear の確認を取れる経路か (TTY かつ CLI 発話のときだけ) */
+  private canConfirmInteractively(): boolean {
+    return process.stdin.isTTY === true && this.currentSource === "cli";
+  }
+
+  /** span 終了時の区切り評価 (B5) と待ち行列の消費 */
+  private async runSpanEndStrategy(): Promise<void> {
+    try {
+      const reason = this.lastSpanEndReason;
+      this.lastSpanEndReason = null;
+      // B5: span が完了で終わったときだけ弱い区切りとみなす。
+      // response_complete はモデル自身の完了宣言なのでそれ自体を完了判定として扱い、
+      // final_text_response は既存の IntentClassifier の判定結果を流用する。
+      const completed =
+        reason === "response_complete" || (reason === "final_text_response" && this.lastCompletionType === "completed");
+      if (completed) this.queueBreak("B5", `B5:${++this.breakSeq}`);
+    } catch (e) {
+      logger.debug(`[strategy] span 終了の区切り検出に失敗 (無視): ${e}`);
+    }
+    await this.runContextStrategy(false);
+  }
+
+  /**
+   * 待ち行列の区切りシグナルを 1 件消費してコンテキストを整理する。
+   *
+   * 全体を try/catch で囲む。 コンテキスト整理は付加機能であって本業ではないので、
+   * ここで失敗しても会話は止めない (docs/context-strategy.md §8)。
+   *
+   * @param midSpan span の途中 (ツール実行の合間) なら true。 途中では履歴を消さない
+   */
+  private async runContextStrategy(midSpan: boolean): Promise<void> {
+    try {
+      if (!this.contextStrategy.isEnabled()) {
+        this.pendingBreaks = [];
+        return;
+      }
+      const pending = pickStrongest(this.pendingBreaks);
+      this.pendingBreaks = [];
+      if (!pending) return;
+
+      const todos = getTodosCurrent();
+      const decision = this.contextStrategy.decide({
+        signal: pending.signal,
+        fingerprint: pending.fingerprint,
+        usageRatio: this.contextManager.getUsageRatio(this.history),
+        hasInProgressTodo: todos.some((t) => t.status === "in_progress"),
+        goalActive: hasGoalSlot(),
+        canConfirm: this.canConfirmInteractively(),
+        midSpan,
+      });
+
+      // 格下げは黙って起こさない (docs §4.3)
+      const downgradeNotice = formatDowngradeNotice(decision);
+      if (downgradeNotice) {
+        console.log(chalk.yellow(`  ${downgradeNotice}`));
+        this.notice("warn", downgradeNotice);
+      }
+      if (decision.skipped || decision.action === "none") return;
+
+      let action = decision.action;
+      if (needsConfirmation(action, this.contextStrategy.getMode())) {
+        const choice = await this.confirmClear(decision);
+        if (choice === "skip") {
+          // 同じ区切りでは二度と聞かない (docs §5.2)
+          this.contextStrategy.decline(pending.fingerprint);
+          console.log(chalk.dim("  コンテキストはそのままにしました。"));
+          return;
+        }
+        if (choice === "forget") action = "forget";
+      }
+
+      const outcome = await this.contextManager.applyStrategy(this.history, action, {
+        saveSession: () => {
+          this.saveCurrentSession();
+          return this.session.meta.id;
+        },
+      });
+
+      // 引き継ぎメモの生成に失敗したら履歴には触れていない。 forget に格下げして続行する (docs §8)
+      if (!outcome.applied && action === "clear") {
+        const msg = `コンテキスト戦略: clear → forget に格下げしました (${outcome.note ?? "引き継ぎメモを生成できませんでした"})`;
+        console.log(chalk.yellow(`  ${msg}`));
+        this.notice("warn", msg);
+        const fallback = await this.contextManager.applyStrategy(this.history, "forget");
+        this.reportStrategyOutcome(decision, fallback);
+        return;
+      }
+      this.reportStrategyOutcome(decision, outcome);
+    } catch (e) {
+      logger.warn(`[strategy] 区切りでのコンテキスト整理に失敗しました (会話は継続): ${e}`);
+    }
+  }
+
+  /** clear の確認 (docs §5.2)。 TTY のときだけ呼ばれる */
+  private async confirmClear(decision: StrategyDecision): Promise<"clear" | "forget" | "skip"> {
+    console.log(
+      chalk.cyan(
+        `\n  区切りを検出しました (${decision.signalLabel} / 使用率 ${Math.round(decision.usageRatio * 100)}%)。`,
+      ),
+    );
+    try {
+      return await select<"clear" | "forget" | "skip">({
+        message: "引き継ぎメモを残してコンテキストをリセットしますか?",
+        choices: [
+          { name: "リセットする (推奨)", value: "clear" },
+          { name: "忘却だけにする", value: "forget" },
+          { name: "何もしない", value: "skip" },
+        ],
+      });
+    } catch {
+      // Esc / 中断は「何もしない」 に倒す (勝手に消さない)
+      return "skip";
+    }
+  }
+
+  /**
+   * アクションの結果をユーザーに報告する (docs §6)。
+   * 黙って履歴が変わることがあってはならないので、 走ったら必ず 1 行出す。
+   * clear のときは引き継ぎメモを全文表示する (何が引き継がれたかを見せずに履歴を消すのは論外)。
+   */
+  private reportStrategyOutcome(decision: StrategyDecision, outcome: StrategyOutcome): void {
+    if (!outcome.applied) {
+      const msg =
+        `区切りを検出 (${decision.signalLabel}) — 整理は見送りました ` +
+        `(${outcome.note ?? "削減できる情報がありませんでした"})`;
+      console.log(chalk.dim(`  ${msg}`));
+      this.notice("info", msg);
+      return;
+    }
+    this.contextStrategy.noteApplied();
+    if (outcome.action === "compress") this.chatLogger?.onCompressed();
+
+    const line = formatStrategyReport({
+      signalLabel: decision.signalLabel,
+      action: outcome.action,
+      freedTokens: outcome.freedTokens,
+      beforeRatio: outcome.beforeRatio,
+      afterRatio: outcome.afterRatio,
+    });
+    console.log(chalk.dim(`  ${line}`));
+    this.notice("info", line);
+    this.printHandoffNote(outcome.handoff);
+  }
+
+  /** 引き継ぎメモの全文表示。 メモが不十分ならユーザーがその場で補足できる */
+  private printHandoffNote(handoff: HandoffResult | null): void {
+    if (!handoff?.applied || !handoff.note) return;
+    console.log(chalk.bold("\n  === 引き継ぎメモ (これだけが履歴に残ります) ==="));
+    for (const l of handoff.note.split("\n")) console.log(`  ${l}`);
+    if (handoff.savedSessionId) {
+      console.log(chalk.dim(`\n  リセット前の完全な履歴: /resume ${handoff.savedSessionId}`));
+    }
+    console.log("");
   }
 
   /** Get tool definitions, filtered by plan mode or Discord source */
@@ -1913,6 +2219,9 @@ export class AgentLoop {
     // span 終了点はほぼすべてここを通るため、 task_complete イベント用の outcome を
     // reason から決定する (docs/agent-events-design.md §3.1)。 発火自体は run() の finally。
     this.runStats.outcome = AgentLoop.SPAN_END_OUTCOMES[reason] ?? "incomplete";
+    // 区切りシグナル B5 の判定材料 (docs/context-strategy.md §3.3)。
+    // ここは同期メソッドなので記録だけ行い、 実際の整理は run() の finally で実行する。
+    this.lastSpanEndReason = reason;
     // ユーザーに表示済みの応答テキストは purge せず会話記録として保全する
     // (docs/ephemeral-context-design.md §displayed 参照。 2026-06-12 の回答消失対策)。
     const promoted = this.history.promoteDisplayedEphemeral();
@@ -2329,6 +2638,8 @@ export class AgentLoop {
     // P1-A/B: bash 累積時間と plan/todo 過多を観測
     this.maybeWarnBashCumulative(toolCall, toolDurationMs);
     this.maybeWarnPlanTodoOveruse(toolCall);
+    // 区切りシグナル B2 (git commit 成功) の検出
+    this.maybeDetectCommitBreak(toolCall, result.success);
 
     return result.abortExecution === true;
   }
@@ -2455,6 +2766,8 @@ export class AgentLoop {
         // P1-A/B: 並列ルートでも bash 累積時間 / plan/todo 過多を観測
         this.maybeWarnBashCumulative(toolCall, durationMs);
         this.maybeWarnPlanTodoOveruse(toolCall);
+        // 区切りシグナル B2 (git commit 成功) の検出
+        this.maybeDetectCommitBreak(toolCall, result.success);
 
         if (result.abortExecution) {
           shouldAbort = true;
@@ -2511,6 +2824,46 @@ export class AgentLoop {
   /** 直近の忘却実績 (/forget status) */
   getLastForgetResult(): { result: ForgetResult; at: number } | null {
     return this.contextManager.getLastForgetResult();
+  }
+
+  /**
+   * 手動の引き継ぎ + リセット (/handoff)。 docs/context-strategy.md §5.3
+   * 「今ここで区切りたい」 という判断はユーザーが一番正確にできるので独立コマンドにする。
+   * 引き継ぎメモの生成に失敗したら履歴には触れない。
+   */
+  async runHandoffNow(): Promise<StrategyOutcome> {
+    const outcome = await this.contextManager.applyStrategy(this.history, "clear", {
+      saveSession: () => {
+        this.saveCurrentSession();
+        return this.session.meta.id;
+      },
+    });
+    if (outcome.applied) this.contextStrategy.noteApplied();
+    return outcome;
+  }
+
+  /** 引き継ぎメモを作って返すだけ (/handoff dry)。 履歴は変更しない */
+  async buildHandoffPreview(): Promise<{ note: string | null; reason?: string }> {
+    return await generateHandoffNote(this.provider, this.model, this.history.getRawMessages());
+  }
+
+  /** 区切り整理のモード (/context strategy) */
+  getStrategyMode(): StrategyMode {
+    return this.contextStrategy.getMode();
+  }
+
+  setStrategyMode(mode: StrategyMode): void {
+    this.contextStrategy.setMode(mode);
+  }
+
+  /** 直近の区切り判断ログ (/context strategy) */
+  getStrategyDecisions(): StrategyDecision[] {
+    return this.contextStrategy.getDecisions();
+  }
+
+  /** 現在のコンテキスト使用率 (0.0〜1.0) */
+  getContextUsageRatio(): number {
+    return this.contextManager.getUsageRatio(this.history);
   }
 
   saveCurrentSession(): void {

@@ -3,8 +3,10 @@ import type { MessageHistory } from "./message-history.js";
 import type { ForgettingConfig, ReductionMode } from "../config/types.js";
 import { estimateMessageTokens } from "./token-counter.js";
 import { HierarchicalCompressor } from "./hierarchical-compressor.js";
-import { ForgettingEngine, DEFAULT_KEEP_RECENT_SEGMENTS } from "./forgetting.js";
-import type { ForgetDryRunReport, ForgetResult } from "./forgetting.js";
+import { ForgettingEngine, DEFAULT_KEEP_RECENT_SEGMENTS, forgetThinking } from "./forgetting.js";
+import type { ForgetDryRunReport, ForgetResult, ForgetThinkingResult } from "./forgetting.js";
+import { runHandoff, type HandoffResult, type HandoffOptions } from "./handoff.js";
+import type { StrategyAction } from "./context-strategy.js";
 import * as logger from "../utils/logger.js";
 
 /** 目標削減量を閾値の何ポイント下に置くか (docs/context-forgetting.md §6.1) */
@@ -47,12 +49,31 @@ export function formatReduceOutcome(outcome: ReduceOutcome): string {
   }
 }
 
+/** applyStrategy() が実際に何をしたか (docs/context-strategy.md §6 の報告に使う) */
+export interface StrategyOutcome {
+  action: StrategyAction;
+  applied: boolean;
+  beforeTokens: number;
+  afterTokens: number;
+  freedTokens: number;
+  beforeRatio: number;
+  afterRatio: number;
+  /** 適用しなかった / 部分的に終わった理由 */
+  note?: string;
+  forget: ForgetResult | null;
+  thinking: ForgetThinkingResult | null;
+  handoff: HandoffResult | null;
+}
+
 export class ContextManager {
   private contextWindow: number;
   private threshold: number;
   private keepRecentMessages: number;
   private compressor: HierarchicalCompressor;
   private forgetter: ForgettingEngine;
+  /** 引き継ぎメモ生成用。 compressor / forgetter と同じ provider を使う */
+  private provider: LLMProvider;
+  private model: string;
   private reductionMode: ReductionMode;
   private forgettingConfig: ForgettingConfig;
   /** 直近で忘却を実行したターン番号 (最短間隔の判定用)。 未実行なら -Infinity */
@@ -74,6 +95,8 @@ export class ContextManager {
     this.contextWindow = contextWindow;
     this.threshold = threshold;
     this.keepRecentMessages = keepRecentMessages;
+    this.provider = provider;
+    this.model = model;
     this.compressor = new HierarchicalCompressor(provider, model);
     this.reductionMode = reductionMode;
     this.forgettingConfig = forgettingConfig;
@@ -102,6 +125,8 @@ export class ContextManager {
   }
 
   setProvider(provider: LLMProvider, model: string): void {
+    this.provider = provider;
+    this.model = model;
     this.compressor.setProvider(provider, model);
     this.forgetter.setProvider(provider, model);
   }
@@ -138,6 +163,12 @@ export class ContextManager {
   /** shouldCompress の別名。 縮約手段が圧縮固定でなくなったので意味に合う名前を用意する */
   shouldReduce(history: MessageHistory): boolean {
     return this.shouldCompress(history);
+  }
+
+  /** コンテキスト使用率 (0.0〜1.0)。 区切り判断の入力 (docs/context-strategy.md §4.1) */
+  getUsageRatio(history: MessageHistory): number {
+    if (this.contextWindow <= 0) return 0;
+    return estimateMessageTokens(history.getMessages()) / this.contextWindow;
   }
 
   /**
@@ -183,6 +214,75 @@ export class ContextManager {
   async forgetDryRun(history: MessageHistory, targetTokens?: number): Promise<ForgetDryRunReport> {
     const target = targetTokens ?? Math.max(1, this.computeTargetTokens(history));
     return await this.forgetter.dryRun(history, target);
+  }
+
+  /**
+   * 区切りアクションの実行口 (docs/context-strategy.md §7)。
+   * 5 つのアクションをここに一本化し、 呼び出し側 (AgentLoop / /handoff) は
+   * 「何をするか」 だけを決めて「どうやるか」 は知らなくてよい形にする。
+   *
+   * clear は引き継ぎメモの生成に成功したときだけ履歴を消す。 失敗時は履歴に触れず
+   * applied=false で返し、 呼び出し側が forget へ格下げする (docs §8)。
+   */
+  async applyStrategy(
+    history: MessageHistory,
+    action: StrategyAction,
+    opts: HandoffOptions = {},
+  ): Promise<StrategyOutcome> {
+    const beforeTokens = estimateMessageTokens(history.getMessages());
+    const finish = (
+      partial: Pick<StrategyOutcome, "applied" | "note" | "forget" | "thinking" | "handoff">,
+    ): StrategyOutcome => {
+      const afterTokens = estimateMessageTokens(history.getMessages());
+      return {
+        action,
+        beforeTokens,
+        afterTokens,
+        freedTokens: Math.max(0, beforeTokens - afterTokens),
+        beforeRatio: this.contextWindow > 0 ? beforeTokens / this.contextWindow : 0,
+        afterRatio: this.contextWindow > 0 ? afterTokens / this.contextWindow : 0,
+        ...partial,
+      };
+    };
+    const empty = { forget: null, thinking: null, handoff: null } as const;
+
+    switch (action) {
+      case "none":
+        return finish({ applied: false, ...empty });
+
+      case "forget-thinking": {
+        // LLM を呼ばない決定論的な忘却。 待ち時間がほぼ無いのでこれが第一選択
+        const result = forgetThinking(
+          history,
+          this.forgettingConfig.keepRecentSegments ?? DEFAULT_KEEP_RECENT_SEGMENTS,
+        );
+        return finish({ applied: result.applied, note: result.reason, ...empty, thinking: result });
+      }
+
+      case "forget": {
+        const result = await this.forget(history);
+        return finish({ applied: result.applied, note: result.reason, ...empty, forget: result });
+      }
+
+      case "compress": {
+        await this.compress(history);
+        this.lastForgetTurn = this.turn; // 圧縮も「整理した」 に数え、 直後の再発火を防ぐ
+        return finish({ applied: true, ...empty });
+      }
+
+      case "clear": {
+        const result = await runHandoff(this.provider, this.model, history, opts);
+        if (result.applied) this.lastForgetTurn = this.turn;
+        return finish({ applied: result.applied, note: result.reason, ...empty, handoff: result });
+      }
+
+      default: {
+        // 網羅性チェック (新しいアクションを足したらここで型エラーになる)
+        const exhaustive: never = action;
+        logger.warn(`[strategy] 未知のアクション: ${String(exhaustive)}`);
+        return finish({ applied: false, note: "未知のアクション", ...empty });
+      }
+    }
   }
 
   /**

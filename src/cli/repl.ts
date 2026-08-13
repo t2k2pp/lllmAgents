@@ -14,6 +14,7 @@ import {
   buildContextBreakdown,
   formatContextBreakdown,
   formatContextDetail,
+  formatStrategyStatus,
   normalizeContextSection,
 } from "./context-breakdown.js";
 import { formatTodos, formatTodosActive, clearTodos, archiveCompletedTodos } from "../tools/definitions/todo-write.js";
@@ -4424,6 +4425,16 @@ export class REPL {
       case "/context": {
         // 引数なし: カテゴリ別内訳。 引数あり: そのカテゴリの中身をダンプ (ドリルダウン)
         const sectionArg = args[0]?.trim();
+        // /context strategy — 区切り整理のモード表示・切替 (docs/context-strategy.md §5.3)
+        if (sectionArg?.toLowerCase() === "strategy") {
+          const { text, changedTo } = formatStrategyStatus(this.agent, args[1]?.trim());
+          process.stdout.write(text);
+          if (changedTo) {
+            this.config.context.strategy = { ...this.config.context.strategy, mode: changedTo };
+            saveConfig(this.config);
+          }
+          break;
+        }
         if (sectionArg) {
           const section = normalizeContextSection(sectionArg);
           if (!section) {

@@ -59,6 +59,10 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
     needsArg: true,
   },
   { command: "/context messages", description: "会話履歴をメッセージ単位でダンプ" },
+  {
+    command: "/context strategy",
+    description: "区切りでのコンテキスト整理のモードと判断履歴 (off|auto|aggressive で切替)",
+  },
   { command: "/compact", description: "コンテキスト圧縮" },
   // /capability /metrics /cost は /status に集約 (Phase optimize #4、 2026-05-28)
   { command: "/mcp status", description: "MCP サーバの接続状態を表示" },

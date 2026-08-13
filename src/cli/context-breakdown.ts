@@ -6,6 +6,11 @@ import type { AgentLoop } from "../agent/agent-loop.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { MCPManager } from "../mcp/mcp-manager.js";
 import type { ReductionMode } from "../config/types.js";
+import {
+  ACTION_DESCRIPTIONS,
+  MODE_DESCRIPTIONS as STRATEGY_MODE_DESCRIPTIONS,
+  type StrategyMode,
+} from "../agent/context-strategy.js";
 import { estimateTokens, estimateMessageTokens } from "../agent/token-counter.js";
 
 /**
@@ -434,6 +439,84 @@ const DETAIL_SECTIONS: Record<string, string> = {
 export function normalizeContextSection(arg: string | undefined): string | undefined {
   if (!arg) return undefined;
   return DETAIL_SECTIONS[arg.trim().toLowerCase()];
+}
+
+// =============================================================================
+// /context strategy — 区切り整理のモード表示・切替 (docs/context-strategy.md §5.3)
+// =============================================================================
+
+const STRATEGY_MODES: StrategyMode[] = ["off", "auto", "aggressive"];
+
+export function isStrategyMode(value: string): value is StrategyMode {
+  return (STRATEGY_MODES as string[]).includes(value);
+}
+
+/**
+ * `/context strategy [off|auto|aggressive]` を処理して表示テキストを返す。
+ * 引数なしなら現在のモードと直近の判断履歴を表示する。
+ *
+ * モードを変更した場合のみ `changedTo` を返す (呼び出し側が config に保存する)。
+ */
+export function formatStrategyStatus(agent: AgentLoop, arg?: string): { text: string; changedTo?: StrategyMode } {
+  const out: string[] = [];
+  const value = arg?.trim().toLowerCase();
+
+  let changedTo: StrategyMode | undefined;
+  if (value !== undefined && value.length > 0) {
+    if (!isStrategyMode(value)) {
+      out.push("");
+      out.push(chalk.yellow(`  不明な mode: ${value}`));
+      out.push(chalk.dim(`  指定できる値: ${STRATEGY_MODES.join(" | ")}`));
+      out.push("");
+      return { text: out.join("\n") };
+    }
+    agent.setStrategyMode(value);
+    changedTo = value;
+  }
+
+  const mode = agent.getStrategyMode();
+  const usagePct = Math.round(agent.getContextUsageRatio() * 100);
+  out.push("");
+  out.push(chalk.bold("  Context Strategy (区切りでのコンテキスト整理)"));
+  if (changedTo) out.push(chalk.green(`    モードを ${changedTo} に変更しました (設定に保存)`));
+  out.push(chalk.dim(`    モード      : ${chalk.cyan(mode)} — ${STRATEGY_MODE_DESCRIPTIONS[mode]}`));
+  out.push(chalk.dim(`    現在の使用率: ${usagePct}%`));
+  out.push("");
+  out.push(chalk.dim("    使用率と区切りの強さでアクションを決める:"));
+  out.push(chalk.dim("      〜40%  : 何もしない"));
+  out.push(chalk.dim("      40〜60%: forget-thinking"));
+  out.push(chalk.dim("      60〜75%: 弱い区切り=forget-thinking / 強い区切り・山場=forget"));
+  out.push(chalk.dim("      75%〜  : 弱い区切り=forget / 強い区切り=clear / 山場=compress"));
+  out.push("");
+
+  const decisions = agent.getStrategyDecisions();
+  out.push(chalk.dim("    直近の判断:"));
+  if (decisions.length === 0) {
+    out.push(chalk.dim("      (まだありません)"));
+  } else {
+    for (const d of decisions.slice(-10)) {
+      const when = new Date(d.at).toLocaleTimeString("ja-JP");
+      const result = d.skipped ? "見送り" : d.action;
+      out.push(
+        chalk.dim(
+          `      ${when}  ${d.signal} ${d.signalLabel}  使用率 ${Math.round(d.usageRatio * 100)}%  ` +
+            `${d.proposed} → ${result}${d.note ? ` (${d.note})` : ""}`,
+        ),
+      );
+      for (const dg of d.downgrades) out.push(chalk.yellow(`        ↳ 格下げ: ${dg}`));
+    }
+  }
+  out.push("");
+  out.push(chalk.dim("    アクションの意味:"));
+  for (const [action, desc] of Object.entries(ACTION_DESCRIPTIONS)) {
+    if (action === "none") continue;
+    out.push(chalk.dim(`      ${action.padEnd(16)} ${desc}`));
+  }
+  out.push("");
+  out.push(chalk.dim("    切替: /context strategy [off|auto|aggressive]"));
+  out.push(chalk.dim("    手動で区切る: /handoff (引き継ぎメモを残してリセット)"));
+  out.push("");
+  return { text: out.join("\n"), changedTo };
 }
 
 /** 1行プレビュー: 改行・連続空白を畳んで maxLen で切る。 */

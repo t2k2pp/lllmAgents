@@ -22,6 +22,33 @@ export function getTodos(): TodoItem[] {
 }
 
 /**
+ * ToDo の遷移通知 (docs/context-strategy.md §3.3 B1/B4/P1)。
+ *
+ * 「ToDo が全部 completed になった」 「1 つ completed に遷移した」 「3 件以上の
+ * pending を新規作成した」 は作業の区切り / 山場の最も明確な証拠なので、
+ * AgentLoop がこれを購読してコンテキスト戦略を判断する。
+ *
+ * ここは tool 実行の通り道にフックを 1 本足しただけで、 新しいループは作らない。
+ * リスナは AgentLoop 側で try/catch されており、 失敗しても tool 実行は止まらない。
+ */
+export type TodoChangeListener = (before: TodoItem[], after: TodoItem[]) => void;
+
+let todoChangeListener: TodoChangeListener | null = null;
+
+export function setTodoChangeListener(listener: TodoChangeListener | null): void {
+  todoChangeListener = listener;
+}
+
+function notifyTodoChange(before: TodoItem[]): void {
+  if (!todoChangeListener) return;
+  try {
+    todoChangeListener(before, [...todos]);
+  } catch {
+    // 区切り検出は付加機能。 失敗しても tool 実行の本流は止めない
+  }
+}
+
+/**
  * Goal Seek mode 入口など、 外部から todo を seed する用途。
  * tool 経由 (LLM 駆動) と並列に使えるが、 上書きする点に注意。
  */
@@ -175,6 +202,7 @@ export const todoAppendTool: ToolHandler = {
         error: "items パラメータが配列ではありません。 items: [{content, status}] の形式で渡してください。",
       };
     }
+    const before = getTodos();
     const added: TodoItem[] = [];
     for (const raw of items) {
       if (typeof raw !== "object" || raw === null) continue;
@@ -188,6 +216,7 @@ export const todoAppendTool: ToolHandler = {
       added.push({ id: generateTodoId(), content, status });
     }
     todos.push(...added);
+    notifyTodoChange(before);
     return { success: true, output: `${added.length} 項目を追加しました。\n\n${formatTodos()}` };
   },
 };
@@ -230,7 +259,9 @@ export const todoMarkTool: ToolHandler = {
         output: "",
         error: `id="${id}" の todo が見つかりません。 一覧: ${todos.map((t) => t.id).join(", ")}`,
       };
+    const before = getTodos();
     target.status = status as TodoStatus;
+    notifyTodoChange(before);
     return { success: true, output: `id="${id}" を ${status} に変更しました。\n\n${formatTodos()}` };
   },
 };
@@ -264,9 +295,10 @@ export const todoDeleteTool: ToolHandler = {
       return { success: false, output: "", error: "ids パラメータが配列ではありません。" };
     }
     const idSet = new Set(ids.filter((x): x is string => typeof x === "string"));
-    const before = todos.length;
+    const before = getTodos();
     todos = todos.filter((t) => !idSet.has(t.id ?? ""));
-    const removed = before - todos.length;
+    const removed = before.length - todos.length;
+    notifyTodoChange(before);
     return { success: true, output: `${removed} 項目を削除しました。\n\n${formatTodos()}` };
   },
 };
@@ -318,6 +350,7 @@ export const todoWriteTool: ToolHandler = {
       };
     }
     // 全削除 + append 等価。 status は valid 値に絞る (旧呼出が "completed" 等を期待していた互換性)
+    const before = getTodos();
     todos = [];
     for (const raw of newTodos) {
       if (typeof raw !== "object" || raw === null) continue;
@@ -330,6 +363,7 @@ export const todoWriteTool: ToolHandler = {
       if (!content) continue;
       todos.push({ id: generateTodoId(), content, status });
     }
+    notifyTodoChange(before);
     return { success: true, output: formatTodos() };
   },
 };
