@@ -3,8 +3,17 @@ import * as path from "node:path";
 import * as os from "node:os";
 import type { SkillDefinition } from "./skill-registry.js";
 
+/** SKILL.md は UTF-8 を正規形式とし、不正バイトを置換文字へ黙って変換しない。 */
+export function decodeSkillFileUtf8(bytes: Uint8Array, filePath: string): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error(`[skills] 読み込みをスキップしました: ${filePath} は有効なUTF-8で保存されていません`);
+  }
+}
+
 /** Parse skill markdown with YAML frontmatter */
-function parseSkillFile(content: string, filePath: string, builtIn: boolean): SkillDefinition | null {
+export function parseSkillFile(content: string, filePath: string, builtIn: boolean): SkillDefinition | null {
   // CRLF/BOMを正規化してから frontmatter を抽出する
   // （Windowsで編集されたSKILL.mdがCRLFでも正しくパースされるように）
   const normalized = content.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
@@ -53,7 +62,7 @@ function parseSkillFile(content: string, filePath: string, builtIn: boolean): Sk
 }
 
 /** Load skills from a directory */
-function loadSkillsFromDir(dir: string, builtIn: boolean): SkillDefinition[] {
+export function loadSkillsFromDir(dir: string, builtIn: boolean): SkillDefinition[] {
   const skills: SkillDefinition[] = [];
 
   if (!fs.existsSync(dir)) return skills;
@@ -62,34 +71,34 @@ function loadSkillsFromDir(dir: string, builtIn: boolean): SkillDefinition[] {
   for (const entry of entries) {
     if (entry.isFile() && entry.name.endsWith(".md")) {
       // Standalone .md files (legacy format)
-      try {
-        const filePath = path.join(dir, entry.name);
-        const content = fs.readFileSync(filePath, "utf-8");
-        const skill = parseSkillFile(content, filePath, builtIn);
-        if (skill) {
-          skills.push(skill);
-        }
-      } catch {
-        // Skip invalid files
-      }
+      const skill = loadSkillFile(path.join(dir, entry.name), builtIn);
+      if (skill) skills.push(skill);
     } else if (entry.isDirectory()) {
       // Subdirectory containing SKILL.md (Anthropic standard format)
       const skillMdPath = path.join(dir, entry.name, "SKILL.md");
       if (fs.existsSync(skillMdPath)) {
-        try {
-          const content = fs.readFileSync(skillMdPath, "utf-8");
-          const skill = parseSkillFile(content, skillMdPath, builtIn);
-          if (skill) {
-            skills.push(skill);
-          }
-        } catch {
-          // Skip invalid files
-        }
+        const skill = loadSkillFile(skillMdPath, builtIn);
+        if (skill) skills.push(skill);
       }
     }
   }
 
   return skills;
+}
+
+function loadSkillFile(filePath: string, builtIn: boolean): SkillDefinition | null {
+  try {
+    const content = decodeSkillFileUtf8(fs.readFileSync(filePath), filePath);
+    const skill = parseSkillFile(content, filePath, builtIn);
+    if (!skill) {
+      console.warn(`[skills] 読み込みをスキップしました: ${filePath} のfrontmatterが不正です`);
+    }
+    return skill;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(message.startsWith("[skills]") ? message : `[skills] 読み込み失敗: ${filePath}: ${message}`);
+    return null;
+  }
 }
 
 /** Load all skills from all sources
