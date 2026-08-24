@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { httpPostStream } from "../../src/utils/http-client.js";
 
 /**
  * http-client.ts のアイドルタイムアウト機能をテスト。
@@ -55,7 +56,17 @@ describe("wrapWithIdleTimeout", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.useRealTimers();
+  });
+
+  it("接続が即時失敗しても長時間の接続タイマーを残さない", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("connection refused")));
+    const timersBefore = vi.getTimerCount();
+
+    await expect(httpPostStream("http://127.0.0.1:1/v1/chat", {}, 7_200_000)).rejects.toThrow("connection refused");
+
+    expect(vi.getTimerCount()).toBe(timersBefore);
   });
 
   it("チャンクが定期的に来る場合はタイムアウトしない", async () => {

@@ -68,11 +68,15 @@ async function searchSearXNG(baseUrl: string, query: string, maxResults: number)
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
 
-  const res = await fetch(url, {
-    signal: controller.signal,
-    headers: { Accept: "application/json" },
-  });
-  clearTimeout(timer);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) {
     throw new Error(`SearXNG API error: HTTP ${res.status}`);
@@ -111,14 +115,18 @@ async function searchDuckDuckGo(query: string, maxResults: number): Promise<Tool
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
 
-  const res = await fetch(url, {
-    signal: controller.signal,
-    headers: {
-      "User-Agent": "LocalLLM-Agent/0.1 (CLI Agent)",
-      Accept: "text/html",
-    },
-  });
-  clearTimeout(timer);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "LocalLLM-Agent/0.1 (CLI Agent)",
+        Accept: "text/html",
+      },
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) {
     return { success: false, output: "", error: `Search failed: HTTP ${res.status}` };

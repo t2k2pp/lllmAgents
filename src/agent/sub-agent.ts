@@ -1,4 +1,4 @@
-import type { LLMProvider } from "../providers/base-provider.js";
+import type { LLMProvider, TokenUsage } from "../providers/base-provider.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import type { PermissionManager } from "../security/permission-manager.js";
 import { MessageHistory } from "./message-history.js";
@@ -18,6 +18,8 @@ import { HarnessState, enrichToolResult } from "./harness-intervention.js";
 import { formatSelfCheck, SUB_AGENT_ACTION_HINT } from "./self-check-messages.js";
 import { resolveModelRef } from "../config/model-resolver.js";
 import { getSlot } from "../config/model-registry.js";
+import { globalTokenTracker, type UsageSlot } from "../cost/token-tracker.js";
+import { globalCostCalculator } from "../cost/cost-calculator.js";
 
 const MAX_SUB_ITERATIONS = 30;
 
@@ -123,6 +125,8 @@ export interface SubAgentModelChoice {
   display?: string;
   /** 解決できなかった場合の注記。 task ツールが modelNote として結果に載せる */
   note?: string;
+  /** /cost の slot 集計に使う。named slot でなければ main/subagent。 */
+  usageSlot: UsageSlot;
 }
 
 /** スキルのcontext:forkで使用するカスタム設定のオーバーライド */
@@ -151,6 +155,7 @@ export class SubAgent {
     overrides?: SubAgentConfigOverrides,
     /** D1: 親 (= 起動元エージェント) の ancestors。 メインから直接起動なら ROOT_ANCESTORS */
     parentAncestors: AncestorTypes = ROOT_ANCESTORS,
+    private readonly usageSlot: UsageSlot = "subagent",
   ) {
     this.agentId = `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -215,6 +220,7 @@ export class SubAgent {
               });
 
         const response = await collectResponse(gen);
+        this.recordUsage(response.usage);
 
         if (response.toolCalls.length > 0) {
           this.history.addAssistantMessage(response.content, response.toolCalls);
@@ -326,6 +332,38 @@ export class SubAgent {
   getAgentId(): string {
     return this.agentId;
   }
+
+  /** collectResponse が保持した done usage を、メイン/second と同じ台帳へ記録する。 */
+  private recordUsage(usage: TokenUsage | undefined): void {
+    if (!usage) return;
+    const promptTokens = usage.promptTokens ?? 0;
+    const outputTokens = usage.completionTokens ?? 0;
+    const cacheRead = usage.cachedTokens ?? 0;
+    const cacheCreation = usage.cacheCreationTokens ?? 0;
+    // 0 件でもフィールドが存在すれば Anthropic semantics。値だけで判定すると、
+    // cache hit のみの応答を OpenAI semantics と誤認して入力トークンを過少計上する。
+    const anthropicSemantics = usage.cacheCreationTokens !== undefined;
+    const estimatedCostUsd = anthropicSemantics
+      ? globalCostCalculator.calculateForModelWithCacheBreakdown(
+          this.model,
+          promptTokens,
+          outputTokens,
+          cacheRead,
+          cacheCreation,
+        )
+      : globalCostCalculator.calculateForModelWithCache(this.model, promptTokens, outputTokens, cacheRead);
+
+    globalTokenTracker.record({
+      timestamp: new Date().toISOString(),
+      provider: this.provider.providerType,
+      model: this.model,
+      slot: this.usageSlot,
+      inputTokens: anthropicSemantics ? promptTokens + cacheRead + cacheCreation : promptTokens,
+      outputTokens,
+      cachedTokens: cacheRead,
+      estimatedCostUsd,
+    });
+  }
 }
 
 export class SubAgentManager {
@@ -357,7 +395,7 @@ export class SubAgentManager {
    * ここではログを出さない。 解決失敗は note で返し、 起動側 (launch*) が 1 回だけ警告する。
    */
   resolveModelFor(type: SubAgentType, explicitRef?: string): SubAgentModelChoice {
-    const fallback: SubAgentModelChoice = { provider: this.provider, model: this.model };
+    const fallback: SubAgentModelChoice = { provider: this.provider, model: this.model, usageSlot: "main" };
     const ref = explicitRef?.trim() || getLoader().get(type)?.modelRef;
     if (!ref) return fallback;
 
@@ -375,7 +413,12 @@ export class SubAgentManager {
     const mainId = getSlot("main");
     if (mainId && resolved.entryId === mainId) return fallback;
 
-    return { provider: resolved.provider, model: resolved.model, display: `${ref} → ${resolved.label}` };
+    return {
+      provider: resolved.provider,
+      model: resolved.model,
+      display: `${ref} → ${resolved.label}`,
+      usageSlot: resolved.slot ?? "subagent",
+    };
   }
 
   /** launch* 共通: モデルを解決し、 解決失敗なら 1 回だけ警告する。 */
@@ -402,6 +445,7 @@ export class SubAgentManager {
       description,
       undefined,
       parentAncestors,
+      picked.usageSlot,
     );
     const id = agent.getAgentId();
     const promise = agent.run(prompt);
@@ -426,6 +470,7 @@ export class SubAgentManager {
       description,
       undefined,
       parentAncestors,
+      picked.usageSlot,
     );
     return agent.run(prompt);
   }
@@ -445,6 +490,7 @@ export class SubAgentManager {
         task.description,
         undefined,
         parentAncestors,
+        picked.usageSlot,
       );
       return agent.run(task.prompt);
     });
@@ -485,6 +531,7 @@ export class SubAgentManager {
       `skill:${skillName}`,
       { systemPrompt: skillSystemPrompt, allowedTools },
       parentAncestors,
+      picked.usageSlot,
     );
     return agent.run(prompt);
   }

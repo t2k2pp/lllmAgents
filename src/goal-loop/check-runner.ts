@@ -50,11 +50,21 @@ function findGitBash(): string | null {
   }
 }
 
-function resolveShell(command: string): { shell: string; args: string[] } {
+interface ResolvedShell {
+  shell: string;
+  args: string[];
+  /** true の場合は Node にシェルの引用符処理を任せ、command 自体を spawn する。 */
+  nativeShell?: boolean;
+}
+
+function resolveShell(command: string): ResolvedShell {
   if (process.platform === "win32") {
     const bash = findGitBash();
     if (bash) return { shell: bash, args: ["-c", command] };
-    return { shell: "cmd.exe", args: ["/c", command] };
+    // cmd.exe を executable + argv で直接 spawn すると、Node の Windows 引用符変換と
+    // cmd.exe の /c 後の再解釈が衝突し、引用符を含むコマンドが無出力で即終了する。
+    // shell オプション経由なら Node が `/d /s /c "..."` を一貫して組み立てる。
+    return { shell: process.env.ComSpec || "cmd.exe", args: [], nativeShell: true };
   }
   return { shell: "/bin/sh", args: ["-c", command] };
 }
@@ -72,7 +82,7 @@ export interface RunCheckOptions {
 export async function runCheck(command: string, opts: RunCheckOptions = {}): Promise<CheckResult> {
   const cwd = opts.cwd ?? process.cwd();
   const timeoutMs = opts.timeoutMs ?? 120_000;
-  const { shell, args } = resolveShell(command);
+  const { shell, args, nativeShell } = resolveShell(command);
   const start = Date.now();
 
   const isWindows = process.platform === "win32";
@@ -85,17 +95,33 @@ export async function runCheck(command: string, opts: RunCheckOptions = {}): Pro
 
     // 非 Windows は detached で自身の process group を作り、timeout 時に group ごと kill する
     // (shell だけ kill すると sleep 等の子が orphan として残り close が遅延するため)。
-    const proc = spawn(shell, args, {
-      cwd,
-      env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: !isWindows,
-    });
+    const proc = nativeShell
+      ? spawn(command, { cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"], shell })
+      : spawn(shell, args, {
+          cwd,
+          env: process.env,
+          stdio: ["ignore", "pipe", "pipe"],
+          detached: !isWindows,
+        });
 
     const killTree = () => {
       try {
         if (!isWindows && proc.pid) {
           process.kill(-proc.pid, "SIGKILL"); // 負の pid = process group
+        } else if (proc.pid) {
+          // proc.kill() は cmd.exe だけを終了し、npm/node 等の孫プロセスを残す。
+          // /T でプロセスツリー全体を、/F でタイムアウト時に確実に終了する。
+          const killer = spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], {
+            stdio: "ignore",
+            windowsHide: true,
+          });
+          killer.on("error", () => {
+            try {
+              proc.kill("SIGKILL");
+            } catch {
+              /* already exited */
+            }
+          });
         } else {
           proc.kill("SIGKILL");
         }

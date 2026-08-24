@@ -19,6 +19,7 @@
 | [workspace-separation.md](workspace-separation.md) | ワークスペース構成 (src/dist/deploy/sandbox) と Stop フック |
 | [production-readiness.md](production-readiness.md) | 製品品質改善計画 PR-01〜16 — P1〜P4 の進行管理表 |
 | [issues.md](issues.md) | 設計書レビュー起点の課題一覧 (2026-07-04 棚卸し済み) |
+| [product-review-cycle-1-2026-08-24.md](product-review-cycle-1-2026-08-24.md) | 商品品質レビュー・修正・評価サイクル第1回の記録 |
 
 ## アーキテクチャ・ハーネス
 
@@ -109,6 +110,7 @@
 | [wsl-sandbox-design.md](wsl-sandbox-design.md) | implemented | bash 封じ込め (Seatbelt / bwrap / WSL2) |
 | [claude-code-driver-skill.md](claude-code-driver-skill.md) | implemented | claude-code-driver スキル |
 | [ascii-art-skill-design.md](ascii-art-skill-design.md) | implemented | ASCII アート化スキル |
+| [product-quality-cycle-skill.md](product-quality-cycle-skill.md) | implemented | 観点指定の商品品質レビュー・改善サイクルスキル |
 | [blender-mcp-integration.md](blender-mcp-integration.md) | implemented | Blender MCP 連携の改修ポイント |
 
 ## 調査・提案 (未実装の構想)

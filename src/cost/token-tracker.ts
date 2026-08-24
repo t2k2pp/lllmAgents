@@ -1,6 +1,7 @@
 import { appendUsageRecord } from "./usage-store.js";
 
-export type UsageSlot = "main" | "second" | "vision" | "image";
+/** named model slot / subagent も集計軸に出せるよう、予約値以外の文字列も許容する。 */
+export type UsageSlot = "main" | "second" | "vision" | "image" | "subagent" | (string & {});
 
 export interface TokenUsageRecord {
   timestamp: string; // ISO 8601

@@ -4,18 +4,22 @@ setlocal enabledelayedexpansion
 rem localllm インストーラ (Windows)
 rem  - localllm.exe を %LOCALAPPDATA%\localllm\ にコピー
 rem  - skills/ を %USERPROFILE%\.localllm\skills\ にコピー
+rem  - agents/ を実行ファイル隣接の %LOCALAPPDATA%\localllm\agents\ にコピー
 rem  - PATH 追加は手順表示のみ（自動で環境変数に触らない）
 
 set "SRC_DIR=%~dp0"
 set "INSTALL_DIR=%LOCALAPPDATA%\localllm"
 set "SKILLS_SRC=%SRC_DIR%skills"
 set "SKILLS_DST=%USERPROFILE%\.localllm\skills"
+set "AGENTS_SRC=%SRC_DIR%agents"
+set "AGENTS_DST=%INSTALL_DIR%\agents"
 
 echo =========================================
 echo  localllm installer
 echo =========================================
 echo Install dir: %INSTALL_DIR%
 echo Skills dir : %SKILLS_DST%
+echo Agents dir : %AGENTS_DST%
 echo.
 
 if not exist "%SRC_DIR%localllm.exe" (
@@ -38,6 +42,14 @@ if exist "%SKILLS_SRC%" (
   echo [OK] copied skills to %SKILLS_DST%
 ) else (
   echo [WARN] skills folder not found, skipped
+)
+
+if exist "%AGENTS_SRC%" (
+  if not exist "%AGENTS_DST%" mkdir "%AGENTS_DST%"
+  xcopy /E /I /Y /Q "%AGENTS_SRC%" "%AGENTS_DST%" >nul
+  echo [OK] copied agents to %AGENTS_DST%
+) else (
+  echo [WARN] agents folder not found, sub-agents will be unavailable
 )
 
 echo.

@@ -126,11 +126,16 @@ export async function httpPostStream(
 ): Promise<ReadableStream<Uint8Array>> {
   const controller = new AbortController();
   const connectTimer = setTimeout(() => controller.abort(), connectTimeoutMs);
+  let detachExternalAbort = (): void => {};
   // 外部シグナル (ユーザーの Esc 中断等) を内部 controller に連動させる。
   // これが無いと中断後も接続が残り、 サーバ側 (llama.cpp 等) が生成を続けてしまう。
   if (externalSignal) {
     if (externalSignal.aborted) controller.abort();
-    else externalSignal.addEventListener("abort", () => controller.abort(), { once: true });
+    else {
+      const relayAbort = (): void => controller.abort();
+      externalSignal.addEventListener("abort", relayAbort, { once: true });
+      detachExternalAbort = () => externalSignal.removeEventListener("abort", relayAbort);
+    }
   }
 
   const reqHeaders = {
@@ -145,35 +150,48 @@ export async function httpPostStream(
     body,
   });
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: reqHeaders,
-    body: JSON.stringify(body),
-    signal: controller.signal,
-    // @ts-expect-error -- Node.js undici dispatcher option（型定義にないがランタイムで有効）
-    dispatcher: streamAgent,
-  });
-
-  clearTimeout(connectTimer);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: reqHeaders,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+      // @ts-expect-error -- Node.js undici dispatcher option（型定義にないがランタイムで有効）
+      dispatcher: streamAgent,
+    });
+  } catch (e) {
+    // DNS エラーや接続拒否では fetch がタイマーより先に reject する。その場合も
+    // 2時間の接続タイマーと外部 signal listener を残さない。
+    detachExternalAbort();
+    throw e;
+  } finally {
+    clearTimeout(connectTimer);
+  }
 
   if (!res.ok) {
-    const text = await res.text();
-    // 運用ログ ERROR: HTTP 非200 を本文付きで記録 (4KBで切り詰め)
-    getOpsLogger().error("http", `HTTP ${res.status}`, {
-      url,
-      status: res.status,
-      statusText: res.statusText,
-      bodyExcerpt: text.length > 4096 ? text.slice(0, 4096) + "...(truncated)" : text,
-    });
-    throw new Error(`HTTP ${res.status}: ${text}`);
+    try {
+      const text = await res.text();
+      // 運用ログ ERROR: HTTP 非200 を本文付きで記録 (4KBで切り詰め)
+      getOpsLogger().error("http", `HTTP ${res.status}`, {
+        url,
+        status: res.status,
+        statusText: res.statusText,
+        bodyExcerpt: text.length > 4096 ? text.slice(0, 4096) + "...(truncated)" : text,
+      });
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    } finally {
+      detachExternalAbort();
+    }
   }
   if (!res.body) {
     getOpsLogger().error("http", "No response body for streaming", { url, status: res.status });
+    detachExternalAbort();
     throw new Error("No response body for streaming");
   }
 
   // アイドルタイムアウト付きラッパーストリームを返す
-  return wrapWithIdleTimeout(res.body, controller, idleTimeoutMs);
+  return wrapWithIdleTimeout(res.body, controller, idleTimeoutMs, detachExternalAbort);
 }
 
 /**
@@ -184,9 +202,19 @@ function wrapWithIdleTimeout(
   source: ReadableStream<Uint8Array>,
   abortController: AbortController,
   idleTimeoutMs: number,
+  onFinalize: () => void = () => {},
 ): ReadableStream<Uint8Array> {
   const reader = source.getReader();
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let finalized = false;
+
+  const finalize = (): void => {
+    if (finalized) return;
+    finalized = true;
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = null;
+    onFinalize();
+  };
 
   const resetIdleTimer = (): void => {
     if (idleTimer) clearTimeout(idleTimer);
@@ -204,7 +232,7 @@ function wrapWithIdleTimeout(
       try {
         const { done, value } = await reader.read();
         if (done) {
-          if (idleTimer) clearTimeout(idleTimer);
+          finalize();
           ctrl.close();
           return;
         }
@@ -212,12 +240,12 @@ function wrapWithIdleTimeout(
         resetIdleTimer();
         ctrl.enqueue(value);
       } catch (e) {
-        if (idleTimer) clearTimeout(idleTimer);
+        finalize();
         ctrl.error(e);
       }
     },
     cancel() {
-      if (idleTimer) clearTimeout(idleTimer);
+      finalize();
       // reader.cancel() に加えて controller も abort し、 undici に確実に接続を
       // 切断させる (サーバ側の生成停止はクライアント切断の検知に依存するため)。
       void reader.cancel().catch(() => {});

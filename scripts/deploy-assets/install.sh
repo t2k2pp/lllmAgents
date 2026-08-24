@@ -2,6 +2,7 @@
 # localllm インストーラ (macOS/Linux/git-bash)
 #  - localllm(.exe) を ~/.local/bin/ にコピー
 #  - skills/ を ~/.localllm/skills/ にコピー
+#  - agents/ を実行ファイル隣接の ~/.local/bin/agents/ にコピー
 #  - PATH 追加は手順表示のみ
 
 set -e
@@ -9,12 +10,14 @@ set -e
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$HOME/.local/bin"
 SKILLS_DST="$HOME/.localllm/skills"
+AGENTS_DST="$INSTALL_DIR/agents"
 
 echo "========================================="
 echo " localllm installer"
 echo "========================================="
 echo "Install dir: $INSTALL_DIR"
 echo "Skills dir : $SKILLS_DST"
+echo "Agents dir : $AGENTS_DST"
 echo
 
 # localllm.exe (Windows) または localllm (Unix) を探す
@@ -41,6 +44,14 @@ if [[ -d "$SRC_DIR/skills" ]]; then
   echo "[OK] copied skills to $SKILLS_DST"
 else
   echo "[WARN] skills folder not found, skipped"
+fi
+
+if [[ -d "$SRC_DIR/agents" ]]; then
+  mkdir -p "$AGENTS_DST"
+  cp -R "$SRC_DIR/agents/." "$AGENTS_DST/"
+  echo "[OK] copied agents to $AGENTS_DST"
+else
+  echo "[WARN] agents folder not found, sub-agents will be unavailable"
 fi
 
 echo
