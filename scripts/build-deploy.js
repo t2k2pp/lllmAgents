@@ -7,6 +7,7 @@
 //  2. deploy/ を作成し、以下を配置:
 //     - localllm.exe (dist/ からコピー)
 //     - skills/ (src/skills/builtin/ からコピー)
+//     - agents/ (src/agents/builtin/ からコピー)
 //     - install.bat / install.sh
 //     - README.md (配布版)
 //  3. .deploy-meta.json を書き出し
@@ -20,11 +21,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
 const DIST = join(ROOT, "dist");
 const DEPLOY = join(ROOT, "deploy");
-const SRC_BUILTIN = join(ROOT, "src", "skills", "builtin");
+const SRC_BUILTIN_SKILLS = join(ROOT, "src", "skills", "builtin");
+const SRC_BUILTIN_AGENTS = join(ROOT, "src", "agents", "builtin");
 const EXE_NAME = process.platform === "win32" ? "localllm.exe" : "localllm";
 const EXE_SRC = join(DIST, EXE_NAME);
 const EXE_DST = join(DEPLOY, EXE_NAME);
 const SKILLS_DST = join(DEPLOY, "skills");
+const AGENTS_DST = join(DEPLOY, "agents");
 const META = join(DEPLOY, ".deploy-meta.json");
 
 const argv = new Set(process.argv.slice(2));
@@ -105,11 +108,21 @@ function copyExe() {
 }
 
 function copySkills() {
-  if (!existsSync(SRC_BUILTIN)) throw new Error(`builtin skills not found: ${SRC_BUILTIN}`);
+  if (!existsSync(SRC_BUILTIN_SKILLS)) throw new Error(`builtin skills not found: ${SRC_BUILTIN_SKILLS}`);
   if (existsSync(SKILLS_DST)) rmSync(SKILLS_DST, { recursive: true, force: true });
-  cpSync(SRC_BUILTIN, SKILLS_DST, { recursive: true });
+  cpSync(SRC_BUILTIN_SKILLS, SKILLS_DST, { recursive: true });
   const count = readdirSync(SKILLS_DST, { withFileTypes: true }).filter((e) => e.isDirectory()).length;
   log(`skills copied (${count} skills)`);
+}
+
+function copyAgents() {
+  if (!existsSync(SRC_BUILTIN_AGENTS)) throw new Error(`builtin agents not found: ${SRC_BUILTIN_AGENTS}`);
+  if (existsSync(AGENTS_DST)) rmSync(AGENTS_DST, { recursive: true, force: true });
+  cpSync(SRC_BUILTIN_AGENTS, AGENTS_DST, { recursive: true });
+  const count = readdirSync(AGENTS_DST, { withFileTypes: true }).filter(
+    (e) => e.isFile() && e.name.endsWith(".md"),
+  ).length;
+  log(`agents copied (${count} agents)`);
 }
 
 function copyAsset(src, dst, label) {
@@ -130,7 +143,7 @@ function writeMeta() {
     platform: process.platform,
     arch: process.arch,
   };
-  writeFileSync(META, JSON.stringify(meta, null, 2) + "\n");
+  writeFileSync(META, `${JSON.stringify(meta, null, 2)}\n`);
 }
 
 function main() {
@@ -143,6 +156,7 @@ function main() {
   mkdirSync(DEPLOY, { recursive: true });
   copyExe();
   copySkills();
+  copyAgents();
 
   // install スクリプトと README は scripts/assets/ に予め配置済みのものをコピー
   const assetsDir = join(__dirname, "deploy-assets");

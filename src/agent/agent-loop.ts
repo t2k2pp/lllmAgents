@@ -336,6 +336,8 @@ export class AgentLoop {
    * config の設定値と比較して「設定したのに反映されていない」 を検出するために持つ。
    */
   private liveBinding: LiveModelBinding | null = null;
+  /** liveBinding を model 単体切替時にも正しく再生成するための元 endpoint。 */
+  private liveEndpoint: LLMEndpoint | null = null;
 
   constructor(
     private provider: LLMProvider,
@@ -3284,6 +3286,12 @@ export class AgentLoop {
 
   setModel(model: string): void {
     this.model = model;
+    // /model <name> は provider を作り直さず model だけ即時反映する経路。
+    // liveBinding を更新しないと、実際には切替済みなのに毎ターン「未反映」と誤警告する。
+    if (this.liveEndpoint) {
+      this.liveEndpoint = { ...this.liveEndpoint, model };
+      this.liveBinding = makeLiveBinding(this.liveEndpoint, model);
+    }
     // 内部コンポーネントにも伝播（contextManager 内のcompressor、intent-classifier、evaluator）
     this.contextManager.setProvider(this.provider, model);
     this.intentClassifier.setProvider(this.provider, model);
@@ -3305,7 +3313,10 @@ export class AgentLoop {
     if (model) this.model = model;
     // 実行中バインディングを更新 (docs/model-apply-immediacy.md §3.1)。
     // endpoint を渡さない旧来の呼び出しでは前の記録を残す (= 誤警告より検出漏れを取る)。
-    if (endpoint) this.liveBinding = makeLiveBinding(endpoint, this.model);
+    if (endpoint) {
+      this.liveEndpoint = { ...endpoint, model: this.model };
+      this.liveBinding = makeLiveBinding(this.liveEndpoint, this.model);
+    }
     this.contextManager.setProvider(provider, this.model);
     this.intentClassifier.setProvider(provider, this.model);
     this.evaluator.setMainProvider(provider, this.model);
@@ -3331,7 +3342,9 @@ export class AgentLoop {
    * (docs/model-apply-immediacy.md §3.1)。 起動直後は index.ts が config.mainLLM で 1 回呼ぶ。
    */
   setLiveBinding(endpoint: LLMEndpoint, model?: string): void {
-    this.liveBinding = makeLiveBinding(endpoint, model ?? this.model);
+    const liveModel = model ?? this.model;
+    this.liveEndpoint = { ...endpoint, model: liveModel };
+    this.liveBinding = makeLiveBinding(this.liveEndpoint, liveModel);
   }
 
   /**

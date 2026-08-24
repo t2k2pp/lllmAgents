@@ -17,6 +17,8 @@
  *   node scripts/analyze-loop.mjs              # 全セッション
  *   node scripts/analyze-loop.mjs --since 2026-05-01  # 指定日以降
  *   node scripts/analyze-loop.mjs --top 30     # 上位 N 件まで表示
+ *   node scripts/analyze-loop.mjs --include-prompts   # prompt 抜粋を明示的に含める
+ *   node scripts/analyze-loop.mjs --include-test-sessions # test/mock model も含める
  *
  * Cron 自動実行例:
  *   0 9 * * MON node /path/to/scripts/analyze-loop.mjs  # 毎週月曜 9 時
@@ -34,6 +36,10 @@ function getArg(name, def) {
 }
 const sinceArg = getArg("--since", null); // ISO date 文字列
 const topN = parseInt(getArg("--top", "20"), 10);
+// レポートは共有されやすいため、ユーザープロンプトは既定で転載しない。
+const includePrompts = args.includes("--include-prompts");
+// E2E が残す test-model-* セッションは運用品質 KPI を歪めるため既定では除外する。
+const includeTestSessions = args.includes("--include-test-sessions");
 const sinceTs = sinceArg ? new Date(sinceArg).getTime() : 0;
 
 const LOG_DIR = path.join(os.homedir(), ".localllm", "logs", "sessions");
@@ -64,7 +70,7 @@ if (files.length === 0) {
 // ===== 集計 =====
 const FAILURE_WINDOW = 10;
 const stats = {
-  sessionCount: files.length,
+  sessionCount: 0,
   totalUserSpans: 0,
   spans: [], // { iterations, userMsgPreview, model, sessionFile }
   totalTokensIn: 0,
@@ -79,14 +85,47 @@ function addToMap(map, key, inc = 1) {
   map.set(key, (map.get(key) ?? 0) + inc);
 }
 
+/** 共有されるレポートから OS ユーザー名を含む home path を除く。 */
+function redactSensitiveText(value) {
+  return String(value)
+    .replace(/[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s"'`]+/gi, "<home>")
+    .replace(/\/(?:home|Users)\/[^/\s"'`]+/g, "<home>");
+}
+
 function normalizeError(err) {
   if (!err) return "";
-  const s = String(err);
+  const s = redactSensitiveText(err);
   // 末尾の path / 数字を除去して正規化 (= 同じパターンを集約)
   return s
     .replace(/\/[A-Za-z0-9._\-/]+/g, "<path>") // パス置換
     .replace(/\d+/g, "<num>") // 数字置換
     .slice(0, 120);
+}
+
+/** stuck-loop の値は保持せず、tool argument のキーだけをレポートへ載せる。 */
+function argumentShape(raw) {
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "{value}";
+    return `{${Object.keys(parsed).sort().join(",")}}`;
+  } catch {
+    return "{unparsed}";
+  }
+}
+
+function isTestModelName(model) {
+  return /^(?:test|mock)(?:[-_/]|$)/i.test(String(model).trim());
+}
+
+/** role=user でも、ハーネスが内部注入した再試行メッセージは実ユーザー span に数えない。 */
+function isHarnessGeneratedUserMessage(content) {
+  if (typeof content !== "string") return false;
+  return (
+    content.startsWith("[自己点検") ||
+    content.startsWith("[ハーネス") ||
+    content === "続きを出力してください。途中から再開してください。" ||
+    content === "ファイルの作成が完了しました。"
+  );
 }
 
 for (const f of files) {
@@ -104,7 +143,9 @@ for (const f of files) {
 
   // model 取得 (最初の request)
   const firstReq = events.find((e) => e.type === "request");
-  const modelName = firstReq?.model ?? "unknown";
+  if (!includeTestSessions && isTestModelName(firstReq?.model ?? "")) continue;
+  const modelName = redactSensitiveText(firstReq?.model ?? "unknown");
+  stats.sessionCount++;
 
   // user turn の検出
   const userTurns = [];
@@ -112,10 +153,14 @@ for (const f of files) {
     if (e.type === "request") {
       const msgs = e.messages ?? [];
       const lastMsg = msgs[msgs.length - 1];
-      if (lastMsg?.role === "user")
+      if (lastMsg?.role === "user" && !isHarnessGeneratedUserMessage(lastMsg.content))
         userTurns.push({
           turn: e.turn,
-          preview: typeof lastMsg.content === "string" ? lastMsg.content.slice(0, 80) : "[non-string]",
+          preview: includePrompts
+            ? typeof lastMsg.content === "string"
+              ? lastMsg.content.slice(0, 80)
+              : "[non-string]"
+            : "(redacted; use --include-prompts)",
           tokensIn: e.tokensIn ?? 0,
         });
     }
@@ -184,7 +229,7 @@ for (const f of files) {
       const prior = recent.filter((r) => r.signature === sig && r.error === errKey);
       if (prior.length > 0) {
         stats.stuckLoops.push({
-          signature: sig.slice(0, 100),
+          signature: `${call.name}:${argumentShape(call.args)}`,
           error: errKey,
           sessionFile: f.name,
           count: prior.length + 1,

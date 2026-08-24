@@ -109,6 +109,28 @@ describe("AgentDefinitionLoader", () => {
     vi.clearAllMocks();
   });
 
+  it("配布版では実行ファイル隣接の agents ディレクトリから built-in 定義を読む", () => {
+    const adjacentAgents = path.join(path.dirname(process.execPath), "agents");
+    setupAgentDirs({
+      [adjacentAgents]: [
+        {
+          filename: "general-purpose.md",
+          content: createAgentMarkdown({
+            name: "general-purpose",
+            description: "Bundled general agent",
+            tools: ["file_read", "file_write"],
+            body: "Handle general tasks.",
+          }),
+        },
+      ],
+    });
+
+    const defs = loader.loadAll();
+
+    expect(defs.map((d) => d.name)).toContain("general-purpose");
+    expect(loader.get("general-purpose")?.source).toBe(path.join(adjacentAgents, "general-purpose.md"));
+  });
+
   // -----------------------------------------------------------------------
   // parseFrontmatter (tested indirectly through loadAll)
   // -----------------------------------------------------------------------

@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 商品品質レビューサイクル 1 (2026-08-24)
+
+- 配布物へ組み込みエージェント定義を同梱し、exe で `general-purpose` / `explore` 等が見つからない不具合を修正
+- サブエージェントのトークン・キャッシュ・推定コストを `/cost` の共通台帳へ計上
+- `/model` 即時切替後の live binding を同期し、設定未反映の誤警告を修正
+- Windows の Goal Loop チェック実行と timeout 時のプロセスツリー終了を修正
+- HTTP 接続失敗・Web ツール失敗時に残るタイマーと AbortSignal listener を解放
+- ループ分析から内部・test sessionを除外し、promptをopt-in、home path・tool引数値をredact
+- 組み込み `product-quality-cycle` スキルを追加し、観点指定のレビュー・設計・実装・評価・記録を再実行可能化
+
 ### 製品品質 (docs/production-readiness.md P3+P4)
 
 - ログ・セッションの世代管理: 起動時に古い ops/LLM I/O ログ (既定30日) とセッション (既定100件超過分) を告知つきで削除。`logging.retention` で調整可能 (PR-15)

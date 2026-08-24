@@ -39,14 +39,19 @@ export const webFetchTool: ToolHandler = {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15000);
 
-      const res = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          "User-Agent": "LocalLLM-Agent/0.1 (CLI Agent)",
-          Accept: "text/html,application/xhtml+xml,text/plain,application/json",
-        },
-      });
-      clearTimeout(timer);
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "LocalLLM-Agent/0.1 (CLI Agent)",
+            Accept: "text/html,application/xhtml+xml,text/plain,application/json",
+          },
+        });
+      } finally {
+        // DNS エラー等で fetch が reject しても、タイマーを残して CLI 終了を遅延させない。
+        clearTimeout(timer);
+      }
 
       if (!res.ok) {
         return { success: false, output: "", error: `HTTP ${res.status}: ${res.statusText}` };

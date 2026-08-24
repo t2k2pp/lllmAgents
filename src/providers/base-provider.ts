@@ -98,6 +98,8 @@ export interface ChatResponse {
   content: string;
   toolCalls: ToolCall[];
   finishReason: string;
+  /** ストリーム終端でプロバイダーが返した使用量。委任経路でも課金集計を失わないため保持する。 */
+  usage?: TokenUsage;
 }
 
 export interface LLMProvider {
@@ -118,6 +120,7 @@ export async function collectResponse(gen: AsyncGenerator<ChatChunk>): Promise<C
   let content = "";
   const toolCalls: ToolCall[] = [];
   let finishReason = "stop";
+  let usage: TokenUsage | undefined;
 
   for await (const chunk of gen) {
     switch (chunk.type) {
@@ -131,11 +134,12 @@ export async function collectResponse(gen: AsyncGenerator<ChatChunk>): Promise<C
         break;
       case "done":
         finishReason = chunk.finishReason ?? "stop";
+        usage = chunk.usage ?? usage;
         break;
       case "error":
         throw new Error(chunk.error ?? "Unknown LLM error");
     }
   }
 
-  return { content, toolCalls, finishReason };
+  return { content, toolCalls, finishReason, usage };
 }

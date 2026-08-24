@@ -33,7 +33,8 @@ describe("runCheck", () => {
   it(
     "stdout / stderr を捕捉する",
     async () => {
-      const r = await runCheck("echo hello-out; echo hello-err 1>&2; exit 1");
+      // cmd.exe / POSIX shell のどちらでも同じ意味になる Node コマンドを使う。
+      const r = await runCheck("node -e \"console.log('hello-out');console.error('hello-err');process.exit(1)\"");
       expect(r.stdoutTail).toContain("hello-out");
       expect(r.stderrTail).toContain("hello-err");
       expect(r.passed).toBe(false);
@@ -44,7 +45,8 @@ describe("runCheck", () => {
   it(
     "timeout を超えると timedOut=true / exitCode=124",
     async () => {
-      const r = await runCheck("sleep 5", { timeoutMs: 200 });
+      // Windows には sleep コマンドがないため、Node で長時間プロセスを作る。
+      const r = await runCheck('node -e "setTimeout(()=>{},5000)"', { timeoutMs: 200 });
       expect(r.timedOut).toBe(true);
       expect(r.passed).toBe(false);
       expect(r.exitCode).toBe(124);

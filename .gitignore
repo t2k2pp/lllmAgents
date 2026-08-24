@@ -22,6 +22,7 @@ deploy/localllm.exe
 deploy/localllm
 deploy/localllm.cjs
 deploy/skills/
+deploy/agents/
 deploy/.deploy-meta.json
 deploy/install.bat
 deploy/install.sh

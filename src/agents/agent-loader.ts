@@ -128,7 +128,7 @@ function loadFromDirectory(dirPath: string): AgentDefinition[] {
  * Loads agent definitions from .md files with YAML frontmatter.
  *
  * Search paths (later paths override earlier for same name):
- *   1. src/agents/builtin/  (built-in definitions)
+ *   1. src/agents/builtin/ または実行ファイル隣接 agents/ (built-in definitions)
  *   2. ~/.localllm/agents/  (user-global overrides)
  *   3. .localllm/agents/    (project-local overrides)
  */
@@ -188,10 +188,17 @@ export class AgentDefinitionLoader {
    */
   private getSearchPaths(): string[] {
     const currentDir = path.dirname(fileURLToPath(import.meta.url));
-    const builtinPath = path.join(currentDir, "builtin");
+    // 開発時は src/agents/builtin。bundle/SEA では Markdown は esbuild に埋め込まれないため、
+    // build-deploy が実行ファイルの隣へ配置する agents/ も探索する。
+    // CJS fallback は currentDir/agents、SEA は dirname(process.execPath)/agents で解決できる。
+    const builtinPaths = [
+      path.join(currentDir, "builtin"),
+      path.join(currentDir, "agents"),
+      path.join(path.dirname(process.execPath), "agents"),
+    ];
     const userGlobalPath = path.join(getHomedir(), ".localllm", "agents");
     const projectLocalPath = path.resolve(".localllm", "agents");
 
-    return [builtinPath, userGlobalPath, projectLocalPath];
+    return [...new Set([...builtinPaths, userGlobalPath, projectLocalPath])];
   }
 }
