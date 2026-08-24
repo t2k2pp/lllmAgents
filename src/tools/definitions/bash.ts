@@ -7,6 +7,7 @@ import { getActiveProcessSandbox } from "../../security/active-sandbox.js";
 import { getSandboxProxy } from "../../security/sandbox-proxy.js";
 import { isDestructiveCommand } from "../../security/destructive-commands.js";
 import { loadConfig } from "../../config/config-manager.js";
+import { Utf8ChunkDecoder } from "../../utils/utf8-chunk-decoder.js";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
 
 const DEFAULT_TIMEOUT = 120_000; // 2 minutes
@@ -261,23 +262,34 @@ export const bashTool: BashToolHandler = {
 
       let stdout = "";
       let stderr = "";
+      const stdoutDecoder = new Utf8ChunkDecoder();
+      const stderrDecoder = new Utf8ChunkDecoder();
+      let streamsFinalized = false;
+
+      const appendStdout = (text: string): void => {
+        stdout += text;
+        if (streamOutputEnabled && text) process.stdout.write(text);
+      };
+      const appendStderr = (text: string): void => {
+        stderr += text;
+        if (streamOutputEnabled && text) process.stderr.write(text);
+      };
+      const finalizeStreams = (): void => {
+        if (streamsFinalized) return;
+        streamsFinalized = true;
+        appendStdout(stdoutDecoder.end());
+        appendStderr(stderrDecoder.end());
+      };
 
       proc.stdout.on("data", (data: Buffer) => {
-        const text = data.toString();
-        stdout += text;
-        if (streamOutputEnabled) {
-          process.stdout.write(text);
-        }
+        appendStdout(stdoutDecoder.write(data));
       });
       proc.stderr.on("data", (data: Buffer) => {
-        const text = data.toString();
-        stderr += text;
-        if (streamOutputEnabled) {
-          process.stderr.write(text);
-        }
+        appendStderr(stderrDecoder.write(data));
       });
 
       const buildResult = (code: number | null): ToolResult => {
+        finalizeStreams();
         let stderrText = stderr;
         if (isWindows && stderrText && /[\ufffd]/.test(stderrText)) {
           stderrText += "\n(文字化けしたエラーメッセージはShift-JISエンコードの可能性があります)";
@@ -291,7 +303,9 @@ export const bashTool: BashToolHandler = {
         const truncated = output.length > 30000 ? output.slice(0, 30000) + "\n... (truncated)" : output;
         // Phase 5-C2: 副次情報の標準同梱 (exitCode/duration/bytes)
         const durationMs = Date.now() - startMs;
-        const meta = `\n[bash] exitCode=${code ?? "?"} | duration=${durationMs}ms | stdout=${stdout.length}B | stderr=${stderr.length}B`;
+        const stdoutBytes = Buffer.byteLength(stdout, "utf8");
+        const stderrBytes = Buffer.byteLength(stderr, "utf8");
+        const meta = `\n[bash] exitCode=${code ?? "?"} | duration=${durationMs}ms | stdout=${stdoutBytes}B | stderr=${stderrBytes}B`;
         // P3-B: 破壊的コマンドの場合、 事前 git status を結果先頭に添付。
         // これによりモデルは「どのファイルが破棄されたか」 を即座に把握でき、
         // T86 (git checkout 失敗 → 同じ編集 6 回やり直し) のような事故が防げる。
