@@ -23,6 +23,7 @@ Status: implemented
 ## 安全条件
 
 - 実行ログのプロンプトと応答は既定でレビュー文書へ転載しない。
+- Windows で UTF-8 の設計書・スキルを PowerShell から読む場合は `Get-Content -Raw -Encoding UTF8` を使う。文字化けの兆候があれば内容を解釈せず、UTF-8を明示して再読込する。
 - 未コミットのユーザー変更を変更・stageしない。
 - commit、タグ、push は明示依頼がある場合だけ実施する。
 - before タグは変更前 HEAD、after タグは全検証を通した commit を指す。
