@@ -64,3 +64,7 @@ cycle 1 / 2 は完了条件を満たしていないため、完了報告を撤�
 CI-03訂正後は、PTY入力・改行分類の対象テスト5/5、`node --check scripts/pty-smoke.mjs`、lintエラー0を再確認した。実PTYのLinux/macOS回帰と、依存するWindows package smokeは次のGitHub Actionsで判定する。
 
 CI-04訂正後は、OS別PTYドライバを含む対象テスト7/7、両スクリプトの構文検査、lintエラー0を再確認した。最終判定は再度、GitHub Actions全job成功を条件とする。
+
+## Push後CI最終判定
+
+修正commit `3262183` のGitHub Actions run `32841361434` は、Ubuntu・macOS・Windowsのtest matrixと、その全成功後にだけ起動するWindows deploy / exe smokeがすべて成功した。これによりCI-01〜CI-04は再現条件を含めて閉鎖し、このサイクルの未解決P1/P2は0、完了条件を充足した。
