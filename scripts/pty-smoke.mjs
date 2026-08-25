@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ptyDriver } from "./pty-driver.js";
 import { submitPtyLine } from "./pty-input.js";
 
 if (process.platform === "win32") {
@@ -29,16 +30,13 @@ writeFileSync(
 const node = process.execPath;
 const tsx = join(root, "node_modules", "tsx", "dist", "cli.mjs");
 const entry = join(root, "src", "index.ts");
-const args =
-  process.platform === "darwin"
-    ? ["-q", "/dev/null", node, tsx, entry, "--no-mcp"]
-    : ["-qec", [node, tsx, entry, "--no-mcp"].map((part) => JSON.stringify(part)).join(" "), "/dev/null"];
+const driver = ptyDriver(process.platform, { node, tsx, entry });
 
 try {
   const result = await new Promise((resolveRun, reject) => {
-    const child = spawn("script", args, {
+    const child = spawn(driver.executable, driver.args, {
       cwd: tempWork,
-      env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome, NO_COLOR: "1" },
+      env: { ...process.env, ...driver.env, HOME: tempHome, USERPROFILE: tempHome, NO_COLOR: "1" },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let output = "";
@@ -46,7 +44,10 @@ try {
     let timedOut = false;
     const capture = (chunk) => {
       output += chunk.toString();
-      if (!sentQuit && /LocalLLM Agent/i.test(output)) {
+      if (!sentQuit && output.includes(driver.quitMarker)) {
+        sentQuit = true;
+      }
+      if (!sentQuit && driver.parentSubmits && /LocalLLM Agent/i.test(output)) {
         sentQuit = true;
         // PTYのLFはinteractive-inputでCtrl+J（改行挿入）になる。CRでEnter確定する。
         child.stdin.write(submitPtyLine("/quit"));

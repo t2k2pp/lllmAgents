@@ -55,9 +55,12 @@ cycle 1 / 2 は完了条件を満たしていないため、完了報告を撤�
 | CI-01 | P1 | `tests/scripts/git-revision.test.ts` がUbuntu/macOSで失敗。`platform="win32"`を渡しても実行ホストの`path.join`を使い、Windows標準Gitパスを`/`区切りで生成した | **修正済み**: Windows候補生成は常に`path.win32.join`を使用。既存クロスOS回帰テストで固定 |
 | CI-02 | P2 | Check annotationで`actions/checkout@v4` / `setup-node@v4`のNode 20 runtime廃止警告 | **修正済み**: Node 24 runtimeの公式`@v6`へ更新 |
 | CI-03 | P1 | 訂正commit `c510e9d` のrun `32840074337`でLinux/macOSのReal PTY smokeが30秒タイムアウト。PTYへ送ったLFはアプリでCtrl+J（改行挿入）として扱われ、`/quit`が確定されなかった | **修正済み**: 起動バナー検出後にCR（Enter）を送り、`Goodbye!`と正常終了を必須化。timeout・signal・送信状態も失敗時に出力 |
+| CI-04 | P1 | 訂正commit `0c4cf41` のrun `32840868945`でLinux実PTYは成功した一方、macOSはPTYステップ開始直後に失敗。Apple版`script(1)`をpipe stdinで駆動する方式が非互換 | **修正済み**: macOSはrunner組込みの`expect`でPTYを生成・操作し、Linuxは成功済みutil-linux `script`経路を維持。OS別ドライバテストを追加 |
 
 この訂正サイクルの完了条件は、対象回帰テスト、全ローカル品質ゲート、修正commitのGitHub Actions全job成功。ローカルだけで完了とはしない。
 
 ローカル再評価は、対象回帰テスト3/3、全体テスト1099件成功・24件skip、E2E 3/3、lintエラー0、coverage閾値をすべて通過した。最終判定は修正commitのGitHub Actions結果で行う。
 
 CI-03訂正後は、PTY入力・改行分類の対象テスト5/5、`node --check scripts/pty-smoke.mjs`、lintエラー0を再確認した。実PTYのLinux/macOS回帰と、依存するWindows package smokeは次のGitHub Actionsで判定する。
+
+CI-04訂正後は、OS別PTYドライバを含む対象テスト7/7、両スクリプトの構文検査、lintエラー0を再確認した。最終判定は再度、GitHub Actions全job成功を条件とする。
