@@ -1,15 +1,16 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { win32 } from "node:path";
 
 /** PATHに加え、Windowsの標準Git配置も候補にする。 */
 export function gitExecutableCandidates(env = process.env, platform = process.platform) {
   const candidates = ["git"];
   if (platform !== "win32") return candidates;
+  // platform引数でWindows候補を生成するため、実行ホストに関係なくwin32.joinを使う。
   for (const root of [env.ProgramFiles, env["ProgramFiles(x86)"], env.LOCALAPPDATA]) {
     if (!root) continue;
-    candidates.push(join(root, root === env.LOCALAPPDATA ? "Programs" : "", "Git", "cmd", "git.exe"));
-    candidates.push(join(root, root === env.LOCALAPPDATA ? "Programs" : "", "Git", "bin", "git.exe"));
+    candidates.push(win32.join(root, root === env.LOCALAPPDATA ? "Programs" : "", "Git", "cmd", "git.exe"));
+    candidates.push(win32.join(root, root === env.LOCALAPPDATA ? "Programs" : "", "Git", "bin", "git.exe"));
   }
   return [...new Set(candidates)];
 }
