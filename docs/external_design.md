@@ -260,7 +260,7 @@ graph TD
 | | `current_datetime` | auto (常時) | 現在の日時を取得します。ISO 8601形式、ローカルタイムゾーン形式、タイムゾーンオフセット情報を返します。 |
 | | `sandbox_info` | auto (常時) | 現在のサンドボックス設定（許可ディレクトリ、ブロックコマンド等）を返します。 |
 | **Web** | `web_search` | auto | DuckDuckGo等の検索エンジンAPIでインターネット検索し、サマリーを取得します。 |
-| | `web_fetch` | auto | 指定URLのWebページを取得し、HTMLからプレーンテキスト（Markdown等）を抽出して返します。`http://` / `https://` のみ許可。 |
+| | `web_fetch` | auto | 指定URLのWebページを取得し、HTMLからプレーンテキスト（Markdown等）を抽出して返します。`http://` / `https://` のみ許可し、localhost・private・link-local・予約IPを拒否。DNS解決IPへ接続をpinし、redirect先も再検証。 |
 | **ブラウザ操作** | `browser_navigate` | ask | **Playwright** プロセスを起動し、指定URLに遷移します。 |
 | | `browser_click` | ask | ブラウザのアクセシビリティツリーから要素をクリックします。 |
 | | `browser_type` | ask | ブラウザの入力フィールドにテキストを入力します。 |

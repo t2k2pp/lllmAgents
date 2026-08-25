@@ -113,3 +113,48 @@ describe("LLMLogger 文脈タグ (roomId/surface)", () => {
     expect(res.surface).toBe("cli");
   });
 });
+
+describe("LLMLogger privacy / capacity", () => {
+  it("機密キーと既知のtoken形式をマスクする", () => {
+    const logger = new LLMLogger("privacy", "redact", { logsDir: tmpHome });
+    logger.nextTurn();
+    logger.logRequest([{ role: "user", content: "Bearer abc.def.ghi", apiKey: "plain-secret" }], "m", [
+      { headers: { authorization: "Bearer another-secret" } },
+    ]);
+    const raw = fs.readFileSync(logger.getFilePath(), "utf-8");
+    expect(raw).not.toContain("abc.def.ghi");
+    expect(raw).not.toContain("plain-secret");
+    expect(raw).not.toContain("another-secret");
+    expect(raw).toContain("[REDACTED]");
+    logger.logResponse({ model: "m", tokensIn: 12, tokensOut: 7 });
+    const response = readEntries(logger).at(-1);
+    expect(response?.tokensIn).toBe(12);
+    expect(response?.tokensOut).toBe(7);
+  });
+
+  it("連続requestではmessagesとtoolsの重複を保存しない", () => {
+    const logger = new LLMLogger("delta", "delta", { logsDir: tmpHome });
+    const first = [{ role: "user", content: "one" }];
+    const tools = [{ name: "read" }];
+    logger.logRequest(first, "m", tools);
+    logger.logRequest([...first, { role: "assistant", content: "two" }], "m", tools);
+    const [a, b] = readEntries(logger);
+    expect(a.messages).toHaveLength(1);
+    expect(a.messageOffset).toBe(0);
+    expect(a.tools).toEqual(tools);
+    expect(b.messages).toHaveLength(1);
+    expect(b.messageOffset).toBe(1);
+    expect("tools" in b).toBe(false);
+  });
+
+  it("単一ファイル上限に達した後はlog_limitを残して追記を止める", () => {
+    const logger = new LLMLogger("cap", "cap", { logsDir: tmpHome, maxFileBytes: 600 });
+    logger.logResponse({ model: "m", text: "x".repeat(300) });
+    logger.logResponse({ model: "m", text: "y".repeat(300) });
+    logger.logResponse({ model: "m", text: "z".repeat(300) });
+    const raw = fs.readFileSync(logger.getFilePath(), "utf-8");
+    expect(Buffer.byteLength(raw, "utf-8")).toBeLessThanOrEqual(600);
+    expect(raw).toContain('"type":"log_limit"');
+    expect(raw).not.toContain("zzz");
+  });
+});

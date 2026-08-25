@@ -17,6 +17,7 @@ import * as os from "node:os";
 import type { LogRetentionConfig } from "../config/types.js";
 
 const DEFAULT_LOG_MAX_AGE_DAYS = 30;
+const DEFAULT_LOG_MAX_TOTAL_MB = 256;
 const DEFAULT_SESSION_MAX_COUNT = 100;
 
 export interface LogRetentionResult {
@@ -86,6 +87,44 @@ function keepNewest(dir: string, extension: string, keep: number): number {
   return deleted;
 }
 
+/** 複数ディレクトリのログを古い順に削除し、合計容量を上限以下にする。 */
+function trimToTotalBytes(dirs: string[], extension: string, maxBytes: number): number {
+  const files: { filePath: string; mtimeMs: number; size: number }[] = [];
+  for (const dir of dirs) {
+    let names: string[];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!name.endsWith(extension)) continue;
+      const filePath = path.join(dir, name);
+      try {
+        const stat = fs.statSync(filePath);
+        if (stat.isFile()) files.push({ filePath, mtimeMs: stat.mtimeMs, size: stat.size });
+      } catch {
+        // 個別ファイルの失敗は無視して続行
+      }
+    }
+  }
+
+  let total = files.reduce((sum, file) => sum + file.size, 0);
+  files.sort((a, b) => a.mtimeMs - b.mtimeMs);
+  let deleted = 0;
+  for (const file of files) {
+    if (total <= maxBytes) break;
+    try {
+      fs.unlinkSync(file.filePath);
+      total -= file.size;
+      deleted++;
+    } catch {
+      // 続行
+    }
+  }
+  return deleted;
+}
+
 /**
  * 世代管理を適用する。baseDir はテスト用に差し替え可能 (既定 ~/.localllm)。
  */
@@ -94,6 +133,7 @@ export function applyLogRetention(
   baseDir: string = path.join(os.homedir(), ".localllm"),
 ): LogRetentionResult {
   const logMaxAgeDays = cfg?.logMaxAgeDays ?? DEFAULT_LOG_MAX_AGE_DAYS;
+  const logMaxTotalMb = cfg?.logMaxTotalMb ?? DEFAULT_LOG_MAX_TOTAL_MB;
   const sessionMaxCount = cfg?.sessionMaxCount ?? DEFAULT_SESSION_MAX_COUNT;
   const notices: string[] = [];
 
@@ -104,6 +144,19 @@ export function applyLogRetention(
     deletedLogs += deleteOlderThan(path.join(baseDir, "logs", "sessions"), ".jsonl", cutoffMs);
     if (deletedLogs > 0) {
       notices.push(`${logMaxAgeDays}日より古いログを ${deletedLogs} 件削除しました (logging.retention で変更可能)`);
+    }
+  }
+  if (logMaxTotalMb > 0) {
+    const sizeDeleted = trimToTotalBytes(
+      [path.join(baseDir, "logs", "ops"), path.join(baseDir, "logs", "sessions")],
+      ".jsonl",
+      logMaxTotalMb * 1024 * 1024,
+    );
+    deletedLogs += sizeDeleted;
+    if (sizeDeleted > 0) {
+      notices.push(
+        `ログ合計を ${logMaxTotalMb} MiB 以下にするため古いログを ${sizeDeleted} 件削除しました (logging.retention で変更可能)`,
+      );
     }
   }
 

@@ -318,6 +318,8 @@ export interface OpsLogConfig {
 export interface LogRetentionConfig {
   /** ops / LLM I/O ログの保持日数。0 で無制限。既定 30 */
   logMaxAgeDays?: number;
+  /** ops / LLM I/O ログの合計上限 MiB。0 で無制限。既定 256 */
+  logMaxTotalMb?: number;
   /** セッション JSON の保持件数 (新しい順)。0 で無制限。既定 100 */
   sessionMaxCount?: number;
 }

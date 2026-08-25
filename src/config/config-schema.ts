@@ -264,6 +264,7 @@ export const configSchema = z
         retention: z
           .object({
             logMaxAgeDays: z.number(),
+            logMaxTotalMb: z.number(),
             sessionMaxCount: z.number(),
           })
           .partial(),

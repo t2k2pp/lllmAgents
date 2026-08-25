@@ -249,6 +249,8 @@ export class AgentLoop {
    * sliding window で「間に他ツールが挟まっても」 失敗の繰り返しを検出する補強。
    */
   private recentFailures: Array<{ iteration: number; signature: string; error: string }> = [];
+  /** 同一span内でstuck-loop警告を注入済みのsignature。履歴は保持して停止閾値まで数える。 */
+  private stuckIntervenedSignatures = new Set<string>();
   /** 主ループの現在の iteration index (executeSingleTool/Parallel から参照するため共有) */
   private currentIteration = 0;
   /**
@@ -537,6 +539,7 @@ export class AgentLoop {
     });
     // P0-A: ユーザー発話のたびに失敗履歴をリセット (前ターンの失敗を引き摺らない)
     this.recentFailures = [];
+    this.stuckIntervenedSignatures.clear();
     // P1-A/B: bash累積時間 / plan/todo 呼出回数も user span 単位でリセット
     this.bashCumulativeMs = 0;
     this.bashCumulativeWarned = false;
@@ -2321,6 +2324,11 @@ export class AgentLoop {
       return;
     }
 
+    // 警告は同一signatureにつき1回に抑えるが、失敗履歴は消さない。
+    // 旧実装はここで履歴を消したため、一過性失敗が停止閾値5回へ到達できなかった。
+    if (this.stuckIntervenedSignatures.has(signature)) return;
+    this.stuckIntervenedSignatures.add(signature);
+
     // 直近 window 内に同じ失敗が既にあった → 学習されていない兆候
     // Phase D-2: T3 では decision-tree mode で binary 二択を提示する。
     // 自由形式の助言は T3 にとって判断負荷が高く、 さらに迷走する原因になるため。
@@ -2336,8 +2344,6 @@ export class AgentLoop {
     this.notice("warn", `stuck-loop 検出: ${toolCall.function.name} の同一エラー再発`);
     // stuck-loop 介入は in-turn の方向修正なので応答完了時に purge
     this.history.addUserMessage(intervention, { ephemeral: true });
-    // 注入後は当該 signature の履歴をクリアして再注入を防ぐ
-    this.recentFailures = this.recentFailures.filter((e) => e.signature !== signature);
   }
 
   /** Phase D-2: T1/T2 向け標準介入 (自由形式の advice) */

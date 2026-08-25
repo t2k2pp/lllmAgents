@@ -18,24 +18,25 @@
 
 | 系統 | 目的 | 内容の決まり方 | レベル概念 |
 |---|---|---|---|
-| **セッションJSONL** | AI が会話を **継続できる** ための状態永続化 (resume / replay) | 「次のターンを再構築できるか」で機能的に固定 | なし |
+| **LLM I/O JSONL** | モデル入出力とツール往復の診断・集計 | 調査に必要な差分を、機密値と容量を制限して保存 | なし |
 | **運用ログ** | 人間が **トレースする** (エラー調査・性能・警告) | レベルで取捨選択 | TRACE/DEBUG/INFO/WARN/ERROR |
 
-**重要な不変条件**: 運用ログ側は壊れても作業は止まらない。逆にセッションJSONL側で必須情報が抜けると resume が壊れる。両者を独立に進化させる。
+**重要な不変条件**: どちらのログも壊れても作業は止めない。`/resume` の正典は `~/.localllm/sessions/*.json` であり、LLM I/O JSONLを完全会話履歴として扱わない。
 
 ## セッションJSONL (`~/.localllm/logs/sessions/<sid>_<agent>.jsonl`)
 
-### 必要十分な event types
+### event types
 
-「次のターンを再構築できる」ための最低限:
+診断とループ分析に使うイベント:
 
 | type | 内容 | 必須性 |
 |---|---|---|
-| `request` | system + messages + tools (送信前) | ✅ 既存 |
+| `request` | 前回requestから増えたmessages、変更時だけtools、messageOffset / messageTotal | ✅ |
 | `response` | text + thinking + toolCalls + finishReason + tokensIn + tokensOut | ✅ 既存 (tokens 修正必要) |
-| `tool_result` | toolCallId + toolName + input + output + success + durationMs | **追加必須** |
+| `tool_result` | toolCallId + toolName + input + output + success + durationMs | ✅ |
+| `log_limit` | 単一ファイル上限へ到達して追記を停止した事実 | 上限到達時 |
 
-`tool_result` がないと resume 時にツール往復を再生できないため、これは仕様としてセッションJSONLに含める。
+すべての値は書込み前に機密キーと既知token形式をマスクする。極端に長い文字列は切り詰め、単一ファイルは既定32 MiBで停止する。
 
 ### スキーマ (TypeScript)
 
@@ -50,6 +51,8 @@ interface SessionRequestLog extends SessionLogBase {
   type: "request";
   model: string;
   messages: Message[];
+  messageOffset: number;
+  messageTotal: number;
   tools?: ToolDefinition[];
 }
 
@@ -131,7 +134,7 @@ interface OpsLogEntry {
 
 - API キー (`x-api-key` / `Authorization`) は常にマスク (`***`)
 - TRACE で wire body を出すときも、Anthropic では平文だが HTTP ヘッダの認証情報はマスク
-- ユーザープロンプト本文は記録 (これがないと再現不可)。ローカルファイルのみで外部送信されないことを前提
+- ユーザープロンプト本文も機密情報を含み得る。ローカル保存であっても、機密キー名・Bearer token・主要API token形式は常にマスクする
 
 ## 設定
 
@@ -144,6 +147,11 @@ interface OpsLogEntry {
       "enabled": true,
       "level": "info",
       "path": "~/.localllm/logs/ops/<sid>.jsonl"
+    },
+    "retention": {
+      "logMaxAgeDays": 30,
+      "logMaxTotalMb": 256,
+      "sessionMaxCount": 100
     }
   }
 }

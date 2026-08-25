@@ -27,6 +27,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import * as readline from "node:readline";
 
 // ===== 引数パース =====
 const args = process.argv.slice(2);
@@ -128,29 +129,42 @@ function isHarnessGeneratedUserMessage(content) {
   );
 }
 
-for (const f of files) {
-  const lines = fs.readFileSync(f.full, "utf-8").split("\n");
-  const events = [];
-  for (const line of lines) {
-    if (!line) continue;
-    try {
-      events.push(JSON.parse(line));
-    } catch {
-      // 壊れた行はスキップ
-    }
-  }
-  if (events.length === 0) continue;
-
-  // model 取得 (最初の request)
-  const firstReq = events.find((e) => e.type === "request");
-  if (!includeTestSessions && isTestModelName(firstReq?.model ?? "")) continue;
-  const modelName = redactSensitiveText(firstReq?.model ?? "unknown");
-  stats.sessionCount++;
-
-  // user turn の検出
+/** 1ファイルをJSONLストリームとして集計し、巨大ログをメモリへ全量展開しない。 */
+async function analyzeFile(f) {
+  let modelName;
+  let eventCount = 0;
+  let lastTurn = 0;
   const userTurns = [];
-  for (const e of events) {
+  const localToolCounts = new Map();
+  const localFailurePatterns = new Map();
+  let localTokensIn = 0;
+  let localTokensOut = 0;
+  const localStuckLoops = [];
+  const recent = [];
+  const callsByTcid = new Map();
+
+  const input = fs.createReadStream(f.full, { encoding: "utf-8" });
+  const lines = readline.createInterface({ input, crlfDelay: Infinity });
+  for await (const line of lines) {
+    if (!line) continue;
+    let e;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    eventCount++;
+    lastTurn = Math.max(lastTurn, e.turn ?? 0);
+
     if (e.type === "request") {
+      if (modelName === undefined) {
+        if (!includeTestSessions && isTestModelName(e.model ?? "")) {
+          lines.close();
+          input.destroy();
+          return;
+        }
+        modelName = redactSensitiveText(e.model ?? "unknown");
+      }
       const msgs = e.messages ?? [];
       const lastMsg = msgs[msgs.length - 1];
       if (lastMsg?.role === "user" && !isHarnessGeneratedUserMessage(lastMsg.content))
@@ -164,12 +178,50 @@ for (const f of files) {
           tokensIn: e.tokensIn ?? 0,
         });
     }
+    if (e.type === "response") {
+      localTokensIn += e.tokensIn ?? 0;
+      localTokensOut += e.tokensOut ?? 0;
+      for (const tc of e.toolCalls ?? []) {
+        const n = tc.function?.name ?? "?";
+        addToMap(localToolCounts, n);
+        callsByTcid.set(tc.id, {
+          turn: e.turn,
+          name: n,
+          args: tc.function?.arguments ?? "",
+        });
+      }
+    }
+    if (e.type === "tool_result" && e.success === false) {
+      const tn = e.toolName ?? "?";
+      const err = normalizeError(e.error ?? e.output);
+      addToMap(localFailurePatterns, `${tn}:${err}`);
+      const tcid = e.toolCallId;
+      const call = callsByTcid.get(tcid);
+      if (!call) continue;
+      callsByTcid.delete(tcid);
+      const sig = `${call.name}:${call.args.slice(0, 200)}`;
+      const errKey = normalizeError(e.error ?? e.output);
+      // window 外を除去
+      while (recent.length > 0 && call.turn - recent[0].iteration > FAILURE_WINDOW) {
+        recent.shift();
+      }
+      const prior = recent.filter((r) => r.signature === sig && r.error === errKey);
+      if (prior.length > 0) {
+        localStuckLoops.push({
+          signature: `${call.name}:${argumentShape(call.args)}`,
+          error: errKey,
+          sessionFile: f.name,
+          count: prior.length + 1,
+        });
+      }
+      recent.push({ iteration: call.turn, signature: sig, error: errKey });
+    }
+    if (e.type === "tool_result" && e.success !== false) callsByTcid.delete(e.toolCallId);
   }
-  // 最終ターンを終端として加える
-  const lastTurn = events.reduce((m, e) => Math.max(m, e.turn ?? 0), 0);
-  userTurns.push({ turn: lastTurn + 1, preview: "(end)", tokensIn: 0 });
 
-  // span 集計
+  if (eventCount === 0) return;
+  modelName ??= "unknown";
+  userTurns.push({ turn: lastTurn + 1, preview: "(end)", tokensIn: 0 });
   const spansInThisFile = [];
   for (let i = 0; i < userTurns.length - 1; i++) {
     const span = userTurns[i + 1].turn - userTurns[i].turn;
@@ -181,63 +233,15 @@ for (const f of files) {
       sessionFile: f.name,
     });
   }
+
+  stats.sessionCount++;
   stats.totalUserSpans += spansInThisFile.length;
   stats.spans.push(...spansInThisFile);
-
-  // tokensIn / tokensOut
-  for (const e of events) {
-    if (e.type === "response") {
-      stats.totalTokensIn += e.tokensIn ?? 0;
-      stats.totalTokensOut += e.tokensOut ?? 0;
-      // tool 呼出統計
-      for (const tc of e.toolCalls ?? []) {
-        const n = tc.function?.name ?? "?";
-        addToMap(stats.toolCounts, n);
-      }
-    }
-    if (e.type === "tool_result" && e.success === false) {
-      const tn = e.toolName ?? "?";
-      const err = normalizeError(e.error ?? e.output);
-      addToMap(stats.failurePatterns, `${tn}:${err}`);
-    }
-  }
-
-  // stuck-loop 検出: file 内の (signature, error) を sliding window で追跡
-  const recent = []; // { iteration, signature, error }
-  // tool_call ID → invocation の map (tool_result とペアリング)
-  const callsByTcid = new Map();
-  for (const e of events) {
-    if (e.type === "response") {
-      for (const tc of e.toolCalls ?? []) {
-        callsByTcid.set(tc.id, {
-          turn: e.turn,
-          name: tc.function?.name ?? "?",
-          args: tc.function?.arguments ?? "",
-        });
-      }
-    }
-    if (e.type === "tool_result" && e.success === false) {
-      const tcid = e.toolCallId;
-      const call = callsByTcid.get(tcid);
-      if (!call) continue;
-      const sig = `${call.name}:${call.args.slice(0, 200)}`;
-      const errKey = normalizeError(e.error ?? e.output);
-      // window 外を除去
-      while (recent.length > 0 && call.turn - recent[0].iteration > FAILURE_WINDOW) {
-        recent.shift();
-      }
-      const prior = recent.filter((r) => r.signature === sig && r.error === errKey);
-      if (prior.length > 0) {
-        stats.stuckLoops.push({
-          signature: `${call.name}:${argumentShape(call.args)}`,
-          error: errKey,
-          sessionFile: f.name,
-          count: prior.length + 1,
-        });
-      }
-      recent.push({ iteration: call.turn, signature: sig, error: errKey });
-    }
-  }
+  stats.totalTokensIn += localTokensIn;
+  stats.totalTokensOut += localTokensOut;
+  for (const [name, count] of localToolCounts) addToMap(stats.toolCounts, name, count);
+  for (const [pattern, count] of localFailurePatterns) addToMap(stats.failurePatterns, pattern, count);
+  stats.stuckLoops.push(...localStuckLoops);
 
   // model 別集計
   if (!stats.sessionsByModel.has(modelName)) {
@@ -248,6 +252,8 @@ for (const f of files) {
   m.totalSpans += spansInThisFile.length;
   m.totalIter += spansInThisFile.reduce((s, x) => s + x.iterations, 0);
 }
+
+for (const f of files) await analyzeFile(f);
 
 // ===== KPI 計算 =====
 const allIters = stats.spans.map((s) => s.iterations).sort((a, b) => a - b);

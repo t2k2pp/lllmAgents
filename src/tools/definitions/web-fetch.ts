@@ -1,4 +1,5 @@
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
+import { requestPublicText } from "../../security/public-http.js";
 
 export const webFetchTool: ToolHandler = {
   name: "web_fetch",
@@ -26,46 +27,20 @@ export const webFetchTool: ToolHandler = {
   async execute(params: Record<string, unknown>): Promise<ToolResult> {
     const url = params.url as string;
 
-    // セキュリティ: http/https のみ許可（file:// 等によるローカルファイル漏洩を防ぐ）
-    if (!/^https?:\/\//i.test(url)) {
-      return {
-        success: false,
-        output: "",
-        error: `セキュリティエラー: URLは http:// または https:// で始まる必要があります（指定値: ${url}）`,
-      };
-    }
-
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000);
-
-      let res: Response;
-      try {
-        res = await fetch(url, {
-          signal: controller.signal,
-          headers: {
-            "User-Agent": "LocalLLM-Agent/0.1 (CLI Agent)",
-            Accept: "text/html,application/xhtml+xml,text/plain,application/json",
-          },
-        });
-      } finally {
-        // DNS エラー等で fetch が reject しても、タイマーを残して CLI 終了を遅延させない。
-        clearTimeout(timer);
-      }
-
-      if (!res.ok) {
+      const res = await requestPublicText(url);
+      if (res.status < 200 || res.status >= 300) {
         return { success: false, output: "", error: `HTTP ${res.status}: ${res.statusText}` };
       }
 
-      const contentType = res.headers.get("content-type") ?? "";
+      const contentType = res.headers["content-type"] ?? "";
       let text: string;
 
       if (contentType.includes("application/json")) {
-        const json = await res.json();
+        const json = JSON.parse(res.body);
         text = JSON.stringify(json, null, 2);
       } else {
-        const html = await res.text();
-        text = stripHtml(html, url);
+        text = stripHtml(res.body, res.finalUrl);
       }
 
       // Truncate if too large
@@ -80,7 +55,7 @@ export const webFetchTool: ToolHandler = {
 
       return { success: true, output };
     } catch (e) {
-      return { success: false, output: "", error: String(e) };
+      return { success: false, output: "", error: `セキュリティ/取得エラー: ${String(e)}` };
     }
   },
 };

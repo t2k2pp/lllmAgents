@@ -124,15 +124,21 @@ export function isBlockedAddress(ip: string): boolean {
  * ホスト名/IP を解決し、 接続先として安全な実IPを1つ返す（内部レンジは拒否＝例外）。
  * ホスト名は解決済みIPを「ピン留め」して返すことで、 authorize 後に別IPへ向く DNS rebinding を防ぐ。
  */
-async function resolvePinnedIp(host: string, isBlocked: (ip: string) => boolean = isBlockedAddress): Promise<string> {
+export async function resolvePinnedIp(
+  host: string,
+  isBlocked: (ip: string) => boolean = isBlockedAddress,
+  lookup: typeof dns.lookup = dns.lookup,
+): Promise<string> {
   const h = host.replace(/^\[|\]$/g, ""); // IPv6 リテラルのブラケットを除去
   if (net.isIP(h)) {
     if (isBlocked(h)) throw new Error(`blocked internal address: ${h}`);
     return h;
   }
-  const { address } = await dns.lookup(h); // 先頭の解決結果を採用
-  if (isBlocked(address)) throw new Error(`host resolves to internal address: ${h} -> ${address}`);
-  return address;
+  const addresses = await lookup(h, { all: true });
+  if (addresses.length === 0) throw new Error(`host did not resolve: ${h}`);
+  const blocked = addresses.find(({ address }) => isBlocked(address));
+  if (blocked) throw new Error(`host resolves to internal address: ${h} -> ${blocked.address}`);
+  return addresses[0].address;
 }
 
 /** プロキシ転送時に除去すべき hop-by-hop ヘッダ（RFC 7230 §6.1 + プロキシ固有）。 */
