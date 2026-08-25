@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { LLMProvider, TokenUsage } from "../providers/base-provider.js";
+import type { ChatResponse, LLMProvider, TokenUsage } from "../providers/base-provider.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
 import type { PermissionManager } from "../security/permission-manager.js";
 import { MessageHistory } from "./message-history.js";
@@ -124,6 +124,25 @@ export interface SubAgentResult {
   success: boolean;
 }
 
+export type BackgroundTaskStatus = "running" | "completed" | "failed" | "cancelled";
+
+export interface BackgroundTaskSnapshot {
+  agentId: string;
+  type: SubAgentType;
+  description: string;
+  status: BackgroundTaskStatus;
+  startedAt: string;
+  completedAt?: string;
+}
+
+interface BackgroundTaskRecord extends BackgroundTaskSnapshot {
+  agent: SubAgent;
+  promise: Promise<SubAgentResult>;
+  result?: SubAgentResult;
+}
+
+const CANCELLED_RESULT = "Cancelled by task_cancel.";
+
 /**
  * サブエージェント 1 回分のモデル選択結果 (docs/model-orchestration.md §4.2)。
  * 解決に失敗しても起動は止めず、 main で走らせた事実を note で返す (silent な差し替えをしない)。
@@ -203,6 +222,8 @@ export class SubAgent {
   private toolExecutor: ToolExecutor;
   private filteredRegistry: ToolRegistry;
   private config: SubAgentConfig;
+  private aborted = false;
+  private llmAbortController: AbortController | null = null;
   /** D1: 自分自身の ancestors (= 親の ancestors ∪ {"sub"})。 子エージェント生成時にさらに伝播 */
   private readonly selfAncestors: AncestorTypes;
 
@@ -276,8 +297,13 @@ export class SubAgent {
     // 壁ドンループ警告 / Read→Edit 契約 / 連続委任ガード / 旧エラーガイダンスが効く。
     const harnessState = new HarnessState();
     for (let iteration = 0; iteration < maxTurns; iteration++) {
+      if (this.aborted) {
+        finalResult = CANCELLED_RESULT;
+        break;
+      }
       try {
         const defs = this.filteredRegistry.getDefinitions();
+        this.llmAbortController = new AbortController();
         const gen =
           defs.length > 0
             ? this.provider.chatWithTools({
@@ -285,25 +311,41 @@ export class SubAgent {
                 messages: this.history.getMessages(),
                 tools: defs,
                 stream: true,
+                signal: this.llmAbortController.signal,
               })
             : this.provider.chat({
                 model: this.model,
                 messages: this.history.getMessages(),
                 stream: true,
+                signal: this.llmAbortController.signal,
               });
 
-        const response = await collectResponse(gen);
+        let response: ChatResponse;
+        try {
+          response = await collectResponse(gen);
+        } finally {
+          this.llmAbortController = null;
+        }
+        if (this.aborted) {
+          finalResult = CANCELLED_RESULT;
+          break;
+        }
         this.recordUsage(response.usage);
 
         if (response.toolCalls.length > 0) {
           this.history.addAssistantMessage(response.content, response.toolCalls);
 
           for (const toolCall of response.toolCalls) {
+            if (this.aborted) break;
             const result = await this.toolExecutor.execute(toolCall);
             const raw = result.success ? (result.output ?? "") : `Error: ${result.error ?? ""}\n${result.output ?? ""}`;
             // D8: ハーネス介入レイヤを通す (壁ドンループ警告 / Read→Edit 契約 等)
             const enriched = enrichToolResult(toolCall, result.success, raw, harnessState);
             this.history.addToolResult(toolCall.id, enriched);
+          }
+          if (this.aborted) {
+            finalResult = CANCELLED_RESULT;
+            break;
           }
           continue;
         }
@@ -384,7 +426,7 @@ export class SubAgent {
         finalResult = response.content;
         break;
       } catch (e) {
-        finalResult = `Error: ${e instanceof Error ? e.message : String(e)}`;
+        finalResult = this.aborted ? CANCELLED_RESULT : `Error: ${e instanceof Error ? e.message : String(e)}`;
         break;
       }
     }
@@ -398,8 +440,16 @@ export class SubAgent {
       type: this.config.type,
       description: this.config.description,
       result: finalResult,
-      success: !finalResult.startsWith("Error:"),
+      success: !finalResult.startsWith("Error:") && finalResult !== CANCELLED_RESULT,
     };
+  }
+
+  /** background taskの協調中断。進行中LLM接続を切り、次のtool/iterationを開始させない。 */
+  abort(): boolean {
+    if (this.aborted) return false;
+    this.aborted = true;
+    this.llmAbortController?.abort();
+    return true;
   }
 
   getAgentId(): string {
@@ -440,7 +490,7 @@ export class SubAgent {
 }
 
 export class SubAgentManager {
-  private runningAgents = new Map<string, Promise<SubAgentResult>>();
+  private backgroundTasks = new Map<string, BackgroundTaskRecord>();
 
   constructor(
     private provider: LLMProvider,
@@ -525,8 +575,43 @@ export class SubAgentManager {
       this.skillRegistry,
     );
     const id = agent.getAgentId();
-    const promise = agent.run(prompt);
-    this.runningAgents.set(id, promise);
+    const startedAt = new Date().toISOString();
+    const promise = agent
+      .run(prompt)
+      .then((result) => {
+        const current = this.backgroundTasks.get(id);
+        if (!current || current.status === "cancelled") return current?.result ?? result;
+        current.result = result;
+        current.status = result.success ? "completed" : "failed";
+        current.completedAt = new Date().toISOString();
+        return result;
+      })
+      .catch((error) => {
+        const current = this.backgroundTasks.get(id);
+        const result: SubAgentResult = {
+          agentId: id,
+          type,
+          description,
+          result: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          success: false,
+        };
+        if (current?.status === "cancelled") return current.result ?? result;
+        if (current) {
+          current.result = result;
+          current.status = "failed";
+          current.completedAt = new Date().toISOString();
+        }
+        return result;
+      });
+    this.backgroundTasks.set(id, {
+      agentId: id,
+      type,
+      description,
+      status: "running",
+      startedAt,
+      agent,
+      promise,
+    });
     return id;
   }
 
@@ -619,14 +704,43 @@ export class SubAgentManager {
   }
 
   async getResult(agentId: string): Promise<SubAgentResult | null> {
-    const promise = this.runningAgents.get(agentId);
-    if (!promise) return null;
-    const result = await promise;
-    this.runningAgents.delete(agentId);
+    const task = this.backgroundTasks.get(agentId);
+    if (!task) return null;
+    const result = task.result ?? (await task.promise);
+    this.backgroundTasks.delete(agentId);
     return result;
   }
 
   isRunning(agentId: string): boolean {
-    return this.runningAgents.has(agentId);
+    return this.backgroundTasks.get(agentId)?.status === "running";
+  }
+
+  listBackgroundTasks(): BackgroundTaskSnapshot[] {
+    return [...this.backgroundTasks.values()].map(({ agentId, type, description, status, startedAt, completedAt }) => ({
+      agentId,
+      type,
+      description,
+      status,
+      startedAt,
+      ...(completedAt ? { completedAt } : {}),
+    }));
+  }
+
+  cancelBackground(agentId: string): "cancelled" | "not_found" | "already_finished" {
+    const task = this.backgroundTasks.get(agentId);
+    if (!task) return "not_found";
+    if (task.status !== "running") return "already_finished";
+
+    task.status = "cancelled";
+    task.completedAt = new Date().toISOString();
+    task.result = {
+      agentId,
+      type: task.type,
+      description: task.description,
+      result: CANCELLED_RESULT,
+      success: false,
+    };
+    task.agent.abort();
+    return "cancelled";
   }
 }

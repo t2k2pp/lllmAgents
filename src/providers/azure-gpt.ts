@@ -199,7 +199,7 @@ export class AzureGPTProvider implements LLMProvider {
 
     let stream: ReadableStream<Uint8Array>;
     try {
-      stream = await httpPostStream(url, body, undefined, undefined, this.headers());
+      stream = await httpPostStream(url, body, undefined, undefined, this.headers(), params.signal);
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       getOpsLogger().error("stream", `${this.providerType} request failed`, {

@@ -232,3 +232,70 @@ export const taskOutputTool: ToolHandler = {
     };
   },
 };
+
+export const taskListTool: ToolHandler = {
+  name: "task_list",
+  definition: {
+    type: "function",
+    function: {
+      name: "task_list",
+      description: "バックグラウンドsub-agentの実行中・完了・失敗・取消状態を一覧する",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+
+  async execute() {
+    if (!subAgentManager) {
+      return { success: false, output: "", error: "SubAgentManager not initialized" };
+    }
+
+    return {
+      success: true,
+      output: JSON.stringify({ tasks: subAgentManager.listBackgroundTasks() }),
+    };
+  },
+};
+
+export const taskCancelTool: ToolHandler = {
+  name: "task_cancel",
+  definition: {
+    type: "function",
+    function: {
+      name: "task_cancel",
+      description: "実行中のバックグラウンドsub-agentを停止する",
+      parameters: {
+        type: "object",
+        properties: {
+          agent_id: {
+            type: "string",
+            description: "停止するサブエージェントのID",
+          },
+        },
+        required: ["agent_id"],
+      },
+    },
+  },
+
+  async execute(params: Record<string, unknown>) {
+    if (!subAgentManager) {
+      return { success: false, output: "", error: "SubAgentManager not initialized" };
+    }
+
+    const agentId = params.agent_id as string;
+    const status = subAgentManager.cancelBackground(agentId);
+    if (status === "not_found") {
+      return { success: false, output: "", error: `Agent ${agentId} not found or already collected` };
+    }
+    if (status === "already_finished") {
+      return { success: false, output: "", error: `Agent ${agentId} is already finished` };
+    }
+
+    return {
+      success: true,
+      output: JSON.stringify({ agentId, status }),
+    };
+  },
+};

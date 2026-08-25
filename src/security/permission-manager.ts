@@ -29,6 +29,8 @@ const INHERENTLY_SAFE_TOOLS = new Set([
   "enter_plan_mode",
   "exit_plan_mode",
   "task_output",
+  "task_list",
+  "task_cancel",
   "schedule_create",
   "schedule_list",
   "schedule_delete",

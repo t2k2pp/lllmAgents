@@ -17,7 +17,7 @@
 - `current_datetime_tool_design.md` で追加された `current_datetime` ツールを反映すると22種になる
 - `claude_code_comparison.md` の比較表でも「21種」と記載されていた
 
-**対応**: 統合版 `external_design.md` では22種に修正済み。ただし、実際のソースコード（`src/tools/definitions/`）のツール数との整合性を確認すること。
+**対応**: 現在の`external_design.md`とREADMEは、機能・設定による登録差を考慮して「30種以上」または count-free の表現へ更新済み。新規tool追加時に固定値が再び陳腐化しない表現とした。
 
 **確認すべき箇所**: `src/index.ts` の `toolRegistry.register()` 呼び出し数
 

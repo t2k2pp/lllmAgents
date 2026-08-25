@@ -752,6 +752,8 @@ export function getDefaultConfig(): Config {
         "enter_plan_mode",
         "exit_plan_mode",
         "task_output",
+        "task_list",
+        "task_cancel",
         "web_search",
         "web_fetch",
       ],

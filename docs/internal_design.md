@@ -168,10 +168,16 @@ stateDiagram-v2
         SubLoop --> ToolExec: 限定されたツール群の使用
         ToolExec --> SubLoop
         SubLoop --> Finalize: タスク完了報告生成
+        SubLoop --> Cancelled: task_cancel / AbortSignal
+        ToolExec --> Cancelled: tool完了後に中断を検出
     }
 
     SAM --> Main : 報告/結果をMainのHistoryへ追加
 ```
+
+background taskは`running / completed / failed / cancelled`を明示追跡します。`task_list`は本文を含まない
+metadataだけを返し、`task_cancel`は進行中のproviderへ`AbortSignal`を伝播します。取消後に遅れてproviderが
+解決しても状態を上書きしません。`task_output`で終端結果を回収すると管理Mapから除去します。
 
 ### 2.3 プランモード (`PlanManager`) による状態制御
 
@@ -315,6 +321,8 @@ classDiagram
         +launchBackground(type, desc, prompt) string
         +launchParallel(tasks) Promise~SubAgentResult[]~
         +getResult(taskId) SubAgentResult
+        +listBackgroundTasks() BackgroundTaskSnapshot[]
+        +cancelBackground(taskId) CancelStatus
     }
 
     class PlanManager {

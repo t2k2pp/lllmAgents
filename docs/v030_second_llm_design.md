@@ -211,7 +211,7 @@ User → REPL → AgentLoop(Leader) → LocalLLM Provider (メインLLM)
 | 孫 → 何か | {sub, second} | (拒否、 そもそもツールが見えない) |
 
 `excludedToolsFor(ancestors)` の挙動:
-- `ancestors.has("sub")` → `task`, `task_output` を除外
+- `ancestors.has("sub")` → `task`, `task_output` を除外。`task_list`, `task_cancel`は全子contextで除外
 - `ancestors.has("second")` → `second_llm_consult`, `second_llm_agent` を除外
 - 共通: `enter_plan_mode`, `exit_plan_mode` は子コンテキストでは常に除外 (リーダー専権)
 

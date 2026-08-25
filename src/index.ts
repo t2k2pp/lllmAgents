@@ -33,7 +33,13 @@ import { todoWriteTool, todoAppendTool, todoMarkTool, todoDeleteTool } from "./t
 import { askUserTool } from "./tools/definitions/ask-user.js";
 import { createBrowserTools } from "./tools/definitions/browser.js";
 import { createGameSmokeTool } from "./tools/definitions/game-smoke.js";
-import { taskTool, taskOutputTool, setSubAgentManager } from "./tools/definitions/task.js";
+import {
+  taskTool,
+  taskOutputTool,
+  taskListTool,
+  taskCancelTool,
+  setSubAgentManager,
+} from "./tools/definitions/task.js";
 import { enterPlanModeTool, exitPlanModeTool, setPlanManager } from "./tools/definitions/plan-mode.js";
 import {
   skillTool,
@@ -249,6 +255,8 @@ async function main(): Promise<void> {
   // Sub-agent tools
   toolRegistry.register(taskTool);
   toolRegistry.register(taskOutputTool);
+  toolRegistry.register(taskListTool);
+  toolRegistry.register(taskCancelTool);
 
   // Skill tool
   toolRegistry.register(skillTool);

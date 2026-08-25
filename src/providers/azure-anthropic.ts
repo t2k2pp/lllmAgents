@@ -250,7 +250,7 @@ export class AzureAnthropicProvider implements LLMProvider {
 
     let stream: ReadableStream<Uint8Array>;
     try {
-      stream = await httpPostStream(url, body, undefined, undefined, this.headers());
+      stream = await httpPostStream(url, body, undefined, undefined, this.headers(), params.signal);
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       // 運用ログ ERROR: ネットワーク失敗・HTTP 非200 を context 付きで記録

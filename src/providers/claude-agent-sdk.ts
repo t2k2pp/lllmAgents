@@ -138,6 +138,18 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
       tools: [],
     };
 
+    const abortController = new AbortController();
+    let detachAbort = (): void => {};
+    if (params.signal) {
+      if (params.signal.aborted) abortController.abort();
+      else {
+        const relayAbort = (): void => abortController.abort();
+        params.signal.addEventListener("abort", relayAbort, { once: true });
+        detachAbort = () => params.signal?.removeEventListener("abort", relayAbort);
+      }
+    }
+    options.abortController = abortController;
+
     if (systemPrompt) {
       options.systemPrompt = systemPrompt;
     }
@@ -191,6 +203,8 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
         error: `[claude-agent-sdk] ${err.message}`,
       };
       return;
+    } finally {
+      detachAbort();
     }
 
     yield {

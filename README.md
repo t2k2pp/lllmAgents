@@ -6,7 +6,7 @@
 
 - **ローカルLLM対応**: Ollama, LM Studio, llama.cpp, vLLM をサポート
 - **クラウドLLM対応**: Anthropic API 直接 / Claude Code CLI (`claude -p`) / Azure OpenAI / Azure Claude / Azure Anthropic / Azure Foundry / Vertex AI
-- **21種のツール**: ファイル操作、コマンド実行、ブラウザ操作、Web検索をLLMが自律的に実行
+- **豊富なツール群**: ファイル操作、コマンド実行、ブラウザ操作、Web検索をLLMが自律的に実行
 - **セキュリティ**: Claude Code準拠の3段階権限モデル（自動許可/要確認/禁止）+ 50以上の危険コマンド検出パターン
 - **サブエージェント**: タスク委譲による並列・バックグラウンド処理（explore / plan / general-purpose / bash）
 - **プランモード**: 読み取り専用の計画フェーズで設計を固めてから実装
@@ -160,6 +160,8 @@ LLMが自律的に呼び出すツール:
 | `exit_plan_mode` | 自動 | プラン承認リクエスト |
 | `task` | 自動 | サブエージェントへのタスク委譲（model / max turns / preload skills指定可） |
 | `task_output` | 自動 | バックグラウンドタスクの結果取得 |
+| `task_list` | 自動 | バックグラウンドタスクの実行中・完了・失敗・取消状態を一覧（prompt・結果本文は非表示） |
+| `task_cancel` | 自動 | 実行中のバックグラウンドタスクをID指定で停止 |
 | `schedule_create` | 自動 | 現REPL sessionに一回／反復プロンプトを登録（10秒〜7日、最大50件） |
 | `schedule_list` | 自動 | 登録中scheduleと実行・skip・失敗状態を一覧 |
 | `schedule_delete` | 自動 | scheduleをID指定または全件取消 |
@@ -194,7 +196,9 @@ LLMが自律的に呼び出すツール:
 | `general-purpose` | 汎用タスク | 全ツール | 30 |
 | `bash` | コマンド実行 | bash, file_read, glob, grep | 15 |
 
-フォアグラウンド（完了まで待機）またはバックグラウンド（`task_output`で結果取得）で実行可能。
+フォアグラウンド（完了まで待機）またはバックグラウンドで実行できます。バックグラウンドtaskは
+`task_list`で状態を確認し、不要になった実行を`task_cancel`で停止し、`task_output`で結果を取得します。
+停止は進行中のLLM生成を中断し、新しいtool/iterationを開始しません。すでに実行中のtoolは戻った直後に停止します。
 `task` の `skills` でその委任だけに必要なスキルを事前ロードできるほか、カスタムagent定義の
 frontmatterへ `skills: [code-review, tdd]` と書けば毎回同じワークフローをsystem promptへ注入できます。
 存在しない、または無効化中のskillは黙って省略せず、モデル起動前にエラーになります。
@@ -256,7 +260,7 @@ src/
 ├── tools/                  # ツールフレームワーク
 │   ├── tool-registry.ts    # ツール登録
 │   ├── tool-executor.ts    # 権限チェック・フック付き実行
-│   └── definitions/        # 21種のツール実装
+│   └── definitions/        # ツール実装
 ├── agents/                 # サブエージェント定義
 │   ├── agent-loader.ts     # Markdown定義の読み込み
 │   └── builtin/            # 組み込みエージェント

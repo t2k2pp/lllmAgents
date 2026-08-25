@@ -103,8 +103,8 @@ graph TD
 
 | 観点 | メインLLM | サブエージェント (task) | セカンドLLM consult | セカンドLLM agent | Evaluator |
 |------|-----------|--------------------------|----------------------|-------------------|-----------|
-| **使えるツール** | 全ツール | `allowedTools` 指定があればホワイトリスト / 無ければ **`task` のみ除外** | **無し** | 共有 ToolRegistry から `EXCLUDED_TOOLS` を除いた全て | `file_read` / `grep` / `glob` の 3 つ |
-| **EXCLUDED_TOOLS** | (なし) | `task` のみ | n/a | `task`, `task_output`, `second_llm_consult`, `second_llm_agent`, `enter_plan_mode`, `exit_plan_mode` | n/a (ホワイトリスト方式) |
+| **使えるツール** | 全ツール | `allowedTools` 指定があればホワイトリスト / 無ければ祖先ガードで委任・lifecycle管理toolを除外 | **無し** | 共有 ToolRegistry から祖先ガード対象を除いた全て | `file_read` / `grep` / `glob` の 3 つ |
+| **EXCLUDED_TOOLS** | (なし) | `task`, `task_output`, `task_list`, `task_cancel` | n/a | `task_list`, `task_cancel`, `second_llm_agent`, `enter_plan_mode`, `exit_plan_mode`ほか祖先ガードで決定 | n/a (ホワイトリスト方式) |
 | **ハーネス介入** | あり (`harnessState`) | なし | なし | あり (`HarnessState` 独立インスタンス) | あり (`HarnessState` 独立インスタンス) |
 | **dialogueLock の影響** | 受ける (file_write/edit を tool 層で拒否) | 受けない | 受けない | 受けない | 受けない |
 
@@ -196,7 +196,7 @@ classDiagram
 - `src/second-llm/second-llm-manager.ts` — セカンドLLM の 3 モード
 - `src/second-llm/delegation-guard.ts` — 委任ガード
 - `src/agent/evaluator.ts` — Evaluator
-- `src/tools/definitions/task.ts` — `task` / `task_output` ツール
+- `src/tools/definitions/task.ts` — `task` / `task_output` / `task_list` / `task_cancel` ツール
 - `src/tools/definitions/second-llm.ts` — `second_llm_consult` / `second_llm_agent` ツール
 
 ---
@@ -311,6 +311,8 @@ export function excludedToolsFor(ancestors: AncestorTypes): Set<string> {
   if (ancestors.has("sub")) {
     excluded.add("task");
     excluded.add("task_output");
+    excluded.add("task_list");
+    excluded.add("task_cancel");
   }
   if (ancestors.has("second")) {
     excluded.add("second_llm_consult");

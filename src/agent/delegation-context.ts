@@ -35,7 +35,8 @@ export function extendAncestors(current: AncestorTypes, origin: DelegationOrigin
  * 与えられた祖先セットに対して、 子コンテキストで除外すべきツール名を返す。
  *
  * - 共通: `enter_plan_mode` / `exit_plan_mode` は子では常に禁止 (リーダー専権)
- * - `ancestors.has("sub")` → `task` / `task_output` を除外 (sub 同種再帰禁止 + 孫からの sub 起動禁止)
+ * - `ancestors.has("sub")` → `task` / `task_output` / lifecycle管理toolを除外
+ *   (sub 同種再帰禁止 + main orchestrator専権)
  * - `ancestors.has("second")` → `second_llm_agent` を除外
  *   (second 同種再帰禁止 + 孫からの second 起動禁止)
  */
@@ -46,6 +47,8 @@ export function excludedToolsFor(ancestors: AncestorTypes): Set<string> {
     excluded.add("schedule_create");
     excluded.add("schedule_list");
     excluded.add("schedule_delete");
+    excluded.add("task_list");
+    excluded.add("task_cancel");
   }
   if (ancestors.has("sub")) {
     excluded.add("task");

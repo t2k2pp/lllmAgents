@@ -140,6 +140,7 @@ export class ClaudeCliProvider implements LLMProvider {
       proc = spawn(this.config.binPath ?? DEFAULT_BIN, args, {
         stdio: ["pipe", "pipe", "pipe"],
         env: process.env,
+        signal: params.signal,
       });
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));

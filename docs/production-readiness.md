@@ -14,7 +14,7 @@
 
 | 領域 | 現状 |
 |---|---|
-| 機能 | ツール22種、権限3段階モデル、サブエージェント、スキル、Room、Discord/Slack 連携など機能面は製品級に充実 |
+| 機能 | 設定に応じて登録される30種以上のツール、権限3段階モデル、サブエージェント、スキル、Room、Discord/Slack 連携など機能面は製品級に充実 |
 | テスト | vitest 71ファイル。ユニットテストの資産は十分 |
 | CI | GitHub Actions あり (ubuntu / macos で型チェック+テスト、Linux は bwrap サンドボックス統合テストまで実行) |
 | セキュリティ設計 | security_assessment.md で脅威モデル文書化済み。web_fetch の http/https 限定、危険コマンド検出、OSサンドボックス (Seatbelt/bwrap) など実装済み |
