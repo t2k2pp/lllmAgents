@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Codex / Claude Code 機能比較サイクル (2026-08-26)
+
+- Codex / Claude Code / lllmAgents の機能比較マトリックスを追加
+- カスタムagent frontmatterの`skills`と`task.skills`で、サブエージェントへスキル全文を起動時preload可能にした
+- preload対象のskillが存在しない、または無効な場合はモデル起動前に明示エラーとし、`${SKILL_DIR}`とsandbox許可を正しく解決
+
 ### 商品品質レビューサイクル 2 (2026-08-25)
 
 - シェルのUTF-8出力がマルチバイト文字のチャンク境界で文字化けする不具合を修正

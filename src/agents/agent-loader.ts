@@ -9,6 +9,8 @@ export interface AgentDefinition {
   description: string;
   tools: string[];
   allowedTools: string[];
+  /** 起動時にsystem promptへ全文を注入するskill名。Codex/Claude Codeのagent skill preload相当。 */
+  skills: string[];
   systemPrompt: string;
   source: string;
   /**
@@ -78,6 +80,9 @@ function loadAgentFile(filePath: string): AgentDefinition | null {
     const description = (meta.description as string) ?? "";
     const tools = (meta.tools as string[]) ?? [];
     const allowedTools = (meta.allowedTools as string[]) ?? tools;
+    const skills = Array.isArray(meta.skills)
+      ? meta.skills.filter((value): value is string => typeof value === "string" && value.trim() !== "")
+      : [];
     // model: は optional。 文字列以外 (flow 配列など) が来たら無視して従来動作にする。
     const rawModel = meta.model;
     const modelRef = typeof rawModel === "string" && rawModel.trim() !== "" ? rawModel.trim() : undefined;
@@ -87,6 +92,7 @@ function loadAgentFile(filePath: string): AgentDefinition | null {
       description,
       tools,
       allowedTools,
+      skills,
       systemPrompt: body,
       source: filePath,
       modelRef,

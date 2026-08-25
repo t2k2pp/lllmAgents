@@ -548,6 +548,7 @@ LLMが必要に応じてスキルを選択する形式です。
 name: explore
 description: Fast codebase exploration (read-only)
 tools: [file_read, glob, grep, web_fetch, web_search]
+skills: [research]
 ---
 You are a codebase exploration specialist. Your job is to quickly find files, search code, and answer questions about the codebase.
 ```
@@ -560,14 +561,20 @@ You are a codebase exploration specialist. Your job is to quickly find files, se
 | `description` | string | エージェントの説明 |
 | `tools` | string[] | 使用可能なツールのリスト |
 | `allowedTools` | string[] | 許可するツールのリスト（指定がなければ `tools` と同一） |
+| `model` | string | 起動に使うModel Registryのslot/ref（未指定はmain） |
+| `skills` | string[] | 起動時にsystem promptへ全文を事前ロードするskill名。無効・不存在は明示エラー |
 
-### 組み込みエージェント定義（4種）
+`task` toolのoptional `skills`引数でも、その委任だけの追加skillを指定できます。agent定義分を先、
+呼出指定分を後にして重複除去し、skill本文中の`${SKILL_DIR}`は実ディレクトリへ解決されます。
+
+### 組み込みエージェント定義（5種）
 
 | 名前 | 説明 | 使用可能ツール |
 |:---|:---|:---|
 | `explore` | コードベース探索（読取専用） | file_read, glob, grep, web_fetch, web_search |
 | `plan` | 実装計画・アーキテクチャ設計（読取専用） | file_read, glob, grep, web_fetch, web_search |
 | `general-purpose` | 全ツール使用可能な汎用エージェント | file_read, file_write, file_edit, glob, grep, bash, web_fetch, web_search, todo_write, ask_user |
+| `bash` | command/build/test実行 | bash, file_read, glob, grep |
 | `code-reviewer` | コード品質・セキュリティレビュー | file_read, glob, grep, bash |
 
 ### エージェント定義のロードパス

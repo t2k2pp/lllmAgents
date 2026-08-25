@@ -158,7 +158,7 @@ LLMが自律的に呼び出すツール:
 | `todo_write` | 自動 | タスクリスト管理 |
 | `enter_plan_mode` | 自動 | プランモード開始 |
 | `exit_plan_mode` | 自動 | プラン承認リクエスト |
-| `task` | 自動 | サブエージェントへのタスク委譲 |
+| `task` | 自動 | サブエージェントへのタスク委譲（model / max turns / preload skills指定可） |
 | `task_output` | 自動 | バックグラウンドタスクの結果取得 |
 | `skill` | 自動 | スキルテンプレートの実行 |
 | `second_llm` | 自動 | セカンドLLMへのタスク委任 |
@@ -192,6 +192,9 @@ LLMが自律的に呼び出すツール:
 | `bash` | コマンド実行 | bash, file_read, glob, grep | 15 |
 
 フォアグラウンド（完了まで待機）またはバックグラウンド（`task_output`で結果取得）で実行可能。
+`task` の `skills` でその委任だけに必要なスキルを事前ロードできるほか、カスタムagent定義の
+frontmatterへ `skills: [code-review, tdd]` と書けば毎回同じワークフローをsystem promptへ注入できます。
+存在しない、または無効化中のskillは黙って省略せず、モデル起動前にエラーになります。
 
 ## プランモード
 

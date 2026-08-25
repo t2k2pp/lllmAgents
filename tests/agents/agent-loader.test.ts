@@ -45,6 +45,7 @@ function createAgentMarkdown(opts: {
   description?: string;
   tools?: string[];
   allowedTools?: string[];
+  skills?: string[];
   body?: string;
 }): string {
   const lines: string[] = ["---"];
@@ -52,6 +53,7 @@ function createAgentMarkdown(opts: {
   if (opts.description) lines.push(`description: ${opts.description}`);
   if (opts.tools) lines.push(`tools: [${opts.tools.join(", ")}]`);
   if (opts.allowedTools) lines.push(`allowedTools: [${opts.allowedTools.join(", ")}]`);
+  if (opts.skills) lines.push(`skills: [${opts.skills.join(", ")}]`);
   lines.push("---");
   if (opts.body) lines.push(opts.body);
   return lines.join("\n");
@@ -174,6 +176,7 @@ describe("AgentDefinitionLoader", () => {
         description: "Reviews code quality",
         tools: ["file_read", "grep", "glob"],
         allowedTools: ["file_read", "grep"],
+        skills: ["code-review", "tdd"],
         body: "You are a code review agent.\n\nProvide detailed feedback.",
       });
 
@@ -190,6 +193,7 @@ describe("AgentDefinitionLoader", () => {
       expect(reviewer!.description).toBe("Reviews code quality");
       expect(reviewer!.tools).toEqual(["file_read", "grep", "glob"]);
       expect(reviewer!.allowedTools).toEqual(["file_read", "grep"]);
+      expect(reviewer?.skills).toEqual(["code-review", "tdd"]);
       expect(reviewer!.systemPrompt).toContain("You are a code review agent.");
       expect(reviewer!.systemPrompt).toContain("Provide detailed feedback.");
     });
@@ -207,6 +211,7 @@ describe("AgentDefinitionLoader", () => {
       expect(simple).toBeDefined();
       expect(simple!.tools).toEqual([]);
       expect(simple!.allowedTools).toEqual([]);
+      expect(simple?.skills).toEqual([]);
     });
 
     it("should handle agent without frontmatter", () => {

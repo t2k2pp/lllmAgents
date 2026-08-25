@@ -1,5 +1,6 @@
+import path from "node:path";
 import type { LLMProvider, TokenUsage } from "../providers/base-provider.js";
-import { ToolRegistry } from "../tools/tool-registry.js";
+import type { ToolRegistry } from "../tools/tool-registry.js";
 import type { PermissionManager } from "../security/permission-manager.js";
 import { MessageHistory } from "./message-history.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
@@ -20,6 +21,7 @@ import { resolveModelRef } from "../config/model-resolver.js";
 import { getSlot } from "../config/model-registry.js";
 import { globalTokenTracker, type UsageSlot } from "../cost/token-tracker.js";
 import { globalCostCalculator } from "../cost/cost-calculator.js";
+import type { SkillDefinition, SkillRegistry } from "../skills/skill-registry.js";
 
 const MAX_SUB_ITERATIONS = 30;
 
@@ -37,6 +39,7 @@ interface SubAgentConfig {
   systemPrompt: string;
   maxTurns?: number;
   allowedTools?: string[];
+  skills?: string[];
 }
 
 // ID-014 (a) (2026-05-01): FALLBACK_CONFIGS は完全撤去。
@@ -109,6 +112,7 @@ function agentDefToConfig(def: AgentDefinition): Omit<SubAgentConfig, "descripti
     type: def.name,
     systemPrompt: def.systemPrompt,
     allowedTools: def.allowedTools.length > 0 ? def.allowedTools : undefined,
+    skills: def.skills.length > 0 ? def.skills : undefined,
   };
 }
 
@@ -140,6 +144,57 @@ export interface SubAgentConfigOverrides {
   systemPrompt?: string;
   allowedTools?: string[];
   maxTurns?: number;
+  /** この起動だけ追加でpreloadするskill名。agent定義のskillsと順序を保って結合する。 */
+  skills?: string[];
+}
+
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+}
+
+/**
+ * agent定義とtask呼出で指定されたskillを有効registryから解決する。
+ * 不存在/無効skillは専門agentの契約違反なので、黙って省略せずLLM起動前に失敗させる。
+ */
+export function resolvePreloadedSkills(
+  requestedNames: readonly string[],
+  registry: SkillRegistry | undefined,
+  agentType: string,
+): SkillDefinition[] {
+  if (requestedNames.length === 0) return [];
+  if (!registry) {
+    throw new Error(`Sub-agent '${agentType}' requested preloaded skills, but SkillRegistry is not initialized.`);
+  }
+
+  const resolved: SkillDefinition[] = [];
+  const seen = new Set<string>();
+  for (const requested of requestedNames) {
+    const name = requested.trim();
+    if (!name) continue;
+    const skill = registry.get(name);
+    if (!skill) {
+      throw new Error(`Preloaded skill '${name}' for sub-agent '${agentType}' was not found or is disabled.`);
+    }
+    if (seen.has(skill.name)) continue;
+    seen.add(skill.name);
+    resolved.push(skill);
+  }
+  return resolved;
+}
+
+function buildPreloadedSkillBlock(skills: readonly SkillDefinition[], permissions: PermissionManager): string {
+  if (skills.length === 0) return "";
+  const sections = skills.map((skill) => {
+    const skillDir = path.dirname(skill.filePath);
+    permissions.addAllowedDir(skillDir);
+    const content = skill.content.replace(/\$\{SKILL_DIR\}/g, skillDir);
+    return `<preloaded-skill name="${escapeAttribute(skill.name)}" skill-dir="${escapeAttribute(skillDir)}">\n${content}\n</preloaded-skill>`;
+  });
+  return [
+    "# Preloaded skills",
+    "The following skill instructions are required for this sub-agent. Follow each applicable instruction.",
+    ...sections,
+  ].join("\n\n");
 }
 
 export class SubAgent {
@@ -162,6 +217,7 @@ export class SubAgent {
     /** D1: 親 (= 起動元エージェント) の ancestors。 メインから直接起動なら ROOT_ANCESTORS */
     parentAncestors: AncestorTypes = ROOT_ANCESTORS,
     private readonly usageSlot: UsageSlot = "subagent",
+    skillRegistry?: SkillRegistry,
   ) {
     this.agentId = `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -170,11 +226,22 @@ export class SubAgent {
       throw new Error(`Unknown sub-agent type: '${type}'. No definition file or fallback found.`);
     }
 
+    // context:fork は専用skill本文でsystem promptを置換するため、通常agent定義のpreloadは混ぜない。
+    const configuredSkills = overrides?.systemPrompt === undefined ? (resolved.skills ?? []) : [];
+    const preloadedSkills = resolvePreloadedSkills(
+      [...configuredSkills, ...(overrides?.skills ?? [])],
+      skillRegistry,
+      String(type),
+    );
+    const preloadBlock = buildPreloadedSkillBlock(preloadedSkills, permissions);
+    const baseSystemPrompt = overrides?.systemPrompt ?? resolved.systemPrompt;
+
     this.config = {
       ...resolved,
       description,
-      ...(overrides?.systemPrompt !== undefined && { systemPrompt: overrides.systemPrompt }),
+      systemPrompt: preloadBlock ? `${baseSystemPrompt}\n\n${preloadBlock}` : baseSystemPrompt,
       ...(overrides?.allowedTools !== undefined && { allowedTools: overrides.allowedTools }),
+      skills: preloadedSkills.map((skill) => skill.name),
       maxTurns: normalizeSubAgentMaxTurns(overrides?.maxTurns ?? resolved.maxTurns),
     };
 
@@ -380,6 +447,7 @@ export class SubAgentManager {
     private model: string,
     private toolRegistry: ToolRegistry,
     private permissions: PermissionManager,
+    private skillRegistry?: SkillRegistry,
   ) {}
 
   /**
@@ -441,6 +509,7 @@ export class SubAgentManager {
     parentAncestors: AncestorTypes = ROOT_ANCESTORS,
     modelRef?: string,
     maxTurns?: number,
+    skills?: string[],
   ): string {
     const picked = this.pickModel(type, modelRef);
     const agent = new SubAgent(
@@ -450,9 +519,10 @@ export class SubAgentManager {
       this.permissions,
       type,
       description,
-      { maxTurns: normalizeSubAgentMaxTurns(maxTurns) },
+      { maxTurns: normalizeSubAgentMaxTurns(maxTurns), skills },
       parentAncestors,
       picked.usageSlot,
+      this.skillRegistry,
     );
     const id = agent.getAgentId();
     const promise = agent.run(prompt);
@@ -467,6 +537,7 @@ export class SubAgentManager {
     parentAncestors: AncestorTypes = ROOT_ANCESTORS,
     modelRef?: string,
     maxTurns?: number,
+    skills?: string[],
   ): Promise<SubAgentResult> {
     const picked = this.pickModel(type, modelRef);
     const agent = new SubAgent(
@@ -476,15 +547,16 @@ export class SubAgentManager {
       this.permissions,
       type,
       description,
-      { maxTurns: normalizeSubAgentMaxTurns(maxTurns) },
+      { maxTurns: normalizeSubAgentMaxTurns(maxTurns), skills },
       parentAncestors,
       picked.usageSlot,
+      this.skillRegistry,
     );
     return agent.run(prompt);
   }
 
   async launchParallel(
-    tasks: Array<{ type: SubAgentType; description: string; prompt: string; modelRef?: string }>,
+    tasks: Array<{ type: SubAgentType; description: string; prompt: string; modelRef?: string; skills?: string[] }>,
     parentAncestors: AncestorTypes = ROOT_ANCESTORS,
   ): Promise<SubAgentResult[]> {
     const promises = tasks.map((task) => {
@@ -496,9 +568,10 @@ export class SubAgentManager {
         this.permissions,
         task.type,
         task.description,
-        undefined,
+        task.skills ? { skills: task.skills } : undefined,
         parentAncestors,
         picked.usageSlot,
+        this.skillRegistry,
       );
       return agent.run(task.prompt);
     });
@@ -540,6 +613,7 @@ export class SubAgentManager {
       { systemPrompt: skillSystemPrompt, allowedTools },
       parentAncestors,
       picked.usageSlot,
+      this.skillRegistry,
     );
     return agent.run(prompt);
   }

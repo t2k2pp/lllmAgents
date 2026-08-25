@@ -550,6 +550,8 @@ classDiagram
         description: string
         tools: string[]
         allowedTools: string[]
+        skills: string[]
+        modelRef?: string
         systemPrompt: string
         source: string
     }
@@ -568,13 +570,18 @@ classDiagram
 
 - **フロントマターの解析 (`parseFrontmatter`)**: 独自の簡易 YAML パーサーで文字列値（クォート有無どちらも対応）とフロースタイル配列 `[a, b, c]` をサポート。
 
-### 組み込みエージェント（4種）
+`SubAgent` 構築時は、agent定義の`skills`と`task`呼出の`skills`を有効な`SkillRegistry`で解決し、
+重複除去した全文を元のsystem prompt末尾へ注入します。`${SKILL_DIR}`を解決してskill directoryを
+sandbox許可へ追加し、不存在・無効skillはLLMを呼ぶ前にfail-loudとします。
+
+### 組み込みエージェント（5種）
 
 | ファイル | name | tools |
 |:---|:---|:---|
 | `explore.md` | explore | file_read, glob, grep, web_fetch, web_search |
 | `plan.md` | plan | file_read, glob, grep, web_fetch, web_search |
 | `general-purpose.md` | general-purpose | file_read, file_write, file_edit, glob, grep, bash, web_fetch, web_search, todo_write, ask_user |
+| `bash.md` | bash | bash, file_read, glob, grep |
 | `code-reviewer.md` | code-reviewer | file_read, glob, grep, bash |
 
 ---

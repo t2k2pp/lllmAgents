@@ -558,7 +558,7 @@ async function main(): Promise<void> {
   }
 
   // Sub-agent manager
-  const subAgentManager = new SubAgentManager(provider, config.mainLLM.model, toolRegistry, permissions);
+  const subAgentManager = new SubAgentManager(provider, config.mainLLM.model, toolRegistry, permissions, skillRegistry);
   setSubAgentManager(subAgentManager);
   setSkillSubAgentManager(subAgentManager);
 
