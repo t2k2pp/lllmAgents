@@ -8,10 +8,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 let baseDir: string;
 
-function writeFileWithAge(relPath: string, ageDays: number): string {
+function writeFileWithAge(relPath: string, ageDays: number, content = "x"): string {
   const filePath = path.join(baseDir, relPath);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, "x", "utf-8");
+  fs.writeFileSync(filePath, content, "utf-8");
   const mtime = new Date(Date.now() - ageDays * DAY_MS);
   fs.utimesSync(filePath, mtime, mtime);
   return filePath;
@@ -54,12 +54,10 @@ describe("applyLogRetention", () => {
   });
 
   it("ログ合計容量を超えた場合はops/session横断で古い順に削除する", () => {
-    const oldest = writeFileWithAge("logs/ops/old.jsonl", 3);
-    const middle = writeFileWithAge("logs/sessions/middle.jsonl", 2);
-    const newest = writeFileWithAge("logs/ops/new.jsonl", 1);
-    fs.writeFileSync(oldest, "a".repeat(700_000));
-    fs.writeFileSync(middle, "b".repeat(700_000));
-    fs.writeFileSync(newest, "c".repeat(100_000));
+    // 内容を書いた後にmtimeを設定し、OSの時刻精度や書込順に左右されない削除順を作る。
+    const oldest = writeFileWithAge("logs/ops/old.jsonl", 3, "a".repeat(700_000));
+    const middle = writeFileWithAge("logs/sessions/middle.jsonl", 2, "b".repeat(700_000));
+    const newest = writeFileWithAge("logs/ops/new.jsonl", 1, "c".repeat(100_000));
 
     const result = applyLogRetention({ logMaxAgeDays: 0, logMaxTotalMb: 1, sessionMaxCount: 0 }, baseDir);
 
