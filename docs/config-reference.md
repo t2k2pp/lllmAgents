@@ -444,6 +444,7 @@ CLIコマンド `/knowledge vault <path>` でも設定可能。設定すると�
 | `notifications.minDurationSec` | number | 0 | この秒数未満で完了したタスクは webhook 完了通知を送らない（docs/task-report-notification-design.md） |
 | `goalSeek.autoPropose` | boolean | true | 複雑なタスクで Goal Seek 昇格を自動提案する（docs/goal-promotion-design.md） |
 | `logging.retention.logMaxAgeDays` | number | 30 | 起動時にこの日数より古い ops / LLM I/O ログを削除する。`0` で無制限（docs/production-readiness.md PR-15） |
+| `logging.retention.logMaxTotalMb` | number | 256 | 起動時に ops / LLM I/O ログの合計をこの容量以下にする。古いログから削除し、`0` で無制限。単一LLMログは別途32 MiBで停止する。 |
 | `logging.retention.sessionMaxCount` | number | 100 | セッション履歴を新しい順にこの件数まで保持し、超過分を起動時に削除する。`0` で無制限 |
 | `updateCheck.enabled` | boolean | true | 起動時に GitHub の最新リリースを確認し、新しければ1行通知する (TTY のみ・失敗は黙ってスキップ)。`false` でオフ |
 

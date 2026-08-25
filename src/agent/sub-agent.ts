@@ -23,6 +23,12 @@ import { globalCostCalculator } from "../cost/cost-calculator.js";
 
 const MAX_SUB_ITERATIONS = 30;
 
+/** 委任1件のLLM呼出回数を必ず1..30へ収める。NaN/未指定は安全な既定30。 */
+export function normalizeSubAgentMaxTurns(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) return MAX_SUB_ITERATIONS;
+  return Math.max(1, Math.min(MAX_SUB_ITERATIONS, Math.floor(value)));
+}
+
 export type SubAgentType = "explore" | "plan" | "general-purpose" | "bash" | (string & {});
 
 interface SubAgentConfig {
@@ -169,7 +175,7 @@ export class SubAgent {
       description,
       ...(overrides?.systemPrompt !== undefined && { systemPrompt: overrides.systemPrompt }),
       ...(overrides?.allowedTools !== undefined && { allowedTools: overrides.allowedTools }),
-      ...(overrides?.maxTurns !== undefined && { maxTurns: overrides.maxTurns }),
+      maxTurns: normalizeSubAgentMaxTurns(overrides?.maxTurns ?? resolved.maxTurns),
     };
 
     // D1: 自分は親 ancestors に "sub" を追加した位置にいる
@@ -434,6 +440,7 @@ export class SubAgentManager {
     prompt: string,
     parentAncestors: AncestorTypes = ROOT_ANCESTORS,
     modelRef?: string,
+    maxTurns?: number,
   ): string {
     const picked = this.pickModel(type, modelRef);
     const agent = new SubAgent(
@@ -443,7 +450,7 @@ export class SubAgentManager {
       this.permissions,
       type,
       description,
-      undefined,
+      { maxTurns: normalizeSubAgentMaxTurns(maxTurns) },
       parentAncestors,
       picked.usageSlot,
     );
@@ -459,6 +466,7 @@ export class SubAgentManager {
     prompt: string,
     parentAncestors: AncestorTypes = ROOT_ANCESTORS,
     modelRef?: string,
+    maxTurns?: number,
   ): Promise<SubAgentResult> {
     const picked = this.pickModel(type, modelRef);
     const agent = new SubAgent(
@@ -468,7 +476,7 @@ export class SubAgentManager {
       this.permissions,
       type,
       description,
-      undefined,
+      { maxTurns: normalizeSubAgentMaxTurns(maxTurns) },
       parentAncestors,
       picked.usageSlot,
     );

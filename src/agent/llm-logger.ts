@@ -2,11 +2,11 @@
  * LLM I/O ロガー
  *
  * 各セッションのリクエスト・レスポンスを JSONL 形式で保存する。
- * エージェントごとにファイルを分離し、thinking content も含めて生データを保存。
+ * 機密値をマスクし、リクエスト履歴は前回からの差分だけを記録する。
  *
  * 保存先: ~/.localllm/logs/sessions/<sessionId>_<agentId>.jsonl
  *
- * 将来のビューワー向けに削らずに保存する方針。
+ * 肥大化が本体を圧迫しないよう、単一ファイルにも上限を設ける。
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -30,6 +30,10 @@ export interface LLMRequestLog extends LogContext {
   type: "request";
   model: string;
   messages: unknown[];
+  /** messages が履歴全体の何番目から始まるか。v2 ログの差分復元用。 */
+  messageOffset?: number;
+  /** このリクエスト時点の履歴総件数。 */
+  messageTotal?: number;
   tools?: unknown[];
 }
 
@@ -70,18 +74,76 @@ export interface LLMToolResultLog extends LogContext {
 
 export type LLMLogEntry = LLMRequestLog | LLMResponseLog | LLMToolResultLog;
 
+export interface LLMLoggerOptions {
+  logsDir?: string;
+  /** 単一 JSONL の最大容量。既定 32 MiB。 */
+  maxFileBytes?: number;
+}
+
+const DEFAULT_MAX_FILE_BYTES = 32 * 1024 * 1024;
+const MAX_STRING_CHARS = 128 * 1024;
+const SECRET_VALUE_PATTERNS = [
+  /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi,
+  /\bsk-[A-Za-z0-9_-]{12,}/g,
+  /\b(?:xox[baprs]-)[A-Za-z0-9-]{10,}/gi,
+];
+
+function isSecretKey(key: string): boolean {
+  const normalized = key.replace(/[-_]/g, "").toLowerCase();
+  return (
+    normalized === "authorization" ||
+    normalized === "cookie" ||
+    normalized === "setcookie" ||
+    normalized === "webhook" ||
+    normalized === "webhookurl" ||
+    normalized.endsWith("apikey") ||
+    normalized.endsWith("password") ||
+    normalized.endsWith("passwd") ||
+    normalized.endsWith("secret") ||
+    normalized.endsWith("token")
+  );
+}
+
+/** ログ用に機密値と極端に長い文字列を除去する。入力オブジェクトは変更しない。 */
+export function sanitizeLogValue(value: unknown, key = "", seen = new WeakSet<object>()): unknown {
+  if (isSecretKey(key)) return "[REDACTED]";
+  if (typeof value === "string") {
+    let sanitized = value;
+    for (const pattern of SECRET_VALUE_PATTERNS) sanitized = sanitized.replace(pattern, "[REDACTED]");
+    return sanitized.length > MAX_STRING_CHARS
+      ? `${sanitized.slice(0, MAX_STRING_CHARS)}\n... [log value truncated]`
+      : sanitized;
+  }
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "[CIRCULAR]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeLogValue(item, "", seen));
+  const out: Record<string, unknown> = {};
+  for (const [childKey, childValue] of Object.entries(value)) {
+    out[childKey] = sanitizeLogValue(childValue, childKey, seen);
+  }
+  return out;
+}
+
 export class LLMLogger {
   private readonly filePath: string;
   private turn: number = 0;
   private requestStartMs: number = 0;
+  private previousMessageCount = 0;
+  private previousToolsJson?: string;
+  private readonly maxFileBytes: number;
+  private bytesWritten = 0;
+  private limitReached = false;
   /** 書き込み時に roomId/surface を引くプロバイダ (AgentLoop が設定)。 5.5。 */
   private contextProvider?: () => LogContext;
 
   constructor(
     private readonly agentId: string = "main",
     sessionId?: string,
+    options: LLMLoggerOptions = {},
   ) {
-    const logsDir = path.join(os.homedir(), ".localllm", "logs", "sessions");
+    const logsDir = options.logsDir ?? path.join(os.homedir(), ".localllm", "logs", "sessions");
+    this.maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
     try {
       fs.mkdirSync(logsDir, { recursive: true });
     } catch {
@@ -90,6 +152,11 @@ export class LLMLogger {
     const sid = sessionId ?? new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const safeName = agentId.replace(/[^a-zA-Z0-9_-]/g, "_");
     this.filePath = path.join(logsDir, `${sid}_${safeName}.jsonl`);
+    try {
+      this.bytesWritten = fs.statSync(this.filePath).size;
+    } catch {
+      this.bytesWritten = 0;
+    }
   }
 
   /** roomId/surface を書き込み時に引くためのプロバイダを設定する (5.5)。 */
@@ -105,14 +172,22 @@ export class LLMLogger {
 
   /** LLM リクエストをログに記録 */
   logRequest(messages: unknown[], model: string, tools?: unknown[]): void {
+    const messageOffset = messages.length >= this.previousMessageCount ? this.previousMessageCount : 0;
+    const messageDelta = messages.slice(messageOffset);
+    this.previousMessageCount = messages.length;
+    const toolsJson = tools === undefined ? undefined : JSON.stringify(sanitizeLogValue(tools));
+    const changedTools = toolsJson !== this.previousToolsJson ? tools : undefined;
+    this.previousToolsJson = toolsJson;
     this.write({
       ts: new Date().toISOString(),
       turn: this.turn,
       agentId: this.agentId,
       type: "request",
       model,
-      messages,
-      tools,
+      messages: messageDelta,
+      messageOffset,
+      messageTotal: messages.length,
+      tools: changedTools,
     });
   }
 
@@ -179,11 +254,29 @@ export class LLMLogger {
   }
 
   private write(entry: LLMLogEntry): void {
+    if (this.limitReached) return;
     try {
       // roomId/surface を書き込み時に注入 (undefined は JSON.stringify が省く＝旧挙動と互換)。
       const ctx = this.contextProvider?.() ?? {};
-      const enriched = { ...entry, roomId: ctx.roomId, surface: ctx.surface };
-      fs.appendFileSync(this.filePath, JSON.stringify(enriched) + "\n", "utf-8");
+      const enriched = sanitizeLogValue({ ...entry, roomId: ctx.roomId, surface: ctx.surface });
+      const line = `${JSON.stringify(enriched)}\n`;
+      const lineBytes = Buffer.byteLength(line, "utf-8");
+      if (this.maxFileBytes > 0 && this.bytesWritten + lineBytes > this.maxFileBytes) {
+        const marker = `${JSON.stringify({
+          ts: new Date().toISOString(),
+          turn: this.turn,
+          agentId: this.agentId,
+          type: "log_limit",
+          maxFileBytes: this.maxFileBytes,
+        })}\n`;
+        if (this.bytesWritten + Buffer.byteLength(marker, "utf-8") <= this.maxFileBytes) {
+          fs.appendFileSync(this.filePath, marker, "utf-8");
+        }
+        this.limitReached = true;
+        return;
+      }
+      fs.appendFileSync(this.filePath, line, "utf-8");
+      this.bytesWritten += lineBytes;
     } catch {
       // ログ書き込み失敗はサイレントに無視（本体処理に影響させない）
     }

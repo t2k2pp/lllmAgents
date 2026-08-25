@@ -57,6 +57,12 @@ function buildTaskDefinition(): ToolDefinition {
       type: "boolean",
       description: "バックグラウンドで実行する場合true。結果は後でtask_outputツールで取得。",
     },
+    max_turns: {
+      type: "integer",
+      minimum: 1,
+      maximum: 30,
+      description: "この委任で許可するLLM呼出回数の上限。1〜30、省略時30。小さな調査は5〜10を推奨。",
+    },
   };
   // named slot が 1 つも無い環境では `model` を出さない (単一モデル運用ではノイズのため)
   if (slots.length > 0) {
@@ -112,6 +118,7 @@ export const taskTool: ToolHandler = {
     const prompt = params.prompt as string;
     const background = params.run_in_background as boolean | undefined;
     const modelRef = typeof params.model === "string" ? params.model : undefined;
+    const maxTurns = typeof params.max_turns === "number" ? params.max_turns : undefined;
     // D1: 呼出元の ancestors を SubAgentManager に伝播。 SubAgent 側で {sub} が追加される
     const parentAncestors = context?.ancestors ?? ROOT_ANCESTORS;
 
@@ -123,7 +130,7 @@ export const taskTool: ToolHandler = {
     console.log(chalk.dim(`\n  [Task] ${type}: ${description}`) + modelSuffix);
 
     if (background) {
-      const agentId = subAgentManager.launchBackground(type, description, prompt, parentAncestors, modelRef);
+      const agentId = subAgentManager.launchBackground(type, description, prompt, parentAncestors, modelRef, maxTurns);
       return {
         success: true,
         output: JSON.stringify({
@@ -135,7 +142,14 @@ export const taskTool: ToolHandler = {
       };
     }
 
-    const result = await subAgentManager.launchForeground(type, description, prompt, parentAncestors, modelRef);
+    const result = await subAgentManager.launchForeground(
+      type,
+      description,
+      prompt,
+      parentAncestors,
+      modelRef,
+      maxTurns,
+    );
 
     return {
       success: result.success,

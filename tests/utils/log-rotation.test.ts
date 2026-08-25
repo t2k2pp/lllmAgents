@@ -53,6 +53,23 @@ describe("applyLogRetention", () => {
     expect(result.notices).toEqual([]);
   });
 
+  it("ログ合計容量を超えた場合はops/session横断で古い順に削除する", () => {
+    const oldest = writeFileWithAge("logs/ops/old.jsonl", 3);
+    const middle = writeFileWithAge("logs/sessions/middle.jsonl", 2);
+    const newest = writeFileWithAge("logs/ops/new.jsonl", 1);
+    fs.writeFileSync(oldest, "a".repeat(700_000));
+    fs.writeFileSync(middle, "b".repeat(700_000));
+    fs.writeFileSync(newest, "c".repeat(100_000));
+
+    const result = applyLogRetention({ logMaxAgeDays: 0, logMaxTotalMb: 1, sessionMaxCount: 0 }, baseDir);
+
+    expect(result.deletedLogs).toBe(1);
+    expect(fs.existsSync(oldest)).toBe(false);
+    expect(fs.existsSync(middle)).toBe(true);
+    expect(fs.existsSync(newest)).toBe(true);
+    expect(result.notices.some((notice) => notice.includes("1 MiB"))).toBe(true);
+  });
+
   it("セッションは新しい順に保持件数を超えた分だけ削除する", () => {
     const files: string[] = [];
     for (let i = 0; i < 5; i++) {

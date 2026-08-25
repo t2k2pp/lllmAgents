@@ -96,7 +96,7 @@
 
 ### [PR-06] Windows の CI が無い 【優先度: 高】 — ✅ 実装済み (2026-07-04)
 
-> 実装: ci.yml マトリクスに windows-latest を追加 (型チェック+テスト+audit)。Windows で失敗していた既存4テストを整理: `defaultSecretDenyDirs` は POSIX プロファイル専用のため `posix.join` に修正 (全 OS で同一結果)、封じ込め/unix ソケットの3件は POSIX 前提の環境依存テストとして win32 skip を明示。Windows ローカルで 839 passed / 0 failed を確認。exe ビルドスモークは未着手 (P2 以降)。
+> 実装: ci.yml マトリクスに windows-latest を追加 (型チェック+テスト+audit)。2026-08-25 にWindows専用 `package-smoke` jobを追加し、`build:deploy`、SEA exe / CJSの `--version`、agent / skill資産、埋込みcommitが`unknown`でないことまで検証する。
 
 **現状**: CI マトリクスは ubuntu / macos のみ。**主開発環境も exe 配布ターゲットも Windows なのに、Windows 経路が CI で一度も検証されない**。git bash 検出、パス区切り、icacls、SEA ビルドなど Windows 固有コードが多いプロジェクトなので、これは基準線とのずれが大きい。
 
@@ -126,7 +126,7 @@
 
 ### [PR-09] カバレッジ計測が無い 【優先度: 低】 — ✅ 実装済み (2026-07-04)
 
-> 実装: `@vitest/coverage-v8` 導入、`npm run test:coverage` (text-summary + html を ./coverage に出力、gitignore 済)。CI の Test ステップをカバレッジ付き実行に変更 (閾値ゲートは設けず可視化のみ)。初回計測: Statements 30.6% / Branches 75.0% / Functions 63.8% — repl.ts 等 CLI 層が主な素通し箇所で、PR-10 (レジストリ分割) の効果測定の基準値になる。付随修正: check-runner.test.ts はシェル初回 spawn が高負荷時に 10 秒を超えるため timeout を 30 秒に延長 (カバレッジ計測で顕在化した既知の CPU 競合 flake)。
+> 実装: `@vitest/coverage-v8` 導入、`npm run test:coverage` (text-summary + html を ./coverage に出力、gitignore 済)。2026-08-25 実測は Statements/Lines 35.12%、Branches 76.20%、Functions 58.14%。CI閾値を34/34/75/57に設定し、大幅な低下を停止する。改善に合わせてratchetする。
 
 **現状**: vitest にカバレッジ設定が無い。71ファイルあっても、どこが素通しか分からない。
 
@@ -152,7 +152,7 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 
 > 実装: `docs/README.md` を索引として新規作成 — 正典 7 本 (external/internal/security/config-reference/workspace-separation/production-readiness/issues) と機能別設計書をカテゴリ分類し、全ファイルに Status (implemented/in-progress/proposal/record/reference/superseded) を付与。**Status は索引で一元管理する方式に変更** (70+ ファイルへのヘッダ一斉付与は差分が巨大で blame を汚すため、各ファイルへのヘッダは触るついでに追加)。運用ルール「新規設計書は索引に1行追加」を索引冒頭に明記。issues.md は 10 件を棚卸し — 9 件解消 (ISSUE-01/03〜10)、ISSUE-02 の一部 (BROWSER-01/PERF-01/CTX-01/WEB-03) のみバックログとして残置し、以後 issues.md は凍結 (新規課題は本ドキュメントか GitHub Issues へ)。
 
-**現状**: docs 配下に設計書が 70 本超あるが、索引が無く、どれが「実装済みの正」でどれが「未着手の構想」「廃止済み」か外形から判別できない。docs/issues.md (2026-03) も ISSUE-05 (web_fetch スキーム制限) のように実装解消済みの項目が未更新のまま残る。「設計書と実装の整合性を常に保つ」というプロジェクトルールが規模に対してスケールしていない。
+**現状**: docs 配下に設計書が 70 本超あり、`docs/README.md` の索引は追加済み。ただし、各文書が「実装済みの正」「未着手の構想」「廃止済み」のどれかを全件で機械判定できる段階にはない。docs/issues.md の解消済み項目を含め、状態ラベルの継続整備が必要。
 
 **改善方針**:
 1. 各設計書の冒頭に status ヘッダを付ける: `Status: implemented | in-progress | proposal | superseded (→後継doc)`
@@ -203,7 +203,7 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 
 ### [PR-15] ログのローテーション・保持期限が無い 【優先度: 中】 — ✅ 実装済み (2026-07-04)
 
-> 実装: `src/utils/log-rotation.ts` (applyLogRetention)。起動時に一度、`logs/ops/*.jsonl` と `logs/sessions/*.jsonl` (LLM I/O) は保持日数超過分を削除 (既定30日)、`sessions/*.json` は新しい順に保持件数超過分を削除 (既定100件)。config は `logging.retention.{logMaxAgeDays, sessionMaxCount}` (0で無制限、checkpoints.retention と同じ流儀)。削除時は「N件削除しました」を1行表示+opsログ記録 (silent削除禁止)。掃除の失敗は起動を止めない。テスト: `tests/utils/log-rotation.test.ts`。
+> 実装: `src/utils/log-rotation.ts` (applyLogRetention)。起動時に保持日数超過分を削除 (既定30日)、ログ合計を既定256 MiB以下へ古い順に縮減、セッションJSONは直近100件を保持する。LLM I/Oは機密値をマスクし、requestを差分化し、単一ファイル32 MiBで`log_limit`を残して停止する。config は `logging.retention.{logMaxAgeDays, logMaxTotalMb, sessionMaxCount}` (0で無制限)。削除時は通知し、掃除の失敗は起動を止めない。
 
 **現状**: `~/.localllm/logs/ops/<sid>.jsonl` と LLM I/O ログ、`~/.localllm/sessions/` はセッションごとに増える一方で、削除・上限の仕組みが無い。LLM I/O ログはプロンプト全文を含むため肥大が速い。
 
