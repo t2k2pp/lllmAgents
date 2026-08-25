@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { submitPtyLine } from "./pty-input.js";
 
 if (process.platform === "win32") {
   console.error("Windows CIには対話console hostが無いため、このsmokeはLinux/macOSで実行します。");
@@ -41,19 +42,37 @@ try {
       stdio: ["pipe", "pipe", "pipe"],
     });
     let output = "";
-    const timer = setTimeout(() => child.kill("SIGKILL"), 30_000);
-    child.stdout.on("data", (chunk) => (output += chunk.toString()));
-    child.stderr.on("data", (chunk) => (output += chunk.toString()));
-    child.on("error", reject);
-    child.on("close", (code) => {
+    let sentQuit = false;
+    let timedOut = false;
+    const capture = (chunk) => {
+      output += chunk.toString();
+      if (!sentQuit && /LocalLLM Agent/i.test(output)) {
+        sentQuit = true;
+        // PTYのLFはinteractive-inputでCtrl+J（改行挿入）になる。CRでEnter確定する。
+        child.stdin.write(submitPtyLine("/quit"));
+      }
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, 30_000);
+    child.stdout.on("data", capture);
+    child.stderr.on("data", capture);
+    child.on("error", (error) => {
       clearTimeout(timer);
-      resolveRun({ code, output });
+      reject(error);
     });
-    child.stdin.end("/quit\n");
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      resolveRun({ code, signal, output, sentQuit, timedOut });
+    });
   });
-  if (result.code !== 0 || !/LocalLLM/i.test(result.output)) {
+  if (result.code !== 0 || result.timedOut || !result.sentQuit || !/Goodbye!/i.test(result.output)) {
     console.error(result.output);
-    throw new Error(`PTY smoke failed (exit ${result.code})`);
+    throw new Error(
+      `PTY smoke failed (exit ${result.code}, signal ${result.signal ?? "none"}, ` +
+        `quitSent ${result.sentQuit}, timedOut ${result.timedOut})`,
+    );
   }
   console.log("real PTY smoke passed");
 } finally {
