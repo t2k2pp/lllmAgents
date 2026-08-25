@@ -1,6 +1,6 @@
 # Codex / Claude Code 機能比較・商品品質改善サイクル
 
-Status: local-validated / latest-push CI pending
+Status: completed (latest pushed closure-record CI is the final handoff gate)
 
 - 実施日: 2026-08-26
 - 基準 commit: `b261f6438e7565ad9500f7a61b49f84bf2a11d05`
@@ -92,11 +92,20 @@ Status: local-validated / latest-push CI pending
 | 配布smoke | SEA / CJSの`--version`成功、agent 5件・skill 19件を確認。CJS bundleにpreload解決・注入コードを確認 |
 | 実行ログ分析 | `analyze:loop --since 2026-08-25`を実行。本番セッション0件（test/mockは既定除外）、stuck-loop 0件。追加の運用品質所見なし |
 
-ローカル配布物は未commitの変更を含むため、version表示だけは基準HEAD `b261f64`だった。実装commit後に同じ配布build/smokeを再実行し、埋込みSHAと最新push SHAを一致させてからpushする。
+実装commit後にも同じ配布build/smokeを再実行し、SEA / CJSとも`localllm v0.4.0 (8f0b337)`、agents 5件・skills 19件、新preloadコード同梱を確認した。
 
-## 7. ローカル終了判定
+## 7. 終了判定
 
 - 未解決P0/P1: 0
 - GAP-01: 回帰・全体・配布ゲートを通過し修正済み
 - GAP-02 / 03: P2、GAP-04: P3。いずれも§3の製品境界を根拠に今回範囲外で終端
 - latest push SHAのGitHub Actions全job成功を最終完了条件として継続する
+
+## 8. Push後CI判定
+
+実装commit `8f0b337b4c16a42ea82448e6fc1dabea717bdbb4` のGitHub Actions run
+[`32902955413`](https://github.com/t2k2pp/lllmAgents/actions/runs/32902955413) は、Ubuntu・macOS・Windowsの
+test matrix 3 jobと、その全成功後にだけ起動するWindows deploy / exe smokeがすべて成功した。
+
+このCI結果を残す本記録commitが新しいcompletion candidateとなる。記録commitも同じ全依存jobを監視し、
+成功したrun URLと最新SHAを最終handoffに明記する。これにより、記録後の未監視commitを残さずサイクルを閉じる。
