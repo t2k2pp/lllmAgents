@@ -98,6 +98,19 @@ describe("delegation-context: excludedToolsFor", () => {
 });
 
 describe("delegation-context: filterRegistryForAncestors", () => {
+  it("子エージェントではmain会話へ注入するschedule操作を除外する", () => {
+    const registry = new ToolRegistry();
+    for (const name of ["file_read", "schedule_create", "schedule_list", "schedule_delete"]) {
+      registry.register(makeHandler(name));
+    }
+    const filtered = filterRegistryForAncestors(registry, new Set(["sub"]));
+
+    expect(filtered.get("file_read")).toBeDefined();
+    expect(filtered.get("schedule_create")).toBeUndefined();
+    expect(filtered.get("schedule_list")).toBeUndefined();
+    expect(filtered.get("schedule_delete")).toBeUndefined();
+  });
+
   it("メイン (ROOT) → sub では task が除外される", () => {
     const reg = makeFullRegistry();
     const subAncestors = extendAncestors(ROOT_ANCESTORS, "sub");

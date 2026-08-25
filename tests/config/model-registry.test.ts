@@ -269,6 +269,16 @@ describe("model-registry: named slot / entry query (Phase 6)", () => {
     expect(resolveEntryQuery("qwen3")?.id).toBe(a.id);
   });
 
+  it("resolveEntryQuery: 数字だけのUUID前方一致を範囲外の一覧番号として捨てない", () => {
+    recordEntry({ providerType: "ollama", model: "numeric-prefix", baseUrl: "http://h1" });
+    const file = _registryFilePath();
+    const store = JSON.parse(fs.readFileSync(file, "utf8"));
+    store.entries[0].id = "12345678-d7bb-47e6-b6a7-79d250897f18";
+    fs.writeFileSync(file, JSON.stringify(store), "utf8");
+
+    expect(resolveEntryQuery("12345678")?.id).toBe("12345678-d7bb-47e6-b6a7-79d250897f18");
+  });
+
   it("resolveEntryQuery: 一意に絞れなければ undefined (曖昧なまま採用しない)", () => {
     recordEntry({ providerType: "ollama", model: "qwen3-32b", baseUrl: "http://h1" });
     recordEntry({ providerType: "ollama", model: "qwen3-9b", baseUrl: "http://h2" });

@@ -189,7 +189,7 @@ stateDiagram-v2
 
 ## 3. 提供機能とツール群
 
-エージェントはLLMの推論結果に基づき、以下の **23種の機能（ツール）** を抽象化された関数 (Function Calling) として呼び出します。
+エージェントはLLMの推論結果に基づき、以下の機能（ツール）を抽象化された関数 (Function Calling) として呼び出します。
 
 ```mermaid
 graph TD
@@ -236,6 +236,12 @@ graph TD
         A6(skill):::ask
         A7(ask_user):::safe
     end
+
+    subgraph Schedule [session schedule - 3ツール]
+        C1(schedule_create):::safe
+        C2(schedule_list):::safe
+        C3(schedule_delete):::safe
+    end
 ```
 
 ※緑色: 自動許可 (`auto`)、黄色: 確認必須 (`ask`)
@@ -243,7 +249,7 @@ graph TD
 ツールの権限は2種類あります。
 
 - **`auto`（自動許可）**: 常にユーザー確認なしで実行されます。以下の2層で決定されます。
-  - `INHERENTLY_SAFE_TOOLS`（コード定数）: `ask_user`, `todo_write`, `enter_plan_mode`, `exit_plan_mode`, `task_output`, `current_datetime`, `sandbox_info` — 設定に関わらず **常に** auto
+  - `INHERENTLY_SAFE_TOOLS`（コード定数）: `ask_user`, `todo_write`, `enter_plan_mode`, `exit_plan_mode`, `task_output`, `schedule_create`, `schedule_list`, `schedule_delete`, `current_datetime`, `sandbox_info` — 設定に関わらず **常に** auto
   - `autoApproveTools`（設定ファイル）: デフォルトは `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`, `web_search`, `web_fetch`
 - **`ask`（要確認）**: 実行前にインタラクティブな承認ダイアログを表示します。明示的に指定されていないツールはすべて `ask` にフォールバックします。
 
@@ -270,6 +276,9 @@ graph TD
 | **タスク管理** | `todo_write` | auto (常時) | エージェント自身が行動計画を整理するためのTODOリストをワークスペースに作成・更新します。 |
 | | `task` | ask | 独立したコンテキストを持つ **子エージェント（SubAgent）** を生成し、スコープを限定したタスクを並列で実行・委譲します。 |
 | | `task_output` | auto (常時) | バックグラウンドで起動したサブエージェントの実行結果を取得します。 |
+| **session schedule** | `schedule_create` | auto (常時) | 現REPL sessionへ10秒〜7日の一回／反復promptを登録します。既定one-shot、最大50件。 |
+| | `schedule_list` | auto (常時) | active scheduleの次回時刻、実行・skip・失敗診断を一覧します。 |
+| | `schedule_delete` | auto (常時) | ID指定または全件のscheduleを取消します。 |
 | | `enter_plan_mode` | auto (常時) | 破壊的なツール実行を封印し、システムの調査・設計のみを行う「プランモード」に入ります。 |
 | | `exit_plan_mode` | auto (常時) | プランモードを終了し、計画内容を `~/.localllm/plans/` に保存してユーザー承認を待ちます。 |
 | | `skill` | ask | ユーザーが配置した独自Markdownスキルを実行します。内蔵スキル（commit, pr-review, tdd, build-fix 等）も含みます。 |

@@ -348,8 +348,10 @@ export function resolveEntryQuery(query: string): LLMRegistryEntry | undefined {
   if (!q) return undefined;
   const entries = listEntries();
 
-  if (/^\d+$/.test(q)) {
-    return entries[Number(q) - 1];
+  if (/^\d+$/.test(q) && q.length < 8) {
+    const index = Number(q) - 1;
+    // 短い数字は常に一覧番号。8文字以上なら推奨長のUUID prefixとして下へ進む。
+    return Number.isSafeInteger(index) && index >= 0 ? entries[index] : undefined;
   }
 
   const byIdExact = entries.find((e) => e.id === q);

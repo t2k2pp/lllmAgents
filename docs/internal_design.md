@@ -81,7 +81,7 @@ graph TD
 src/
 ├── agent/          - AgentLoop, PlanManager, ContextManager, MessageHistory, SystemPrompt
 ├── agents/         - エージェント定義ファイル (.md) とローダー
-├── tools/          - ToolRegistry, ToolExecutor, 23ツール定義
+├── tools/          - ToolRegistry, ToolExecutor, 組み込みツール定義
 ├── providers/      - LLMプロバイダ (Ollama, LMStudio, llama.cpp, vLLM)
 ├── cli/            - REPL, レンダラー, 補完 (completer)
 ├── hooks/          - HookManager (Pre/PostToolUse, Session lifecycle)
@@ -91,6 +91,7 @@ src/
 ├── config/         - ConfigManager, セットアップウィザード
 ├── browser/        - PlaywrightManager
 ├── mcp/            - MCPManager, MCPClient
+├── loop/           - session-scoped LoopManager（/loop + schedule tools）
 ├── tenacious/      - TenaciousRunner（試行錯誤モード: /try コマンド）
 ├── utils/          - http-client, discord, non-tty-reader, platform
 └── index.ts        - エントリポイント・初期化

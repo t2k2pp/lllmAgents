@@ -23,6 +23,7 @@
 | [product-review-cycle-2-2026-08-25.md](product-review-cycle-2-2026-08-25.md) | Codex類似アプリ観点の商品品質レビュー・改善サイクル第2回の記録 |
 | [product-review-closure-2026-08-25.md](product-review-closure-2026-08-25.md) | cycle 1 / 2 の未修正課題を終端状態まで処理する統合クローズ記録 |
 | [product-feature-comparison-2026-08-26.md](product-feature-comparison-2026-08-26.md) | Codex / Claude Code 機能比較マトリックスとサブエージェントskill preload改善記録 |
+| [product-feature-comparison-cycle-2-2026-08-26.md](product-feature-comparison-cycle-2-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第2回とモデル向けschedule改善記録 |
 
 ## アーキテクチャ・ハーネス
 

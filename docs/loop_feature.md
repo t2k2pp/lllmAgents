@@ -3,7 +3,8 @@
 ## 概要
 
 `/loop` コマンドは、プロンプトまたはスラッシュコマンドを一定間隔で繰り返し実行する機能。
-Claude Code の `/loop` スキルと同等の UX を提供する。
+同じsession-scoped managerをモデル向け `schedule_create` / `schedule_list` / `schedule_delete` toolsからも操作できる。
+Claude Code の `/loop` と `CronCreate/List/Delete` に相当する、ユーザー操作面とモデル操作面を提供する。
 
 ## ユースケース
 
@@ -49,6 +50,9 @@ Claude Code の `/loop` スキルと同等の UX を提供する。
 ```
 src/loop/
   loop-manager.ts    LoopManager クラス + parseInterval 関数
+
+src/tools/definitions/
+  schedule.ts        モデル向け create/list/delete tools
 ```
 
 ### LoopManager クラス
@@ -59,22 +63,42 @@ interface LoopEntry {
   prompt: string;
   intervalMs: number;
   intervalStr: string;         // 表示用: "5m"
-  timerId: ReturnType<typeof setInterval>;
+  recurring: boolean;
+  timerId: ReturnType<typeof setTimeout>;
   createdAt: Date;
+  nextRunAt: Date;
   lastRunAt?: Date;
   runCount: number;
+  skippedRuns: number;
+  failureCount: number;
+  lastError?: string;
 }
 
 type LoopRunner = (prompt: string) => Promise<void>;
 
 class LoopManager {
-  start(prompt, intervalMs, intervalStr, runner): string  // ループ開始、ID返却
+  start(prompt, intervalMs, intervalStr, runner, options?): string // 反復/one-shot開始、ID返却
   stop(id): boolean                                       // 指定ID停止
   stopAll(): number                                       // 全停止、件数返却
   list(): LoopEntry[]                                     // 一覧取得
   get count(): number                                     // アクティブ数
 }
 ```
+
+同じentryのrunnerは同時実行しない。runnerのrejectは未処理例外へ流さずentryの診断へ記録する。
+REPL busy時、反復はその回をskipし、一回限りのscheduleは1秒後へ延期して依頼を失わない。
+active上限は50件。
+
+### モデル向けtools
+
+| Tool | 入力 | 動作 |
+|---|---|---|
+| `schedule_create` | `prompt`, `delay`, `recurring?` | 10秒〜7日の一回／反復scheduleを作成。promptは最大4000文字 |
+| `schedule_list` | なし | active scheduleと実行・skip・失敗診断をJSONで返す |
+| `schedule_delete` | `id` または `all: true` | scheduleを取消 |
+
+toolsはメインREPLだけへ登録し、Discord/Slack headless面とsubagentには公開しない。将来promptが実行する
+個別toolは従来のpermission / sandboxを通る。
 
 ### REPL 統合
 
@@ -108,5 +132,6 @@ Node.js は単一スレッドのため、エージェント実行中（`await ag
 
 - `/loop` はスキルシステムを経由しない（REPL の switch 文で直接処理）
 - ループは REPL セッション内のみ有効（セッション終了時に全タイマーをクリア）
+- モデル向けscheduleも同じくsession内だけで、プロセス再起動後へ永続化しない
 - 実行中のループをまとめてキャンセルする場合は `/loop status` で全選択 → Enter、 または旧形式の `/loop stop all` (alias) を使う
 - CLAUDE.md の「絶対パス使用」ルールは本機能には非該当（パス操作なし）

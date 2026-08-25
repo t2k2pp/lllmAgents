@@ -9,6 +9,9 @@
 - Codex / Claude Code / lllmAgents の機能比較マトリックスを追加
 - カスタムagent frontmatterの`skills`と`task.skills`で、サブエージェントへスキル全文を起動時preload可能にした
 - preload対象のskillが存在しない、または無効な場合はモデル起動前に明示エラーとし、`${SKILL_DIR}`とsandbox許可を正しく解決
+- `schedule_create` / `schedule_list` / `schedule_delete`を追加し、モデルが現REPL sessionへ一回／反復promptを登録・確認・取消可能にした
+- `/loop`のasync timerでrunner例外が未処理rejectになる問題と、長時間runnerの重複実行を修正。busy時のone-shotは延期して消失を防止
+- UUID先頭8文字が数字だけの場合にモデル登録のID前方一致が範囲外一覧番号と誤判定される不具合を修正
 
 ### 商品品質レビューサイクル 2 (2026-08-25)
 

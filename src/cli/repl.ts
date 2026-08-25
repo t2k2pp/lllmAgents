@@ -112,7 +112,6 @@ export class REPL {
   private isMultiline = false;
   private lineNumber = 0;
   private interactionServer: DiscordInteractionServer | null = null;
-  private loopManager = new LoopManager();
   private agentBusy = false;
   /** Phase 1.5: run 中に type-ahead で打たれた追加入力 (受信順に後で処理する)。 docs/room-model-design.md §11 */
   private pendingInputs: string[] = [];
@@ -134,6 +133,8 @@ export class REPL {
     private roomManager?: import("../agent/room-manager.js").RoomManager,
     /** 受信順グローバル FIFO キュー (全サーフェス共有)。 index.ts が必ず渡す */
     private roomQueue?: import("../agent/room-run-queue.js").RoomRunQueue,
+    /** `/loop` とモデル向けschedule toolsが共有するsession-scoped manager */
+    private loopManager: LoopManager = new LoopManager(),
   ) {
     // スキル情報を取得してメニュープロバイダーに渡す
     const skillInfos = skillRegistry
@@ -4094,6 +4095,28 @@ export class REPL {
 
   // ─── 入力処理 ──────────────────────────────────────
 
+  /**
+   * `/loop` とschedule tool共通の実行入口。
+   * 現turn中ならfalseを返し、one-shotはLoopManagerが1秒後へ延期する。
+   */
+  async runScheduledPrompt(prompt: string, scheduleId: string): Promise<boolean> {
+    if (this.agentBusy) {
+      console.log(
+        chalk.dim(`\n  [Schedule ${scheduleId}] エージェント実行中のため延期 (${new Date().toLocaleTimeString()})`),
+      );
+      return false;
+    }
+    console.log(
+      chalk.bold(`\n  [Schedule ${scheduleId}] 実行開始 (${new Date().toLocaleTimeString()}): `) + chalk.white(prompt),
+    );
+    if (prompt.startsWith("/")) {
+      await this.handleCommand(prompt);
+    } else {
+      await this.processInput(prompt);
+    }
+    return true;
+  }
+
   private async processInput(input: string): Promise<void> {
     this.agentBusy = true;
     let interruptedByEsc = false;
@@ -7368,22 +7391,17 @@ export class REPL {
           break;
         }
 
-        const loopId = this.loopManager.start(loopPrompt, intervalMs, intervalStr, async (p: string) => {
-          if (this.agentBusy) {
-            console.log(
-              chalk.dim(`\n  [Loop ${loopId}] エージェント実行中のためスキップ (${new Date().toLocaleTimeString()})`),
-            );
-            return;
-          }
-          console.log(
-            chalk.bold(`\n  [Loop ${loopId}] 実行開始 (${new Date().toLocaleTimeString()}): `) + chalk.white(p),
+        let loopId: string;
+        try {
+          loopId = this.loopManager.start(loopPrompt, intervalMs, intervalStr, (p, id) =>
+            this.runScheduledPrompt(p, id),
           );
-          if (p.startsWith("/")) {
-            await this.handleCommand(p);
-          } else {
-            await this.processInput(p);
-          }
-        });
+        } catch (error) {
+          console.log(
+            chalk.yellow(`  ループを開始できません: ${error instanceof Error ? error.message : String(error)}`),
+          );
+          break;
+        }
 
         console.log(
           chalk.green(`  ✅ ループ [${loopId}] を開始しました。`) +

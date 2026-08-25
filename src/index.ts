@@ -46,6 +46,8 @@ import { federatedDelegateTool, setFederatedSecondLLMManager } from "./tools/def
 import { knowledgeSaveTool, setObsidianConfig } from "./tools/definitions/knowledge-save.js";
 import { knowledgeSearchTool } from "./tools/definitions/knowledge-search.js";
 import { responseCompleteTool } from "./tools/definitions/response-complete.js";
+import { createScheduleTools } from "./tools/definitions/schedule.js";
+import { LoopManager } from "./loop/loop-manager.js";
 
 import { displayWelcome } from "./cli/renderer.js";
 import { REPL } from "./cli/repl.js";
@@ -712,6 +714,7 @@ async function main(): Promise<void> {
   roomManager.initReplSession();
 
   // Start REPL (sharedPassphrase は /swap や /second setup 後の Provider 再生成で使い回す)
+  const loopManager = new LoopManager();
   const repl = new REPL(
     agent,
     config,
@@ -724,7 +727,12 @@ async function main(): Promise<void> {
     imageService,
     roomManager,
     roomQueue,
+    loopManager,
   );
+  // schedule toolsはREPL sessionだけに登録する。background Discord/Slack面では公開しない。
+  for (const tool of createScheduleTools(loopManager, (prompt, id) => repl.runScheduledPrompt(prompt, id))) {
+    toolRegistry.register(tool);
+  }
   await repl.start();
 
   // Cleanup

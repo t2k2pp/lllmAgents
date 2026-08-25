@@ -160,6 +160,9 @@ LLMが自律的に呼び出すツール:
 | `exit_plan_mode` | 自動 | プラン承認リクエスト |
 | `task` | 自動 | サブエージェントへのタスク委譲（model / max turns / preload skills指定可） |
 | `task_output` | 自動 | バックグラウンドタスクの結果取得 |
+| `schedule_create` | 自動 | 現REPL sessionに一回／反復プロンプトを登録（10秒〜7日、最大50件） |
+| `schedule_list` | 自動 | 登録中scheduleと実行・skip・失敗状態を一覧 |
+| `schedule_delete` | 自動 | scheduleをID指定または全件取消 |
 | `skill` | 自動 | スキルテンプレートの実行 |
 | `second_llm` | 自動 | セカンドLLMへのタスク委任 |
 | `knowledge_save` | 自動 | Obsidianナレッジベースへの保存 |
@@ -195,6 +198,13 @@ LLMが自律的に呼び出すツール:
 `task` の `skills` でその委任だけに必要なスキルを事前ロードできるほか、カスタムagent定義の
 frontmatterへ `skills: [code-review, tdd]` と書けば毎回同じワークフローをsystem promptへ注入できます。
 存在しない、または無効化中のskillは黙って省略せず、モデル起動前にエラーになります。
+
+## モデル向けschedule
+
+メインLLMは `schedule_create` / `schedule_list` / `schedule_delete` を使い、「10分後にCIを再確認」や
+「1時間ごとにデプロイ状況を確認」のような将来turnを現REPL sessionへ登録できます。既定は一回限りで、
+`recurring: true` のときだけ反復します。schedule自体はメモリ上の管理操作ですが、実行されたprompt内の
+各toolは通常どおりpermission / sandboxを通ります。プロセス終了後まで残す永続schedulerではありません。
 
 ## プランモード
 

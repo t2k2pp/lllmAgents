@@ -41,6 +41,12 @@ export function extendAncestors(current: AncestorTypes, origin: DelegationOrigin
  */
 export function excludedToolsFor(ancestors: AncestorTypes): Set<string> {
   const excluded = new Set<string>(["enter_plan_mode", "exit_plan_mode"]);
+  // scheduleはmain REPLの将来turnへpromptを注入する操作。子の独立contextからは公開しない。
+  if (ancestors.size > 0) {
+    excluded.add("schedule_create");
+    excluded.add("schedule_list");
+    excluded.add("schedule_delete");
+  }
   if (ancestors.has("sub")) {
     excluded.add("task");
     excluded.add("task_output");

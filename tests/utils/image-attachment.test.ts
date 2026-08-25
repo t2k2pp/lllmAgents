@@ -59,7 +59,9 @@ describe("prepareForDiscord", () => {
   });
 
   it("上限超過なら一時ファイルに縮小し、オリジナルは無加工で残す", async () => {
-    const src = await writeNoisyPng(1024);
+    // 512pxでもmaxBytesを元サイズの半分にするため縮小経路は確実に通る。
+    // 1024pxノイズ画像はcoverageと並列負荷時に10秒を超え、正しさと無関係なflakeになっていた。
+    const src = await writeNoisyPng(512);
     const originalSize = fs.statSync(src).size;
     const originalBytes = fs.readFileSync(src);
     // 元サイズより小さい上限を指定して縮小を強制
