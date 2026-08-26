@@ -3,7 +3,7 @@
 Status: completed (quality gates passed; final commit is pushed as the handoff boundary)
 
 - 開始日: 2026-08-25
-- 基準 commit: `e00a03e`
+- 基準 commit: `4627211`
 - 目的: cycle 1 / 2 を未完了チェックポイントとして統合し、発見済み課題を終端状態まで処理して商品品質レビューを完了する
 - 完了条件: 未解決P0/P1なし。P2/P3は修正済み、誤検出・重複、当初範囲外かつ品質ゲート非阻害を実証、具体的blocked、ユーザー明示受容のいずれか。全品質ゲートと配布smokeを通し、対象差分のみpushする
 
@@ -25,7 +25,7 @@ cycle 1 / 2 は完了条件を満たしていないため、完了報告を撤�
 | RISK-08 | P2 | 設計正典のdrift | **修正済み**: LLM I/Oをresume正典とする誤記、ログ上限、SSRF、CI配布、coverage、索引有無の記述を現行実装へ同期 |
 | RISK-09 | P2 | `agent-loop.ts` / `repl.ts` の巨大化 | **リスク仮説を終端**: ファイル行数だけでは商品不具合を実証しない。既存command registry/責務別moduleと全品質ゲートを確認し、実害なく大規模分割する変更リスクの方が高い。今回発見した具体的stuck-loop不具合はRISK-05として分離修正済み |
 | RISK-10 | P2 | sub-agent委任前の予算上限なし | **修正済み**: `max_turns`を1〜30で公開し、設定・呼出値も必ず1〜30へ正規化。既定30を含む回帰7件 |
-| RISK-11 | P2 | PATH外Gitで配布commitが `unknown` | **修正済み**: shell非経由でPATHとWindows標準配置を順に探索。回帰3件、実配布は`e00a03e`を埋込み成功 |
+| RISK-11 | P2 | PATH外Gitで配布commitが `unknown` | **修正済み**: shell非経由でPATHとWindows標準配置を順に探索。回帰3件、実配布は履歴書換え前の`e00a03e`（現`4627211`とtree同一）を埋込み成功 |
 | RISK-12 | P2 | tracked `demo-skill` が非UTF-8・未完成 | **修正済み**: 全資産をUTF-8化し、明示起動専用のloader診断fixtureとして完成。Node版validatorと日本語診断を通過 |
 
 ## 実装・評価記録
@@ -48,15 +48,15 @@ cycle 1 / 2 は完了条件を満たしていないため、完了報告を撤�
 
 ## Push後CI訂正サイクル
 
-最初のpush `d7a7fd9` に対するGitHub Actions run `32830463174` は、Windows成功、Ubuntu/macOS失敗だったため、完了判定をいったん取り消して継続した。
+最初のpush（旧SHA `d7a7fd9`、現`06eec01`とtree同一）に対するGitHub Actions run `32830463174` は、Windows成功、Ubuntu/macOS失敗だったため、完了判定をいったん取り消して継続した。
 
 | ID | 優先度 | 証拠・原因 | 終端状態 |
 |---|:---:|---|---|
 | CI-01 | P1 | `tests/scripts/git-revision.test.ts` がUbuntu/macOSで失敗。`platform="win32"`を渡しても実行ホストの`path.join`を使い、Windows標準Gitパスを`/`区切りで生成した | **修正済み**: Windows候補生成は常に`path.win32.join`を使用。既存クロスOS回帰テストで固定 |
 | CI-02 | P2 | Check annotationで`actions/checkout@v4` / `setup-node@v4`のNode 20 runtime廃止警告 | **修正済み**: Node 24 runtimeの公式`@v6`へ更新 |
-| CI-03 | P1 | 訂正commit `c510e9d` のrun `32840074337`でLinux/macOSのReal PTY smokeが30秒タイムアウト。PTYへ送ったLFはアプリでCtrl+J（改行挿入）として扱われ、`/quit`が確定されなかった | **修正済み**: 起動バナー検出後にCR（Enter）を送り、`Goodbye!`と正常終了を必須化。timeout・signal・送信状態も失敗時に出力 |
-| CI-04 | P1 | 訂正commit `0c4cf41` のrun `32840868945`でLinux実PTYは成功した一方、macOSはPTYステップ開始直後に失敗。Apple版`script(1)`をpipe stdinで駆動する方式が非互換 | **修正済み**: macOSはrunner組込みの`expect`でPTYを生成・操作し、Linuxは成功済みutil-linux `script`経路を維持。OS別ドライバテストを追加 |
-| CI-05 | P1 | 記録commit `82fad55` のrun `32841933003`でWindows coverageが失敗。容量テストがmtime設定後に内容を書いてmtimeを現在へ戻し、削除順がOS依存になっていた | **修正済み**: テストhelperで内容を書いた後にmtimeを固定し、oldest/middle/newestの順序を決定的にした |
+| CI-03 | P1 | 訂正commitの旧SHA `c510e9d`（現`a1c7679`）のrun `32840074337`でLinux/macOSのReal PTY smokeが30秒タイムアウト。PTYへ送ったLFはアプリでCtrl+J（改行挿入）として扱われ、`/quit`が確定されなかった | **修正済み**: 起動バナー検出後にCR（Enter）を送り、`Goodbye!`と正常終了を必須化。timeout・signal・送信状態も失敗時に出力 |
+| CI-04 | P1 | 訂正commitの旧SHA `0c4cf41`（現`65273a7`）のrun `32840868945`でLinux実PTYは成功した一方、macOSはPTYステップ開始直後に失敗。Apple版`script(1)`をpipe stdinで駆動する方式が非互換 | **修正済み**: macOSはrunner組込みの`expect`でPTYを生成・操作し、Linuxは成功済みutil-linux `script`経路を維持。OS別ドライバテストを追加 |
+| CI-05 | P1 | 記録commitの旧SHA `82fad55`（現`7a79478`）のrun `32841933003`でWindows coverageが失敗。容量テストがmtime設定後に内容を書いてmtimeを現在へ戻し、削除順がOS依存になっていた | **修正済み**: テストhelperで内容を書いた後にmtimeを固定し、oldest/middle/newestの順序を決定的にした |
 
 この訂正サイクルの完了条件は、対象回帰テスト、全ローカル品質ゲート、修正commitのGitHub Actions全job成功。ローカルだけで完了とはしない。
 
@@ -68,9 +68,9 @@ CI-04訂正後は、OS別PTYドライバを含む対象テスト7/7、両スク�
 
 ## Push後CI最終判定
 
-修正commit `3262183` のGitHub Actions run `32841361434` は、Ubuntu・macOS・Windowsのtest matrixと、その全成功後にだけ起動するWindows deploy / exe smokeがすべて成功した。これによりCI-01〜CI-04は再現条件を含めて閉鎖し、このサイクルの未解決P1/P2は0、完了条件を充足した。
+修正commitの旧SHA `3262183`（現`ea4a1d1`）のGitHub Actions run `32841361434` は、Ubuntu・macOS・Windowsのtest matrixと、その全成功後にだけ起動するWindows deploy / exe smokeがすべて成功した。これによりCI-01〜CI-04は再現条件を含めて閉鎖し、このサイクルの未解決P1/P2は0、完了条件を充足した。
 
-ただし、この結果を記録したcommit `82fad55` のrun `32841933003` でCI-05が顕在化したため、完了判定を取り消して訂正を継続した。CI-05修正commitの全job成功をもって最終完了とする。
+ただし、この結果を記録したcommitの旧SHA `82fad55`（現`7a79478`）のrun `32841933003` でCI-05が顕在化したため、完了判定を取り消して訂正を継続した。CI-05修正commitの全job成功をもって最終完了とする。
 
 CI-05訂正後は、Windows上でログ保持テスト7件を20回連続（計140件）成功、全体coverage 1102件成功・24件skip、全coverage閾値、lintエラー0を再確認した。
 

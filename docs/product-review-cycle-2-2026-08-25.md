@@ -6,7 +6,7 @@ Status: incomplete checkpoint（既存P1を継続せず完了扱いしたため�
 
 - 実施日: 2026-08-25
 - 観点: Codex に類する開発エージェントとしての正しさ、安全性、運用性、UX、配布可能性。特に Windows 上のスキルとシェル出力
-- 変更前 commit: `f2d62816124533644f57d3d38b7727e2f8262f6d`
+- 変更前 commit: `9bb7248632d39a1928a1a9e5135a3d1da6004463`
 - 完了条件: 対象バグの回帰テスト、全 unit test、E2E、lint/typecheck、build、配布スモークを通し、対象差分だけを commit/push する
 
 ## 1. 調査範囲と基準
@@ -82,7 +82,7 @@ Codex 相当の製品基準として、公式 OpenAI ドキュメントが独立
 
 ## 6. commit / push
 
-- 実装 commit: `5f42443` (`fix: preserve UTF-8 across shell and skill loading`)
+- 実装 commit: `ad3efdb` (`Windows実行とスキル読込でUTF-8を保全`)
 - レビュー記録・changelog: 本記録を含む文書commit
 - push先: `origin/main`
 - タグ: 依頼されていないため作成しない

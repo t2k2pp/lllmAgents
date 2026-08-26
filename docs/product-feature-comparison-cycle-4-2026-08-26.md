@@ -3,7 +3,7 @@
 Status: completed
 
 - 実施日: 2026-08-26
-- 基準 commit: `b96c0885173da0634ce827627adcad714324dcd3`
+- 基準 commit: `09fcb6318674fd5c8f4a18f609d8aff3065633a3`
 - 観点: Codex / Claude Code に類するローカル開発エージェントとしての機能充足、正しさ、安全性、運用性、UX、配布可能性
 - 対象: 実行中background sub-agentへの追加指示、task lifecycle、tool registry、権限、関連テスト・設計・配布物
 - 完了条件: 公式機能との比較表を更新し、実行中taskへの順序保証付き追加指示を実装する。回帰・全unit・E2E・lint/typecheck・coverage・build・配布smoke・最新push SHAのCIを通し、未解決P0/P1を残さない
@@ -102,7 +102,7 @@ OpenAI Docsは、orchestratorがsub-agentへのfollow-up指示をroutingし、�
 
 ## 7. CI closure
 
-- 実装commit: `39b7cd60dd2e270b3c3c05bf1c43671245e48b10` (`feat: steer running background agents`)
+- 実装commit: `c1c4def16c9df4c609c1a81385f59ed37a57e0bf` (`実行中のバックグラウンドエージェントへ追加指示を送信`、CI実行時の旧SHA `39b7cd60dd2e270b3c3c05bf1c43671245e48b10`)
 - push先: `origin/main`
 - workflow: [CI run 32931225713](https://github.com/t2k2pp/lllmAgents/actions/runs/32931225713) — `completed / success`
 - jobs: `test (macos-latest)`、`test (windows-latest)`、`test (ubuntu-latest)`、依存する`Windows deploy / exe smoke`の全4件がsuccess。

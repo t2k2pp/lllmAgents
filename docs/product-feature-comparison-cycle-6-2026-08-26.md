@@ -3,7 +3,7 @@
 Status: completed
 
 - 実施日: 2026-08-26
-- 基準 commit: `7d408889d4ed1c4f9364a978fcc87262d4f3468a`
+- 基準 commit: `66efa6ac8c5f17cea9a73a44dc146e5efec6cba1`
 - 観点: Codex / Claude Codeに類するlocal開発agentとしての機能充足、診断性、安全性、正しさ、運用性、UX、配布可能性
 - 対象: repo全体の比較、startup customization境界、system prompt、skills/agents/rules/hooks/MCP/plugins、文書、test、配布物
 - 完了条件: 公式一次資料に基づく比較表を残し、類似機能のない重要な抜けを一つ以上実装する。回帰・全unit・E2E・lint/typecheck・coverage・build・配布smoke・最新push SHAのCIを通し、未解決P0/P1を残さない
@@ -111,7 +111,7 @@ live API credential、remote plugin、実MCP serverは使用していない。cr
 
 ## 8. CI closure
 
-- 実装commit: `ced559796e36fdae455c2c45f98c86207cae567c` (`feat: add safe mode recovery startup`)
+- 実装commit: `35b2369050b0570fed2d567537ec08ff05ee1b93` (`壊れたカスタマイズから復旧するSafe modeを追加`、CI実行時の旧SHA `ced559796e36fdae455c2c45f98c86207cae567c`)
 - push先: `origin/main`
 - workflow: [CI run 32963215581](https://github.com/t2k2pp/lllmAgents/actions/runs/32963215581) — `completed / success`
 - jobs: `test (windows-latest)`、`test (ubuntu-latest)`、`test (macos-latest)`、依存する`Windows deploy / exe smoke`の全4件がsuccess。

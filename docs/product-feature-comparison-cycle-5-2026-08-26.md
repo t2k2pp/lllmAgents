@@ -3,7 +3,7 @@
 Status: completed
 
 - 実施日: 2026-08-26
-- 基準 commit: `b3120548eda42e84c6ecd40ab425355cc921c831`
+- 基準 commit: `e8485eed284ad7901244bddc2dd941de2de19dc6`
 - 観点: Codex / Claude Codeに類するローカル開発agentとしての機能充足、安全性、正しさ、運用性、UX、配布可能性
 - 対象: repo全体の比較、plugin bundle、skill / agent / hook / MCP統合、設定、文書、テスト、配布物
 - 完了条件: 一次資料に基づく比較表を作成し、重要な機能抜けを一つ実装する。回帰・全unit・E2E・lint/typecheck・coverage・build・配布smoke・最新push SHAのCIを通し、未解決P0/P1を残さない
@@ -102,7 +102,7 @@ Codex pluginはmanifestを持つdirectoryにskills、MCP、hooks等をまとめ�
 
 ## 7. CI closure
 
-- 実装commit: `250b61272d14ab56a3d879da5dcd0a37aa88c96b` (`feat: add local plugin bundles`)
+- 実装commit: `6ee85c468cf4302d786e9beba4dcfebe82ae762c` (`明示指定したローカルプラグインを安全に統合`、CI実行時の旧SHA `250b61272d14ab56a3d879da5dcd0a37aa88c96b`)
 - push先: `origin/main`
 - workflow: [CI run 32935610480](https://github.com/t2k2pp/lllmAgents/actions/runs/32935610480) — `completed / success`
 - jobs: `test (windows-latest)`、`test (ubuntu-latest)`、`test (macos-latest)`、依存する`Windows deploy / exe smoke`の全4件がsuccess。

@@ -3,7 +3,7 @@
 Status: implemented
 
 - 作成日: 2026-08-26
-- 基準 commit: `b3120548eda42e84c6ecd40ab425355cc921c831`
+- 基準 commit: `e8485eed284ad7901244bddc2dd941de2de19dc6`
 - 対象: skill、sub-agent、hook、MCPを一つの明示的に信頼したローカル配布単位として読み込む
 
 ## 1. 背景

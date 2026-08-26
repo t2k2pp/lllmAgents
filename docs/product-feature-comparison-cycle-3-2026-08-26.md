@@ -3,7 +3,7 @@
 Status: completed
 
 - 実施日: 2026-08-26
-- 基準 commit: `7e75d576f3cb544199e85722f1341c72e1ad7e25`
+- 基準 commit: `57808f4d32079454ef69366953e97d4798d8dd59`
 - 観点: Codex / Claude Code に類するローカル開発エージェントとしての機能充足、正しさ、安全性、運用性、UX、配布可能性
 - 対象: バックグラウンドsub-agentのライフサイクル、provider中断、tool registry、権限、関連テスト・設計・配布物
 - 完了条件: 公式機能との比較表を更新し、バックグラウンド委任の一覧・停止を実装する。回帰・全unit・E2E・lint/typecheck・coverage・build・配布smoke・最新push SHAのCIを通し、未解決P0/P1を残さない
@@ -112,7 +112,7 @@ sandbox内の`test:all` / deploy buildは、esbuildがworkspace外の上位direc
 
 ## 7. CI closure
 
-- 実装commit / push: `29c405772d838741f5f04c9192ee3ce98879c819` (`main` / `origin/main`)
+- 実装commit: `790e30e2e042b466525d0fd680a53eb926f2ec3f`（push・CI実行時の旧SHA `29c405772d838741f5f04c9192ee3ce98879c819`とtree同一）
 - GitHub Actions: [CI run 133](https://github.com/t2k2pp/lllmAgents/actions/runs/32907899671) — success
 - `test (ubuntu-latest)`: success
 - `test (macos-latest)`: success

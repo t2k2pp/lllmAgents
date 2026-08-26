@@ -3,7 +3,7 @@
 Status: completed
 
 - 実施日: 2026-08-26
-- 基準 commit: `0d7fb13cc4950b1438cc9b18121d83ae8bd2d833`
+- 基準 commit: `f755f03dface84d9a5ef1421a8de5b7799068a3b`
 - 観点: Codex / Claude Code に類するローカル開発エージェントとしての機能充足、正しさ、安全性、運用性、UX、配布可能性
 - 対象: 定時プロンプト、`src/loop`、REPL、tool registry、権限、関連テスト・設計・配布物
 - 完了条件: 公式機能との比較表を更新し、類似性と利用価値が高い欠落を1件以上実装する。回帰・全unit・E2E・lint/typecheck・coverage・build・配布smoke・最新push SHAのCIを通し、未解決P0/P1を残さない
@@ -101,7 +101,7 @@ Status: completed
 - TIMER-01 / MREG-01 / TEST-01: **fixed and regression-tested**
 - GAP-02 / GAP-05 / GAP-04: **scope-out with product-boundary rationale**
 - ローカル品質ゲート: **passed**
-- 実装commit: [`fa8a1b42a12b551a8ac84eb1d0b8a93bf7cf2cb4`](https://github.com/t2k2pp/lllmAgents/commit/fa8a1b42a12b551a8ac84eb1d0b8a93bf7cf2cb4)
+- 実装commit: `831335a2bbeafc8c352b9f7407703d4b590d77ff`（CI実行時の旧SHA [`fa8a1b42`](https://github.com/t2k2pp/lllmAgents/commit/fa8a1b42a12b551a8ac84eb1d0b8a93bf7cf2cb4)とtree同一）
 - 実装commitのCI: [run 32905841790](https://github.com/t2k2pp/lllmAgents/actions/runs/32905841790) — Ubuntu / macOS / Windows test、および依存するWindows deploy / exe smokeの全job **passed**
 
 したがって完了条件を満たし、改善サイクル2を**完了**と判定する。

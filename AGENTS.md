@@ -15,3 +15,12 @@
 - Monitor the latest workflow through all dependent jobs. A failed or skipped required job reopens the cycle; diagnose, fix, validate, push, and monitor again.
 - Do not create an unmonitored documentation-only commit after declaring CI green. If a final record must be committed, that commit becomes the new completion candidate and its CI must also pass.
 - Treat cross-OS, filesystem-time, ordering, TTY, and packaging failures as product findings. Make tests deterministic and repeat a formerly flaky test enough times to demonstrate stability.
+
+## Commit history
+
+- Write every commit subject in Japanese. Describe the purpose of the change, not merely the edited component or a generic action such as “fix” or “update.”
+- Every commit must have a body with the exact headings `背景:`, `変更:`, and `検証:`. Put at least one concrete bullet under each heading.
+- Record the information while making the change. The body must explain why the change was necessary, what behavior or decision changed, and which checks actually ran. A source diff, issue link, quality-cycle document, or later handoff is supporting evidence, not a substitute for the commit's own rationale.
+- For a CI correction, include the failing OS/job and root cause. For a closure/documentation commit, identify the implementation boundary and the CI evidence it closes.
+- Before committing, inspect the staged diff and ensure the repository-managed `commit-msg` hook is active with `npm run setup:git-hooks`. The hook validates the proposed message locally, and CI revalidates every commit introduced by a push or pull request.
+- Do not rewrite public history unless the user explicitly requests it. If requested, create a recoverable local backup ref, preserve trees and authorship, and use `--force-with-lease` against the verified remote SHA.

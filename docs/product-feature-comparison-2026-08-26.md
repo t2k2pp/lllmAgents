@@ -3,7 +3,7 @@
 Status: completed (latest pushed closure-record CI is the final handoff gate)
 
 - 実施日: 2026-08-26
-- 基準 commit: `b261f6438e7565ad9500f7a61b49f84bf2a11d05`
+- 基準 commit: `aad4585f4cb59fc582d18d0603f6144553e86f43`
 - 観点: Codex / Claude Code に類するローカル開発エージェントとしての機能充足、正しさ、安全性、運用性、UX、配布可能性
 - 対象: `src/agents`、`src/agent/sub-agent.ts`、`task` ツール、関連テスト・設計・配布物
 - 完了条件: 2026-08-26 時点の公式機能との比較表を残し、類似性と利用価値が高い欠落を1件以上実装し、回帰・全unit・E2E・lint/typecheck・coverage・build・配布smoke・最新push SHAのCIを通す。未解決P0/P1を残さない
@@ -92,7 +92,7 @@ Status: completed (latest pushed closure-record CI is the final handoff gate)
 | 配布smoke | SEA / CJSの`--version`成功、agent 5件・skill 19件を確認。CJS bundleにpreload解決・注入コードを確認 |
 | 実行ログ分析 | `analyze:loop --since 2026-08-25`を実行。本番セッション0件（test/mockは既定除外）、stuck-loop 0件。追加の運用品質所見なし |
 
-実装commit後にも同じ配布build/smokeを再実行し、SEA / CJSとも`localllm v0.4.0 (8f0b337)`、agents 5件・skills 19件、新preloadコード同梱を確認した。
+実装commit後にも同じ配布build/smokeを再実行し、SEA / CJSとも履歴書換え前の`localllm v0.4.0 (8f0b337)`（現`53c38d6`とtree同一）、agents 5件・skills 19件、新preloadコード同梱を確認した。
 
 ## 7. 終了判定
 
@@ -103,7 +103,7 @@ Status: completed (latest pushed closure-record CI is the final handoff gate)
 
 ## 8. Push後CI判定
 
-実装commit `8f0b337b4c16a42ea82448e6fc1dabea717bdbb4` のGitHub Actions run
+実装commit `53c38d68fe84a14827a7909c333f57dd9af4b66a`（CI実行時の旧SHA `8f0b337b4c16a42ea82448e6fc1dabea717bdbb4`）のGitHub Actions run
 [`32902955413`](https://github.com/t2k2pp/lllmAgents/actions/runs/32902955413) は、Ubuntu・macOS・Windowsの
 test matrix 3 jobと、その全成功後にだけ起動するWindows deploy / exe smokeがすべて成功した。
 
