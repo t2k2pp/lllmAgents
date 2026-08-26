@@ -1,6 +1,6 @@
 # Codex / Claude Code 機能比較・商品品質改善サイクル 6
 
-Status: in-progress (latest pushed SHAの全CI job成功を最終gateとする)
+Status: completed
 
 - 実施日: 2026-08-26
 - 基準 commit: `7d408889d4ed1c4f9364a978fcc87262d4f3468a`
@@ -108,3 +108,11 @@ live API credential、remote plugin、実MCP serverは使用していない。cr
 - 未解決P0/P1: 0。
 - user所有の`sandbox/`未追跡6群は変更・stageしていない。
 - commit後に配布物を再buildし、そのSHAを埋め込んだSEA/CJS smokeを行う。`origin/main`へpushした最新SHAのGitHub Actions全依存job成功を最終完了条件とする。
+
+## 8. CI closure
+
+- 実装commit: `ced559796e36fdae455c2c45f98c86207cae567c` (`feat: add safe mode recovery startup`)
+- push先: `origin/main`
+- workflow: [CI run 32963215581](https://github.com/t2k2pp/lllmAgents/actions/runs/32963215581) — `completed / success`
+- jobs: `test (windows-latest)`、`test (ubuntu-latest)`、`test (macos-latest)`、依存する`Windows deploy / exe smoke`の全4件がsuccess。
+- 本CI結果を追記するclosure commitも`main`へpushし、その最新SHAの全依存jobを完了まで監視する。最終SHAとworkflow結果はhandoffへ記録する。
