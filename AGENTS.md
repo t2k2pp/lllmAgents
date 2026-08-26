@@ -18,7 +18,7 @@
 
 ## Commit history
 
-- Write every commit subject in Japanese. Describe the purpose of the change, not merely the edited component or a generic action such as “fix” or “update.”
+- Follow the established subject style: an optional Conventional Commit prefix such as `feat(scope):` or `fix(ci):`, followed by a Japanese description of the purpose. Do not write the descriptive part only in English or use a generic action such as “fix” or “update.”
 - Every commit must have a body with the exact headings `背景:`, `変更:`, and `検証:`. Put at least one concrete bullet under each heading.
 - Record the information while making the change. The body must explain why the change was necessary, what behavior or decision changed, and which checks actually ran. A source diff, issue link, quality-cycle document, or later handoff is supporting evidence, not a substitute for the commit's own rationale.
 - For a CI correction, include the failing OS/job and root cause. For a closure/documentation commit, identify the implementation boundary and the CI evidence it closes.

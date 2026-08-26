@@ -30,12 +30,20 @@ const args = process.argv.slice(2);
 let valid = true;
 
 if (args[0] === "--range") {
-  const [, before, after] = args;
+  const [, before, after, fallbackBase] = args;
   if (!before || !after) throw new Error("usage: --range <before> <after>");
-  const commits = runGit(["rev-list", "--reverse", `${before}..${after}`])
-    .split("\n")
-    .filter(Boolean);
-  if (commits.length === 0) throw new Error(`no commits found in ${before}..${after}`);
+  let range = `${before}..${after}`;
+  let rawCommits;
+  try {
+    rawCommits = runGit(["rev-list", "--reverse", range]);
+  } catch (error) {
+    if (!fallbackBase) throw error;
+    range = `${fallbackBase}..${after}`;
+    console.warn(`commit range ${before}..${after} is unavailable; validating ${range}`);
+    rawCommits = runGit(["rev-list", "--reverse", range]);
+  }
+  const commits = rawCommits.split("\n").filter(Boolean);
+  if (commits.length === 0) throw new Error(`no commits found in ${range}`);
   for (const commit of commits) {
     valid = validateOne(commit, runGit(["show", "-s", "--format=%B", commit])) && valid;
   }

@@ -21,7 +21,8 @@ jobs:
         env:
           BEFORE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           AFTER_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        run: node scripts/validate-commit-messages.mjs --range "$BEFORE_SHA" "$AFTER_SHA"
+          POLICY_BASE_SHA: 1aed7fa86c93f9444b6039bbe5317e507cf758f2
+        run: node scripts/validate-commit-messages.mjs --range "$BEFORE_SHA" "$AFTER_SHA" "$POLICY_BASE_SHA"
 
   test:
     strategy:

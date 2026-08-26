@@ -16,6 +16,9 @@ const validMessage = `Safe modeの復旧境界を追加
 describe("commit message policy", () => {
   it("日本語タイトルと背景・変更・検証を持つ本文を受理する", () => {
     expect(validateCommitMessage(validMessage)).toEqual([]);
+    expect(
+      validateCommitMessage(validMessage.replace("Safe modeの復旧境界を追加", "feat(cli): Safe modeの復旧境界を追加")),
+    ).toEqual([]);
   });
 
   it("英語だけのタイトルを拒否する", () => {
