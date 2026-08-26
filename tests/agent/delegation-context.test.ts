@@ -25,6 +25,7 @@ function makeFullRegistry(): ToolRegistry {
     "task",
     "task_output",
     "task_list",
+    "task_send",
     "task_cancel",
     "second_llm_agent",
     "enter_plan_mode",
@@ -80,6 +81,7 @@ describe("delegation-context: excludedToolsFor", () => {
     expect(ex.has("task")).toBe(true);
     expect(ex.has("task_output")).toBe(true);
     expect(ex.has("task_list")).toBe(true);
+    expect(ex.has("task_send")).toBe(true);
     expect(ex.has("task_cancel")).toBe(true);
     // second_llm_agent は呼べる (sub → second の異種 1 段は許可)
     expect(ex.has("second_llm_agent")).toBe(false);
@@ -131,6 +133,7 @@ describe("delegation-context: filterRegistryForAncestors", () => {
     expect(filtered.get("second_llm_agent")).toBeUndefined();
     expect(filtered.get("task")).toBeDefined(); // second → sub は OK
     expect(filtered.get("task_list")).toBeUndefined(); // lifecycle管理はmain専権
+    expect(filtered.get("task_send")).toBeUndefined();
     expect(filtered.get("task_cancel")).toBeUndefined();
     expect(filtered.get("bash")).toBeDefined();
   });

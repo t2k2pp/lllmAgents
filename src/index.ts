@@ -37,6 +37,7 @@ import {
   taskTool,
   taskOutputTool,
   taskListTool,
+  taskSendTool,
   taskCancelTool,
   setSubAgentManager,
 } from "./tools/definitions/task.js";
@@ -256,6 +257,7 @@ async function main(): Promise<void> {
   toolRegistry.register(taskTool);
   toolRegistry.register(taskOutputTool);
   toolRegistry.register(taskListTool);
+  toolRegistry.register(taskSendTool);
   toolRegistry.register(taskCancelTool);
 
   // Skill tool

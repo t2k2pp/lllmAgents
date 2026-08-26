@@ -161,6 +161,7 @@ LLMが自律的に呼び出すツール:
 | `task` | 自動 | サブエージェントへのタスク委譲（model / max turns / preload skills指定可） |
 | `task_output` | 自動 | バックグラウンドタスクの結果取得 |
 | `task_list` | 自動 | バックグラウンドタスクの実行中・完了・失敗・取消状態を一覧（prompt・結果本文は非表示） |
+| `task_send` | 自動 | 実行中のバックグラウンドタスクへID指定で追加指示（本文は応答・一覧へ非表示） |
 | `task_cancel` | 自動 | 実行中のバックグラウンドタスクをID指定で停止 |
 | `schedule_create` | 自動 | 現REPL sessionに一回／反復プロンプトを登録（10秒〜7日、最大50件） |
 | `schedule_list` | 自動 | 登録中scheduleと実行・skip・失敗状態を一覧 |
@@ -197,7 +198,10 @@ LLMが自律的に呼び出すツール:
 | `bash` | コマンド実行 | bash, file_read, glob, grep | 15 |
 
 フォアグラウンド（完了まで待機）またはバックグラウンドで実行できます。バックグラウンドtaskは
-`task_list`で状態を確認し、不要になった実行を`task_cancel`で停止し、`task_output`で結果を取得します。
+`task_list`で状態を確認し、方針を変える場合は`task_send`で追加指示を送り、不要になった実行は
+`task_cancel`で停止して、`task_output`で結果を取得します。追加指示はFIFOで処理され、進行中のLLM生成を
+中断して新しいturnへ移ります。すでにtoolを実行中ならその1件の完了を待ち、同じturnの未実行toolをskipします。
+指示は1件4000文字、待機中20件、sub-agent全体30 LLM turnが上限です。本文はtool応答や`task_list`へechoしません。
 停止は進行中のLLM生成を中断し、新しいtool/iterationを開始しません。すでに実行中のtoolは戻った直後に停止します。
 `task` の `skills` でその委任だけに必要なスキルを事前ロードできるほか、カスタムagent定義の
 frontmatterへ `skills: [code-review, tdd]` と書けば毎回同じワークフローをsystem promptへ注入できます。

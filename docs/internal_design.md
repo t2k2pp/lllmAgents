@@ -167,6 +167,8 @@ stateDiagram-v2
         IsolateContext --> SubLoop: 子AgentLoop実行
         SubLoop --> ToolExec: 限定されたツール群の使用
         ToolExec --> SubLoop
+        Main --> SubLoop: task_send / FIFO mailbox
+        SubLoop --> SubLoop: LLM abort / 未実行tool skip / 次turn
         SubLoop --> Finalize: タスク完了報告生成
         SubLoop --> Cancelled: task_cancel / AbortSignal
         ToolExec --> Cancelled: tool完了後に中断を検出
@@ -178,6 +180,13 @@ stateDiagram-v2
 background taskは`running / completed / failed / cancelled`を明示追跡します。`task_list`は本文を含まない
 metadataだけを返し、`task_cancel`は進行中のproviderへ`AbortSignal`を伝播します。取消後に遅れてproviderが
 解決しても状態を上書きしません。`task_output`で終端結果を回収すると管理Mapから除去します。
+
+`task_send`はrunning taskのFIFO mailboxへ親agent由来の追加指示を積みます。LLM生成中は同じ
+`AbortSignal`で古い生成を中断し、providerがsignalを無視しても返却されたtool callは実行しません。
+tool実行中は強制停止せず、現在の1件を履歴へ反映した後、同じassistant turnに残るtool callへskip結果を
+補ってtool pairingを維持します。次turn冒頭で追加指示を受付順にuser-roleへ注入しますが、
+`[parent-follow-up]`を付けて実ユーザー入力と区別します。本文は`task_list`とtool応答へ返しません。
+mailboxは20件、指示は1件4000文字、総LLM呼出は30回を上限とし、管理toolはmain orchestrator専権です。
 
 ### 2.3 プランモード (`PlanManager`) による状態制御
 

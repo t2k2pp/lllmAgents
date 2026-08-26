@@ -48,6 +48,7 @@ export function excludedToolsFor(ancestors: AncestorTypes): Set<string> {
     excluded.add("schedule_list");
     excluded.add("schedule_delete");
     excluded.add("task_list");
+    excluded.add("task_send");
     excluded.add("task_cancel");
   }
   if (ancestors.has("sub")) {

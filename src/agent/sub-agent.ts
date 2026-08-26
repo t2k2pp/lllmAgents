@@ -133,6 +133,8 @@ export interface BackgroundTaskSnapshot {
   status: BackgroundTaskStatus;
   startedAt: string;
   completedAt?: string;
+  /** 本文を露出せず、親から受理した追加指示の累計だけを可視化する。 */
+  followUpCount: number;
 }
 
 interface BackgroundTaskRecord extends BackgroundTaskSnapshot {
@@ -142,6 +144,22 @@ interface BackgroundTaskRecord extends BackgroundTaskSnapshot {
 }
 
 const CANCELLED_RESULT = "Cancelled by task_cancel.";
+const MAX_ITERATIONS_RESULT = "Maximum iterations reached without final response.";
+const MAX_PENDING_FOLLOW_UPS = 20;
+export const MAX_FOLLOW_UP_CHARS = 4_000;
+const SKIPPED_FOR_FOLLOW_UP = "Skipped because a parent follow-up was received before execution.";
+
+export type SendBackgroundResult =
+  | { status: "queued"; followUpCount: number }
+  | {
+      status:
+        | "not_found"
+        | "already_finished"
+        | "invalid_message"
+        | "message_too_long"
+        | "queue_full"
+        | "turn_limit_reached";
+    };
 
 /**
  * サブエージェント 1 回分のモデル選択結果 (docs/model-orchestration.md §4.2)。
@@ -224,6 +242,9 @@ export class SubAgent {
   private config: SubAgentConfig;
   private aborted = false;
   private llmAbortController: AbortController | null = null;
+  private pendingFollowUps: string[] = [];
+  private iterationsStarted = 0;
+  private iterationLimit = MAX_SUB_ITERATIONS;
   /** D1: 自分自身の ancestors (= 親の ancestors ∪ {"sub"})。 子エージェント生成時にさらに伝播 */
   private readonly selfAncestors: AncestorTypes;
 
@@ -265,6 +286,7 @@ export class SubAgent {
       skills: preloadedSkills.map((skill) => skill.name),
       maxTurns: normalizeSubAgentMaxTurns(overrides?.maxTurns ?? resolved.maxTurns),
     };
+    this.iterationLimit = this.config.maxTurns ?? MAX_SUB_ITERATIONS;
 
     // D1: 自分は親 ancestors に "sub" を追加した位置にいる
     this.selfAncestors = extendAncestors(parentAncestors, "sub");
@@ -284,7 +306,6 @@ export class SubAgent {
 
   async run(prompt: string): Promise<SubAgentResult> {
     this.history.addUserMessage(prompt);
-    const maxTurns = this.config.maxTurns ?? MAX_SUB_ITERATIONS;
     let finalResult = "";
 
     let codeBlockRetried = false;
@@ -296,11 +317,13 @@ export class SubAgent {
     // D8: SubAgent もメイン / セカンドと同じハーネス介入レイヤを通す。
     // 壁ドンループ警告 / Read→Edit 契約 / 連続委任ガード / 旧エラーガイダンスが効く。
     const harnessState = new HarnessState();
-    for (let iteration = 0; iteration < maxTurns; iteration++) {
+    for (let iteration = 0; iteration < this.iterationLimit; iteration++) {
+      this.iterationsStarted = iteration + 1;
       if (this.aborted) {
         finalResult = CANCELLED_RESULT;
         break;
       }
+      this.flushFollowUps();
       try {
         const defs = this.filteredRegistry.getDefinitions();
         this.llmAbortController = new AbortController();
@@ -323,6 +346,11 @@ export class SubAgent {
         let response: ChatResponse;
         try {
           response = await collectResponse(gen);
+        } catch (error) {
+          // task_send が進行中LLMを中断した場合は古い部分応答を採用せず、
+          // mailboxを次turnへ注入する。通常のprovider errorは従来どおり失敗にする。
+          if (!this.aborted && this.hasPendingFollowUps()) continue;
+          throw error;
         } finally {
           this.llmAbortController = null;
         }
@@ -332,11 +360,27 @@ export class SubAgent {
         }
         this.recordUsage(response.usage);
 
+        // signalを無視するproviderもある。追加指示が生成中に届いていた場合は、
+        // 返ってきた古いtool callを実行せず、pairingを保つskip結果だけを履歴へ置く。
+        if (this.hasPendingFollowUps()) {
+          this.history.addAssistantMessage(response.content, response.toolCalls);
+          for (const toolCall of response.toolCalls) {
+            this.history.addToolResult(toolCall.id, SKIPPED_FOR_FOLLOW_UP);
+          }
+          continue;
+        }
+
         if (response.toolCalls.length > 0) {
           this.history.addAssistantMessage(response.content, response.toolCalls);
 
           for (const toolCall of response.toolCalls) {
             if (this.aborted) break;
+            // 現在実行中のtoolは強制停止しない。戻った後は同じassistant turnに残る
+            // 古いtool callへskip結果を補い、次turnで親の追加指示を適用する。
+            if (this.hasPendingFollowUps()) {
+              this.history.addToolResult(toolCall.id, SKIPPED_FOR_FOLLOW_UP);
+              continue;
+            }
             const result = await this.toolExecutor.execute(toolCall);
             const raw = result.success ? (result.output ?? "") : `Error: ${result.error ?? ""}\n${result.output ?? ""}`;
             // D8: ハーネス介入レイヤを通す (壁ドンループ警告 / Read→Edit 契約 等)
@@ -432,7 +476,7 @@ export class SubAgent {
     }
 
     if (!finalResult) {
-      finalResult = "Maximum iterations reached without final response.";
+      finalResult = MAX_ITERATIONS_RESULT;
     }
 
     return {
@@ -440,8 +484,37 @@ export class SubAgent {
       type: this.config.type,
       description: this.config.description,
       result: finalResult,
-      success: !finalResult.startsWith("Error:") && finalResult !== CANCELLED_RESULT,
+      success:
+        !finalResult.startsWith("Error:") && finalResult !== CANCELLED_RESULT && finalResult !== MAX_ITERATIONS_RESULT,
     };
+  }
+
+  /**
+   * 親orchestratorからの追加指示をFIFO mailboxへ積む。
+   * LLM生成中ならsignalで早期に切り上げるが、進行中toolは強制停止しない。
+   */
+  queueFollowUp(message: string): "queued" | "queue_full" | "turn_limit_reached" {
+    if (this.pendingFollowUps.length >= MAX_PENDING_FOLLOW_UPS) return "queue_full";
+    if (this.iterationsStarted >= this.iterationLimit) {
+      if (this.iterationLimit >= MAX_SUB_ITERATIONS) return "turn_limit_reached";
+      this.iterationLimit++;
+    }
+    this.pendingFollowUps.push(message);
+    this.llmAbortController?.abort();
+    return "queued";
+  }
+
+  private hasPendingFollowUps(): boolean {
+    return this.pendingFollowUps.length > 0;
+  }
+
+  private flushFollowUps(): void {
+    const messages = this.pendingFollowUps.splice(0);
+    for (const message of messages) {
+      // providerにはuser/assistant/tool/systemしかないためuser roleを使うが、
+      // 実ユーザー発言ではなく親agent由来だと明示してprovenanceを保つ。
+      this.history.addUserMessage(`[parent-follow-up]\n${message}`);
+    }
   }
 
   /** background taskの協調中断。進行中LLM接続を切り、次のtool/iterationを開始させない。 */
@@ -609,6 +682,7 @@ export class SubAgentManager {
       description,
       status: "running",
       startedAt,
+      followUpCount: 0,
       agent,
       promise,
     });
@@ -716,14 +790,32 @@ export class SubAgentManager {
   }
 
   listBackgroundTasks(): BackgroundTaskSnapshot[] {
-    return [...this.backgroundTasks.values()].map(({ agentId, type, description, status, startedAt, completedAt }) => ({
-      agentId,
-      type,
-      description,
-      status,
-      startedAt,
-      ...(completedAt ? { completedAt } : {}),
-    }));
+    return [...this.backgroundTasks.values()].map(
+      ({ agentId, type, description, status, startedAt, completedAt, followUpCount }) => ({
+        agentId,
+        type,
+        description,
+        status,
+        startedAt,
+        ...(completedAt ? { completedAt } : {}),
+        followUpCount,
+      }),
+    );
+  }
+
+  sendBackground(agentId: string, message: string): SendBackgroundResult {
+    const task = this.backgroundTasks.get(agentId);
+    if (!task) return { status: "not_found" };
+    if (task.status !== "running") return { status: "already_finished" };
+
+    const normalized = message.trim();
+    if (!normalized) return { status: "invalid_message" };
+    if (normalized.length > MAX_FOLLOW_UP_CHARS) return { status: "message_too_long" };
+
+    const status = task.agent.queueFollowUp(normalized);
+    if (status !== "queued") return { status };
+    task.followUpCount++;
+    return { status: "queued", followUpCount: task.followUpCount };
   }
 
   cancelBackground(agentId: string): "cancelled" | "not_found" | "already_finished" {

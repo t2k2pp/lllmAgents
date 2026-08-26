@@ -11,7 +11,9 @@
 - preload対象のskillが存在しない、または無効な場合はモデル起動前に明示エラーとし、`${SKILL_DIR}`とsandbox許可を正しく解決
 - `schedule_create` / `schedule_list` / `schedule_delete`を追加し、モデルが現REPL sessionへ一回／反復promptを登録・確認・取消可能にした
 - `task_list` / `task_cancel`を追加し、background sub-agentの実行中・完了・失敗・取消状態を確認して不要な実行を停止可能にした
+- `task_send`を追加し、実行中background sub-agentへFIFOの追加指示を送り、古いLLM生成・未実行tool callを安全に再steer可能にした
 - sub-agentのLLM生成へ中断signalを伝播し、完了済みtaskを結果回収までrunningと誤表示する状態管理を修正
+- sub-agentが最大turn到達で最終回答を作れなかった場合に成功・完了と誤表示する状態判定を修正
 - `/loop`のasync timerでrunner例外が未処理rejectになる問題と、長時間runnerの重複実行を修正。busy時のone-shotは延期して消失を防止
 - UUID先頭8文字が数字だけの場合にモデル登録のID前方一致が範囲外一覧番号と誤判定される不具合を修正
 

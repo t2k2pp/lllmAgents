@@ -105,6 +105,12 @@ describe("checkToolPermission (channel + bridge)", () => {
     expect(r.allowed).toBe(true);
   });
 
+  it("task_send はsession内管理操作として常に許可", async () => {
+    const pm = new PermissionManager(mkConfig());
+    const r = await pm.checkToolPermission("task_send", { agent_id: "sub-1", message: "redirect" }, "cli");
+    expect(r.allowed).toBe(true);
+  });
+
   it("channel autoApprove のツールはブリッジを呼ばず許可", async () => {
     const { bridge, calls } = mkBridge("deny");
     setInteractionBridge("slack", bridge);

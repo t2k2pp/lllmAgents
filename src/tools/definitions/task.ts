@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import type { ToolDefinition } from "../../providers/base-provider.js";
 import type { ToolHandler, ToolExecutionContext } from "../tool-registry.js";
-import type { SubAgentManager, SubAgentType } from "../../agent/sub-agent.js";
+import { MAX_FOLLOW_UP_CHARS, type SubAgentManager, type SubAgentType } from "../../agent/sub-agent.js";
 import { ROOT_ANCESTORS } from "../../agent/delegation-context.js";
 import { listResolvableSlots } from "../../config/model-resolver.js";
 
@@ -255,6 +255,60 @@ export const taskListTool: ToolHandler = {
     return {
       success: true,
       output: JSON.stringify({ tasks: subAgentManager.listBackgroundTasks() }),
+    };
+  },
+};
+
+export const taskSendTool: ToolHandler = {
+  name: "task_send",
+  definition: {
+    type: "function",
+    function: {
+      name: "task_send",
+      description:
+        "実行中のバックグラウンドsub-agentへ追加指示を送る。進行中LLMは再steerし、進行中toolは完了後に方向転換する。",
+      parameters: {
+        type: "object",
+        properties: {
+          agent_id: {
+            type: "string",
+            description: "追加指示を送るサブエージェントのID",
+          },
+          message: {
+            type: "string",
+            maxLength: MAX_FOLLOW_UP_CHARS,
+            description: `親orchestratorから送る追加指示（1〜${MAX_FOLLOW_UP_CHARS}文字）`,
+          },
+        },
+        required: ["agent_id", "message"],
+      },
+    },
+  },
+
+  async execute(params: Record<string, unknown>) {
+    if (!subAgentManager) {
+      return { success: false, output: "", error: "SubAgentManager not initialized" };
+    }
+
+    const agentId = params.agent_id as string;
+    const message = typeof params.message === "string" ? params.message : "";
+    const result = subAgentManager.sendBackground(agentId, message);
+    if (result.status !== "queued") {
+      const errors: Record<Exclude<typeof result.status, "queued">, string> = {
+        not_found: `Agent ${agentId} not found or already collected`,
+        already_finished: `Agent ${agentId} is already finished`,
+        invalid_message: "Follow-up message must not be empty",
+        message_too_long: `Follow-up message exceeds ${MAX_FOLLOW_UP_CHARS} characters`,
+        queue_full: "Follow-up queue is full (maximum 20 pending messages)",
+        turn_limit_reached: "Agent has reached the maximum of 30 LLM turns",
+      };
+      return { success: false, output: "", error: errors[result.status] };
+    }
+
+    return {
+      success: true,
+      // 指示本文をtool resultやログへechoしない。
+      output: JSON.stringify({ agentId, status: result.status, followUpCount: result.followUpCount }),
     };
   },
 };
