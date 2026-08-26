@@ -90,9 +90,10 @@ export function buildSystemPrompt(
   llmProfiles?: LLMProfiles,
   tier?: Tier,
   overrides?: SystemPromptOverrides,
+  safeMode: boolean = false,
 ): string {
-  const memory = overrides?.memory ?? loadMemory();
-  const projectInstructions = overrides?.projectInstructions ?? loadProjectInstructions();
+  const memory = safeMode ? "" : (overrides?.memory ?? loadMemory());
+  const projectInstructions = safeMode ? "" : (overrides?.projectInstructions ?? loadProjectInstructions());
   const gitInfo = getGitInfo();
 
   const parts: string[] = [];
@@ -335,7 +336,7 @@ Knowledge tools available: knowledge_save (save), knowledge_search (search). Sav
   }
 
   // Rules
-  const ruleLoader = new RuleLoader();
+  const ruleLoader = new RuleLoader({ includeCustomizations: !safeMode });
   const rulesSection = ruleLoader.formatForSystemPrompt();
   if (rulesSection) {
     parts.push(rulesSection);

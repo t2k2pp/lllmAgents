@@ -143,7 +143,10 @@ export class AgentDefinitionLoader {
   private definitions = new Map<string, AgentDefinition>();
   private loaded = false;
 
-  constructor(private readonly pluginSources: PluginComponentSource[] = []) {}
+  constructor(
+    private readonly pluginSources: PluginComponentSource[] = [],
+    private readonly options: { includeCustomizations?: boolean } = {},
+  ) {}
 
   /**
    * Load all agent definitions from all search paths.
@@ -166,21 +169,23 @@ export class AgentDefinitionLoader {
 
     // Explicitly enabled plugin agents are always namespaced. This prevents a
     // plugin from replacing a built-in/user/project agent with the same name.
-    for (const source of this.pluginSources) {
-      const defs = loadFromDirectory(source.path);
-      for (const def of defs) {
-        const qualifiedName = `${source.pluginName}:${def.name}`;
-        const qualifiedSkills = def.skills.map((skill) =>
-          skill.includes(":") ? skill : `${source.pluginName}:${skill}`,
-        );
-        const qualified: AgentDefinition = {
-          ...def,
-          name: qualifiedName,
-          skills: qualifiedSkills,
-          systemPrompt: expandPluginRoot(def.systemPrompt, source.pluginRoot),
-        };
-        this.definitions.set(qualifiedName, qualified);
-        logger.debug(`Loaded plugin agent definition '${qualifiedName}' from ${def.source}`);
+    if (this.options.includeCustomizations !== false) {
+      for (const source of this.pluginSources) {
+        const defs = loadFromDirectory(source.path);
+        for (const def of defs) {
+          const qualifiedName = `${source.pluginName}:${def.name}`;
+          const qualifiedSkills = def.skills.map((skill) =>
+            skill.includes(":") ? skill : `${source.pluginName}:${skill}`,
+          );
+          const qualified: AgentDefinition = {
+            ...def,
+            name: qualifiedName,
+            skills: qualifiedSkills,
+            systemPrompt: expandPluginRoot(def.systemPrompt, source.pluginRoot),
+          };
+          this.definitions.set(qualifiedName, qualified);
+          logger.debug(`Loaded plugin agent definition '${qualifiedName}' from ${def.source}`);
+        }
       }
     }
 
@@ -228,6 +233,7 @@ export class AgentDefinitionLoader {
     const userGlobalPath = path.join(getHomedir(), ".localllm", "agents");
     const projectLocalPath = path.resolve(".localllm", "agents");
 
-    return [...new Set([...builtinPaths, userGlobalPath, projectLocalPath])];
+    const customPaths = this.options.includeCustomizations === false ? [] : [userGlobalPath, projectLocalPath];
+    return [...new Set([...builtinPaths, ...customPaths])];
   }
 }

@@ -17,9 +17,9 @@
 | ID | 機能 | 価値 | 工数 | 主な改修先 | ステータス |
 |----|------|------|------|-----------|-----------|
 | **CL-01** | フォールバックモデル連鎖 | ★★★ | M | `src/config/types.ts`, `src/providers/*`, `src/agent/` | 未実装 |
-| **CL-02** | `/doctor` 診断コマンド | ★★★ | M | `src/cli/`（新規 `doctor.ts`）, 各 provider | 未実装 |
+| **CL-02** | `/doctor` 診断コマンド | ★★★ | M | `src/cli/`（新規 `doctor.ts`）, 各 provider | 実装済み |
 | **CL-03** | フック機構の拡張 | ★★☆ | M | `src/agent/hooks.ts`, `src/agent/sub-agent.ts` | 未実装 |
-| **CL-04** | `--safe-mode` 起動フラグ | ★★☆ | S | `src/cli/`（起動引数） | 未実装 |
+| **CL-04** | `--safe-mode` 起動フラグ | ★★☆ | S | `src/cli/`（起動引数） | 実装済み |
 | **CL-05** | `/usage` カテゴリ別トークン内訳 | ★★☆ | S〜M | `src/cost/`, `src/cli/repl.ts` | 未実装 |
 | **CL-06** | REPL 内クイックシェル `! <command>` | ★★☆ | S | `src/cli/repl.ts` | 未実装 |
 | **CL-07** | サブエージェント worktree 分離 | ★☆☆ | M | `src/agent/sub-agent.ts` | 未実装（オプション） |
@@ -43,8 +43,8 @@
 - **設計書**: `docs/fallback-model-design.md`（新規）。
 - **関連 changelog**: model fallback / automatic retry on overload。
 
-### CL-02 `/doctor` 診断コマンド — 価値★★★ / M
-- **課題**: `/status` はあるが、起動前のヘルスチェックがない。ローカル特有の躓き（モデル未ロード・サンドボックス未導入・APIキー env 未解決）が分かりにくい。
+### CL-02 `/doctor` 診断コマンド — 実装済み
+- **結果**: LLM接続、Playwright、Discord、Slack、画像生成、disk使用量をread-onlyで診断する`/doctor`を実装済み。E2E smokeで継続検証する。
 - **診断項目**:
   1. main/second/vision LLM への疎通 + モデル存在（Ollama `/api/tags` 等、各 provider に `healthCheck()` を追加）
   2. サンドボックス可用性（bubblewrap / sandbox-exec の存在。`src/security/` の検出ロジック再利用）
@@ -65,11 +65,9 @@
 - **設計書**: `docs/hooks.md`（あれば更新／無ければ新規）。
 - **関連 changelog**: SubagentStart/Stop hooks, Stop hook additionalContext。
 
-### CL-04 `--safe-mode` 起動フラグ — 価値★★☆ / S
-- **課題**: CLAUDE/project 指示・skills・hooks・MCP が原因の不具合を切り分ける手段がない。
-- **設計方針**: `--safe-mode` で上記カスタマイズ群を一括無効化して起動。各ローダーに safeMode ガードを通すだけ。
-- **反映先**: `src/cli/` の起動引数パース。
-- **関連 changelog**: `--safe-mode` flag。
+### CL-04 `--safe-mode` 起動フラグ — 実装済み
+- **結果**: plugin、skills、hooks、MCP、project指示、memory、custom agents/rulesを解析前に一括停止し、built-in tools/agents/rulesとpermissionを維持する診断起動を実装した。
+- **設計書**: `docs/safe-mode-design.md`。
 
 ### CL-05 `/usage` カテゴリ別トークン内訳 — 価値★★☆ / S〜M
 - **課題**: `/cost`（金額）はあるが、main / second / subagent / skill / MCP 別のトークン帰属内訳がない。どこがコンテキストを食っているか分からない。

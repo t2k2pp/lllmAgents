@@ -21,6 +21,7 @@
 - **インタラクティブUI**: `/`コマンドと`@`ファイルパスの補完ドロップダウン
 - **スキルベースワークフロー**: 開発・レビュー・調査等のワークフローをスキルとして定義、LLMが必要に応じて選択
 - **ローカルplugin bundle**: 明示したbundleからskills・agents・hooks・MCPを一括ロード（Codex / Claude manifestの最小互換）
+- **Safe mode**: `--safe-mode`でカスタマイズを一括停止し、壊れた設定から診断・復旧
 - **フック・ルール**: ツール実行前後のフック、コーディングスタイル等のルール自動適用
 - **クロスプラットフォーム**: Windows, macOS, Linux対応
 
@@ -76,6 +77,18 @@ $ npm start
 | `@path` | ファイル/フォルダの内容をプロンプトに添付 |
 | `/command` | スラッシュコマンド（補完ドロップダウン付き） |
 | `Ctrl+C` | 現在の操作をキャンセル |
+
+### Safe mode（カスタマイズ起因の故障診断）
+
+```bash
+npm start -- --safe-mode
+```
+
+`--safe-mode`は、その起動中だけplugin、skills、hooks、MCP、project指示、永続memory、
+custom agents、user/project rulesを読み込みません。認証、model設定、built-in tools/agents/rules、
+permission、sandboxは維持されるため、通常起動を壊すカスタマイズの切り分けと修正に使えます。
+設定fileは変更・削除されず、次回の通常起動では元どおり読み込まれます。
+`--plugin-dir`等を同時指定してもsafe modeが優先されます。
 
 ### コマンド一覧
 

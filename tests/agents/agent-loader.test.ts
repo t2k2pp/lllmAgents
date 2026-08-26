@@ -133,6 +133,37 @@ describe("AgentDefinitionLoader", () => {
     expect(loader.get("general-purpose")?.source).toBe(path.join(adjacentAgents, "general-purpose.md"));
   });
 
+  it("safe modeではbuilt-inだけを読み、project/plugin agentを解析しない", () => {
+    const builtinDir = path.join(path.dirname(process.execPath), "agents");
+    const projectDir = path.resolve(".localllm", "agents");
+    const pluginDir = "/plugins/broken/agents";
+    setupAgentDirs({
+      [builtinDir]: [
+        {
+          filename: "general-purpose.md",
+          content: createAgentMarkdown({ name: "general-purpose", body: "Built in." }),
+        },
+      ],
+      [projectDir]: [
+        {
+          filename: "project-agent.md",
+          content: createAgentMarkdown({ name: "project-agent", body: "Project customization." }),
+        },
+      ],
+      [pluginDir]: [
+        {
+          filename: "plugin-agent.md",
+          content: createAgentMarkdown({ name: "plugin-agent", body: "Plugin customization." }),
+        },
+      ],
+    });
+    loader = new AgentDefinitionLoader([{ pluginName: "broken", pluginRoot: "/plugins/broken", path: pluginDir }], {
+      includeCustomizations: false,
+    });
+
+    expect(loader.loadAll().map((definition) => definition.name)).toEqual(["general-purpose"]);
+  });
+
   // -----------------------------------------------------------------------
   // parseFrontmatter (tested indirectly through loadAll)
   // -----------------------------------------------------------------------

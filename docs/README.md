@@ -27,6 +27,7 @@
 | [product-feature-comparison-cycle-3-2026-08-26.md](product-feature-comparison-cycle-3-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第3回とbackground task一覧・停止の改善記録 |
 | [product-feature-comparison-cycle-4-2026-08-26.md](product-feature-comparison-cycle-4-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第4回とbackground agent steer改善記録 |
 | [product-feature-comparison-cycle-5-2026-08-26.md](product-feature-comparison-cycle-5-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第5回とlocal plugin bundle改善記録 |
+| [product-feature-comparison-cycle-6-2026-08-26.md](product-feature-comparison-cycle-6-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第6回とsafe mode改善記録 |
 
 ## アーキテクチャ・ハーネス
 
@@ -119,6 +120,7 @@
 | [ascii-art-skill-design.md](ascii-art-skill-design.md) | implemented | ASCII アート化スキル |
 | [product-quality-cycle-skill.md](product-quality-cycle-skill.md) | implemented | 観点指定の商品品質レビュー・改善サイクルスキル |
 | [plugin-bundle-design.md](plugin-bundle-design.md) | implemented | 明示的に信頼したローカルplugin bundleのmanifest・安全境界・loader設計 |
+| [safe-mode-design.md](safe-mode-design.md) | implemented | カスタマイズを一括停止して診断・復旧する`--safe-mode`の境界 |
 | [blender-mcp-integration.md](blender-mcp-integration.md) | implemented | Blender MCP 連携の改修ポイント |
 
 ## 調査・提案 (未実装の構想)

@@ -837,3 +837,17 @@ v1は宣言型componentだけを扱い、JavaScript entrypointのin-process実�
 download/install/update、署名検証は提供しない。hookとstdio MCPはローカルcommandを実行できるため、
 利用者は内容を確認したbundleだけを明示指定する。既存のHookManager/MCP lifecycle自体は変更しない。
 詳細は`docs/plugin-bundle-design.md`を参照。
+
+---
+
+## 15. Safe mode
+
+`localllm --safe-mode`は、カスタマイズ起因の起動失敗・誤動作を切り分ける一時診断モードである。
+plugin、skills、hooks、MCP、project指示、永続memory、custom agents、user/project rulesを、
+解析・接続・実行の前に一括無効化する。壊れた`--plugin-dir`やMCP設定そのものがsafe modeの
+起動を妨げてはならない。
+
+認証、model選択、built-in tools/agents/rules、permission、OS sandbox、session/loggingは維持する。
+safe modeは設定を永続変更せず、通常起動の挙動は変えない。resume、model変更、Room切替、
+input compression操作でsystem promptを再構築しても、project指示・memory・custom rulesを
+再注入しない。詳細は`docs/safe-mode-design.md`を参照。

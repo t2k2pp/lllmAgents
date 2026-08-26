@@ -89,6 +89,7 @@ import { installCrashHandlers, setCrashContext, setTerminalRestore } from "./uti
 import { applyLogRetention } from "./utils/log-rotation.js";
 import { checkForUpdate } from "./utils/update-check.js";
 import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "./providers/utils/context-length.js";
+import { resolveStartupMode } from "./cli/startup-mode.js";
 
 async function main(): Promise<void> {
   // 未捕捉例外での即死時にセッション保存・端末復元・クラッシュログを行う
@@ -122,6 +123,7 @@ async function main(): Promise<void> {
   }
 
   const args = process.argv.slice(2);
+  const startupMode = resolveStartupMode(args);
 
   // バージョン表示 (PR-12)。不具合報告用に「バージョン+コミット」を1行で出す。
   if (args.includes("--version")) {
@@ -166,11 +168,17 @@ async function main(): Promise<void> {
 
   const config = loadConfig();
 
+  if (startupMode.safeMode) {
+    console.log(chalk.yellow("  Safe mode: customizations are disabled for this session."));
+  }
+
   // Plugin bundles are never auto-discovered because hooks and MCP may execute
   // commands. Only config.pluginDirs / --plugin-dir paths are trusted and loaded.
   let plugins: LoadedPlugin[];
   try {
-    const pluginDirs = collectPluginDirs(args, config.pluginDirs, process.cwd());
+    const pluginDirs = startupMode.customizations.plugins
+      ? collectPluginDirs(args, config.pluginDirs, process.cwd())
+      : [];
     plugins = loadPluginBundles(pluginDirs);
   } catch (error) {
     console.error(`Plugin initialization failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -327,11 +335,17 @@ async function main(): Promise<void> {
   // Phase F-1b: 起動時 --no-mcp フラグ / config.mcpEnabled で全体 ON/OFF を制御。
   // 設定ファイル (mcp-servers.json) は残したまま、 接続だけスキップできる。
   const mcpManager = new MCPManager(process.cwd(), getPluginMcpSources(plugins));
+  const mcpDisabledBySafeMode = !startupMode.customizations.mcp;
   const mcpDisabledByCli = args.includes("--no-mcp");
   const mcpDisabledByCfg = config.mcpEnabled === false;
-  if (mcpDisabledByCli || mcpDisabledByCfg) {
-    mcpManager.setGlobalEnabled(false);
-    console.log(chalk.dim(`  MCP: disabled by ${mcpDisabledByCli ? "--no-mcp" : "config"}`));
+  if (mcpDisabledBySafeMode || mcpDisabledByCli || mcpDisabledByCfg) {
+    const disabledBy = mcpDisabledBySafeMode ? "--safe-mode" : mcpDisabledByCli ? "--no-mcp" : "config";
+    if (mcpDisabledBySafeMode) {
+      mcpManager.disableForSession(disabledBy);
+    } else {
+      mcpManager.setGlobalEnabled(false);
+    }
+    console.log(chalk.dim(`  MCP: disabled by ${disabledBy}`));
   }
   // Phase F: REPL から個別 disable した server を再起動後も維持
   if (Array.isArray(config.disabledMcpServers)) {
@@ -357,7 +371,9 @@ async function main(): Promise<void> {
 
   // Hooks
   const hookManager = new HookManager();
-  hookManager.loadHooks(process.cwd(), getPluginHookSources(plugins));
+  hookManager.loadHooks(process.cwd(), getPluginHookSources(plugins), {
+    enabled: startupMode.customizations.hooks,
+  });
 
   // Context window: 明示設定 > プロバイダ getModelInfo > モデル名ヒューリスティック > FALLBACK_CONTEXT_WINDOW
   let contextWindow = config.mainLLM.contextWindow ?? 0;
@@ -418,7 +434,7 @@ async function main(): Promise<void> {
 
   // Skill registry (before AgentLoop to inject into system prompt)
   const skillRegistry = new SkillRegistry();
-  const skills = [...loadAllSkills(), ...loadPluginSkills(plugins)];
+  const skills = startupMode.customizations.skills ? [...loadAllSkills(), ...loadPluginSkills(plugins)] : [];
   for (const skill of skills) {
     skillRegistry.register(skill);
   }
@@ -566,6 +582,7 @@ async function main(): Promise<void> {
     !!config.obsidian?.vaultPath,
     secondLLMManager,
     llmProfiles,
+    startupMode.safeMode,
   );
 
   // 起動時の provider は config.mainLLM から作っているので、実行中バインディングとして記録する
@@ -577,7 +594,7 @@ async function main(): Promise<void> {
 
   // opt-in 入力圧縮モード: 有効時のみ、起動時に一度だけ project指示/メモを圧縮 (閾値超過時)。
   // docs/input-compression-design.md
-  if (config.inputCompression) {
+  if (config.inputCompression && !startupMode.safeMode) {
     await agent.applyInputCompression(true);
   }
 
@@ -594,7 +611,9 @@ async function main(): Promise<void> {
   }
 
   // Sub-agent manager
-  const pluginAgentLoader = new AgentDefinitionLoader(getPluginAgentSources(plugins));
+  const pluginAgentLoader = new AgentDefinitionLoader(getPluginAgentSources(plugins), {
+    includeCustomizations: startupMode.customizations.customAgents,
+  });
   const subAgentManager = new SubAgentManager(
     provider,
     config.mainLLM.model,

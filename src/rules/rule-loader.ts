@@ -34,6 +34,8 @@ function loadRulesFromDir(dir: string, source: string): Rule[] {
 }
 
 export class RuleLoader {
+  constructor(private readonly options: { includeCustomizations?: boolean } = {}) {}
+
   /** Load all rules from built-in, user-global, and project directories */
   loadAllRules(): Rule[] {
     const rules: Rule[] = [];
@@ -44,6 +46,8 @@ export class RuleLoader {
       "builtin",
     );
     rules.push(...loadRulesFromDir(builtinDir, "builtin"));
+
+    if (this.options.includeCustomizations === false) return rules;
 
     // 2. User-global rules (~/.localllm/rules/)
     const userRulesDir = path.join(os.homedir(), ".localllm", "rules");

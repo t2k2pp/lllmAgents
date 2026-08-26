@@ -107,6 +107,22 @@ describe("HookManager", () => {
   // -----------------------------------------------------------------------
 
   describe("loadHooks", () => {
+    it("safe modeではhook fileとplugin sourceを一切読まない", () => {
+      mockExistsSync.mockImplementation(() => {
+        throw new Error("safe mode must not inspect customization files");
+      });
+
+      manager.loadHooks(
+        "/broken/project",
+        [{ pluginName: "broken", pluginRoot: "/broken/plugin", path: "/broken/plugin/hooks.json" }],
+        { enabled: false },
+      );
+
+      expect(manager.isLoaded).toBe(true);
+      expect(manager.count).toBe(0);
+      expect(mockExistsSync).not.toHaveBeenCalled();
+    });
+
     it("plugin hookを追加し、command内のPLUGIN_ROOTを展開する", async () => {
       const hooksFilePath = "/plugins/quality/hooks/hooks.json";
       setupHooksFile(hooksFilePath, [{ type: "PreToolUse", command: `node ${PLUGIN_ROOT_TOKEN}/check.js` }]);

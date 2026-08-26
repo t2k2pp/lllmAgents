@@ -21,6 +21,7 @@ vi.mock("chalk", () => ({
     yellow: (s: string) => s,
     red: (s: string) => s,
     cyan: (s: string) => s,
+    dim: (s: string) => s,
   },
 }));
 
@@ -161,6 +162,29 @@ describe("MCPManager", () => {
   });
 
   describe("connectAll", () => {
+    it("keeps MCP disabled for the session when startup policy locks it", async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue("not json");
+      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const manager = new MCPManager("/test/project");
+
+      manager.disableForSession("--safe-mode");
+
+      expect(manager.setGlobalEnabled(true)).toBe(false);
+      expect(manager.isGlobalEnabled()).toBe(false);
+      expect(manager.getSessionDisabledReason()).toBe("--safe-mode");
+      expect(manager.getServerStatus()).toEqual([]);
+      expect(fs.readFileSync).not.toHaveBeenCalled();
+      await expect(manager.connectAll(registry)).resolves.toBe(0);
+      await expect(manager.reload(registry)).rejects.toThrow("disabled for this session by --safe-mode");
+      await expect(manager.enableServerImmediate("test-server", registry)).rejects.toThrow(
+        "disabled for this session by --safe-mode",
+      );
+      expect(MCPClient).not.toHaveBeenCalled();
+
+      consoleSpy.mockRestore();
+    });
+
     it("should return 0 when no servers configured", async () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
       const manager = new MCPManager("/test/project");

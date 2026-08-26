@@ -124,6 +124,24 @@ describe("RuleLoader", () => {
       expect(rules[0].source).toBe("builtin");
     });
 
+    it("safe modeではbuilt-in ruleだけを読み、custom ruleを解析しない", () => {
+      mockExistsSync.mockImplementation((p: fs.PathLike) => {
+        const value = String(p);
+        return value.includes("builtin") || value.includes(".localllm");
+      });
+      const readdirForSafeMode = (p: fs.PathOrFileDescriptor): string[] =>
+        String(p).includes("builtin") ? ["security.md"] : ["broken.md"];
+      mockReaddirSync.mockImplementation(readdirForSafeMode as typeof fs.readdirSync);
+      mockReadFileSync.mockImplementation((p: fs.PathOrFileDescriptor) => {
+        return String(p).endsWith("security.md") ? "Built-in safety." : "CUSTOM-RULE-MARKER";
+      });
+
+      const rules = new RuleLoader({ includeCustomizations: false }).loadAllRules();
+
+      expect(rules).toHaveLength(1);
+      expect(rules[0]).toMatchObject({ source: "builtin", content: "Built-in safety." });
+    });
+
     it("should load rules from user-global directory", () => {
       const userRulesDir = path.join(os.homedir(), ".localllm", "rules");
       const ruleContent = "Always write tests.";

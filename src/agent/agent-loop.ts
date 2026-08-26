@@ -359,6 +359,7 @@ export class AgentLoop {
     hasObsidian: boolean = false,
     secondLLMManager: SecondLLMManager | null = null,
     llmProfiles?: LLMProfiles,
+    private readonly safeMode: boolean = false,
   ) {
     this.streamingDisplay = streamingDisplay;
     this.maxParallelTools = maxParallelTools;
@@ -372,7 +373,15 @@ export class AgentLoop {
     this.capability = resolveCapability(model, contextWindow, this.getCapabilityOverride(model));
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, model)} (${this.capability.reason})`);
     // Phase B-2: 能力ティアを system prompt に渡して、 T1=concise / T2=current / T3=verbose+examples を出し分ける
-    const systemPrompt = buildSystemPrompt(skills, hasSecondLLM, hasObsidian, llmProfiles, this.capability.tier);
+    const systemPrompt = buildSystemPrompt(
+      skills,
+      hasSecondLLM,
+      hasObsidian,
+      llmProfiles,
+      this.capability.tier,
+      undefined,
+      this.safeMode,
+    );
     // 既存 goal-slot 状態を反映 (process 内で /goal-seek 実行後の AgentLoop 再生成時に継承)。
     if (hasGoalSlot()) {
       this.currentMode = "goal-seek";
@@ -2932,6 +2941,7 @@ export class AgentLoop {
       profiles,
       this.capability.tier,
       this.currentCompressionOverrides(),
+      this.safeMode,
     );
     this.history.updateSystemPrompt(systemPrompt);
   }
@@ -2973,6 +2983,11 @@ export class AgentLoop {
    * (毎ターンは呼ばない — project/メモは不変)。
    */
   async applyInputCompression(enabled: boolean): Promise<void> {
+    if (this.safeMode) {
+      this.inputCompressionEnabled = false;
+      this.compressionState = [];
+      return;
+    }
     this.inputCompressionEnabled = enabled;
     this.compressionState = [];
 
@@ -2984,6 +2999,8 @@ export class AgentLoop {
         this.builtHasObsidian,
         this.llmProfiles,
         this.capability.tier,
+        undefined,
+        this.safeMode,
       );
       this.history.updateSystemPrompt(full);
       return;
@@ -3029,6 +3046,7 @@ export class AgentLoop {
         this.llmProfiles,
         this.capability.tier,
         overrides,
+        this.safeMode,
       );
       this.history.updateSystemPrompt(compressed);
     }
@@ -3070,6 +3088,7 @@ export class AgentLoop {
       this.llmProfiles,
       this.capability.tier,
       this.currentCompressionOverrides(),
+      this.safeMode,
     );
     this.history = new MessageHistory(systemPrompt);
     // 戦略 ToDo Phase 1: 新しい MessageHistory にも composer を注入
@@ -3140,6 +3159,7 @@ export class AgentLoop {
         this.llmProfiles,
         this.capability.tier,
         this.currentCompressionOverrides(),
+        this.safeMode,
       );
       this.history = new MessageHistory(systemPrompt);
       this.history.setSystemPromptComposer((base) => this.composeQuasiSystemPrompt(base));

@@ -4898,11 +4898,19 @@ export class REPL {
         }
         const sub = args[0]?.trim() ?? "status";
         const target = args[1]?.trim();
+        const sessionDisabledReason = this.mcpManager.getSessionDisabledReason();
+        if (sessionDisabledReason && sub !== "status") {
+          console.log(chalk.yellow(`  MCP is disabled for this session by ${sessionDisabledReason}.`));
+          break;
+        }
         switch (sub) {
           case "status": {
             const enabled = this.mcpManager.isGlobalEnabled();
             const servers = this.mcpManager.getServerStatus();
             console.log(chalk.dim(`  MCP global: ${enabled ? chalk.green("ON") : chalk.yellow("OFF")}`));
+            if (sessionDisabledReason) {
+              console.log(chalk.dim(`  Session policy: disabled by ${sessionDisabledReason}`));
+            }
             if (servers.length === 0) {
               console.log(chalk.dim("  (mcp-servers.json に登録なし)"));
             } else {

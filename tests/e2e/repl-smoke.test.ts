@@ -13,6 +13,7 @@
  *   2. ツール実行+権限確認: file_write のツール呼び出し → 数値応答 "1" (今回のみ許可)
  *      → ファイルが実際に書かれる → 完了報告 → /quit → exit 0
  *   3. /doctor 環境診断: モック LLM への疎通 ✔ と診断表の描画 → /quit → exit 0 (PR-16)
+ *   4. --safe-mode: 壊れたplugin/MCPとproject/user customizationを読み込まず起動
  *
  * モデル応答は毎回 response_complete を添えてターンを決定的に終了させる
  * (テキストのみ応答だと自己点検ループ/intent classifier の追加 LLM 呼び出しが発生するため)。
@@ -79,9 +80,9 @@ interface RunResult {
 }
 
 /** アプリを非TTYパイプモードで起動し、入力行を先渡しして終了まで待つ */
-function runApp(lines: string[]): Promise<RunResult> {
+function runApp(lines: string[], args: string[] = ["--no-mcp"]): Promise<RunResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [TSX_CLI, ENTRY, "--no-mcp"], {
+    const child = spawn(process.execPath, [TSX_CLI, ENTRY, ...args], {
       cwd: workspace,
       env: { ...process.env, HOME: tmpHome, USERPROFILE: tmpHome },
       stdio: ["pipe", "pipe", "pipe"],
@@ -200,6 +201,52 @@ describe("E2E smoke — 非TTYパイプモード起動", () => {
       expect(r.stdout, diag(r)).toContain("Discord");
       expect(r.stdout, diag(r)).toContain("Slack");
       expect(r.stdout, diag(r)).toContain("ディスク使用量");
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "シナリオ4: --safe-mode は壊れたcustomizationを読まずbuilt-in機能で起動する",
+    async () => {
+      const projectMarker = "SAFE-MODE-PROJECT-MARKER-7X";
+      const memoryMarker = "SAFE-MODE-MEMORY-MARKER-8Y";
+      const ruleMarker = "SAFE-MODE-RULE-MARKER-9Z";
+      fs.writeFileSync(path.join(workspace, "AGENTS.md"), projectMarker);
+      fs.mkdirSync(path.join(workspace, ".localllm", "rules"), { recursive: true });
+      fs.writeFileSync(path.join(workspace, ".localllm", "rules", "custom.md"), ruleMarker);
+      fs.writeFileSync(path.join(workspace, ".localllm", "mcp-servers.json"), "{ broken json");
+      fs.mkdirSync(path.join(workspace, ".claude"), { recursive: true });
+      fs.writeFileSync(
+        path.join(workspace, ".claude", "hooks.json"),
+        JSON.stringify({
+          hooks: [
+            {
+              type: "SessionStart",
+              command: `node -e "require('node:fs').writeFileSync('safe-mode-hook-ran.txt','yes')"`,
+            },
+          ],
+        }),
+      );
+      fs.mkdirSync(path.join(tmpHome, ".localllm", "memory"), { recursive: true });
+      fs.writeFileSync(path.join(tmpHome, ".localllm", "memory", "MEMORY.md"), memoryMarker);
+
+      const requestStart = server.chatRequests.length;
+      const missingPlugin = path.join(workspace, "missing-plugin");
+      const r = await runApp(["/mcp on", "こんにちは SMOKE1", "/quit"], ["--safe-mode", "--plugin-dir", missingPlugin]);
+
+      expect(r.timedOut, diag(r)).toBe(false);
+      expect(r.code, diag(r)).toBe(0);
+      expect(r.stdout, diag(r)).toContain("Safe mode: customizations are disabled");
+      expect(r.stdout, diag(r)).toContain("MCP is disabled for this session by --safe-mode");
+      expect(r.stdout, diag(r)).toContain("SMOKE1-REPLY-XYZZY");
+      const configAfter = JSON.parse(fs.readFileSync(path.join(tmpHome, ".localllm", "config.json"), "utf-8"));
+      expect(configAfter.mcpEnabled).toBeUndefined();
+      expect(fs.existsSync(path.join(workspace, "safe-mode-hook-ran.txt")), diag(r)).toBe(false);
+      const safeModeRequests = server.chatRequests.slice(requestStart);
+      const serializedMessages = JSON.stringify(safeModeRequests.flatMap((request) => request.messages));
+      expect(serializedMessages).not.toContain(projectMarker);
+      expect(serializedMessages).not.toContain(memoryMarker);
+      expect(serializedMessages).not.toContain(ruleMarker);
     },
     TEST_TIMEOUT_MS,
   );

@@ -33,6 +33,12 @@ export class MCPManager {
    */
   private globalEnabled = true;
   /**
+   * A startup policy such as --safe-mode may disable MCP for the entire
+   * process. Unlike the ordinary global switch, this cannot be reversed by
+   * REPL commands during the session.
+   */
+  private sessionDisabledReason: string | null = null;
+  /**
    * Phase F-1b: 個別サーバーの runtime skip。 設定ファイルの disabled フラグと
    * 合算され、 「いずれかが true」 なら接続しない。 /mcp toggle <name> で動的切替。
    */
@@ -53,11 +59,22 @@ export class MCPManager {
   }
 
   // === Phase F-1b: ON/OFF / skip 操作 API ===
-  setGlobalEnabled(enabled: boolean): void {
+  setGlobalEnabled(enabled: boolean): boolean {
+    if (enabled && this.sessionDisabledReason) {
+      return false;
+    }
     this.globalEnabled = enabled;
+    return true;
   }
   isGlobalEnabled(): boolean {
     return this.globalEnabled;
+  }
+  disableForSession(reason: string): void {
+    this.sessionDisabledReason = reason;
+    this.globalEnabled = false;
+  }
+  getSessionDisabledReason(): string | null {
+    return this.sessionDisabledReason;
   }
   /** 個別サーバを runtime skip フラグだけ立てる (再接続時に反映、 既存接続は切らない) */
   disableServer(name: string): void {
@@ -99,6 +116,7 @@ export class MCPManager {
    * 既に接続済の場合は何もしない (idempotent)。
    */
   async enableServerImmediate(name: string, registry: ToolRegistry): Promise<{ added: number }> {
+    this.assertSessionEnabled();
     this.runtimeDisabledServers.delete(name);
     // 既に connected ならスキップ
     for (const client of this.clients.values()) {
@@ -134,6 +152,9 @@ export class MCPManager {
     connected: boolean;
     toolCount: number;
   }> {
+    if (this.sessionDisabledReason) {
+      return [];
+    }
     const configs = this.loadConfig();
     const out: Array<{
       name: string;
@@ -281,12 +302,19 @@ export class MCPManager {
    * @returns 再接続後のツール総数
    */
   async reload(registry?: ToolRegistry): Promise<number> {
+    this.assertSessionEnabled();
     const target = registry ?? this.lastRegistry;
     if (!target) {
       throw new Error("MCPManager.reload: no registry available (not connected before)");
     }
     await this.disconnectAll();
     return this.connectAll(target);
+  }
+
+  private assertSessionEnabled(): void {
+    if (this.sessionDisabledReason) {
+      throw new Error(`MCP is disabled for this session by ${this.sessionDisabledReason}`);
+    }
   }
 
   /**

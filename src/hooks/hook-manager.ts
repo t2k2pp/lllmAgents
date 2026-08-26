@@ -99,8 +99,17 @@ export class HookManager {
    * Load hooks from all sources (project-local and user-global).
    * Later sources are appended; all matching hooks run in order.
    */
-  loadHooks(projectDir?: string, pluginSources: PluginComponentSource[] = []): void {
+  loadHooks(
+    projectDir?: string,
+    pluginSources: PluginComponentSource[] = [],
+    options: { enabled?: boolean } = {},
+  ): void {
     this.hooks = [];
+    if (options.enabled === false) {
+      this.loaded = true;
+      logger.debug("Hooks disabled for this startup mode");
+      return;
+    }
 
     // 1. Project-level hooks
     if (projectDir) {
