@@ -1,6 +1,6 @@
 # Codex / Claude Code 機能比較・商品品質改善サイクル 4
 
-Status: locally validated; CI pending
+Status: completed
 
 - 実施日: 2026-08-26
 - 基準 commit: `b96c0885173da0634ce827627adcad714324dcd3`
@@ -102,4 +102,8 @@ OpenAI Docsは、orchestratorがsub-agentへのfollow-up指示をroutingし、�
 
 ## 7. CI closure
 
-本記録を含む実装commitを`main`へpushし、最新SHAの全依存job完了後にcommit / workflow URL / job結果を追記する。
+- 実装commit: `39b7cd60dd2e270b3c3c05bf1c43671245e48b10` (`feat: steer running background agents`)
+- push先: `origin/main`
+- workflow: [CI run 32931225713](https://github.com/t2k2pp/lllmAgents/actions/runs/32931225713) — `completed / success`
+- jobs: `test (macos-latest)`、`test (windows-latest)`、`test (ubuntu-latest)`、依存する`Windows deploy / exe smoke`の全4件がsuccess。
+- 本CI結果を追記するclosure commitも`main`へpushし、その最新SHAの全依存jobを完了まで監視する。最終SHAとworkflow結果はhandoffへ記録する。
