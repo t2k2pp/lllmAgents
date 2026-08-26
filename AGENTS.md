@@ -8,6 +8,9 @@
 - Batch related approval-requiring commands into one narrowly scoped request. Do not request approval separately for each file, test, poll, or correction step.
 - Do not report every tool call or unchanged CI poll. Report material state changes: a cause was identified, implementation or validation reached a boundary, a new failure requires another correction, or the task completed. For long-running work, send one consolidated update at the minimum required cadence instead of repeating unchanged status.
 - A promise such as “next time I will…” is not an acceptable corrective action by itself. When the user identifies a reusable workflow failure and asks for persistence, encode it in the applicable `AGENTS.md`, skill, test, or automation before reporting completion, and name the persisted artifact.
+- Before introducing or changing a repository-wide convention, inspect the repository's existing history, nearby documentation, and automation first. Treat the established convention as the default.
+- If a different convention appears materially better, present the existing convention, the proposed difference, and the tradeoff to the user, then obtain confirmation before applying it. Do not silently replace project practice with an agent-authored “best” approach.
+- When correcting historical or workflow metadata, preserve and follow the repository's established style unless the user explicitly authorizes a departure.
 
 ## CI closure
 
