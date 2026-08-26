@@ -548,6 +548,12 @@ export interface Config {
    */
   disabledSkills?: string[];
   /**
+   * 明示的に信頼して読み込むローカルplugin bundle directory。
+   * 相対pathは起動時CWD基準。自動探索はせず、manifest/path検証後に
+   * skills・agents・hooks・MCPだけを既存loaderへ統合する。
+   */
+  pluginDirs?: string[];
+  /**
    * 自動チェックポイント (シャドウ Git)。 docs/checkpoint-and-smoke-design.md §4。
    * 既定 OFF のオプトイン。 REPL `/checkpoint on|off` で切替し、 結果はここに永続化。
    */

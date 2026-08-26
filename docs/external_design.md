@@ -819,3 +819,21 @@ MCPサーバーが提供するツールは起動時に自動検出され、`mcp_
 - Generator は前回の失敗パターンに引きずられない
 - Evaluator は Generator の自己評価バイアスなしに客観評価できる
 - 前回のフィードバックは明示的にプロンプトに渡すことで引き継ぎ
+
+---
+
+## 14. ローカルplugin bundle
+
+`config.pluginDirs`または反復可能な`--plugin-dir <path>`で明示したbundleから、skills、agents、
+hooks、MCP server設定を一括ロードする。自動探索は行わず、pluginを信頼する操作を利用者の明示指定に限定する。
+
+manifestは`.localllm-plugin/plugin.json`を正本とし、同じ最小fieldを持つ
+`.codex-plugin/plugin.json` / `.claude-plugin/plugin.json`も受け付ける。skillsとagentsは
+`plugin-name:<component-name>`、MCP serverは`plugin-name__<server-name>`へ名前空間化する。
+component pathは`./`相対かつ実pathもplugin root内でなければならないため、`..`、絶対path、
+symlink escapeは起動前に拒否する。hook/MCP設定とagent本文の`${PLUGIN_ROOT}`は実rootへ展開する。
+
+v1は宣言型componentだけを扱い、JavaScript entrypointのin-process実行、remote marketplace、
+download/install/update、署名検証は提供しない。hookとstdio MCPはローカルcommandを実行できるため、
+利用者は内容を確認したbundleだけを明示指定する。既存のHookManager/MCP lifecycle自体は変更しない。
+詳細は`docs/plugin-bundle-design.md`を参照。

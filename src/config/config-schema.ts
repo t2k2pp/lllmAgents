@@ -276,6 +276,7 @@ export const configSchema = z
     disabledMcpServers: z.array(z.string()),
     skillsEnabled: z.boolean(),
     disabledSkills: z.array(z.string()),
+    pluginDirs: z.array(z.string()),
     checkpoints: z
       .object({
         enabled: z.boolean(),

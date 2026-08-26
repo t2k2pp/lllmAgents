@@ -20,6 +20,7 @@
 - **マルチライン入力**: Shift+Enter / Ctrl+J で改行、@path でファイル参照
 - **インタラクティブUI**: `/`コマンドと`@`ファイルパスの補完ドロップダウン
 - **スキルベースワークフロー**: 開発・レビュー・調査等のワークフローをスキルとして定義、LLMが必要に応じて選択
+- **ローカルplugin bundle**: 明示したbundleからskills・agents・hooks・MCPを一括ロード（Codex / Claude manifestの最小互換）
 - **フック・ルール**: ツール実行前後のフック、コーディングスタイル等のルール自動適用
 - **クロスプラットフォーム**: Windows, macOS, Linux対応
 
@@ -139,6 +140,39 @@ $ npm start
 | `/code-stats` | コードベース統計情報 |
 | `/add-repl-command` | REPLコマンド追加ガイド |
 | `/skill-creator` | スキル作成ガイド |
+
+### ローカルplugin bundle
+
+信頼したローカルdirectoryだけを、起動時に一つの拡張単位として読み込めます。自動探索はしません。
+
+```text
+quality-tools/
+├── .localllm-plugin/plugin.json
+├── skills/review/SKILL.md
+├── agents/reviewer.md
+├── hooks/hooks.json
+└── .mcp.json
+```
+
+```json
+{
+  "name": "quality-tools",
+  "version": "1.0.0",
+  "skills": "./skills",
+  "agents": "./agents",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json"
+}
+```
+
+一時利用は `npm start -- --plugin-dir ./plugins/quality-tools`、永続利用は
+`~/.localllm/config.json` の `"pluginDirs": ["./plugins/quality-tools"]` で指定します。
+`.codex-plugin/plugin.json` と `.claude-plugin/plugin.json` も上記fieldの範囲で読めます。
+skillは `/quality-tools:review`、agentは `quality-tools:reviewer`、MCP serverは
+`quality-tools__<server>` に名前空間化されます。`${PLUGIN_ROOT}` はhook/MCP設定とagent本文で
+bundleの実pathへ展開されます。component pathはplugin root外へ出られず、同名pluginや曖昧な
+複数manifestは起動前にエラーになります。JavaScript entrypointやremote marketplaceの自動実行・取得は行いません。
+pluginのhookとstdio MCPはローカルcommandを実行できるため、内容を確認して信頼したbundleだけを指定してください。
 
 ## ツール一覧
 
@@ -347,7 +381,8 @@ bash の実行を OS 機能でカーネルレベルに封じ込め、 その安�
 | `SessionStart` | セッション開始時 |
 | `SessionStop` | セッション終了時 |
 
-読み込み優先順: 組み込み → ユーザーグローバル (`~/.localllm/hooks/`) → プロジェクト (`.localllm/hooks/`)
+読み込み順: プロジェクト (`.claude/hooks.json` → `.localllm/hooks.json`) → ユーザーグローバル
+(`~/.localllm/hooks.json`) → 明示plugin。すべてのmatching hookを順に実行します。
 
 ### ルール
 

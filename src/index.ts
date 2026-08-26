@@ -18,6 +18,16 @@ import { PlanManager } from "./agent/plan-mode.js";
 import { SubAgentManager } from "./agent/sub-agent.js";
 import { SkillRegistry } from "./skills/skill-registry.js";
 import { loadAllSkills } from "./skills/skill-loader.js";
+import { AgentDefinitionLoader } from "./agents/agent-loader.js";
+import {
+  collectPluginDirs,
+  getPluginAgentSources,
+  getPluginHookSources,
+  getPluginMcpSources,
+  loadPluginBundles,
+  loadPluginSkills,
+} from "./plugins/plugin-loader.js";
+import type { LoadedPlugin } from "./plugins/plugin-loader.js";
 
 // Tool imports
 import { fileReadTool } from "./tools/definitions/file-read.js";
@@ -155,6 +165,20 @@ async function main(): Promise<void> {
   }
 
   const config = loadConfig();
+
+  // Plugin bundles are never auto-discovered because hooks and MCP may execute
+  // commands. Only config.pluginDirs / --plugin-dir paths are trusted and loaded.
+  let plugins: LoadedPlugin[];
+  try {
+    const pluginDirs = collectPluginDirs(args, config.pluginDirs, process.cwd());
+    plugins = loadPluginBundles(pluginDirs);
+  } catch (error) {
+    console.error(`Plugin initialization failed: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+  if (plugins.length > 0) {
+    console.log(chalk.dim(`  Plugins: ${plugins.map((plugin) => plugin.name).join(", ")}`));
+  }
 
   // コスト表示の日本円換算レート (/cost rate) をプロセス全体で共有する。
   // Discord/Slack 通知や画像生成コストなど config を直接参照できない箇所も
@@ -302,7 +326,7 @@ async function main(): Promise<void> {
   // MCP servers
   // Phase F-1b: 起動時 --no-mcp フラグ / config.mcpEnabled で全体 ON/OFF を制御。
   // 設定ファイル (mcp-servers.json) は残したまま、 接続だけスキップできる。
-  const mcpManager = new MCPManager(process.cwd());
+  const mcpManager = new MCPManager(process.cwd(), getPluginMcpSources(plugins));
   const mcpDisabledByCli = args.includes("--no-mcp");
   const mcpDisabledByCfg = config.mcpEnabled === false;
   if (mcpDisabledByCli || mcpDisabledByCfg) {
@@ -333,7 +357,7 @@ async function main(): Promise<void> {
 
   // Hooks
   const hookManager = new HookManager();
-  hookManager.loadHooks(process.cwd());
+  hookManager.loadHooks(process.cwd(), getPluginHookSources(plugins));
 
   // Context window: 明示設定 > プロバイダ getModelInfo > モデル名ヒューリスティック > FALLBACK_CONTEXT_WINDOW
   let contextWindow = config.mainLLM.contextWindow ?? 0;
@@ -394,7 +418,7 @@ async function main(): Promise<void> {
 
   // Skill registry (before AgentLoop to inject into system prompt)
   const skillRegistry = new SkillRegistry();
-  const skills = loadAllSkills();
+  const skills = [...loadAllSkills(), ...loadPluginSkills(plugins)];
   for (const skill of skills) {
     skillRegistry.register(skill);
   }
@@ -570,7 +594,15 @@ async function main(): Promise<void> {
   }
 
   // Sub-agent manager
-  const subAgentManager = new SubAgentManager(provider, config.mainLLM.model, toolRegistry, permissions, skillRegistry);
+  const pluginAgentLoader = new AgentDefinitionLoader(getPluginAgentSources(plugins));
+  const subAgentManager = new SubAgentManager(
+    provider,
+    config.mainLLM.model,
+    toolRegistry,
+    permissions,
+    skillRegistry,
+    pluginAgentLoader,
+  );
   setSubAgentManager(subAgentManager);
   setSkillSubAgentManager(subAgentManager);
 

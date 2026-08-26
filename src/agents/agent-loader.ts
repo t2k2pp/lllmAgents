@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getHomedir } from "../utils/platform.js";
 import * as logger from "../utils/logger.js";
+import { expandPluginRoot, type PluginComponentSource } from "../plugins/plugin-loader.js";
 
 export interface AgentDefinition {
   name: string;
@@ -142,6 +143,8 @@ export class AgentDefinitionLoader {
   private definitions = new Map<string, AgentDefinition>();
   private loaded = false;
 
+  constructor(private readonly pluginSources: PluginComponentSource[] = []) {}
+
   /**
    * Load all agent definitions from all search paths.
    * Later paths override earlier ones (project > user > builtin).
@@ -158,6 +161,26 @@ export class AgentDefinitionLoader {
       for (const def of defs) {
         this.definitions.set(def.name, def);
         logger.debug(`Loaded agent definition '${def.name}' from ${def.source}`);
+      }
+    }
+
+    // Explicitly enabled plugin agents are always namespaced. This prevents a
+    // plugin from replacing a built-in/user/project agent with the same name.
+    for (const source of this.pluginSources) {
+      const defs = loadFromDirectory(source.path);
+      for (const def of defs) {
+        const qualifiedName = `${source.pluginName}:${def.name}`;
+        const qualifiedSkills = def.skills.map((skill) =>
+          skill.includes(":") ? skill : `${source.pluginName}:${skill}`,
+        );
+        const qualified: AgentDefinition = {
+          ...def,
+          name: qualifiedName,
+          skills: qualifiedSkills,
+          systemPrompt: expandPluginRoot(def.systemPrompt, source.pluginRoot),
+        };
+        this.definitions.set(qualifiedName, qualified);
+        logger.debug(`Loaded plugin agent definition '${qualifiedName}' from ${def.source}`);
       }
     }
 

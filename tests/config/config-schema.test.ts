@@ -54,6 +54,12 @@ describe("sanitizeParsedConfig", () => {
     expect(r.warnings).toHaveLength(2);
   });
 
+  it("pluginDirsは不正要素だけを除き、明示pathを保持する", () => {
+    const r = sanitizeParsedConfig({ pluginDirs: ["./plugins/a", 123, "C:/plugins/b"] });
+    expect(r.config).toEqual({ pluginDirs: ["./plugins/a", "C:/plugins/b"] });
+    expect(r.warnings).toHaveLength(1);
+  });
+
   it("roomConfig の不正な binding / autoResume を取り除く (旧 L-4 の統合)", () => {
     const r = sanitizeParsedConfig({
       roomConfig: {

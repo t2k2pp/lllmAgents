@@ -89,8 +89,10 @@ function getLoader(): AgentDefinitionLoader {
  * ID-014 (a) (2026-05-01): ハードコード fallback は撤去。 外部 .md が見つからない場合は
  * null を返し、 task ツール側で「不明な agent type」 エラーにする。
  */
-function resolveAgentConfig(type: SubAgentType): Omit<SubAgentConfig, "description"> | null {
-  const loader = getLoader();
+function resolveAgentConfig(
+  type: SubAgentType,
+  loader: AgentDefinitionLoader = getLoader(),
+): Omit<SubAgentConfig, "description"> | null {
   const externalDef = loader.get(type);
 
   if (externalDef) {
@@ -260,10 +262,11 @@ export class SubAgent {
     parentAncestors: AncestorTypes = ROOT_ANCESTORS,
     private readonly usageSlot: UsageSlot = "subagent",
     skillRegistry?: SkillRegistry,
+    agentDefinitionLoader?: AgentDefinitionLoader,
   ) {
     this.agentId = `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    const resolved = resolveAgentConfig(type);
+    const resolved = resolveAgentConfig(type, agentDefinitionLoader);
     if (!resolved) {
       throw new Error(`Unknown sub-agent type: '${type}'. No definition file or fallback found.`);
     }
@@ -571,6 +574,7 @@ export class SubAgentManager {
     private toolRegistry: ToolRegistry,
     private permissions: PermissionManager,
     private skillRegistry?: SkillRegistry,
+    private agentDefinitionLoader?: AgentDefinitionLoader,
   ) {}
 
   /**
@@ -646,6 +650,7 @@ export class SubAgentManager {
       parentAncestors,
       picked.usageSlot,
       this.skillRegistry,
+      this.agentDefinitionLoader,
     );
     const id = agent.getAgentId();
     const startedAt = new Date().toISOString();
@@ -710,6 +715,7 @@ export class SubAgentManager {
       parentAncestors,
       picked.usageSlot,
       this.skillRegistry,
+      this.agentDefinitionLoader,
     );
     return agent.run(prompt);
   }
@@ -731,6 +737,7 @@ export class SubAgentManager {
         parentAncestors,
         picked.usageSlot,
         this.skillRegistry,
+        this.agentDefinitionLoader,
       );
       return agent.run(task.prompt);
     });
@@ -773,6 +780,7 @@ export class SubAgentManager {
       parentAncestors,
       picked.usageSlot,
       this.skillRegistry,
+      this.agentDefinitionLoader,
     );
     return agent.run(prompt);
   }

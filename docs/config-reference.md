@@ -447,6 +447,7 @@ CLIコマンド `/knowledge vault <path>` でも設定可能。設定すると�
 | `logging.retention.logMaxTotalMb` | number | 256 | 起動時に ops / LLM I/O ログの合計をこの容量以下にする。古いログから削除し、`0` で無制限。単一LLMログは別途32 MiBで停止する。 |
 | `logging.retention.sessionMaxCount` | number | 100 | セッション履歴を新しい順にこの件数まで保持し、超過分を起動時に削除する。`0` で無制限 |
 | `updateCheck.enabled` | boolean | true | 起動時に GitHub の最新リリースを確認し、新しければ1行通知する (TTY のみ・失敗は黙ってスキップ)。`false` でオフ |
+| `pluginDirs` | string[] | `[]` | 明示的に信頼して読み込むローカルplugin bundle directory。相対pathは起動時CWD基準。`--plugin-dir <path>`でも追加可能。自動探索しない（docs/plugin-bundle-design.md） |
 
 CLIコマンド `/parallel <N>` で実行時に変更可能。
 

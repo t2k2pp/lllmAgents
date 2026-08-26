@@ -4,6 +4,7 @@ import { exec } from "node:child_process";
 import { getHomedir, getShell, isWindows } from "../utils/platform.js";
 import * as logger from "../utils/logger.js";
 import type { ToolResult } from "../tools/tool-registry.js";
+import { expandPluginRoot, type PluginComponentSource } from "../plugins/plugin-loader.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,6 +22,8 @@ export interface HookDefinition {
   matcher?: HookMatcher;
   command: string;
   description?: string;
+  /** Explicit plugin hooks receive their root without exposing other plugin paths. */
+  pluginRoot?: string;
 }
 
 export interface HooksFile {
@@ -96,7 +99,7 @@ export class HookManager {
    * Load hooks from all sources (project-local and user-global).
    * Later sources are appended; all matching hooks run in order.
    */
-  loadHooks(projectDir?: string): void {
+  loadHooks(projectDir?: string, pluginSources: PluginComponentSource[] = []): void {
     this.hooks = [];
 
     // 1. Project-level hooks
@@ -114,6 +117,12 @@ export class HookManager {
     const globalPath = path.join(getHomedir(), ".localllm", "hooks.json");
     this.loadFromFile(globalPath);
 
+    // 3. Explicitly enabled plugin hooks. PluginLoader already verified that
+    // each source is contained by its plugin root.
+    for (const source of pluginSources) {
+      this.loadFromFile(source.path, source.pluginRoot);
+    }
+
     this.loaded = true;
     logger.debug(`Loaded ${this.hooks.length} hook(s)`);
   }
@@ -126,10 +135,9 @@ export class HookManager {
     const matching = this.getMatching("PreToolUse", toolName, params);
     if (matching.length === 0) return { proceed: true };
 
-    const env = this.buildEnv(toolName, params);
-
     for (const hook of matching) {
       logger.debug(`Running pre-hook: ${hook.description ?? hook.command}`);
+      const env = this.buildEnv(toolName, params, undefined, hook.pluginRoot);
       const result = await runCommand(hook.command, env);
 
       if (result.code !== 0) {
@@ -152,10 +160,9 @@ export class HookManager {
     const matching = this.getMatching("PostToolUse", toolName, params);
     if (matching.length === 0) return;
 
-    const env = this.buildEnv(toolName, params, result);
-
     for (const hook of matching) {
       logger.debug(`Running post-hook: ${hook.description ?? hook.command}`);
+      const env = this.buildEnv(toolName, params, result, hook.pluginRoot);
       const out = await runCommand(hook.command, env);
 
       if (out.code !== 0) {
@@ -178,7 +185,8 @@ export class HookManager {
 
     for (const hook of matching) {
       logger.debug(`Running session hook (${type}): ${hook.description ?? hook.command}`);
-      const out = await runCommand(hook.command, env);
+      const hookEnv = hook.pluginRoot ? { ...env, PLUGIN_ROOT: hook.pluginRoot } : env;
+      const out = await runCommand(hook.command, hookEnv);
 
       if (out.code !== 0) {
         logger.warn(`Session hook failed: ${hook.description ?? hook.command}`, out.stderr || out.stdout);
@@ -200,7 +208,7 @@ export class HookManager {
   // Private helpers
   // -------------------------------------------------------------------------
 
-  private loadFromFile(filePath: string): void {
+  private loadFromFile(filePath: string, pluginRoot?: string): void {
     const data = readJsonFile<HooksFile>(filePath);
     if (!data?.hooks || !Array.isArray(data.hooks)) return;
 
@@ -209,7 +217,11 @@ export class HookManager {
         logger.warn(`Skipping invalid hook in ${filePath}:`, hook);
         continue;
       }
-      this.hooks.push(hook);
+      this.hooks.push({
+        ...hook,
+        command: pluginRoot ? expandPluginRoot(hook.command, pluginRoot) : hook.command,
+        pluginRoot,
+      });
     }
 
     logger.debug(`Loaded ${data.hooks.length} hook(s) from ${filePath}`);
@@ -238,7 +250,12 @@ export class HookManager {
   }
 
   /** Build environment variables for hook commands. */
-  private buildEnv(toolName: string, params: Record<string, unknown>, result?: ToolResult): Record<string, string> {
+  private buildEnv(
+    toolName: string,
+    params: Record<string, unknown>,
+    result?: ToolResult,
+    pluginRoot?: string,
+  ): Record<string, string> {
     const env: Record<string, string> = {
       TOOL_NAME: toolName,
     };
@@ -246,6 +263,9 @@ export class HookManager {
     const filePath = this.extractFilePath(params);
     if (filePath) {
       env.FILE_PATH = filePath;
+    }
+    if (pluginRoot) {
+      env.PLUGIN_ROOT = pluginRoot;
     }
 
     if (result) {

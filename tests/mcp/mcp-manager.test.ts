@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as path from "node:path";
 import * as os from "node:os";
 
+const PLUGIN_ROOT_TOKEN = `\${PLUGIN_ROOT}`;
+
 // fs モック
 vi.mock("node:fs", async () => {
   const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
@@ -48,6 +50,39 @@ describe("MCPManager", () => {
   });
 
   describe("loadConfig", () => {
+    it("plugin MCP serverを名前空間化し、PLUGIN_ROOTを展開する", () => {
+      const pluginRoot = path.resolve("/plugins/quality");
+      const pluginConfigPath = path.join(pluginRoot, ".mcp.json");
+      vi.mocked(fs.existsSync).mockImplementation((p) => String(p) === pluginConfigPath);
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        if (String(p) !== pluginConfigPath) throw new Error(`unexpected path: ${p}`);
+        return JSON.stringify({
+          mcpServers: {
+            checker: {
+              name: "checker",
+              transport: "stdio",
+              command: `${PLUGIN_ROOT_TOKEN}/bin/checker`,
+              args: ["--root", PLUGIN_ROOT_TOKEN],
+              env: { PLUGIN_DATA: `${PLUGIN_ROOT_TOKEN}/data` },
+            },
+          },
+        });
+      });
+
+      const manager = new MCPManager("/test/project", [
+        { pluginName: "quality-tools", pluginRoot, path: pluginConfigPath },
+      ]);
+      const config = manager.loadConfig();
+
+      expect(config.qualityTools).toBeUndefined();
+      expect(config["quality-tools__checker"]).toMatchObject({
+        name: "quality-tools__checker",
+        command: `${pluginRoot}/bin/checker`,
+        args: ["--root", pluginRoot],
+        env: { PLUGIN_DATA: `${pluginRoot}/data` },
+      });
+    });
+
     it("should return empty config when no files exist", () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
       const manager = new MCPManager("/test/project");

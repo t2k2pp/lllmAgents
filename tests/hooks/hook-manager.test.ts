@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { HookManager } from "../../src/hooks/hook-manager.js";
 
+const PLUGIN_ROOT_TOKEN = `\${PLUGIN_ROOT}`;
+
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
@@ -105,6 +107,23 @@ describe("HookManager", () => {
   // -----------------------------------------------------------------------
 
   describe("loadHooks", () => {
+    it("plugin hookを追加し、command内のPLUGIN_ROOTを展開する", async () => {
+      const hooksFilePath = "/plugins/quality/hooks/hooks.json";
+      setupHooksFile(hooksFilePath, [{ type: "PreToolUse", command: `node ${PLUGIN_ROOT_TOKEN}/check.js` }]);
+      manager.loadHooks(undefined, [
+        { pluginName: "quality-tools", pluginRoot: "/plugins/quality", path: hooksFilePath },
+      ]);
+      mockExecSuccess();
+
+      await manager.runPreToolHooks("bash", {});
+
+      expect(mockExec).toHaveBeenCalledWith(
+        `node ${path.resolve("/plugins/quality")}/check.js`,
+        expect.any(Object),
+        expect.any(Function),
+      );
+    });
+
     it("should load hooks from project-level hooks.json", () => {
       const projectDir = "/my/project";
       const hooksFilePath = path.join(projectDir, ".claude", "hooks.json");

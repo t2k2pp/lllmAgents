@@ -91,6 +91,7 @@ src/
 ├── config/         - ConfigManager, セットアップウィザード
 ├── browser/        - PlaywrightManager
 ├── mcp/            - MCPManager, MCPClient
+├── plugins/        - PluginLoader（manifest・path検証、component source統合）
 ├── loop/           - session-scoped LoopManager（/loop + schedule tools）
 ├── tenacious/      - TenaciousRunner（試行錯誤モード: /try コマンド）
 ├── utils/          - http-client, discord, non-tty-reader, platform
@@ -592,6 +593,9 @@ classDiagram
 重複除去した全文を元のsystem prompt末尾へ注入します。`${SKILL_DIR}`を解決してskill directoryを
 sandbox許可へ追加し、不存在・無効skillはLLMを呼ぶ前にfail-loudとします。
 
+明示plugin agent sourceは`AgentDefinitionLoader`のconstructorへ注入し、agent名を
+`plugin-name:agent-name`へ、未修飾のpreload skillを同じplugin名前空間へ変換する。
+
 ### 組み込みエージェント（5種）
 
 | ファイル | name | tools |
@@ -1044,3 +1048,24 @@ Evaluator が出力する `TOTAL_SCORE: X.X` を正規表現で抽出します�
 ```typescript
 const scoreMatch = text.match(/TOTAL_SCORE:\s*(\d+(?:\.\d+)?)/i);
 ```
+
+---
+
+## 12. PluginLoader アーキテクチャ
+
+`src/plugins/plugin-loader.ts`は、明示されたplugin rootについてmanifest候補、1 MiB上限、fatal UTF-8、
+JSON、kebab-case名、重複名、component path containmentをLLM/provider初期化前に検証する。
+manifest候補が0件または複数、宣言componentが不存在、`..`・絶対path・symlinkでroot外参照となる場合は
+fail-loudし、部分ロード状態で起動しない。
+
+検証済みsourceは次の既存境界へ渡す。
+
+| component | 統合先 | 衝突防止・path処理 |
+|---|---|---|
+| skills | `loadSkillsFromDir` → `SkillRegistry` | `plugin:skill`へ名前空間化 |
+| agents | `AgentDefinitionLoader` → `SubAgentManager` | `plugin:agent`、内部skill参照も名前空間化 |
+| hooks | `HookManager.loadHooks` | `${PLUGIN_ROOT}`展開、`PLUGIN_ROOT`環境変数 |
+| MCP | `MCPManager.loadConfig` | `plugin__server`、command/args/env/urlの`${PLUGIN_ROOT}`展開 |
+
+plugin自体はコードとしてimportしない。hookとstdio MCPはlocal commandを実行できるため明示指定を信頼境界とし、
+既存のHookManager/MCP lifecycleを変更しない。

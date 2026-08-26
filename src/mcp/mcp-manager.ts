@@ -16,6 +16,7 @@ import { MCPClient } from "./mcp-client.js";
 import type { MCPServerConfig, MCPServersConfig, MCPTool, MCPContentBlock } from "./types.js";
 import type { ToolHandler, ToolResult, ToolRegistry } from "../tools/tool-registry.js";
 import type { ToolDefinition } from "../providers/base-provider.js";
+import { expandPluginRoot, type PluginComponentSource } from "../plugins/plugin-loader.js";
 
 /** MCPツール名にサーバープレフィックスを付与する形式 */
 function mcpToolName(serverName: string, toolName: string): string {
@@ -39,7 +40,10 @@ export class MCPManager {
   /** Phase F-1a: reload 用に直近接続時の registry を保持 */
   private lastRegistry: ToolRegistry | null = null;
 
-  constructor(projectDir: string = process.cwd()) {
+  constructor(
+    projectDir: string = process.cwd(),
+    private readonly pluginSources: PluginComponentSource[] = [],
+  ) {
     // 設定ファイルの検索パス（後が優先）
     this.configPaths = [
       path.join(os.homedir(), ".localllm", "mcp-servers.json"),
@@ -176,6 +180,44 @@ export class MCPManager {
         }
       } catch (err) {
         console.error(chalk.yellow(`  Warning: MCP設定ファイル読み込みエラー: ${configPath}`));
+      }
+    }
+
+    // Plugin servers are explicit opt-in and namespaced, so they cannot replace
+    // an existing user/project server definition.
+    for (const source of this.pluginSources) {
+      try {
+        const content = fs.readFileSync(source.path, "utf-8");
+        const parsed = JSON.parse(content) as MCPServersConfig;
+        if (!parsed.mcpServers || typeof parsed.mcpServers !== "object") {
+          throw new Error("mcpServers object is required");
+        }
+        for (const [key, serverConfig] of Object.entries(parsed.mcpServers)) {
+          const originalName = serverConfig.name ?? key;
+          if (!/^[A-Za-z0-9_-]+$/.test(originalName)) {
+            throw new Error(`server name '${originalName}' contains unsupported characters`);
+          }
+          const namespacedName = `${source.pluginName}__${originalName}`;
+          merged[namespacedName] = {
+            ...serverConfig,
+            name: namespacedName,
+            command: mapOptionalString(serverConfig.command, source.pluginRoot),
+            args: serverConfig.args?.map((arg) => expandPluginRoot(arg, source.pluginRoot)),
+            env: serverConfig.env
+              ? Object.fromEntries(
+                  Object.entries(serverConfig.env).map(([envKey, value]) => [
+                    envKey,
+                    expandPluginRoot(value, source.pluginRoot),
+                  ]),
+                )
+              : undefined,
+            url: mapOptionalString(serverConfig.url, source.pluginRoot),
+          };
+        }
+      } catch (error) {
+        throw new Error(
+          `[plugin] MCP設定ファイル読み込みエラー (${source.pluginName}): ${source.path}: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
 
@@ -325,6 +367,10 @@ export class MCPManager {
     await Promise.all(disconnectPromises);
     this.clients.clear();
   }
+}
+
+function mapOptionalString(value: string | undefined, pluginRoot: string): string | undefined {
+  return value === undefined ? undefined : expandPluginRoot(value, pluginRoot);
 }
 
 /**
