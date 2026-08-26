@@ -1,6 +1,6 @@
 # Codex / Claude Code 機能比較・商品品質改善サイクル 5
 
-Status: local-completed / CI pending
+Status: completed
 
 - 実施日: 2026-08-26
 - 基準 commit: `b3120548eda42e84c6ecd40ab425355cc921c831`
@@ -102,5 +102,8 @@ Codex pluginはmanifestを持つdirectoryにskills、MCP、hooks等をまとめ�
 
 ## 7. CI closure
 
-- 実装commit / push / workflow: pending
-- 最新push SHAの全依存jobが完了するまで監視し、結果をclosure commitとhandoffへ記録する。
+- 実装commit: `250b61272d14ab56a3d879da5dcd0a37aa88c96b` (`feat: add local plugin bundles`)
+- push先: `origin/main`
+- workflow: [CI run 32935610480](https://github.com/t2k2pp/lllmAgents/actions/runs/32935610480) — `completed / success`
+- jobs: `test (windows-latest)`、`test (ubuntu-latest)`、`test (macos-latest)`、依存する`Windows deploy / exe smoke`の全4件がsuccess。
+- 本CI結果を追記するclosure commitも`main`へpushし、その最新SHAの全依存jobを完了まで監視する。最終SHAとworkflow結果はhandoffへ記録する。
