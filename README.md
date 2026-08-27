@@ -76,7 +76,11 @@ $ npm start
 | ` ``` ` | マルチライン入力モード開始/終了（フォールバック） |
 | `@path` | ファイル/フォルダの内容をプロンプトに添付 |
 | `/command` | スラッシュコマンド（補完ドロップダウン付き） |
+| `PgUp` / `PgDn` | Alternate Screen TUIの過去ログを遡る / 最新へ戻る（LLM・ツール実行中も有効） |
 | `Ctrl+C` | 現在の操作をキャンセル |
+
+端末本来のscrollback・選択・コピーを優先したい場合は、`npm start -- --no-alt-screen`
+（配布版は`localllm --no-alt-screen`）でpassthrough表示として起動できます。
 
 ### Safe mode（カスタマイズ起因の故障診断）
 

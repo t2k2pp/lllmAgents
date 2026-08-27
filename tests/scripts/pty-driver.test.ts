@@ -9,12 +9,16 @@ describe("PTY smoke driver", () => {
     expect(driver.executable).toBe("script");
     expect(driver.args[0]).toBe("-qec");
     expect(driver.parentSubmits).toBe(true);
+    expect(driver.scrollMarker).toBe("__PTY_SCROLL_SEEN__");
   });
 
   it("macOSではpipe stdin非互換のscriptを避け、expect内でCRを送る", () => {
     const driver = ptyDriver("darwin", command);
     expect(driver.executable).toBe("expect");
     expect(driver.parentSubmits).toBe(false);
+    expect(driver.args.join("\n")).toContain('send -- "/help\\r"');
+    expect(driver.args.join("\n")).toContain('send -- "\\033\\[5~"');
+    expect(driver.args.join("\n")).toContain("__PTY_SCROLL_SEEN__");
     expect(driver.args.join("\n")).toContain('send -- "/quit\\r"');
     expect(driver.env).toEqual({ PTY_NODE: command.node, PTY_TSX: command.tsx, PTY_ENTRY: command.entry });
   });

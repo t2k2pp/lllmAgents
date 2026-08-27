@@ -89,6 +89,8 @@ export function getRawStdout(): NodeJS.WriteStream {
 export interface AlternateScreenEnv {
   /** LLLMAGENT_DISABLE_ALTERNATE_SCREEN */
   disable?: string;
+  /** 起動引数 --no-alt-screen */
+  disableByCli?: boolean;
   /** process.stdout.isTTY */
   isTTY?: boolean;
   /** TERM */
@@ -109,7 +111,7 @@ export interface AlternateScreenEnv {
  * 代替画面バッファを使ってよいかを判定する (§6.1)。
  *
  * 以下のいずれかで passthrough (= false):
- *   1. 環境変数 LLLMAGENT_DISABLE_ALTERNATE_SCREEN が設定されている
+ *   1. --no-alt-screen、または環境変数 LLLMAGENT_DISABLE_ALTERNATE_SCREEN が設定されている
  *   2. process.stdout.isTTY が false (パイプ・リダイレクト・CI)
  *   3. TERM=dumb
  *
@@ -120,6 +122,7 @@ export interface AlternateScreenEnv {
  * 表示が素朴になる方がまだ良い (安全側に倒す)。
  */
 export function shouldUseAlternateScreen(env: AlternateScreenEnv): boolean {
+  if (env.disableByCli) return false;
   const disable = env.disable;
   if (disable !== undefined && disable !== "" && disable !== "0" && disable.toLowerCase() !== "false") {
     return false;
@@ -141,6 +144,7 @@ export function shouldUseAlternateScreen(env: AlternateScreenEnv): boolean {
 function readAlternateScreenEnv(): AlternateScreenEnv {
   return {
     disable: process.env.LLLMAGENT_DISABLE_ALTERNATE_SCREEN,
+    disableByCli: process.argv.slice(2).includes("--no-alt-screen"),
     isTTY: !!process.stdout.isTTY,
     term: process.env.TERM,
     platform: process.platform,
@@ -262,6 +266,13 @@ const MAX_RENDER_PASSES = 3;
  */
 const CTRL_C_BYTE = 0x03;
 
+/** PageUp / PageDown。修飾キー付きのCSI (`\x1b[5;2~`等) も同じ操作として扱う。 */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: raw stdinのANSI CSI検出そのものが目的
+const SCROLL_KEY_PATTERN = /\x1b\[(5|6)(?:;\d+)?~/g;
+
+/** 複数data chunkへ分割されたCSIを復元するために保持する最大文字数。 */
+const SCROLL_SEQUENCE_TAIL_CHARS = 24;
+
 /** stdin のチャンクに Ctrl+C が含まれるか。encoding 設定次第で文字列で届くことがある */
 function containsCtrlC(chunk: Buffer | string | null | undefined): boolean {
   if (chunk == null) return false;
@@ -322,6 +333,8 @@ export class ScreenManagerImpl implements ScreenManager {
   private stdinConsumers = 0;
   /** 最下位の `\x03` 監視 (§3.3)。保持中だけ購読する */
   private sigintFallback: ((chunk: Buffer | string) => void) | null = null;
+  /** PageUp/PageDownのCSIがdata chunk境界を跨いだ場合の末尾。 */
+  private scrollSequenceTail = "";
   /** 代替画面で表示するスピナーの最新フレーム (ライブ領域の所有者がいないときだけ描く) */
   private statusLine = "";
   private statusAtMs = 0;
@@ -647,6 +660,7 @@ export class ScreenManagerImpl implements ScreenManager {
   /** セッション終了。ここで初めて cooked に戻す (§3.1) */
   private releaseStdinRaw(): void {
     this.uninstallSigintFallback();
+    this.scrollSequenceTail = "";
     if (!this.stdinRawHeld) return;
     this.stdinRawHeld = false;
     this.stdinSuspended = false;
@@ -723,6 +737,9 @@ export class ScreenManagerImpl implements ScreenManager {
     if (!stdin?.isTTY || typeof stdin.on !== "function") return;
     const listener = (chunk: Buffer | string): void => {
       if (!this.stdinRawHeld || this.stdinSuspended) return;
+      // Alternate Screenでは端末本来のscrollbackが使えないため、入力欄が無いLLM/tool
+      // 実行中もScreenManagerがPageUp/PageDownを受け持つ。排他prompt中だけはprompt側へ譲る。
+      if (this.alternate && !this.isExclusive()) this.handleScrollInput(chunk);
       // ライブ領域の所有者 (入力欄 / inquirer) や生 stdin の担い手 (InterruptWatcher) が
       // いる間は、その人が自分で Ctrl+C を処理する。保険は黙っている。
       if (this.owners.length > 0 || this.stdinConsumers > 0) return;
@@ -752,6 +769,23 @@ export class ScreenManagerImpl implements ScreenManager {
     } catch {
       /* ignore */
     }
+  }
+
+  /** raw stdinのdata chunkからPageUp/PageDownを観測する。入力自体は消費せず、他のlistenerへも届く。 */
+  private handleScrollInput(chunk: Buffer | string): void {
+    const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    const previousTailLength = this.scrollSequenceTail.length;
+    const combined = this.scrollSequenceTail + text;
+    SCROLL_KEY_PATTERN.lastIndex = 0;
+    for (const match of combined.matchAll(SCROLL_KEY_PATTERN)) {
+      const end = (match.index ?? 0) + match[0].length;
+      // 前回tailに完全に含まれていたsequenceは再処理しない。chunk境界を跨いだものと
+      // 今回chunk内で完結したものだけがpreviousTailLengthを越える。
+      if (end <= previousTailLength) continue;
+      if (match[1] === "5") this.scrollUp();
+      else this.scrollDown();
+    }
+    this.scrollSequenceTail = combined.slice(-SCROLL_SEQUENCE_TAIL_CHARS);
   }
 
   // ─── スクロールバックの保持 (§3.4) ───────────────────
@@ -784,7 +818,10 @@ export class ScreenManagerImpl implements ScreenManager {
   scrollUp(lines?: number): void {
     if (!this.alternate) return;
     const step = lines ?? Math.max(1, this.viewportHeight() - 1);
-    const max = Math.max(0, this.lines.length - this.viewportHeight());
+    const viewHeight = this.viewportHeight();
+    // 履歴が通常viewportに収まるなら遡る必要はない。溢れている場合は、遡り中に
+    // 案内行を1行確保したcontent heightを上限計算にも使い、最古行まで到達可能にする。
+    const max = this.lines.length <= viewHeight ? 0 : Math.max(0, this.lines.length - Math.max(1, viewHeight - 1));
     this.viewOffset = Math.min(max, this.viewOffset + step);
     this.renderNow();
   }
@@ -939,7 +976,7 @@ export class ScreenManagerImpl implements ScreenManager {
   /** 遡り中に最下行へ出す案内 (§3.4) */
   private scrollHint(): string {
     const n = this.newLinesWhileScrolled;
-    const text = n > 0 ? `▼ 新しい出力が ${n} 行 (PgDn で最下部へ)` : `▼ 下に ${this.viewOffset} 行 (PgDn で最下部へ)`;
+    const text = n > 0 ? `▼ 新しい出力が ${n} 行 (PgDn で下へ)` : `▼ 下に ${this.viewOffset} 行 (PgDn で下へ)`;
     // 反転表示。桁計算は共通の getDisplayWidth を使う (§11)
     const pad = Math.max(0, Math.min(this.columnsOf(), 200) - getDisplayWidth(text));
     return `\x1b[7m${text}${" ".repeat(pad)}\x1b[0m`;

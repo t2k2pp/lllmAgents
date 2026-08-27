@@ -859,17 +859,9 @@ export class InteractiveInput {
           return;
         }
 
-        // ── PgUp / PgDn → スクロールバックを遡る (§3.4) ──
-        // 代替画面では端末自身のスクロールバックが使えないので、ScreenManager の
-        // 行配列を遡る。素通しモードでは端末に任せる (ScreenManager 側で no-op)。
-        if (key.name === "pageup") {
-          screen.scrollUp();
-          return;
-        }
-        if (key.name === "pagedown") {
-          screen.scrollDown();
-          return;
-        }
+        // PgUp / PgDn は入力待ちだけでなくLLM/tool実行中にも必要なので、raw stdinを
+        // session全期間保持するScreenManagerが一元処理する (§3.4)。ここで重ねて処理しない。
+        if (key.name === "pageup" || key.name === "pagedown") return;
 
         // ── Escape → メニュー閉じる / 入力クリア ──
         if (key.name === "escape") {

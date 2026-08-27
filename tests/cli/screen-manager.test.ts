@@ -120,6 +120,10 @@ describe("ScreenManager: passthrough 判定 (§6.1)", () => {
     expect(shouldUseAlternateScreen({ ...tty, disable: "1" })).toBe(false);
   });
 
+  it("--no-alt-screen なら passthrough", () => {
+    expect(shouldUseAlternateScreen({ ...tty, disableByCli: true })).toBe(false);
+  });
+
   it("空文字 / 0 / false の環境変数は「無効化されていない」 と読む", () => {
     expect(shouldUseAlternateScreen({ ...tty, disable: "" })).toBe(true);
     expect(shouldUseAlternateScreen({ ...tty, disable: "0" })).toBe(true);
@@ -269,6 +273,19 @@ describe("ScreenManager: 描画とフレーム集約 (§3.5)", () => {
 });
 
 describe("ScreenManager: スクロールバックの遡り (§3.4)", () => {
+  it("最大まで遡ると案内行を確保しても最古行へ到達できる", () => {
+    const { screen, written, all } = createAltHarness({ rows: 5, columns: 20 });
+    screen.start();
+    screen.write("oldest-row\nrow-2\nrow-3\nrow-4\nrow-5\nrow-6\nrow-7\nnewest-row\n");
+    written.length = 0;
+
+    screen.scrollUp(100);
+
+    expect(all()).toContain("oldest-row");
+    expect(all()).toContain("▼");
+    screen.stop();
+  });
+
   it("scrollUp で視点が上へ動き、scrollToBottom で戻る", () => {
     const { screen, written, all } = createAltHarness({ rows: 5, columns: 20 });
     screen.start();
@@ -480,6 +497,64 @@ function fakeStdin() {
   };
   return { stdin: stdin as unknown as NodeJS.ReadStream, state, emitData };
 }
+
+describe("ScreenManager: session全期間のスクロールキー", () => {
+  it("入力所有者がいないLLM/tool実行中でもPgUp/PgDnを処理する", () => {
+    const { stdin, emitData } = fakeStdin();
+    const screen = new ScreenManagerImpl({
+      sink: () => {},
+      stdin,
+      alternate: true,
+      rows: () => 5,
+      columns: () => 20,
+    });
+    screen.write("1\n2\n3\n4\n5\n6\n7\n8\n");
+    screen.start();
+
+    emitData(Buffer.from("\x1b[5~"));
+    expect(screen.scrollOffset()).toBeGreaterThan(0);
+
+    emitData(Buffer.from("\x1b[6~"));
+    expect(screen.scrollOffset()).toBe(0);
+    screen.stop();
+  });
+
+  it("chunk境界で分割されたPgUpも1回だけ処理する", () => {
+    const { stdin, emitData } = fakeStdin();
+    const screen = new ScreenManagerImpl({
+      sink: () => {},
+      stdin,
+      alternate: true,
+      rows: () => 5,
+      columns: () => 20,
+    });
+    screen.write("1\n2\n3\n4\n5\n6\n7\n8\n");
+    screen.start();
+
+    emitData(Buffer.from("\x1b[5"));
+    expect(screen.scrollOffset()).toBe(0);
+    emitData(Buffer.from("~"));
+    const once = screen.scrollOffset();
+    expect(once).toBeGreaterThan(0);
+    emitData(Buffer.from("x"));
+    expect(screen.scrollOffset()).toBe(once);
+    screen.stop();
+  });
+
+  it("排他prompt中はPageUpをpromptへ譲り、履歴を動かさない", () => {
+    const { stdin, emitData } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin, alternate: true, rows: () => 5 });
+    screen.write("1\n2\n3\n4\n5\n6\n7\n8\n");
+    screen.start();
+    const release = screen.acquireLive({ name: "inquirer" });
+
+    emitData(Buffer.from("\x1b[5~"));
+    expect(screen.scrollOffset()).toBe(0);
+
+    release();
+    screen.stop();
+  });
+});
 
 /** process.emit を差し替えて発火したイベント名を集める (本物の SIGINT を飛ばさない) */
 function captureProcessEmit() {

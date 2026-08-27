@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### TUI完成度レビュー cycle 7 (2026-08-27)
+
+- Alternate ScreenのPgUp/PgDnを入力待ち中だけでなくLLM・ツール実行中も有効にし、最古行まで遡れるよう修正
+- `--no-alt-screen`を追加し、端末本来のscrollback・選択・コピーへ明示的に切り替え可能にした
+- Linux/macOS実PTY smokeを履歴生成・PageUp・描画変化・PageDownまで検証するscenarioへ拡張
+- Codex Desktop / Claude Desktopとの機能比較で、ブラウザ操作とは別のOS desktop Computer Use欠落をP2として記録
+
 ### Codex / Claude Code 機能比較サイクル (2026-08-26)
 
 - Codex / Claude Code / lllmAgents の機能比較マトリックスを追加

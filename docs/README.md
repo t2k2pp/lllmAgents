@@ -28,6 +28,7 @@
 | [product-feature-comparison-cycle-4-2026-08-26.md](product-feature-comparison-cycle-4-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第4回とbackground agent steer改善記録 |
 | [product-feature-comparison-cycle-5-2026-08-26.md](product-feature-comparison-cycle-5-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第5回とlocal plugin bundle改善記録 |
 | [product-feature-comparison-cycle-6-2026-08-26.md](product-feature-comparison-cycle-6-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第6回とsafe mode改善記録 |
+| [product-feature-comparison-cycle-7-2026-08-27.md](product-feature-comparison-cycle-7-2026-08-27.md) | Codex / Claude Code機能比較第7回とTUI session全期間scrollback改善記録 |
 
 ## アーキテクチャ・ハーネス
 

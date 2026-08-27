@@ -1,4 +1,5 @@
 const EXPECT_QUIT_MARKER = "__PTY_QUIT_SENT__";
+const EXPECT_SCROLL_MARKER = "__PTY_SCROLL_SEEN__";
 
 const EXPECT_PROGRAM = `
 set timeout 30
@@ -6,10 +7,21 @@ log_user 1
 spawn -noecho $env(PTY_NODE) $env(PTY_TSX) $env(PTY_ENTRY) --no-mcp
 expect {
   -re {LocalLLM Agent} {
-    puts "${EXPECT_QUIT_MARKER}"
-    send -- "/quit\\r"
-    exp_continue
+    send -- "/help\\r"
   }
+  timeout {
+    puts stderr "__PTY_TIMEOUT__"
+    exit 124
+  }
+}
+expect -re {Ctrl\\+C}
+send -- "\\033\\[5~"
+expect -re {PgDn}
+puts "${EXPECT_SCROLL_MARKER}"
+puts "${EXPECT_QUIT_MARKER}"
+send -- "\\033\\[6~"
+send -- "/quit\\r"
+expect {
   timeout {
     puts stderr "__PTY_TIMEOUT__"
     exit 124
@@ -29,6 +41,7 @@ export function ptyDriver(platform, { node, tsx, entry }) {
       env: { PTY_NODE: node, PTY_TSX: tsx, PTY_ENTRY: entry },
       parentSubmits: false,
       quitMarker: EXPECT_QUIT_MARKER,
+      scrollMarker: EXPECT_SCROLL_MARKER,
     };
   }
 
@@ -39,5 +52,6 @@ export function ptyDriver(platform, { node, tsx, entry }) {
     env: {},
     parentSubmits: true,
     quitMarker: EXPECT_QUIT_MARKER,
+    scrollMarker: EXPECT_SCROLL_MARKER,
   };
 }

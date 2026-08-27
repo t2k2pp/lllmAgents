@@ -40,15 +40,33 @@ try {
       stdio: ["pipe", "pipe", "pipe"],
     });
     let output = "";
+    let sentHelp = false;
+    let sentPageUp = false;
+    let pageUpOutputStart = 0;
+    let scrollSeen = false;
     let sentQuit = false;
     let timedOut = false;
     const capture = (chunk) => {
       output += chunk.toString();
+      if (!scrollSeen && output.includes(driver.scrollMarker)) {
+        scrollSeen = true;
+      }
       if (!sentQuit && output.includes(driver.quitMarker)) {
         sentQuit = true;
       }
-      if (!sentQuit && driver.parentSubmits && /LocalLLM Agent/i.test(output)) {
+      if (driver.parentSubmits && !sentHelp && /LocalLLM Agent/i.test(output)) {
+        sentHelp = true;
+        child.stdin.write(submitPtyLine("/help"));
+      }
+      if (driver.parentSubmits && sentHelp && !sentPageUp && /Ctrl\+C/.test(output)) {
+        sentPageUp = true;
+        pageUpOutputStart = output.length;
+        child.stdin.write("\x1b[5~");
+      }
+      if (driver.parentSubmits && sentPageUp && !scrollSeen && output.slice(pageUpOutputStart).includes("PgDn")) {
+        scrollSeen = true;
         sentQuit = true;
+        child.stdin.write("\x1b[6~");
         // PTYのLFはinteractive-inputでCtrl+J（改行挿入）になる。CRでEnter確定する。
         child.stdin.write(submitPtyLine("/quit"));
       }
@@ -65,14 +83,20 @@ try {
     });
     child.on("close", (code, signal) => {
       clearTimeout(timer);
-      resolveRun({ code, signal, output, sentQuit, timedOut });
+      resolveRun({ code, signal, output, sentQuit, scrollSeen, timedOut });
     });
   });
-  if (result.code !== 0 || result.timedOut || !result.sentQuit || !/Goodbye!/i.test(result.output)) {
+  if (
+    result.code !== 0 ||
+    result.timedOut ||
+    !result.sentQuit ||
+    !result.scrollSeen ||
+    !/Goodbye!/i.test(result.output)
+  ) {
     console.error(result.output);
     throw new Error(
       `PTY smoke failed (exit ${result.code}, signal ${result.signal ?? "none"}, ` +
-        `quitSent ${result.sentQuit}, timedOut ${result.timedOut})`,
+        `quitSent ${result.sentQuit}, scrollSeen ${result.scrollSeen}, timedOut ${result.timedOut})`,
     );
   }
   console.log("real PTY smoke passed");

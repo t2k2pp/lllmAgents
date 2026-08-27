@@ -155,6 +155,11 @@ private viewOffset = 0;           // 0 = 最下部に追従。 >0 で遡り中
 - `viewOffset > 0` (遡り中) のとき新しい出力が来ても **視点を動かさない**。
   読んでいる最中に勝手にスクロールするのは最悪の体験である。
   代わりに下端に `▼ 新しい出力が N 行` を出す
+- PgUp / PgDn は入力プロンプトだけでなく、ScreenManager が stdin を保持する
+  **セッション全期間**で処理する。LLM応答中・ツール実行中も履歴を遡れることを
+  実PTY smokeで保証する。inquirer等の排他プロンプト中は、プロンプト側のキー意味を優先する
+- 遡り中は案内表示に1行使うため、最大offsetも案内を除いたcontent heightで計算し、
+  最古行まで到達できることをunit testで保証する
 
 ### 3.5 描画
 
@@ -276,7 +281,7 @@ export const select = gate(rawSelect);   // @inquirer/prompts 系も同様にく
 
 以下のいずれかで passthrough になる。
 
-1. 環境変数 `LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1` が設定されている
+1. `--no-alt-screen`、または環境変数 `LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1` が設定されている
 2. `process.stdout.isTTY` が false (パイプ・リダイレクト・CI)
 3. `TERM=dumb`
 
