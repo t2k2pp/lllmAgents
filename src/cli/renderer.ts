@@ -28,7 +28,7 @@ export function displayWelcome(
   if (screen.isAlternate()) {
     console.log(chalk.dim(`  TUI履歴: PgUp / PgDn（通常scrollback: 次回起動時 --no-alt-screen）`));
   }
-  console.log(chalk.dim(`  マルチライン: Shift+Enter / Ctrl+J (フォールバック: \`\`\`)\n`));
+  console.log(chalk.dim(`  マルチライン: Shift+Enter / Ctrl+J (代替入力: \`\`\`)\n`));
 }
 
 export interface SkillSummary {
@@ -122,7 +122,7 @@ ${skillSection}
     PgUp/PgDn   TUIの過去ログを遡る / 最新へ戻る（LLM・ツール実行中も有効）
     Shift+Enter  改行を挿入（マルチライン入力）
     Ctrl+J       改行を挿入（Shift+Enter非対応ターミナル用）
-    \`\`\`          マルチライン入力モード（フォールバック）
+    \`\`\`          マルチライン入力モード（明示的な代替入力）
     @path        ファイル/フォルダの内容を参照
     Esc          処理を中断 / 入力中テキストをクリア
     Ctrl+C       現在の操作をキャンセル（2回でプロセス終了）

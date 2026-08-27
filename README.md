@@ -57,7 +57,7 @@ $ npm start
   Context: 130K tokens | Skills: 4
   CWD: /home/user/my-project
   Type /help for commands, /quit to exit.
-  マルチライン: Shift+Enter / Ctrl+J (フォールバック: ```)
+  マルチライン: Shift+Enter / Ctrl+J (代替入力: ```)
 
 > このディレクトリのファイルを見せて
   ✔ glob
@@ -73,14 +73,15 @@ $ npm start
 |------|------|
 | `Shift+Enter` | 改行を挿入（マルチライン入力） |
 | `Ctrl+J` | 改行を挿入（Shift+Enter非対応ターミナル用） |
-| ` ``` ` | マルチライン入力モード開始/終了（フォールバック） |
+| ` ``` ` | マルチライン入力モード開始/終了（明示的な代替入力） |
 | `@path` | ファイル/フォルダの内容をプロンプトに添付 |
 | `/command` | スラッシュコマンド（補完ドロップダウン付き） |
 | `PgUp` / `PgDn` | Alternate Screen TUIの過去ログを遡る / 最新へ戻る（LLM・ツール実行中も有効） |
 | `Ctrl+C` | 現在の操作をキャンセル |
 
 端末本来のscrollback・選択・コピーを優先したい場合は、`npm start -- --no-alt-screen`
-（配布版は`localllm --no-alt-screen`）でpassthrough表示として起動できます。
+（配布版は`localllm --no-alt-screen`）でclassic stream表示として起動できます。
+TTYの端末能力が不足または判定不能な場合、自動的に簡易表示へは切り替えず、原因と対処を表示して停止します。
 
 ### Safe mode（カスタマイズ起因の故障診断）
 

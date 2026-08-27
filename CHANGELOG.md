@@ -8,6 +8,7 @@
 
 - Alternate ScreenのPgUp/PgDnを入力待ち中だけでなくLLM・ツール実行中も有効にし、最古行まで遡れるよう修正
 - `--no-alt-screen`を追加し、端末本来のscrollback・選択・コピーへ明示的に切り替え可能にした
+- TTYの端末能力不明やraw mode取得失敗で簡易表示へ黙って落とさず、原因と明示的な対処を表示してfail-fastする方針へ変更
 - Linux/macOS実PTY smokeを履歴生成・PageUp・描画変化・PageDownまで検証するscenarioへ拡張
 - Codex Desktop / Claude Desktopとの機能比較で、ブラウザ操作とは別のOS desktop Computer Use欠落をP2として記録
 

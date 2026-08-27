@@ -65,7 +65,7 @@
 ### 2.1 中心にあるのは「所有権」 であって「代替画面」 ではない
 
 代替画面の採用は目に見える変化だが、 **本質は所有権の一元化**である。
-代替画面を使わない passthrough モード (§6) でも所有権の調停は効くようにする。
+代替画面を使わないclassic streamモード (§6) でも所有権の調停は効くようにする。
 そうしないと「環境変数で戻したら不具合 1・2 が復活する」 ことになる。
 
 ---
@@ -98,7 +98,7 @@ export interface LiveOwner {
 }
 
 export interface ScreenManager {
-  /** 起動。 alt screen に入る (passthrough では何もしない) */
+  /** 起動。 alt screen に入る (classic stream / 非TTYでは何もしない) */
   start(): void;
   /** 終了。 alt screen を抜けて内容をスクロールバックへ書き戻す */
   stop(): void;
@@ -133,7 +133,7 @@ process.stdout.write = (chunk, ...rest) => { screen.write(String(chunk)); return
 利点:
 - **漏れがない**。 まだ見ぬ将来のコードも自動的に経路に乗る
 - 呼び出し側の差分がゼロ = レビュー可能な変更量に収まる
-- passthrough モードでは差し替えた関数が `rawWrite` に素通しするだけ
+- classic streamモードでは差し替えた関数が `rawWrite` に素通しするだけ
 
 注意点:
 - ScreenManager 自身の描画は必ず `rawWrite` を使う (無限再帰の防止)
@@ -275,17 +275,20 @@ export const select = gate(rawSelect);   // @inquirer/prompts 系も同様にく
 
 ---
 
-## 6. Passthrough モード (`LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1`)
+## 6. Classic stream モード (`--no-alt-screen`)
 
 ### 6.1 有効になる条件
 
-以下のいずれかで passthrough になる。
+以下は独立した対応モードとしてAlternate Screenを使わない。
 
 1. `--no-alt-screen`、または環境変数 `LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1` が設定されている
 2. `process.stdout.isTTY` が false (パイプ・リダイレクト・CI)
-3. `TERM=dumb`
 
-### 6.2 passthrough での挙動
+TTYで`TERM=dumb`、`TERM`未設定、Windows端末能力の印が無い場合は、黙ってclassic
+stream表示へ落とさない。原因と対処を示してfail-fastし、ユーザーがclassic表示を意図する
+場合だけ`--no-alt-screen`を明示する。raw modeを取得できない場合も同様に停止する。
+
+### 6.2 classic stream での挙動
 
 | 機能 | 挙動 |
 |------|------|
@@ -294,9 +297,9 @@ export const select = gate(rawSelect);   // @inquirer/prompts 系も同様にく
 | ライブ領域の排他制御 | **有効のまま**。 排他所有中のキューイングは動く |
 | スクロール操作 (PgUp 等) | 端末自身のスクロールバックに任せる |
 
-**排他制御だけは passthrough でも残す**。 §2.1 のとおり、 不具合 1・2 の修正は
+**排他制御だけはclassic streamでも残す**。 §2.1 のとおり、 不具合 1・2 の修正は
 代替画面とは独立しているためである。 「環境変数で戻したらバグも戻る」 では
-逃げ道として機能しない。
+明示モードによって再発しない。
 
 ---
 
@@ -390,7 +393,7 @@ release()     →  所有者がいなくなったら raw mode を解除
 
 | 追加 | 場所 | 理由 |
 |------|------|------|
-| `LiveOwner.clear?()` | §3.2 の API に 1 つ追加 | passthrough では全画面再描画が無いので、 割り込み出力を差し込む前に所有者自身に描画を消させる必要がある。 これが無いと §4.2 の「入力中の文字列が消えない」 が代替画面でしか成立しない |
+| `LiveOwner.clear?()` | §3.2 の API に 1 つ追加 | classic streamでは全画面再描画が無いので、 割り込み出力を差し込む前に所有者自身に描画を消させる必要がある。 これが無いと §4.2 の「入力中の文字列が消えない」 が代替画面でしか成立しない |
 | `ScreenManager.writeLive()` | 同上 | ライブ領域の所有者の描画をスクロールバックに記録しないための入口。 所有者が `process.stdout.write` を使うと、 自分の描画が履歴に混ざり、 代替画面では再描画が自分を呼び返して無限再帰する |
 | `ScreenManager.refreshLive()` / `scrollUp` / `scrollDown` / `scrollToBottom` | 同上 | ライブ領域の高さ変化の通知 (§3.5 の再確保) と PgUp/PgDn (§3.4) |
 | スピナーの「状態行」 | §5 の補足 | `ora` の既定の出力先は **stderr** であり OutputRouter を素通りする。 代替画面ではそのままだと画面が壊れ、 捨てると「考え中...」 が消える。 代替画面のときだけ出力先を ScreenManager に向け、 最新フレームをライブ領域の 1 行として描く。 素通しモードでは既定の stderr のまま (パイプ実行に ANSI を混ぜないため) |
@@ -407,7 +410,7 @@ release()     →  所有者がいなくなったら raw mode を解除
 | セッション終了後にログが残らない (現行からの退行) | `stop()` でスクロールバックを通常画面へ書き戻す (§8) |
 | `console.log` 差し替えが外部ライブラリと衝突する | 差し替えは 1 箇所・起動直後のみ。 元の関数を保持し `stop()` で復元 |
 | 全画面再描画が遅い | 16ms のフレーム集約 (§3.5)。 実測で問題が出たら差分描画は**入れない**で描画頻度を下げる (差分描画は不具合 1 の再来を招く) |
-| Windows conhost で ANSI が効かない | 起動時に `\x1b[?1049h` の可否を検出できないため、 `TERM`/`WT_SESSION`/ConPTY の有無で判定し、 不明なら **passthrough に倒す** (安全側) |
+| Windows conhost で ANSI が効かない | `TERM`/`WT_SESSION`/ConPTY の印が無ければ原因と`--no-alt-screen`を示してfail-fastする。能力不明を黙って別表示へ落とさない |
 | 日本語 (全角) の桁数計算がズレて描画が崩れる | 既存 `interactive-input.ts` の幅計算ロジックを共通化して使う。 新規に書き直さない |
 | パイプモードでの検証しかできず TTY 実機の退行に気付けない | 段階ごとに手動 TTY 確認を必須とする。 `CLAUDE.md` の「対話品質はパイプモードで検証できない」 に従う |
 
@@ -440,7 +443,7 @@ release()     →  所有者がいなくなったら raw mode を解除
 | 7 | **未確認** (TTY 実機のみ)。 `viewOffset` の算術と案内表示は自動テストで確認済み |
 | 8 | 未捕捉例外は擬似 TTY で確認済み (代替画面を抜けてから stderr にスタック)。 Ctrl+C 2 回は**未確認** |
 | 9 | **未確認** (TTY 実機のみ)。 全角の桁計算と切り詰めは自動テストで確認済み |
-| 10 | **未確認** (TTY 実機のみ)。 stderr が TTY でないと `ora` が非対話フォールバックに落ちるため、 擬似 TTY では検証できない |
+| 10 | **未確認** (TTY 実機のみ)。 stderr が TTY でないと `ora` が非対話表示へ切り替わるため、 擬似 TTY では検証できない |
 
 ### 12.2 stdin 所有権の一元化 (`docs/stdin-ownership.md`) 実装時点 (2026-08-14)
 

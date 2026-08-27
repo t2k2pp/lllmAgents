@@ -1,7 +1,7 @@
 /**
  * ScreenManager — 端末出力の唯一の受け口。
  * 設計: docs/tui-alternate-screen.md §3 (ScreenManager) / §4 (ライブ領域の排他制御)
- *       / §6 (passthrough) / §7 (stdin の一元化) / §8 (終了処理)
+ *       / §6 (classic stream) / §7 (stdin の一元化) / §8 (終了処理)
  *
  * ## 実装範囲 (段階 1〜4)
  *
@@ -110,16 +110,12 @@ export interface AlternateScreenEnv {
 /**
  * 代替画面バッファを使ってよいかを判定する (§6.1)。
  *
- * 以下のいずれかで passthrough (= false):
+ * 以下のいずれかでclassic stream表示 (= false):
  *   1. --no-alt-screen、または環境変数 LLLMAGENT_DISABLE_ALTERNATE_SCREEN が設定されている
  *   2. process.stdout.isTTY が false (パイプ・リダイレクト・CI)
- *   3. TERM=dumb
  *
- * さらに §11 のリスク表に従い、**判定が不明なときは passthrough に倒す**。
- * 具体的には Windows で「ANSI が効くと分かっている端末」 の印
- * (WT_SESSION / TERM_PROGRAM / ConEmuANSI / ANSICON / TERM) が 1 つも無い場合は
- * legacy conhost の可能性があるため代替画面に入らない。画面が壊れるより、
- * 表示が素朴になる方がまだ良い (安全側に倒す)。
+ * TTYなのに能力が不足・不明な場合は黙って表示を変えず、原因が分かるようfail-fastする。
+ * classic stream表示を意図するユーザーは明示的に --no-alt-screen を選べる。
  */
 export function shouldUseAlternateScreen(env: AlternateScreenEnv): boolean {
   if (env.disableByCli) return false;
@@ -129,15 +125,31 @@ export function shouldUseAlternateScreen(env: AlternateScreenEnv): boolean {
   }
   if (!env.isTTY) return false;
   const term = env.term ?? "";
-  if (term === "dumb") return false;
+  if (term === "dumb") {
+    throw new Error(
+      "TUIを開始できません: TERM=dumb はAlternate Screenに対応していません。" +
+        "端末設定を修正するか、classic stream表示を意図する場合だけ --no-alt-screen を指定してください。",
+    );
+  }
 
   if (env.platform === "win32") {
-    // Windows は端末の実装差が大きい。ANSI が効くと分かっている印がある時だけ使う
+    // Windows は端末の実装差が大きい。能力不明を黙ってclassic表示には落とさない。
     const known = env.wtSession || env.termProgram || env.conEmuANSI || env.ansicon || term;
-    return !!known;
+    if (!known) {
+      throw new Error(
+        "TUIを開始できません: Windows端末のANSI/Alternate Screen対応を判定できません。" +
+          "Windows Terminal等を使うか、classic stream表示を意図する場合だけ --no-alt-screen を指定してください。",
+      );
+    }
+    return true;
   }
-  // POSIX 系。TERM が空 = 端末種別不明なので使わない
-  return term !== "";
+  if (term === "") {
+    throw new Error(
+      "TUIを開始できません: TTYですがTERMが未設定のため端末能力を判定できません。" +
+        "TERMを正しく設定するか、classic stream表示を意図する場合だけ --no-alt-screen を指定してください。",
+    );
+  }
+  return true;
 }
 
 /** 実際の process.env / process.stdout から判定材料を集める */
@@ -171,7 +183,7 @@ export interface LiveOwner {
   /** ライブ領域が今何行あるか (排他所有では使わない) */
   height?: () => number;
   /**
-   * 自分の描画を消す。passthrough モード (代替画面なし) で割り込み出力を
+   * 自分の描画を消す。classic stream モード (代替画面なし) で割り込み出力を
    * 差し込む前に呼ばれる。設計 §4.2 の「入力中の文字列が消えない」 を
    * 代替画面なしでも成立させるために必要 (代替画面では全画面再描画で足りる)。
    */
@@ -179,7 +191,7 @@ export interface LiveOwner {
 }
 
 export interface ScreenManager {
-  /** 起動。alt screen に入る (passthrough では何もしない) */
+  /** 起動。alt screen に入る (classic stream / 非TTYでは何もしない) */
   start(): void;
   /** 終了。alt screen を抜けて内容をスクロールバックへ書き戻す */
   stop(): void;
@@ -221,6 +233,8 @@ export interface ScreenManagerOptions {
   maxLines?: number;
   /** 代替画面を使うかを明示指定する (省略時は §6.1 の自動判定)。テスト用 */
   alternate?: boolean;
+  /** §6.1 の端末能力判定入力。省略時は実環境。テスト用 */
+  alternateEnv?: AlternateScreenEnv;
   /** 画面の行数。既定は process.stdout.rows */
   rows?: () => number;
   /** 画面の桁数。既定は process.stdout.columns */
@@ -297,6 +311,7 @@ export class ScreenManagerImpl implements ScreenManager {
   private readonly sink: (text: string) => void;
   private readonly maxLines: number;
   private readonly forcedAlternate?: boolean;
+  private readonly alternateEnv?: AlternateScreenEnv;
   private readonly rowsOf: () => number;
   private readonly columnsOf: () => number;
   private readonly stdin: ScreenManagerOptions["stdin"];
@@ -345,6 +360,7 @@ export class ScreenManagerImpl implements ScreenManager {
     this.sink = options.sink ?? rawWrite;
     this.maxLines = options.maxLines ?? 10_000;
     this.forcedAlternate = options.alternate;
+    this.alternateEnv = options.alternateEnv;
     this.rowsOf = options.rows ?? (() => process.stdout.rows || 24);
     this.columnsOf = options.columns ?? (() => process.stdout.columns || 80);
     this.stdin = options.stdin === undefined ? process.stdin : options.stdin;
@@ -354,11 +370,20 @@ export class ScreenManagerImpl implements ScreenManager {
 
   start(): void {
     if (this.started) return;
+    // TTY能力不明を黙って別表示へ落とさない。判定失敗時はraw modeへ触れる前に
+    // fail-fastし、元の端末状態と診断理由を保つ。
+    const alternate = this.forcedAlternate ?? shouldUseAlternateScreen(this.alternateEnv ?? readAlternateScreenEnv());
     this.started = true;
+    this.alternate = alternate;
     // stdin はセッションの間ずっと保持する (docs/stdin-ownership.md §3.1)。
     // 代替画面を使うかどうかとは独立。素通しモードでも「誰も持っていない一瞬」 は作らない。
-    this.acquireStdinRaw();
-    this.alternate = this.forcedAlternate ?? shouldUseAlternateScreen(readAlternateScreenEnv());
+    try {
+      this.acquireStdinRaw();
+    } catch (error) {
+      this.started = false;
+      this.alternate = false;
+      throw error;
+    }
     if (!this.alternate) return;
 
     // 代替画面へ入り、画面を消してから初回描画する
@@ -525,11 +550,12 @@ export class ScreenManagerImpl implements ScreenManager {
 
   acquireLive(owner: LiveOwner): () => void {
     const entry: OwnerEntry = { owner };
-    this.owners.push(entry);
     // 所有者の種別を問わず raw を再確認する (docs/stdin-ownership.md §3.1)。
     // 段階 4 は `if (!owner.redraw) return` で inquirer をスキップしていたが、
     // 塞ぎたいのは「inquirer が自分で raw にする前の一瞬」 なのでスキップしてはいけない。
+    // 失敗時に幽霊ownerを残さないため、raw確認後にだけ登録する。
     this.ensureStdinRaw();
+    this.owners.push(entry);
 
     if (this.alternate) {
       if (owner.redraw) {
@@ -619,7 +645,7 @@ export class ScreenManagerImpl implements ScreenManager {
   private acquireStdinRaw(): void {
     const stdin = this.stdin;
     if (!stdin?.isTTY) return;
-    if (!this.applyRawMode()) return;
+    this.applyRawMode();
     this.stdinRawHeld = true;
     this.stdinSuspended = false;
     this.installSigintFallback();
@@ -635,7 +661,7 @@ export class ScreenManagerImpl implements ScreenManager {
   }
 
   /**
-   * 実際に raw mode を適用する。成功したら true。
+   * 実際に raw mode を適用する。取得できなければ別入力方式へ黙って落とさず例外にする。
    *
    * libuv は要求モードが内部キャッシュと一致すると何もしないため、子プロセスや
    * inquirer が実コンソールのモードを変えた後は setRawMode(true) 単発では復旧
@@ -643,17 +669,18 @@ export class ScreenManagerImpl implements ScreenManager {
    *
    * 溜まっている入力は読み捨てない (捨てるとユーザーが先に打った文字が消える)。
    */
-  private applyRawMode(): boolean {
+  private applyRawMode(): void {
     const stdin = this.stdin;
-    if (!stdin?.isTTY) return false;
+    if (!stdin?.isTTY) return;
     try {
       if (stdin.isRaw) stdin.setRawMode(false);
       stdin.setRawMode(true);
       stdin.resume();
-      return true;
-    } catch {
-      /* raw mode を扱えない端末では諦める (readline フォールバックが受ける) */
-      return false;
+    } catch (error) {
+      throw new Error(
+        `TTY raw modeを取得できないため対話sessionを開始できません: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
     }
   }
 
@@ -697,7 +724,12 @@ export class ScreenManagerImpl implements ScreenManager {
   resumeStdin(): void {
     if (!this.stdinRawHeld || !this.stdinSuspended) return;
     this.stdinSuspended = false;
-    this.applyRawMode();
+    try {
+      this.applyRawMode();
+    } catch (error) {
+      this.stdinSuspended = true;
+      throw error;
+    }
     this.installSigintFallback();
   }
 

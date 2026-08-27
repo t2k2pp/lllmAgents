@@ -109,7 +109,7 @@ describe("ScreenManager: 所有権", () => {
 
 // ─── 段階 2 (docs/tui-alternate-screen.md §3 / §6 / §8) ───────────────
 
-describe("ScreenManager: passthrough 判定 (§6.1)", () => {
+describe("ScreenManager: TUI / classic stream 判定 (§6.1)", () => {
   const tty = { isTTY: true, term: "xterm-256color", platform: "linux" };
 
   it("TTY で TERM があれば代替画面を使う", () => {
@@ -124,6 +124,10 @@ describe("ScreenManager: passthrough 判定 (§6.1)", () => {
     expect(shouldUseAlternateScreen({ ...tty, disableByCli: true })).toBe(false);
   });
 
+  it("--no-alt-screen の明示指定はTERM=dumbでもclassic stream表示を選べる", () => {
+    expect(shouldUseAlternateScreen({ ...tty, term: "dumb", disableByCli: true })).toBe(false);
+  });
+
   it("空文字 / 0 / false の環境変数は「無効化されていない」 と読む", () => {
     expect(shouldUseAlternateScreen({ ...tty, disable: "" })).toBe(true);
     expect(shouldUseAlternateScreen({ ...tty, disable: "0" })).toBe(true);
@@ -134,16 +138,18 @@ describe("ScreenManager: passthrough 判定 (§6.1)", () => {
     expect(shouldUseAlternateScreen({ ...tty, isTTY: false })).toBe(false);
   });
 
-  it("TERM=dumb は passthrough", () => {
-    expect(shouldUseAlternateScreen({ ...tty, term: "dumb" })).toBe(false);
+  it("TTYのTERM=dumbは黙って表示を落とさず、対処を示してfail-fastする", () => {
+    expect(() => shouldUseAlternateScreen({ ...tty, term: "dumb" })).toThrow(/TERM=dumb.*--no-alt-screen/);
   });
 
-  it("TERM が無い POSIX 端末は判定不明なので passthrough に倒す (§11)", () => {
-    expect(shouldUseAlternateScreen({ isTTY: true, platform: "linux" })).toBe(false);
+  it("TERM が無い POSIX TTYは判定不明を隠さずfail-fastする (§11)", () => {
+    expect(() => shouldUseAlternateScreen({ isTTY: true, platform: "linux" })).toThrow(/TERMが未設定.*--no-alt-screen/);
   });
 
-  it("Windows で端末の印が 1 つも無ければ passthrough に倒す (legacy conhost 対策)", () => {
-    expect(shouldUseAlternateScreen({ isTTY: true, platform: "win32" })).toBe(false);
+  it("Windows で端末能力の印が無ければ判定不明を隠さずfail-fastする", () => {
+    expect(() => shouldUseAlternateScreen({ isTTY: true, platform: "win32" })).toThrow(
+      /ANSI\/Alternate Screen対応を判定できません.*--no-alt-screen/,
+    );
   });
 
   it("Windows Terminal / ConEmu / ANSICON なら代替画面を使う", () => {
@@ -463,7 +469,14 @@ describe("ScreenManager: 代替画面でのスピナー状態行 (§5 補足)", 
 /** 差し替え用の stdin。raw mode の呼び出し履歴と data 購読者を記録する */
 function fakeStdin() {
   const listeners: ((chunk: Buffer) => void)[] = [];
-  const state = { isTTY: true, isRaw: false, resumed: 0, calls: [] as boolean[], listeners };
+  const state = {
+    isTTY: true,
+    isRaw: false,
+    resumed: 0,
+    calls: [] as boolean[],
+    listeners,
+    rawError: undefined as Error | undefined,
+  };
   const stdin = {
     get isTTY() {
       return state.isTTY;
@@ -472,6 +485,7 @@ function fakeStdin() {
       return state.isRaw;
     },
     setRawMode(v: boolean) {
+      if (v && state.rawError) throw state.rawError;
       state.isRaw = v;
       state.calls.push(v);
       return stdin;
@@ -567,6 +581,46 @@ function captureProcessEmit() {
 }
 
 describe("ScreenManager: stdin をセッション単位で保持する (§3.1)", () => {
+  it("端末能力判定の失敗はraw modeへ触れる前に理由を保って停止する", () => {
+    const { stdin, state } = fakeStdin();
+    const screen = new ScreenManagerImpl({
+      sink: () => {},
+      stdin,
+      alternateEnv: { isTTY: true, term: "dumb", platform: "linux" },
+    });
+
+    expect(() => screen.start()).toThrow(/TERM=dumb/);
+    expect(state.calls).toEqual([]);
+    expect(screen.holdsStdinRaw()).toBe(false);
+  });
+
+  it("raw mode取得失敗は黙って別入力へ落とさず、修正後にstartを再試行できる", () => {
+    const { stdin, state } = fakeStdin();
+    state.rawError = new Error("unsupported ioctl");
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin, alternate: true });
+
+    expect(() => screen.start()).toThrow(/raw mode.*unsupported ioctl/);
+    expect(screen.holdsStdinRaw()).toBe(false);
+
+    state.rawError = undefined;
+    expect(() => screen.start()).not.toThrow();
+    expect(screen.holdsStdinRaw()).toBe(true);
+    screen.stop();
+  });
+
+  it("所有取得時のraw mode再確認が失敗しても幽霊ownerを残さない", () => {
+    const { stdin, state } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin, alternate: true });
+    screen.start();
+    state.rawError = new Error("raw mode lost");
+
+    expect(() => screen.acquireLive({ name: "input", redraw: () => {} })).toThrow(/raw mode lost/);
+    expect(screen.currentOwner()).toBeUndefined();
+
+    state.rawError = undefined;
+    screen.stop();
+  });
+
   it("start() で raw mode を取得し resume する", () => {
     const { stdin, state } = fakeStdin();
     const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
@@ -682,6 +736,22 @@ describe("ScreenManager: stdin をセッション単位で保持する (§3.1)",
 });
 
 describe("ScreenManager: suspendStdin / resumeStdin (§3.4)", () => {
+  it("resume時のraw mode取得失敗はsuspend状態を保ち、修正後に再試行できる", () => {
+    const { stdin, state } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin, alternate: true });
+    screen.start();
+    screen.suspendStdin();
+    state.rawError = new Error("resume ioctl failed");
+
+    expect(() => screen.resumeStdin()).toThrow(/resume ioctl failed/);
+    expect(screen.holdsStdinRaw()).toBe(false);
+
+    state.rawError = undefined;
+    screen.resumeStdin();
+    expect(screen.holdsStdinRaw()).toBe(true);
+    screen.stop();
+  });
+
   it("suspend で cooked に戻し、resume で raw に戻す", () => {
     const { stdin, state } = fakeStdin();
     const screen = new ScreenManagerImpl({ sink: () => {}, stdin });

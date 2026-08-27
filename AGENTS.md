@@ -19,6 +19,12 @@
 - Do not create an unmonitored documentation-only commit after declaring CI green. If a final record must be committed, that commit becomes the new completion candidate and its CI must also pass.
 - Treat cross-OS, filesystem-time, ordering, TTY, and packaging failures as product findings. Make tests deterministic and repeat a formerly flaky test enough times to demonstrate stability.
 
+## Product failure policy
+
+- Do not silently substitute degraded behavior when a required capability is unavailable or its state cannot be determined. Silent fallback hides the original defect and makes diagnosis unreliable.
+- Fail fast with the missing capability, observed state, and a concrete recovery action. An explicitly selected mode and inherently non-interactive output are separate supported modes, not fallbacks; name and test them as such.
+- If compatibility behavior is unavoidable, require an explicit user choice and make the active mode visible. Do not introduce automatic fallback merely to keep a workflow green.
+
 ## Commit history
 
 - Follow the established subject style: an optional Conventional Commit prefix such as `feat(scope):` or `fix(ci):`, followed by a Japanese description of the purpose. Do not write the descriptive part only in English or use a generic action such as “fix” or “update.”
