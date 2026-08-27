@@ -1,5 +1,6 @@
 const EXPECT_QUIT_MARKER = "__PTY_QUIT_SENT__";
 const EXPECT_SCROLL_MARKER = "__PTY_SCROLL_SEEN__";
+const SCROLL_CAPABLE_TERM = "xterm-256color";
 
 const EXPECT_PROGRAM = `
 set timeout 30
@@ -38,7 +39,7 @@ export function ptyDriver(platform, { node, tsx, entry }) {
     return {
       executable: "expect",
       args: ["-c", EXPECT_PROGRAM],
-      env: { PTY_NODE: node, PTY_TSX: tsx, PTY_ENTRY: entry },
+      env: { PTY_NODE: node, PTY_TSX: tsx, PTY_ENTRY: entry, TERM: SCROLL_CAPABLE_TERM },
       parentSubmits: false,
       quitMarker: EXPECT_QUIT_MARKER,
       scrollMarker: EXPECT_SCROLL_MARKER,
@@ -49,7 +50,9 @@ export function ptyDriver(platform, { node, tsx, entry }) {
   return {
     executable: "script",
     args: ["-qec", command, "/dev/null"],
-    env: {},
+    // CI shellのTERMは未設定またはdumbの場合がある。今回のscenarioはAlternate Screen
+    // そのものを検証するため、PTY子プロセスの端末能力を明示して決定論化する。
+    env: { TERM: SCROLL_CAPABLE_TERM },
     parentSubmits: true,
     quitMarker: EXPECT_QUIT_MARKER,
     scrollMarker: EXPECT_SCROLL_MARKER,
