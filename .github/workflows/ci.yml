@@ -89,8 +89,7 @@ jobs:
         run: |
           $exeVersion = & .\deploy\localllm.exe --version
           if ($LASTEXITCODE -ne 0 -or -not $exeVersion) { throw "localllm.exe --version failed" }
-          $bundleVersion = & node .\deploy\localllm.cjs --version
-          if ($LASTEXITCODE -ne 0 -or -not $bundleVersion) { throw "localllm.cjs --version failed" }
+          if (Test-Path -LiteralPath '.\deploy\localllm.cjs') { throw 'non-equivalent CJS fallback must not be packaged' }
           if (-not (Test-Path -LiteralPath '.\deploy\agents\general-purpose.md')) { throw 'agent asset missing' }
           if (-not (Test-Path -LiteralPath '.\deploy\skills\product-quality-cycle\SKILL.md')) { throw 'skill asset missing' }
           if ($exeVersion -match 'commit unknown') { throw 'packaged commit is unknown' }

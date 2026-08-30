@@ -64,4 +64,4 @@ plugin rootには `.localllm-plugin/plugin.json` を置く。移行を容易に�
 - `..`、絶対path、symlink escapeを拒否する。
 - skill/agent/MCPの名前空間化、agent内skill参照、`${PLUGIN_ROOT}` 展開を確認する。
 - 未指定時は既存loaderの結果が変わらないことを確認する。
-- 全unit、coverage、E2E、lint/typecheck、build、deploy/SEA/CJS smoke、最新push SHAのCIを通す。
+- 全unit、coverage、E2E、lint/typecheck、build、deploy/SEA smoke、CJS非混入検査、最新push SHAのCIを通す。

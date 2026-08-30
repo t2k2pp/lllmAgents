@@ -26,6 +26,7 @@ const SRC_BUILTIN_AGENTS = join(ROOT, "src", "agents", "builtin");
 const EXE_NAME = process.platform === "win32" ? "localllm.exe" : "localllm";
 const EXE_SRC = join(DIST, EXE_NAME);
 const EXE_DST = join(DEPLOY, EXE_NAME);
+const LEGACY_CJS_DST = join(DEPLOY, "localllm.cjs");
 const SKILLS_DST = join(DEPLOY, "skills");
 const AGENTS_DST = join(DEPLOY, "agents");
 const META = join(DEPLOY, ".deploy-meta.json");
@@ -99,6 +100,13 @@ function copyExe() {
   log(`exe copied (${Math.round(sz / (1024 * 1024))}MB)`);
 }
 
+function removeUnsupportedArtifacts() {
+  if (existsSync(LEGACY_CJS_DST)) {
+    rmSync(LEGACY_CJS_DST, { force: true });
+    log("removed unsupported legacy CJS artifact");
+  }
+}
+
 function copySkills() {
   if (!existsSync(SRC_BUILTIN_SKILLS)) throw new Error(`builtin skills not found: ${SRC_BUILTIN_SKILLS}`);
   if (existsSync(SKILLS_DST)) rmSync(SKILLS_DST, { recursive: true, force: true });
@@ -146,6 +154,7 @@ function main() {
   if (!SKIP_EXE) runBuildExe();
 
   mkdirSync(DEPLOY, { recursive: true });
+  removeUnsupportedArtifacts();
   copyExe();
   copySkills();
   copyAgents();

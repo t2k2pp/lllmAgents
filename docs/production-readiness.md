@@ -96,9 +96,9 @@
 
 ### [PR-06] Windows の CI が無い 【優先度: 高】 — ✅ 実装済み (2026-07-04)
 
-> 実装: ci.yml マトリクスに windows-latest を追加 (型チェック+テスト+audit)。2026-08-25 にWindows専用 `package-smoke` jobを追加し、`build:deploy`、SEA exe / CJSの `--version`、agent / skill資産、埋込みcommitが`unknown`でないことまで検証する。
+> 実装: ci.yml マトリクスに windows-latest を追加 (型チェック+テスト+audit)。Windows専用 `package-smoke` jobで`build:deploy`、SEA exeの`--version`、非同等CJSの非混入、agent / skill資産、埋込みcommitが`unknown`でないことまで検証する。
 
-**現状**: CI マトリクスは ubuntu / macos のみ。**主開発環境も exe 配布ターゲットも Windows なのに、Windows 経路が CI で一度も検証されない**。git bash 検出、パス区切り、icacls、SEA ビルドなど Windows 固有コードが多いプロジェクトなので、これは基準線とのずれが大きい。
+**現状**: CIマトリクスでubuntu / macOS / Windowsを検証し、全OS成功後にWindows SEA配布jobを実行する。git bash検出、パス区切り、icacls、SEAビルドなどWindows固有コードも最新push SHAの完了条件に含む。
 
 **改善方針**: マトリクスに `windows-latest` を追加する。サンドボックス統合テストは Windows では skip される設計 (WSL 前提) なので、まず型チェック+ユニットテストだけでも回す。余力があれば `npm run build:exe` のスモーク (exe が起動して `--version` を返す) も CI 化する。
 
