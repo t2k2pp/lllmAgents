@@ -136,6 +136,7 @@
 | [autonomy-improvement-proposal.md](autonomy-improvement-proposal.md) | proposal | 他エージェントアプリ比較と自律性向上の提案 |
 | [agent-loop-efficiency-review.md](agent-loop-efficiency-review.md) | proposal | Agent Loop 効率レビュー (米国株投資支援アプリのログ分析起点) |
 | [changelog-feature-backlog.md](changelog-feature-backlog.md) | proposal | Claude Code changelog 由来の機能バックログ |
+| [product-feature-comparison-cycle-11-worktree-design-2026-08-31.md](product-feature-comparison-cycle-11-worktree-design-2026-08-31.md) | design-ready | Codex/Claude比較、既存類似機能監査、sub-agent worktree分離の実装・安全・評価設計 |
 | [prompt-tech-debt-review.md](prompt-tech-debt-review.md) | record | プロンプト棚卸しレビュー (2026-04-29) |
 
 ## 手順書・参照

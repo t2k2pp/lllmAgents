@@ -22,7 +22,7 @@
 | **CL-04** | `--safe-mode` 起動フラグ | ★★☆ | S | `src/cli/`（起動引数） | 実装済み |
 | **CL-05** | `/usage` カテゴリ別トークン内訳 | ★★☆ | S〜M | `src/cost/`, `src/cli/repl.ts` | 未実装 |
 | **CL-06** | REPL 内クイックシェル `! <command>` | ★★☆ | S | `src/cli/repl.ts` | 未実装 |
-| **CL-07** | サブエージェント worktree 分離 | ★☆☆ | M | `src/agent/sub-agent.ts` | 未実装（オプション） |
+| **CL-07** | サブエージェント worktree 分離 | ★★★ | L | workspace/tool/security/Git/task lifecycle | 設計済み・未実装（P1） |
 | **CL-08** | Rewind / "ここまで要約" | ★☆☆ | L | `src/checkpoint/`, 圧縮層 | 未実装（オプション） |
 | **CL-09** | GFM 出力レンダリング | ★☆☆ | S〜M | markdown レンダラ | 未実装（要レンダラ調査） |
 | **CL-10** | スキル frontmatter 残り（`disallowed-tools`/`effort`） | ★☆☆ | S | `src/skills/skill-loader.ts` | 一部実装済み（`context:fork` は済） |
@@ -81,10 +81,11 @@
 - **反映先**: `src/cli/repl.ts` の入力ディスパッチ。
 - **関連 changelog**: `!` bash quick-run in REPL。
 
-### CL-07 サブエージェント worktree 分離 — 価値★☆☆ / M（オプション）
-- **概要**: サブエージェントに `isolation:"worktree"` 相当の独立 git worktree を与え、変更が無ければ自動破棄。
-- **注意**: 既存の checkpoint（シャドウ Git, `src/checkpoint/`）との棲み分け整理が必要。需要が出てから。
-- **反映先**: `src/agent/sub-agent.ts`。
+### CL-07 サブエージェント worktree 分離 — 価値★★★ / L（P1・設計済み）
+- **概要**: サブエージェントに `isolation: worktree` 相当の独立 Git worktree を与え、並列編集をmain checkoutから分離する。変更なしは自動破棄、変更ありは回収または明示破棄まで保持する。
+- **再評価理由**: 現行のbackground/parallel taskはediting agentも同じ`process.cwd()`を共有するため、同一fileの後勝ち上書きと検証の相互汚染が起こり得る。Codex/Claude Codeの双方がworktreeを正式な並列実行境界としている。
+- **設計正本**: [`product-feature-comparison-cycle-11-worktree-design-2026-08-31.md`](product-feature-comparison-cycle-11-worktree-design-2026-08-31.md)。既存checkpoint、per-agent workspace context、main checkout redirect遮断、Git hook/filter、cancel/crash、diff/apply/discard、cross-OS/SEA gateを一体で扱う。
+- **反映先**: `src/git/`（新規）、`src/agent/sub-agent.ts`、`src/tools/`、`src/security/`、`src/agents/agent-loader.ts`、CLI、docs/tests。`sub-agent.ts`だけの変更では成立しない。
 
 ### CL-08 Rewind / "ここまで要約" — 価値★☆☆ / L（オプション）
 - **概要**: 会話の特定地点までの巻き戻し、または「ここまでを要約して続行」。
