@@ -241,6 +241,15 @@ graph TD
         A10(ask_user):::safe
     end
 
+    subgraph Computer [Native Computer Use - 6ツール]
+        CU1(computer_windows):::ask
+        CU2(computer_screenshot):::ask
+        CU3(computer_click):::ask
+        CU4(computer_type):::ask
+        CU5(computer_key):::ask
+        CU6(computer_scroll):::ask
+    end
+
     subgraph Schedule [session schedule - 3ツール]
         C1(schedule_create):::safe
         C2(schedule_list):::safe
@@ -256,6 +265,8 @@ graph TD
   - `INHERENTLY_SAFE_TOOLS`（コード定数）: `ask_user`, `todo_write`, `enter_plan_mode`, `exit_plan_mode`, `task_output`, `task_list`, `task_send`, `task_cancel`, `schedule_create`, `schedule_list`, `schedule_delete`, `current_datetime`, `sandbox_info` — 設定に関わらず **常に** auto
   - `autoApproveTools`（設定ファイル）: デフォルトは `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`, `web_search`, `web_fetch`
 - **`ask`（要確認）**: 実行前にインタラクティブな承認ダイアログを表示します。明示的に指定されていないツールはすべて `ask` にフォールバックします。
+
+`computer_*`は通常の`ask`より厳しく、local CLIで呼出しごとの一回許可だけを選択できます。autorun、`autoApproveTools`、allow rule、保存済み許可で省略できず、Discord/Slackからは常に拒否されます。
 
 ### 3.1 ツール詳細仕様
 
@@ -276,6 +287,12 @@ graph TD
 | | `browser_type` | ask | ブラウザの入力フィールドにテキストを入力します。 |
 | | `browser_snapshot` | auto | ページのアクセシビリティツリー（テキスト形式）を取得します。Vision API不要で軽量。 |
 | | `browser_screenshot` | ask | ページのスクリーンショットを取得します。`save_path` 指定時はサンドボックス内のパスに保存し、`vision_analyze` と組み合わせた視覚的な状態確認に使用します。 |
+| **Native Computer Use** | `computer_windows` | ask (毎回) | 可視OS windowのID、app、title、位置、寸法を列挙します。既定offで、local CLIから明示有効化した場合だけ登録します。 |
+| | `computer_screenshot` | ask (毎回) | 指定windowのboundsだけをPNG保存します。全画面captureは提供しません。画面内容はuntrusted dataとして扱い、Visionへ渡す場合は選択providerへ画像が送信され得ます。 |
+| | `computer_click` | ask (毎回) | 指定windowをforeground化し、再検証したwindow相対座標をclickします。 |
+| | `computer_type` | ask (毎回) | 指定windowへ最大4000 UTF-16 code unitのtextを入力します。確認表示には本文を出しません。 |
+| | `computer_key` | ask (毎回) | 指定windowへ許可済みkeyまたは最大4 keyのchordを送ります。 |
+| | `computer_scroll` | ask (毎回) | Windows/Linux X11で指定window内の座標へ範囲制限したwheel eventを送ります。macOSではtoolを登録しません。 |
 | **画像解析** | `vision_analyze` | auto | スクリーンショットやローカル画像を、画像解析専用のサブLLM（OllamaのLlava等）に渡して状態を視覚的に説明させます。 |
 | **タスク管理** | `todo_write` | auto (常時) | エージェント自身が行動計画を整理するためのTODOリストをワークスペースに作成・更新します。 |
 | | `task` | ask | 独立したコンテキストを持つ **子エージェント（SubAgent）** を生成し、スコープを限定したタスクを並列で実行・委譲します。 |

@@ -60,6 +60,17 @@ describe("sanitizeParsedConfig", () => {
     expect(r.warnings).toHaveLength(1);
   });
 
+  it("features.computerUse は明示的な on/off だけを受け入れる", () => {
+    const valid = sanitizeParsedConfig({ features: { computerUse: "on" } });
+    expect(valid.warnings).toEqual([]);
+    expect(valid.config).toEqual({ features: { computerUse: "on" } });
+
+    const invalid = sanitizeParsedConfig({ features: { computerUse: true } });
+    expect(invalid.warnings).toHaveLength(1);
+    expect(invalid.warnings[0]).toContain("features.computerUse");
+    expect(invalid.config).toEqual({ features: {} });
+  });
+
   it("roomConfig の不正な binding / autoResume を取り除く (旧 L-4 の統合)", () => {
     const r = sanitizeParsedConfig({
       roomConfig: {

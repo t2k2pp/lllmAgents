@@ -397,6 +397,11 @@ export interface ModelRegistryStore {
  */
 export interface FeaturesConfig {
   /**
+   * Native Computer Use (computer_*)。host desktopを扱うため既定offで、onを明示した場合だけ有効。
+   * browserとは別capabilityであり、利用不能時にbrowserへ代替しない。
+   */
+  computerUse?: "on" | "off";
+  /**
    * ブラウザ機能 (browser_* / game_smoke) の有効化方針。
    * - "auto"(既定): 起動時プローブで playwright+chromium が揃っていれば有効。
    * - "off": 常に無効（ツール非登録）。エージェントは試行しない。
@@ -818,6 +823,9 @@ export function getDefaultConfig(): Config {
         enabled: true,
         level: "info",
       },
+    },
+    features: {
+      computerUse: "off",
     },
     roomConfig: getDefaultRoomConfig(),
   };

@@ -40,6 +40,10 @@ const INHERENTLY_SAFE_TOOLS = new Set([
   "response_complete",
 ]);
 
+function isComputerUseTool(toolName: string): boolean {
+  return toolName.startsWith("computer_");
+}
+
 /**
  * bashコマンド文字列が CWD 外のパスを参照しているか判定。
  * 絶対パス（Windows/Unix）や ../ を含むパスを抽出し、cwd 配下以外を指していれば true。
@@ -250,6 +254,24 @@ export class PermissionManager {
     params: Record<string, unknown>,
     source: RequestSource = "cli",
   ): Promise<{ allowed: boolean; reason?: string; abortExecution?: boolean }> {
+    if (isComputerUseTool(toolName)) {
+      if (source !== "cli") {
+        return {
+          allowed: false,
+          reason: `Native Computer Use (${toolName}) is restricted to the local CLI. Discord/Slack remote desktop control is blocked.`,
+        };
+      }
+      if (evaluateRules({ allow: [], deny: this.rules.deny, ask: [] }, toolName, params) === "deny") {
+        return { allowed: false, reason: `ルールにより ${toolName} はブロックされました` };
+      }
+      if (toolName === "computer_screenshot" && params.save_path) {
+        const savePath = params.save_path as string;
+        if (!this.sandbox.isPathAllowed(savePath)) {
+          return { allowed: false, reason: `save_path ${savePath} はサンドボックス外です` };
+        }
+      }
+      return this.askUserComputerUse(toolName, params);
+    }
     // Discord/Slack: チャネルフロー (ブリッジがあれば対話確認、 無ければ headless 拒否)
     if (source === "discord" || source === "slack") {
       return this.checkChannelPermission(source, toolName, params);
@@ -635,6 +657,61 @@ export class PermissionManager {
     }
   }
 
+  /** Native desktopはhost全体へ作用するため、各呼出しを一回だけ承認し、許可をcache/persistしない。 */
+  private async askUserComputerUse(
+    toolName: string,
+    params: Record<string, unknown>,
+  ): Promise<{ allowed: boolean; reason?: string; abortExecution?: boolean }> {
+    let resolveQueue!: () => void;
+    const previous = this._permissionQueue;
+    this._permissionQueue = new Promise<void>((resolve) => {
+      resolveQueue = resolve;
+    });
+    await previous;
+
+    try {
+      console.log(chalk.cyan(`\n  [${toolName}] ${formatToolSummary(toolName, params)}`));
+      console.log(chalk.yellow("  Native Computer Use: この呼出しだけを許可できます。永続許可とautorunは無効です。"));
+      let action: "once" | "deny" | "abort";
+      if (!process.stdin.isTTY) {
+        process.stdout.write("  1: 許可 (今回のみ)\n  2: 拒否\n  3: 中止\n選択 [1-3]: ");
+        const answer = await nonTTYReader.readLine();
+        action = answer === "1" ? "once" : answer === "2" ? "deny" : "abort";
+      } else {
+        try {
+          const result = await withPrompt(() =>
+            inquirer.prompt<{ action: "once" | "deny" | "abort" }>([
+              {
+                type: "list",
+                name: "action",
+                message: "このnative desktop操作を実行しますか？",
+                choices: [
+                  { name: "許可 (今回のみ)", value: "once" },
+                  { name: "拒否", value: "deny" },
+                  { name: "中止 (Agentを中断してプロンプトに戻る)", value: "abort" },
+                ],
+              },
+            ]),
+          );
+          action = result.action;
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            (error.constructor.name === "ExitPromptError" || error.message.includes("force closed"))
+          ) {
+            return { allowed: false, reason: "入力が閉じられたため中止しました", abortExecution: true };
+          }
+          throw error;
+        }
+      }
+      if (action === "once") return { allowed: true };
+      if (action === "abort") return { allowed: false, reason: "ユーザーが中止しました", abortExecution: true };
+      return { allowed: false, reason: "ユーザーがnative desktop操作を拒否しました" };
+    } finally {
+      resolveQueue();
+    }
+  }
+
   /** 非TTYモード用: NonTTYReader から1行読んでテキストメニューで選択 */
   private async askUserNonTTY(
     toolName: string,
@@ -719,6 +796,18 @@ export function formatToolSummary(toolName: string, params: Record<string, unkno
       return `クリック: ${params.selector ?? params.ref}`;
     case "browser_type":
       return `入力: ${params.text}`;
+    case "computer_windows":
+      return "可視windowのID・title・boundsを列挙";
+    case "computer_screenshot":
+      return `window capture: id=${params.window_id} save_path=${params.save_path ?? "OS temp"}`;
+    case "computer_click":
+      return `window click: id=${params.window_id} (${params.x},${params.y}) ${params.button ?? "left"} x${params.clicks ?? 1}`;
+    case "computer_type":
+      return `window text input: id=${params.window_id} length=${typeof params.text === "string" ? params.text.length : 0}`;
+    case "computer_key":
+      return `window key: id=${params.window_id} keys=${Array.isArray(params.keys) ? params.keys.join("+") : "invalid"}`;
+    case "computer_scroll":
+      return `window scroll: id=${params.window_id} (${params.x},${params.y}) delta_y=${params.delta_y}`;
     case "web_fetch":
       return `取得: ${params.url}`;
     case "web_search":

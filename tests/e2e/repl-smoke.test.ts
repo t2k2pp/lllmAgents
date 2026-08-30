@@ -271,7 +271,27 @@ describe("E2E smoke — 非TTYパイプモード起動", () => {
         expect(r.code, diag(r)).toBe(0);
         expect(r.stdout, diag(r)).toContain("Usage:");
         expect(r.stdout, diag(r)).toContain("--no-alt-screen");
+        expect(r.stdout, diag(r)).toContain("--computer-use");
+        expect(r.stdout, diag(r)).toContain("--check-computer-use");
         expect(r.stdout, diag(r)).not.toContain("Discord");
+        expect(fs.existsSync(path.join(emptyHome, ".localllm")), diag(r)).toBe(false);
+      } finally {
+        fs.rmSync(emptyHome, { recursive: true, force: true });
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "シナリオ5b: --check-computer-use は設定を作らず診断結果だけを返す",
+    async () => {
+      const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), "localllm-computer-check-e2e-"));
+      try {
+        const r = await runApp([], ["--check-computer-use"], emptyHome);
+
+        expect(r.timedOut, diag(r)).toBe(false);
+        expect([0, 1], diag(r)).toContain(r.code);
+        expect(`${r.stdout}\n${r.stderr}`, diag(r)).toContain("[check-computer-use]");
         expect(fs.existsSync(path.join(emptyHome, ".localllm")), diag(r)).toBe(false);
       } finally {
         fs.rmSync(emptyHome, { recursive: true, force: true });

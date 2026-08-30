@@ -226,6 +226,7 @@ export const configSchema = z
     features: z
       .object({
         browser: z.enum(["auto", "on", "off"]),
+        computerUse: z.enum(["on", "off"]),
         promptCache: z
           .object({
             enabled: z.boolean(),

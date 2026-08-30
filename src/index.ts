@@ -42,7 +42,9 @@ import { sandboxInfoTool } from "./tools/definitions/sandbox-info.js";
 import { todoWriteTool, todoAppendTool, todoMarkTool, todoDeleteTool } from "./tools/definitions/todo-write.js";
 import { askUserTool } from "./tools/definitions/ask-user.js";
 import { createBrowserTools } from "./tools/definitions/browser.js";
+import { createComputerTools } from "./tools/definitions/computer.js";
 import { createGameSmokeTool } from "./tools/definitions/game-smoke.js";
+import { createDesktopDriver, detectComputerUseCapability, probeComputerUseCapability } from "./computer-use/index.js";
 import {
   taskTool,
   taskOutputTool,
@@ -104,7 +106,9 @@ Options:
   --no-mcp            Start without MCP servers
   --no-alt-screen     Disable the terminal alternate screen
   --install-browser   Install the browser runtime
-  --check-browser     Verify the browser runtime`;
+  --check-browser     Verify the browser runtime
+  --computer-use      Enable native OS window capture/input for this session
+  --check-computer-use Verify native Computer Use dependencies and visible windows`;
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -116,6 +120,39 @@ async function main(): Promise<void> {
     const { getVersionString } = await import("./version.js");
     console.log(`localllm ${getVersionString()}`);
     return;
+  }
+
+  // 設定・ログ・MCP・代替画面へ触れない副作用なしの診断経路。
+  if (args.includes("--check-computer-use")) {
+    const capability = detectComputerUseCapability({ requested: true });
+    if (!capability.ready || !capability.platform) {
+      console.error(`[check-computer-use] NG — ${capability.reason}`);
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const windows = await createDesktopDriver(capability.platform).listWindows();
+      if (windows.length === 0) {
+        throw new Error("操作対象にできる可視ウィンドウがありません。デスクトップセッションで再実行してください。");
+      }
+      // ウィンドウ名には機密情報が含まれ得るため、自己診断では件数だけを表示する。
+      console.log(`[check-computer-use] OK — ${capability.reason}; visible windows=${windows.length}`);
+    } catch (error) {
+      console.error(`[check-computer-use] NG — ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  // CLIで明示要求された場合はsetupやlog作成より先にdependency不足を通知する。
+  // config opt-inはconfig読込後に同じprobeを行う。
+  if (args.includes("--computer-use")) {
+    const capability = detectComputerUseCapability({ requested: true });
+    if (!capability.ready) {
+      console.error(`Native Computer Use initialization failed: ${capability.reason}`);
+      process.exitCode = 1;
+      return;
+    }
   }
 
   // 未捕捉例外での即死時にセッション保存・端末復元・クラッシュログを行う
@@ -329,6 +366,19 @@ async function main(): Promise<void> {
     toolRegistry.register(createGameSmokeTool(playwrightManager));
   } else {
     console.log(chalk.dim(`ℹ ブラウザ機能 (browser_*/game_smoke) は無効: ${browserCap.reason}`));
+  }
+
+  // Native Computer Use は明示 opt-in のときだけ公開する。要求されたのに
+  // OS 能力が不足する場合はブラウザへ暗黙代替せず、回復方法つきで起動を止める。
+  const computerCap = probeComputerUseCapability(config, args.includes("--computer-use"));
+  if (computerCap.ready && computerCap.platform) {
+    for (const tool of createComputerTools(createDesktopDriver(computerCap.platform))) {
+      toolRegistry.register(tool);
+    }
+    console.log(chalk.yellow(`  Native Computer Use: enabled (${computerCap.reason})`));
+  } else if (computerCap.source !== "disabled") {
+    console.error(`Native Computer Use initialization failed: ${computerCap.reason}`);
+    process.exit(1);
   }
 
   // Vision tool

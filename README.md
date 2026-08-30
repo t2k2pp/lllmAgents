@@ -17,6 +17,7 @@
 - **画像認識**: Vision非対応LLM向けにサブLLM委譲をサポート
 - **画像生成**: Azure GPT Images / Stable Diffusion WebUI / ComfyUI に対応（ON/OFF 可能、`/image` で設定・直接生成、`/cost` でコスト確認）
 - **ブラウザ操作**: Playwright統合によるWeb自動化
+- **Native Computer Use**: 明示opt-inしたlocal CLIから、選択したOS windowだけをcapture・click・入力（毎回確認、remote操作は禁止）
 - **マルチライン入力**: Shift+Enter / Ctrl+J で改行、@path でファイル参照
 - **インタラクティブUI**: `/`コマンドと`@`ファイルパスの補完ドロップダウン
 - **スキルベースワークフロー**: 開発・レビュー・調査等のワークフローをスキルとして定義、LLMが必要に応じて選択
@@ -82,6 +83,22 @@ $ npm start
 端末本来のscrollback・選択・コピーを優先したい場合は、`npm start -- --no-alt-screen`
 （配布版は`localllm --no-alt-screen`）でclassic stream表示として起動できます。
 TTYの端末能力が不足または判定不能な場合、自動的に簡易表示へは切り替えず、原因と対処を表示して停止します。
+
+### Native Computer Use（明示opt-in）
+
+Playwrightのbrowser tab内操作とは別に、選択したOS windowのcapture・click・text入力・keyを行えます。Windows/Linux X11ではwheel scrollにも対応します。既定は無効です。
+
+```bash
+# このsessionだけ有効化
+npm start -- --computer-use
+
+# dependencyと可視window列挙だけを副作用なしで診断
+node dist/index.js --check-computer-use
+```
+
+Windows、macOS、Linux X11に対応します。macOSは`cliclick`とAccessibility/Screen Recording権限、LinuxはX11、`xdotool`、ImageMagickが必要です。Waylandやdependency不足ではbrowser操作へ自動代替せず、復旧方法を表示して起動を停止します。
+
+全`computer_*`操作はlocal CLI限定で、autorunや永続許可の設定に関係なく呼出しごとに確認します。Discord/Slackからのhost desktop操作と全画面captureは提供しません。詳細は[Native Computer Use設計](docs/native-computer-use.md)を参照してください。
 
 ### Safe mode（カスタマイズ起因の故障診断）
 

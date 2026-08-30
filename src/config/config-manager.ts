@@ -87,6 +87,7 @@ export function loadConfig(): Config {
       ),
     },
     context: { ...defaults.context, ...parsed.context },
+    features: { ...defaults.features, ...parsed.features },
     discord: { ...(defaults.discord ?? { enabled: false, webhookUrl: "" }), ...parsed.discord },
     slack: { ...(defaults.slack ?? { enabled: false, webhookUrl: "" }), ...parsed.slack },
     // Room 設定は bindings / autoResume を個別にマージし、 手編集や旧 config での

@@ -461,6 +461,7 @@ CLIコマンド `/knowledge vault <path>` でも設定可能。設定すると�
 | `logging.retention.sessionMaxCount` | number | 100 | セッション履歴を新しい順にこの件数まで保持し、超過分を起動時に削除する。`0` で無制限 |
 | `updateCheck.enabled` | boolean | true | 起動時に GitHub の最新リリースを確認し、新しければ1行通知する (TTY のみ・失敗は黙ってスキップ)。`false` でオフ |
 | `pluginDirs` | string[] | `[]` | 明示的に信頼して読み込むローカルplugin bundle directory。相対pathは起動時CWD基準。`--plugin-dir <path>`でも追加可能。自動探索しない（docs/plugin-bundle-design.md） |
+| `features.computerUse` | `"on"` \| `"off"` | `"off"` | Native Computer Useを明示有効化する。利用不能時はbrowserへ代替せず起動を停止する。session限定なら`--computer-use`を使用（docs/native-computer-use.md） |
 
 CLIコマンド `/parallel <N>` で実行時に変更可能。
 
