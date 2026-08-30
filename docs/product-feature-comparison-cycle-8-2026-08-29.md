@@ -101,4 +101,4 @@
 - `npm.cmd run validate:skills -- --root .agents/skills` / `--root .claude/skills`: passed
 - `npm.cmd run analyze:loop -- --since 2026-08-27`: session 1、user span 1、stuck-loop 0
 - Windowsローカルでは`test:pty`は設計どおり非対応。Linux/macOS PTY（macOSは幅20、日本語右端、scrollback）は最新push SHAのCI結果で終端する
-- push後CI: 未実行（最新SHAの全dependent jobsがgreenになるまでcycleを閉じない）
+- push後CI: `1dfb2c5`はLinux/macOS PTY fixtureの未知model capability未設定で失敗。製品コードの推測値を戻さずfixtureへtier/contextWindowを明示し、修正SHAの全dependent jobsを再評価する

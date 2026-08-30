@@ -21,6 +21,7 @@ writeFileSync(
   join(configDir, "config.json"),
   JSON.stringify({
     mainLLM: { providerType: "vllm", baseUrl: "http://127.0.0.1:9", model: "pty-smoke", contextWindow: 8192 },
+    modelCapabilities: { "pty-smoke": { tier: "T2", contextWindow: 8192 } },
     updateCheck: { enabled: false },
     mcpEnabled: false,
   }),
