@@ -78,7 +78,14 @@
 
 ### 5.3 CI closure
 
-実装commitのpush後にlatest SHAの全依存jobを監視し、結果をclosure commitへ記録する。
+- 実装境界: `6be5170`（`feat(cli): 差分レビューとセッション整理を実用化する`）
+- GitHub Actions run: [33299645255](https://github.com/t2k2pp/lllmAgents/actions/runs/33299645255)
+- `Commit message policy`: success
+- `test (ubuntu-latest)`: success。bubblewrap統合、実PTY、npm package実内容検証を含む
+- `test (macos-latest)`: success。Seatbelt統合、実PTY、npm package実内容検証を含む
+- `test (windows-latest)`: success。Windows Git解決、unit/E2E、npm package実内容検証を含む
+- dependent `Windows deploy / exe smoke`: success。SEA version、commit revision、agent/skill asset、CJS非混入を確認
+- 本記録のclosure commitもlatest SHAとして同じworkflowを再実行し、全依存jobのsuccessを最終handoff条件にする
 
 ## 6. 残課題の終端判断
 
