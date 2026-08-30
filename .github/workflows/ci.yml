@@ -67,9 +67,10 @@ jobs:
         if: runner.os != 'Windows'
         run: npm run test:pty
       # 実行時依存の既知脆弱性 (High 以上) で fail させる (PR-05)。
-      # devDependencies はビルド時のみ使うため対象外 (--omit=dev)。
+      # devDependencies はビルド時のみ使うため対象外 (--omit=dev)。OS ごとの
+      # optional package 実体ではなく lockfile を監査し、全 runner で同じ木を判定する。
       - name: Audit runtime dependencies
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --package-lock-only --omit=dev --audit-level=high
       - name: Validate npm package contents
         run: npm run validate:package
 

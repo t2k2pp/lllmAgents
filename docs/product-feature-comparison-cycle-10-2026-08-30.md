@@ -59,6 +59,7 @@ Codex/Claudeのremote controlやClaudeの永続app許可をそのまま追従し
 | CU-05 | 並行test中のWindows smokeでforeground化が一過性失敗 | `SetForegroundWindow`だけではWindows foreground lockを越えられない | foreground/target input threadを操作中だけattachし、top/active/foregroundを揃えて必ず最終検証 | 修正後に実GUI smokeを3回連続実行 |
 | CU-06 | macOSの左側displayでclick座標がrelative扱いになる | cliclickは負数をrelative、`=-100`をabsoluteとして解釈する | global座標の負数へ`=`を付け、right double-clickも2 eventとして構築 | multi-display argv contract test |
 | CU-07 | macOSのscrollが入力せず待機する | cliclickの`w:`をwheelと誤認したが、公式仕様ではwait | macOSでは`computer_scroll`を非公開とし、driver直呼出しも理由付きで失敗 | tool露出/driver fail-fast test |
+| CU-08 | latest SHAのmacOS CIだけruntime auditが400で失敗 | OS別optional packageを含む実体treeの監査が旧quick endpointへfallbackし、`Invalid package tree`になった | `--package-lock-only`で全OSが同一lockfileを監査。endpointエラーやHigh以上は引き続きfail | local lockfile auditと次pushの3 OS CI |
 
 ## 6. 評価
 
@@ -81,6 +82,7 @@ Codex/Claudeのremote controlやClaudeの永続app許可をそのまま追従し
 - `npm.cmd run test:e2e`: 7 scenarios成功
 - `npm.cmd run lint`: error 0（既存warning/infoは非blocking設定）
 - `npm.cmd run validate:skills`、`validate:package`（522 files / 9.2 MiB）、runtime audit（0 vulnerabilities）成功
+- 初回pushのmacOS `Audit runtime dependencies`は脆弱性ではなくnpm registryの`400 Invalid package tree`で失敗。lockfile限定監査へ修正し、OS別optional package実体による揺れを除去
 - fresh `dist/localllm.exe`をSEA buildし、`--version`、`--help`、`--check-computer-use`を実行。既存`deploy/localllm.exe`は実行中PIDのlockを検出して安全に上書き拒否したため、deploy directory全体のsmokeはpush後CIへ委ねる
 
 ## 7. 残差

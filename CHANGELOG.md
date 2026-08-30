@@ -11,6 +11,7 @@
 - 選択window IDの再検証、window限定capture、local CLI限定、呼出しごとの一回許可を強制し、remote・autorun・永続許可による回避を拒否
 - OS dependency不足とWaylandをbrowserへ暗黙代替せずfail-fastし、副作用なしの`--check-computer-use`を追加
 - Windows専用可視window smokeで日本語入力、key/chord、click、scroll、対象windowのbefore/after captureを実動作検証
+- runtime auditをlockfile限定にし、macOSのoptional dependency実体treeだけがnpm旧endpointで400になるCI差を解消
 
 ### 機能比較・差分レビュー cycle 9 (2026-08-30)
 
