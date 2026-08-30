@@ -44,6 +44,10 @@ function samePath(a: string, b: string): boolean {
   return safeResolvePath(a) === safeResolvePath(b);
 }
 
+function resolveRepositoryPath(git: string, cwd: string, selector: "--show-toplevel" | "--git-common-dir"): string {
+  return safeResolvePath(runGitSync(git, ["rev-parse", "--path-format=absolute", selector], cwd).trim());
+}
+
 /** agent単位のdetached worktreeを作成・保持・回収するmain-orchestrator専用manager。 */
 export class WorktreeManager {
   private readonly git: string;
@@ -57,10 +61,8 @@ export class WorktreeManager {
   constructor(options: { mainRoot?: string; managedRoot?: string; git?: string } = {}) {
     this.git = options.git ?? resolveGitExecutable();
     this.mainRoot = safeResolvePath(options.mainRoot ?? process.cwd());
-    this.repoRoot = safeResolvePath(runGitSync(this.git, ["rev-parse", "--show-toplevel"], this.mainRoot).trim());
-    this.commonDir = safeResolvePath(
-      path.resolve(this.repoRoot, runGitSync(this.git, ["rev-parse", "--git-common-dir"], this.repoRoot).trim()),
-    );
+    this.repoRoot = resolveRepositoryPath(this.git, this.mainRoot, "--show-toplevel");
+    this.commonDir = resolveRepositoryPath(this.git, this.repoRoot, "--git-common-dir");
     const repoHash = createHash("sha256").update(this.commonDir).digest("hex").slice(0, 16);
     this.managedRoot = safeResolvePath(
       options.managedRoot ?? path.join(os.homedir(), ".localllm", "worktrees", repoHash),
@@ -397,12 +399,14 @@ export class WorktreeManager {
   private verifyIdentity(worktreePath: string, expectedHead?: string): void {
     this.assertManagedPath(worktreePath);
     if (!fs.existsSync(worktreePath)) throw new Error(`Managed worktreeが見つかりません: ${worktreePath}`);
-    const top = safeResolvePath(runGitSync(this.git, ["rev-parse", "--show-toplevel"], worktreePath).trim());
-    const common = safeResolvePath(
-      path.resolve(top, runGitSync(this.git, ["rev-parse", "--git-common-dir"], worktreePath).trim()),
-    );
+    const top = resolveRepositoryPath(this.git, worktreePath, "--show-toplevel");
+    const common = resolveRepositoryPath(this.git, worktreePath, "--git-common-dir");
     if (!samePath(top, worktreePath) || !samePath(common, this.commonDir)) {
-      throw new Error("Managed worktreeのGit identityが作成時と一致しません。操作を停止しました。");
+      throw new Error(
+        "Managed worktreeのGit identityが作成時と一致しません。操作を停止しました。" +
+          ` top=${top} expectedTop=${safeResolvePath(worktreePath)}` +
+          ` common=${common} expectedCommon=${this.commonDir}`,
+      );
     }
     if (expectedHead) {
       const head = runGitSync(this.git, ["rev-parse", "HEAD"], worktreePath).trim();
