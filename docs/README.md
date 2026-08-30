@@ -38,6 +38,7 @@
 
 | ドキュメント | Status | 内容 |
 |---|---|---|
+| [product-feature-comparison-cycle-11-worktree-design-2026-08-31.md](product-feature-comparison-cycle-11-worktree-design-2026-08-31.md) | implemented | Codex/Claude比較、類似機能監査、sub-agent worktree分離の実装・安全・評価記録 |
 | [harness-engineering.md](harness-engineering.md) | implemented | ハーネス改善の起点 (テトリスセッション分析→システムプロンプト再設計ほか) |
 | [harness-engineering-phase5.md](harness-engineering-phase5.md) | in-progress | Phase 5 計画 — Claude Code 比較で見える本質的弱点と段階的改善 |
 | [harness-engineering-phase5-progress.md](harness-engineering-phase5-progress.md) | in-progress | Phase 5 の進捗トラッカー |
@@ -136,7 +137,6 @@
 | [autonomy-improvement-proposal.md](autonomy-improvement-proposal.md) | proposal | 他エージェントアプリ比較と自律性向上の提案 |
 | [agent-loop-efficiency-review.md](agent-loop-efficiency-review.md) | proposal | Agent Loop 効率レビュー (米国株投資支援アプリのログ分析起点) |
 | [changelog-feature-backlog.md](changelog-feature-backlog.md) | proposal | Claude Code changelog 由来の機能バックログ |
-| [product-feature-comparison-cycle-11-worktree-design-2026-08-31.md](product-feature-comparison-cycle-11-worktree-design-2026-08-31.md) | design-ready | Codex/Claude比較、既存類似機能監査、sub-agent worktree分離の実装・安全・評価設計 |
 | [prompt-tech-debt-review.md](prompt-tech-debt-review.md) | record | プロンプト棚卸しレビュー (2026-04-29) |
 
 ## 手順書・参照

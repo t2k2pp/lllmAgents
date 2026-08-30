@@ -46,6 +46,7 @@ function createAgentMarkdown(opts: {
   tools?: string[];
   allowedTools?: string[];
   skills?: string[];
+  isolation?: "shared" | "worktree" | string;
   body?: string;
 }): string {
   const lines: string[] = ["---"];
@@ -54,6 +55,7 @@ function createAgentMarkdown(opts: {
   if (opts.tools) lines.push(`tools: [${opts.tools.join(", ")}]`);
   if (opts.allowedTools) lines.push(`allowedTools: [${opts.allowedTools.join(", ")}]`);
   if (opts.skills) lines.push(`skills: [${opts.skills.join(", ")}]`);
+  if (opts.isolation) lines.push(`isolation: ${opts.isolation}`);
   lines.push("---");
   if (opts.body) lines.push(opts.body);
   return lines.join("\n");
@@ -225,6 +227,7 @@ describe("AgentDefinitionLoader", () => {
       expect(reviewer!.tools).toEqual(["file_read", "grep", "glob"]);
       expect(reviewer!.allowedTools).toEqual(["file_read", "grep"]);
       expect(reviewer?.skills).toEqual(["code-review", "tdd"]);
+      expect(reviewer?.isolation).toBe("shared");
       expect(reviewer!.systemPrompt).toContain("You are a code review agent.");
       expect(reviewer!.systemPrompt).toContain("Provide detailed feedback.");
     });
@@ -284,6 +287,25 @@ describe("AgentDefinitionLoader", () => {
 
       expect(agent).toBeDefined();
       expect(agent!.tools).toEqual(["bash", "file_read", "grep"]);
+    });
+
+    it("worktree isolationをparseし、不正値はagent全体を無効化する", () => {
+      const projectAgentsDir = path.resolve(".localllm", "agents");
+      setupAgentDirs({
+        [projectAgentsDir]: [
+          {
+            filename: "isolated.md",
+            content: createAgentMarkdown({ name: "isolated", isolation: "worktree", body: "Edit safely." }),
+          },
+          {
+            filename: "unsafe.md",
+            content: createAgentMarkdown({ name: "unsafe", isolation: "maybe", body: "Invalid." }),
+          },
+        ],
+      });
+      const defs = loader.loadAll();
+      expect(defs.find((definition) => definition.name === "isolated")?.isolation).toBe("worktree");
+      expect(defs.find((definition) => definition.name === "unsafe")).toBeUndefined();
     });
   });
 

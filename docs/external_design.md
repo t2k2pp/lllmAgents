@@ -228,7 +228,7 @@ graph TD
         V1(vision_analyze):::safe
     end
 
-    subgraph AgentTools [タスク・エージェント管理 - 10ツール]
+    subgraph AgentTools [タスク・エージェント管理 - 13ツール]
         A1(todo_write):::safe
         A2(task):::ask
         A3(task_output):::safe
@@ -239,6 +239,9 @@ graph TD
         A8(exit_plan_mode):::safe
         A9(skill):::ask
         A10(ask_user):::safe
+        A11(task_diff):::safe
+        A12(task_apply):::ask
+        A13(task_discard):::ask
     end
 
     subgraph Computer [Native Computer Use - 6ツール]
@@ -262,7 +265,7 @@ graph TD
 ツールの権限は2種類あります。
 
 - **`auto`（自動許可）**: 常にユーザー確認なしで実行されます。以下の2層で決定されます。
-  - `INHERENTLY_SAFE_TOOLS`（コード定数）: `ask_user`, `todo_write`, `enter_plan_mode`, `exit_plan_mode`, `task_output`, `task_list`, `task_send`, `task_cancel`, `schedule_create`, `schedule_list`, `schedule_delete`, `current_datetime`, `sandbox_info` — 設定に関わらず **常に** auto
+  - `INHERENTLY_SAFE_TOOLS`（コード定数）: `ask_user`, `todo_write`, `enter_plan_mode`, `exit_plan_mode`, `task_output`, `task_list`, `task_send`, `task_cancel`, `task_diff`, `schedule_create`, `schedule_list`, `schedule_delete`, `current_datetime`, `sandbox_info` — 設定に関わらず **常に** auto
   - `autoApproveTools`（設定ファイル）: デフォルトは `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`, `web_search`, `web_fetch`
 - **`ask`（要確認）**: 実行前にインタラクティブな承認ダイアログを表示します。明示的に指定されていないツールはすべて `ask` にフォールバックします。
 
@@ -299,7 +302,10 @@ graph TD
 | | `task_output` | auto (常時) | バックグラウンドで起動したサブエージェントの実行結果を取得します。 |
 | | `task_list` | auto (常時) | background taskの状態・type・description・開始/完了時刻・追加指示累計を一覧します。prompt・指示・結果本文は返しません。 |
 | | `task_send` | auto (常時) | running taskへID指定で追加指示を送ります。LLM生成中は中断して次turnへ移り、tool実行中はその1件の完了後に未実行toolをskipします。1件4000文字、待機20件、総30 LLM turn上限。 |
-| | `task_cancel` | auto (常時) | running taskをID指定で取消し、LLM生成を中断します。進行中toolは戻った直後に停止します。 |
+| | `task_cancel` | auto (常時) | running taskをID指定で取消し、LLM生成を中断します。進行中toolは戻った直後に停止し、worktreeの変更は破棄せず回収可能にします。 |
+| | `task_diff` | auto (常時) | 保持中managed worktreeのstage/unstage/untracked/binaryを含む差分と変更pathを返します。 |
+| | `task_apply` | ask | cleanかつ`HEAD === baseCommit`のmain checkoutへ隔離後のfilesystem状態を適用し、hash/mode/typeを再検証します。自動merge/commitはしません。 |
+| | `task_discard` | ask | agent IDで登録済みのmanaged worktreeだけを、変更一覧の確認後に明示破棄します。 |
 | **session schedule** | `schedule_create` | auto (常時) | 現REPL sessionへ10秒〜7日の一回／反復promptを登録します。既定one-shot、最大50件。 |
 | | `schedule_list` | auto (常時) | active scheduleの次回時刻、実行・skip・失敗診断を一覧します。 |
 | | `schedule_delete` | auto (常時) | ID指定または全件のscheduleを取消します。 |

@@ -22,6 +22,14 @@ import { getSlot } from "../config/model-registry.js";
 import { globalTokenTracker, type UsageSlot } from "../cost/token-tracker.js";
 import { globalCostCalculator } from "../cost/cost-calculator.js";
 import type { SkillDefinition, SkillRegistry } from "../skills/skill-registry.js";
+import {
+  createSharedWorkspace,
+  workspacePromptBlock,
+  type WorkspaceContext,
+  type WorkspaceMode,
+} from "./workspace-context.js";
+import { WorktreeManager, type ManagedWorktreeRecord, type WorktreeOperationResult } from "../git/worktree-manager.js";
+import type { RequestSource } from "../security/permission-manager.js";
 
 const MAX_SUB_ITERATIONS = 30;
 
@@ -40,6 +48,7 @@ interface SubAgentConfig {
   maxTurns?: number;
   allowedTools?: string[];
   skills?: string[];
+  isolation: WorkspaceMode;
 }
 
 // ID-014 (a) (2026-05-01): FALLBACK_CONFIGS は完全撤去。
@@ -115,6 +124,7 @@ function agentDefToConfig(def: AgentDefinition): Omit<SubAgentConfig, "descripti
     systemPrompt: def.systemPrompt,
     allowedTools: def.allowedTools.length > 0 ? def.allowedTools : undefined,
     skills: def.skills.length > 0 ? def.skills : undefined,
+    isolation: def.isolation,
   };
 }
 
@@ -124,6 +134,12 @@ export interface SubAgentResult {
   description: string;
   result: string;
   success: boolean;
+  isolation?: WorkspaceMode;
+  workspaceId?: string;
+  baseCommit?: string;
+  worktreePath?: string;
+  workspaceState?: ManagedWorktreeRecord["workspaceState"];
+  changedFiles?: string[];
 }
 
 export type BackgroundTaskStatus = "running" | "completed" | "failed" | "cancelled";
@@ -137,6 +153,12 @@ export interface BackgroundTaskSnapshot {
   completedAt?: string;
   /** 本文を露出せず、親から受理した追加指示の累計だけを可視化する。 */
   followUpCount: number;
+  isolation: WorkspaceMode;
+  workspaceId?: string;
+  baseCommit?: string;
+  worktreePath?: string;
+  workspaceState?: ManagedWorktreeRecord["workspaceState"];
+  changedFiles?: string[];
 }
 
 interface BackgroundTaskRecord extends BackgroundTaskSnapshot {
@@ -221,11 +243,16 @@ export function resolvePreloadedSkills(
   return resolved;
 }
 
-function buildPreloadedSkillBlock(skills: readonly SkillDefinition[], permissions: PermissionManager): string {
+function buildPreloadedSkillBlock(
+  skills: readonly SkillDefinition[],
+  permissions: PermissionManager,
+  workspace: WorkspaceContext,
+): string {
   if (skills.length === 0) return "";
   const sections = skills.map((skill) => {
     const skillDir = path.dirname(skill.filePath);
-    permissions.addAllowedDir(skillDir);
+    // 本文は既にsystem promptへ注入済み。worktree agentへskill directoryの書込権限を付与しない。
+    if (workspace.mode === "shared") permissions.addAllowedDir(skillDir);
     const content = skill.content.replace(/\$\{SKILL_DIR\}/g, skillDir);
     return `<preloaded-skill name="${escapeAttribute(skill.name)}" skill-dir="${escapeAttribute(skillDir)}">\n${content}\n</preloaded-skill>`;
   });
@@ -263,8 +290,10 @@ export class SubAgent {
     private readonly usageSlot: UsageSlot = "subagent",
     skillRegistry?: SkillRegistry,
     agentDefinitionLoader?: AgentDefinitionLoader,
+    private readonly workspace: WorkspaceContext = createSharedWorkspace(),
+    agentId?: string,
   ) {
-    this.agentId = `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    this.agentId = agentId ?? `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     const resolved = resolveAgentConfig(type, agentDefinitionLoader);
     if (!resolved) {
@@ -278,13 +307,14 @@ export class SubAgent {
       skillRegistry,
       String(type),
     );
-    const preloadBlock = buildPreloadedSkillBlock(preloadedSkills, permissions);
+    const preloadBlock = buildPreloadedSkillBlock(preloadedSkills, permissions, this.workspace);
     const baseSystemPrompt = overrides?.systemPrompt ?? resolved.systemPrompt;
+    const isolationBlock = workspacePromptBlock(this.workspace);
 
     this.config = {
       ...resolved,
       description,
-      systemPrompt: preloadBlock ? `${baseSystemPrompt}\n\n${preloadBlock}` : baseSystemPrompt,
+      systemPrompt: [baseSystemPrompt, preloadBlock, isolationBlock].filter(Boolean).join("\n\n"),
       ...(overrides?.allowedTools !== undefined && { allowedTools: overrides.allowedTools }),
       skills: preloadedSkills.map((skill) => skill.name),
       maxTurns: normalizeSubAgentMaxTurns(overrides?.maxTurns ?? resolved.maxTurns),
@@ -299,7 +329,14 @@ export class SubAgent {
     this.history = new MessageHistory(this.config.systemPrompt);
     // ToolExecutor にも自分の ancestors を渡し、 task / second_llm_* ツールが呼ばれた時に
     // さらに 1 段拡張した ancestors を子に伝播できるようにする
-    this.toolExecutor = new ToolExecutor(this.filteredRegistry, permissions, undefined, this.selfAncestors);
+    this.toolExecutor = new ToolExecutor(
+      this.filteredRegistry,
+      permissions,
+      undefined,
+      this.selfAncestors,
+      undefined,
+      this.workspace,
+    );
   }
 
   /** 自分の ancestors を返す (D1: 主にテスト・デバッグ用) */
@@ -567,6 +604,8 @@ export class SubAgent {
 
 export class SubAgentManager {
   private backgroundTasks = new Map<string, BackgroundTaskRecord>();
+  private worktreeManager?: WorktreeManager;
+  private worktreeCapabilityError?: string;
 
   constructor(
     private provider: LLMProvider,
@@ -575,7 +614,100 @@ export class SubAgentManager {
     private permissions: PermissionManager,
     private skillRegistry?: SkillRegistry,
     private agentDefinitionLoader?: AgentDefinitionLoader,
-  ) {}
+    worktreeManager?: WorktreeManager,
+    private readonly mainWorkspaceRoot: string = process.cwd(),
+  ) {
+    this.worktreeManager = worktreeManager;
+  }
+
+  private loader(): AgentDefinitionLoader {
+    return this.agentDefinitionLoader ?? getLoader();
+  }
+
+  private effectiveIsolation(type: SubAgentType, requested?: WorkspaceMode): WorkspaceMode {
+    const required = this.loader().get(type)?.isolation ?? "shared";
+    return required === "worktree" || requested === "worktree" ? "worktree" : "shared";
+  }
+
+  private workspaceFor(
+    agentId: string,
+    isolation: WorkspaceMode,
+    source: RequestSource,
+    parentAncestors: AncestorTypes,
+  ): WorkspaceContext {
+    if (isolation === "shared") return createSharedWorkspace(this.mainWorkspaceRoot);
+    if (source !== "cli") {
+      throw new Error(
+        `Worktree isolation is restricted to the local CLI (observed source: ${source}). ` +
+          "ローカルCLIから再実行してください。shared modeへは自動切替しません。",
+      );
+    }
+    if (parentAncestors.size > 0) {
+      throw new Error(
+        "Worktree isolation can only be created by the main orchestrator. " +
+          "Nested/second-LLM delegationへshared modeで自動降格しません。mainからworktree taskを起動してください。",
+      );
+    }
+    try {
+      this.worktreeManager ??= new WorktreeManager({ mainRoot: this.mainWorkspaceRoot });
+      this.worktreeCapabilityError = undefined;
+    } catch (error) {
+      this.worktreeCapabilityError = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
+    return this.worktreeManager.create(agentId);
+  }
+
+  /** startup時にdurable metadataだけを発見する。失敗はshared taskを壊さずtask_listへ可視化する。 */
+  initializeWorktreeRecovery(): void {
+    if (this.worktreeManager) return;
+    try {
+      this.worktreeManager = new WorktreeManager({ mainRoot: this.mainWorkspaceRoot });
+      this.worktreeCapabilityError = undefined;
+    } catch (error) {
+      this.worktreeCapabilityError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  private attachWorkspace(result: SubAgentResult, agentId: string, workspace: WorkspaceContext): SubAgentResult {
+    if (workspace.mode !== "worktree") return { ...result, isolation: "shared" };
+    const record = this.worktreeManager?.finalize(agentId);
+    return {
+      ...result,
+      isolation: "worktree",
+      workspaceId: record?.workspaceId ?? workspace.workspaceId,
+      baseCommit: record?.baseCommit ?? workspace.baseCommit,
+      worktreePath: record?.worktreePath ?? workspace.root,
+      workspaceState: record?.workspaceState ?? "error",
+      changedFiles: record?.changedFiles ?? [],
+    };
+  }
+
+  private createAgent(
+    agentId: string,
+    picked: SubAgentModelChoice,
+    type: SubAgentType,
+    description: string,
+    overrides: SubAgentConfigOverrides | undefined,
+    parentAncestors: AncestorTypes,
+    workspace: WorkspaceContext,
+  ): SubAgent {
+    return new SubAgent(
+      picked.provider,
+      picked.model,
+      this.toolRegistry,
+      this.permissions,
+      type,
+      description,
+      overrides,
+      parentAncestors,
+      picked.usageSlot,
+      this.skillRegistry,
+      this.agentDefinitionLoader,
+      workspace,
+      agentId,
+    );
+  }
 
   /**
    * サブエージェント起動に使うProvider/Modelを差し替える。
@@ -633,32 +765,44 @@ export class SubAgentManager {
     modelRef?: string,
     maxTurns?: number,
     skills?: string[],
+    isolation?: WorkspaceMode,
+    source: RequestSource = "cli",
   ): string {
     const picked = this.pickModel(type, modelRef);
-    const agent = new SubAgent(
-      picked.provider,
-      picked.model,
-      this.toolRegistry,
-      this.permissions,
+    const id = `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const effectiveIsolation = this.effectiveIsolation(type, isolation);
+    const workspace = this.workspaceFor(id, effectiveIsolation, source, parentAncestors);
+    const agent = this.createAgent(
+      id,
+      picked,
       type,
       description,
       { maxTurns: normalizeSubAgentMaxTurns(maxTurns), skills },
       parentAncestors,
-      picked.usageSlot,
-      this.skillRegistry,
-      this.agentDefinitionLoader,
+      workspace,
     );
-    const id = agent.getAgentId();
     const startedAt = new Date().toISOString();
     const promise = agent
       .run(prompt)
       .then((result) => {
         const current = this.backgroundTasks.get(id);
-        if (!current || current.status === "cancelled") return current?.result ?? result;
+        if (!current || current.status === "cancelled") {
+          const completed = this.attachWorkspace(current?.result ?? result, id, workspace);
+          if (current) {
+            current.result = completed;
+            current.workspaceState = completed.workspaceState;
+            current.changedFiles = completed.changedFiles;
+          }
+          return completed;
+        }
         current.result = result;
         current.status = result.success ? "completed" : "failed";
         current.completedAt = new Date().toISOString();
-        return result;
+        const completed = this.attachWorkspace(result, id, workspace);
+        current.result = completed;
+        current.workspaceState = completed.workspaceState;
+        current.changedFiles = completed.changedFiles;
+        return completed;
       })
       .catch((error) => {
         const current = this.backgroundTasks.get(id);
@@ -669,13 +813,21 @@ export class SubAgentManager {
           result: `Error: ${error instanceof Error ? error.message : String(error)}`,
           success: false,
         };
-        if (current?.status === "cancelled") return current.result ?? result;
+        if (current?.status === "cancelled") {
+          const completed = this.attachWorkspace(current.result ?? result, id, workspace);
+          current.result = completed;
+          current.workspaceState = completed.workspaceState;
+          current.changedFiles = completed.changedFiles;
+          return completed;
+        }
         if (current) {
-          current.result = result;
+          current.result = this.attachWorkspace(result, id, workspace);
           current.status = "failed";
           current.completedAt = new Date().toISOString();
+          current.workspaceState = current.result.workspaceState;
+          current.changedFiles = current.result.changedFiles;
         }
-        return result;
+        return current?.result ?? this.attachWorkspace(result, id, workspace);
       });
     this.backgroundTasks.set(id, {
       agentId: id,
@@ -684,6 +836,16 @@ export class SubAgentManager {
       status: "running",
       startedAt,
       followUpCount: 0,
+      isolation: effectiveIsolation,
+      ...(workspace.mode === "worktree"
+        ? {
+            workspaceId: workspace.workspaceId,
+            baseCommit: workspace.baseCommit,
+            worktreePath: workspace.root,
+            workspaceState: "active" as const,
+            changedFiles: [],
+          }
+        : {}),
       agent,
       promise,
     });
@@ -698,44 +860,56 @@ export class SubAgentManager {
     modelRef?: string,
     maxTurns?: number,
     skills?: string[],
+    isolation?: WorkspaceMode,
+    source: RequestSource = "cli",
   ): Promise<SubAgentResult> {
     const picked = this.pickModel(type, modelRef);
-    const agent = new SubAgent(
-      picked.provider,
-      picked.model,
-      this.toolRegistry,
-      this.permissions,
+    const id = `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const effectiveIsolation = this.effectiveIsolation(type, isolation);
+    const workspace = this.workspaceFor(id, effectiveIsolation, source, parentAncestors);
+    const agent = this.createAgent(
+      id,
+      picked,
       type,
       description,
       { maxTurns: normalizeSubAgentMaxTurns(maxTurns), skills },
       parentAncestors,
-      picked.usageSlot,
-      this.skillRegistry,
-      this.agentDefinitionLoader,
+      workspace,
     );
-    return agent.run(prompt);
+    try {
+      return this.attachWorkspace(await agent.run(prompt), id, workspace);
+    } catch (error) {
+      this.worktreeManager?.finalize(id);
+      throw error;
+    }
   }
 
   async launchParallel(
-    tasks: Array<{ type: SubAgentType; description: string; prompt: string; modelRef?: string; skills?: string[] }>,
+    tasks: Array<{
+      type: SubAgentType;
+      description: string;
+      prompt: string;
+      modelRef?: string;
+      skills?: string[];
+      isolation?: WorkspaceMode;
+    }>,
     parentAncestors: AncestorTypes = ROOT_ANCESTORS,
   ): Promise<SubAgentResult[]> {
     const promises = tasks.map((task) => {
       const picked = this.pickModel(task.type, task.modelRef);
-      const agent = new SubAgent(
-        picked.provider,
-        picked.model,
-        this.toolRegistry,
-        this.permissions,
+      const id = `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const effectiveIsolation = this.effectiveIsolation(task.type, task.isolation);
+      const workspace = this.workspaceFor(id, effectiveIsolation, "cli", parentAncestors);
+      const agent = this.createAgent(
+        id,
+        picked,
         task.type,
         task.description,
         task.skills ? { skills: task.skills } : undefined,
         parentAncestors,
-        picked.usageSlot,
-        this.skillRegistry,
-        this.agentDefinitionLoader,
+        workspace,
       );
-      return agent.run(task.prompt);
+      return agent.run(task.prompt).then((result) => this.attachWorkspace(result, id, workspace));
     });
     return Promise.allSettled(promises).then((results) =>
       results.map((r, i) =>
@@ -784,7 +958,7 @@ export class SubAgentManager {
   async getResult(agentId: string): Promise<SubAgentResult | null> {
     const task = this.backgroundTasks.get(agentId);
     if (!task) return null;
-    const result = task.result ?? (await task.promise);
+    const result = task.isolation === "worktree" ? await task.promise : (task.result ?? (await task.promise));
     this.backgroundTasks.delete(agentId);
     return result;
   }
@@ -795,7 +969,21 @@ export class SubAgentManager {
 
   listBackgroundTasks(): BackgroundTaskSnapshot[] {
     return [...this.backgroundTasks.values()].map(
-      ({ agentId, type, description, status, startedAt, completedAt, followUpCount }) => ({
+      ({
+        agentId,
+        type,
+        description,
+        status,
+        startedAt,
+        completedAt,
+        followUpCount,
+        isolation,
+        workspaceId,
+        baseCommit,
+        worktreePath,
+        workspaceState,
+        changedFiles,
+      }) => ({
         agentId,
         type,
         description,
@@ -803,8 +991,44 @@ export class SubAgentManager {
         startedAt,
         ...(completedAt ? { completedAt } : {}),
         followUpCount,
+        isolation,
+        ...(workspaceId ? { workspaceId } : {}),
+        ...(baseCommit ? { baseCommit } : {}),
+        ...(worktreePath ? { worktreePath } : {}),
+        ...(workspaceState ? { workspaceState } : {}),
+        ...(changedFiles ? { changedFiles: [...changedFiles] } : {}),
       }),
     );
+  }
+
+  getBackgroundTask(agentId: string): BackgroundTaskSnapshot | undefined {
+    return this.listBackgroundTasks().find((task) => task.agentId === agentId);
+  }
+
+  listRecoverableWorktrees(): ManagedWorktreeRecord[] {
+    return this.worktreeManager?.listRecoverable() ?? [];
+  }
+
+  getWorktreeCapabilityError(): string | undefined {
+    return this.worktreeCapabilityError;
+  }
+
+  diffWorktree(agentId: string): { text: string; changedFiles: string[] } {
+    if (!this.worktreeManager)
+      throw new Error("WorktreeManager is not initialized. worktree taskを先に起動してください。");
+    return this.worktreeManager.diff(agentId);
+  }
+
+  applyWorktree(agentId: string): WorktreeOperationResult {
+    if (!this.worktreeManager)
+      throw new Error("WorktreeManager is not initialized. worktree taskを先に起動してください。");
+    return this.worktreeManager.apply(agentId);
+  }
+
+  discardWorktree(agentId: string): WorktreeOperationResult {
+    if (!this.worktreeManager)
+      throw new Error("WorktreeManager is not initialized. worktree taskを先に起動してください。");
+    return this.worktreeManager.discard(agentId);
   }
 
   sendBackground(agentId: string, message: string): SendBackgroundResult {

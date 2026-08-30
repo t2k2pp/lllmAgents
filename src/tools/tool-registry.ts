@@ -1,5 +1,6 @@
 import type { ToolDefinition } from "../providers/base-provider.js";
 import type { AncestorTypes } from "../agent/delegation-context.js";
+import type { WorkspaceContext } from "../agent/workspace-context.js";
 
 export interface ToolResult {
   success: boolean;
@@ -37,12 +38,16 @@ export interface ToolExecutionContext {
    * 省略時は cli 扱い。
    */
   source?: "cli" | "discord" | "slack";
+  /** agent固有のfilesystem実行境界。sub-agent worktreeではprocess.cwd()と異なる。 */
+  workspace?: WorkspaceContext;
 }
 
 export interface ToolHandler {
   name: string;
   definition: ToolDefinition;
   execute(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult>;
+  /** worktree agentからの利用可否。未指定の非core/plugin/MCP toolはfail-closed。 */
+  workspacePolicy?: "aware" | "agnostic" | "forbidden";
 }
 
 export class ToolRegistry {

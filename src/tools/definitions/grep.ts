@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
+import { createSharedWorkspace, resolveWorkspacePath } from "../../agent/workspace-context.js";
 
 export const grepTool: ToolHandler = {
   name: "grep",
@@ -43,9 +44,10 @@ export const grepTool: ToolHandler = {
       },
     },
   },
-  async execute(params: Record<string, unknown>): Promise<ToolResult> {
+  async execute(params: Record<string, unknown>, context): Promise<ToolResult> {
     const pattern = params.pattern as string;
-    const searchPath = path.resolve((params.path as string) ?? process.cwd());
+    const workspace = context?.workspace ?? createSharedWorkspace();
+    const searchPath = resolveWorkspacePath(workspace, (params.path as string) ?? ".");
     const fileGlob = params.glob as string | undefined;
     const caseInsensitive = (params.case_insensitive as boolean) ?? false;
 

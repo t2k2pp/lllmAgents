@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { CheckpointManager } from "../../src/checkpoint/checkpoint-manager.js";
+import { resolveGitExecutable } from "../../src/git/git-command.js";
 
 vi.mock("../../src/utils/logger.js", () => ({
   debug: vi.fn(),
@@ -14,8 +15,10 @@ vi.mock("../../src/utils/logger.js", () => ({
 
 // git が無い環境ではスキップ (CI には git がある前提)
 let gitAvailable = true;
+let gitExecutable = "git";
 try {
-  execFileSync("git", ["--version"]);
+  gitExecutable = resolveGitExecutable();
+  execFileSync(gitExecutable, ["--version"]);
 } catch {
   gitAvailable = false;
 }
@@ -62,7 +65,7 @@ const exists = (name: string) => fs.existsSync(path.join(work, name));
 const read = (name: string) => fs.readFileSync(path.join(work, name), "utf8");
 const gitDirOf = (id: string) => path.join(tmpHome, ".localllm", "checkpoints", id);
 const trackedFiles = (id: string): string[] =>
-  execFileSync("git", [`--git-dir=${gitDirOf(id)}`, `--work-tree=${work}`, "ls-files"], {
+  execFileSync(gitExecutable, [`--git-dir=${gitDirOf(id)}`, `--work-tree=${work}`, "ls-files"], {
     encoding: "utf8",
   })
     .trim()

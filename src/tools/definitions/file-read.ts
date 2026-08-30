@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
+import { createSharedWorkspace, resolveWorkspacePath } from "../../agent/workspace-context.js";
 
 export const fileReadTool: ToolHandler = {
   name: "file_read",
@@ -35,8 +36,8 @@ export const fileReadTool: ToolHandler = {
       },
     },
   },
-  async execute(params: Record<string, unknown>): Promise<ToolResult> {
-    const filePath = path.resolve(params.file_path as string);
+  async execute(params: Record<string, unknown>, context): Promise<ToolResult> {
+    const filePath = resolveWorkspacePath(context?.workspace ?? createSharedWorkspace(), params.file_path as string);
     const offset = (params.offset as number) ?? 1;
     const limit = (params.limit as number) ?? 2000;
 

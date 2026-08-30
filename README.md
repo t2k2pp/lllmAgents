@@ -229,11 +229,14 @@ LLMが自律的に呼び出すツール:
 | `todo_write` | 自動 | タスクリスト管理 |
 | `enter_plan_mode` | 自動 | プランモード開始 |
 | `exit_plan_mode` | 自動 | プラン承認リクエスト |
-| `task` | 自動 | サブエージェントへのタスク委譲（model / max turns / preload skills指定可） |
+| `task` | 自動 | サブエージェントへのタスク委譲（model / max turns / preload skills / `shared`・`worktree` isolation指定可） |
 | `task_output` | 自動 | バックグラウンドタスクの結果取得 |
 | `task_list` | 自動 | バックグラウンドタスクの実行中・完了・失敗・取消状態を一覧（prompt・結果本文は非表示） |
 | `task_send` | 自動 | 実行中のバックグラウンドタスクへID指定で追加指示（本文は応答・一覧へ非表示） |
 | `task_cancel` | 自動 | 実行中のバックグラウンドタスクをID指定で停止 |
+| `task_diff` | 自動 | 保持中managed worktreeのstage/unstage/untracked/binary差分を取得 |
+| `task_apply` | 要確認 | cleanかつ同一baseのmain checkoutへ隔離差分を適用 |
+| `task_discard` | 要確認 | 保持中managed worktreeと未回収変更を明示破棄 |
 | `schedule_create` | 自動 | 現REPL sessionに一回／反復プロンプトを登録（10秒〜7日、最大50件） |
 | `schedule_list` | 自動 | 登録中scheduleと実行・skip・失敗状態を一覧 |
 | `schedule_delete` | 自動 | scheduleをID指定または全件取消 |
@@ -277,6 +280,14 @@ LLMが自律的に呼び出すツール:
 `task` の `skills` でその委任だけに必要なスキルを事前ロードできるほか、カスタムagent定義の
 frontmatterへ `skills: [code-review, tdd]` と書けば毎回同じワークフローをsystem promptへ注入できます。
 存在しない、または無効化中のskillは黙って省略せず、モデル起動前にエラーになります。
+
+編集をmain checkoutから分離する場合は`task`へ`isolation: "worktree"`を指定するか、custom agentの
+frontmatterへ`isolation: worktree`を指定します。agent定義で必須にした隔離を呼出側が`shared`へ降格することは
+できません。変更なしworktreeは終了時に除去され、変更・取消・異常終了は`task_diff/apply/discard`または
+`/tasks diff|apply|discard <agent-id>`で回収するまで保持されます。作成時にmainがdirty、適用時にbaseが進んだ、
+Gitのhook/filterを安全に無効化できない場合はsharedへ代替せず理由付きで停止します。Native Windowsではfile toolを
+隔離できますが、bashのfilesystem制約をOS強制できないためworktree bashは実行前に停止します。bashが必要な編集は
+WSL2内で起動してください。
 
 ## モデル向けschedule
 

@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
-import * as path from "node:path";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
+import { createSharedWorkspace, resolveWorkspacePath } from "../../agent/workspace-context.js";
 
 export const fileEditTool: ToolHandler = {
   name: "file_edit",
@@ -40,8 +40,8 @@ export const fileEditTool: ToolHandler = {
       },
     },
   },
-  async execute(params: Record<string, unknown>): Promise<ToolResult> {
-    const filePath = path.resolve(params.file_path as string);
+  async execute(params: Record<string, unknown>, context): Promise<ToolResult> {
+    const filePath = resolveWorkspacePath(context?.workspace ?? createSharedWorkspace(), params.file_path as string);
     const oldString = params.old_string as string;
     const newString = params.new_string as string;
     const replaceAll = (params.replace_all as boolean) ?? false;

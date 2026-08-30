@@ -301,7 +301,7 @@ describe("E2E smoke — 非TTYパイプモード起動", () => {
   );
 
   it(
-    "シナリオ6: /diff が実差分と未追跡を表示し、/rename がsession一覧へ残る",
+    "シナリオ6: /diff・/tasksを実行し、/renameがsession一覧へ残る",
     async () => {
       const repo = fs.mkdtempSync(path.join(os.tmpdir(), "localllm-diff-e2e-"));
       try {
@@ -316,7 +316,7 @@ describe("E2E smoke — 非TTYパイプモード起動", () => {
         fs.writeFileSync(path.join(repo, "untracked.txt"), "new body\n", "utf8");
 
         const r = await runApp(
-          ["/diff", "/rename cycle 9 release", "/resume list", "/quit"],
+          ["/diff", "/tasks", "/rename cycle 9 release", "/resume list", "/quit"],
           ["--no-mcp"],
           tmpHome,
           repo,
@@ -328,6 +328,7 @@ describe("E2E smoke — 非TTYパイプモード起動", () => {
         expect(r.stdout, diag(r)).toContain("+after");
         expect(r.stdout, diag(r)).toContain("untracked.txt");
         expect(r.stdout, diag(r)).toContain("+new body");
+        expect(r.stdout, diag(r)).toContain("task/worktreeなし");
         expect(r.stdout, diag(r)).toContain("session名を変更しました: cycle 9 release");
         expect(r.stdout, diag(r)).toContain("cycle 9 release");
       } finally {

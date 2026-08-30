@@ -457,6 +457,7 @@ describe("background sub-agent lifecycle", () => {
     const listed = await taskListTool.execute({});
     expect(JSON.parse(listed.output)).toEqual({
       tasks: [expect.objectContaining({ agentId: id, status: "running" })],
+      recoverableWorktrees: [],
     });
 
     const sent = await taskSendTool.execute({ agent_id: id, message: "focus on the parser" });

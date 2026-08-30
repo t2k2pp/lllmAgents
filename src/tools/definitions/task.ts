@@ -57,6 +57,12 @@ function buildTaskDefinition(): ToolDefinition {
       type: "boolean",
       description: "バックグラウンドで実行する場合true。結果は後でtask_outputツールで取得。",
     },
+    isolation: {
+      type: "string",
+      enum: ["shared", "worktree"],
+      description:
+        "filesystem境界。worktreeはlocal CLIのclean Git checkoutからdetached worktreeを作成する。作成不能時にsharedへfallbackしない。",
+    },
     max_turns: {
       type: "integer",
       minimum: 1,
@@ -128,6 +134,8 @@ export const taskTool: ToolHandler = {
     const skills = Array.isArray(params.skills)
       ? params.skills.filter((value): value is string => typeof value === "string" && value.trim() !== "")
       : undefined;
+    const isolation =
+      params.isolation === "worktree" ? "worktree" : params.isolation === "shared" ? "shared" : undefined;
     // D1: 呼出元の ancestors を SubAgentManager に伝播。 SubAgent 側で {sub} が追加される
     const parentAncestors = context?.ancestors ?? ROOT_ANCESTORS;
 
@@ -147,12 +155,20 @@ export const taskTool: ToolHandler = {
         modelRef,
         maxTurns,
         skills,
+        isolation,
+        context?.source ?? "cli",
       );
+      const snapshot = subAgentManager.getBackgroundTask(agentId);
       return {
         success: true,
         output: JSON.stringify({
           agentId,
           status: "running",
+          isolation: snapshot?.isolation ?? "shared",
+          ...(snapshot?.workspaceId ? { workspaceId: snapshot.workspaceId } : {}),
+          ...(snapshot?.baseCommit ? { baseCommit: snapshot.baseCommit } : {}),
+          ...(snapshot?.worktreePath ? { worktreePath: snapshot.worktreePath } : {}),
+          ...(snapshot?.workspaceState ? { workspaceState: snapshot.workspaceState } : {}),
           message: `サブエージェントをバックグラウンドで起動しました: ${agentId}`,
           ...(choice.note ? { modelNote: choice.note } : {}),
         }),
@@ -167,6 +183,8 @@ export const taskTool: ToolHandler = {
       modelRef,
       maxTurns,
       skills,
+      isolation,
+      context?.source ?? "cli",
     );
 
     return {
@@ -177,6 +195,12 @@ export const taskTool: ToolHandler = {
         description: result.description,
         result: result.result,
         success: result.success,
+        isolation: result.isolation ?? "shared",
+        ...(result.workspaceId ? { workspaceId: result.workspaceId } : {}),
+        ...(result.baseCommit ? { baseCommit: result.baseCommit } : {}),
+        ...(result.worktreePath ? { worktreePath: result.worktreePath } : {}),
+        ...(result.workspaceState ? { workspaceState: result.workspaceState } : {}),
+        ...(result.changedFiles ? { changedFiles: result.changedFiles } : {}),
         // 解決に失敗しても実行は止めず、 事実を LLM に返す (silent な差し替えをしない)
         ...(choice.note ? { modelNote: choice.note } : {}),
       }),
@@ -254,8 +278,89 @@ export const taskListTool: ToolHandler = {
 
     return {
       success: true,
-      output: JSON.stringify({ tasks: subAgentManager.listBackgroundTasks() }),
+      output: JSON.stringify({
+        tasks: subAgentManager.listBackgroundTasks(),
+        recoverableWorktrees: subAgentManager.listRecoverableWorktrees(),
+        ...(subAgentManager.getWorktreeCapabilityError()
+          ? { worktreeCapabilityError: subAgentManager.getWorktreeCapabilityError() }
+          : {}),
+      }),
     };
+  },
+};
+
+export const taskDiffTool: ToolHandler = {
+  name: "task_diff",
+  definition: {
+    type: "function",
+    function: {
+      name: "task_diff",
+      description:
+        "完了・中断したworktree taskのstage/unstage/untracked/binary差分を読み取る。main checkoutは変更しない。",
+      parameters: {
+        type: "object",
+        properties: { agent_id: { type: "string", description: "worktree taskのagent ID" } },
+        required: ["agent_id"],
+      },
+    },
+  },
+  async execute(params: Record<string, unknown>) {
+    if (!subAgentManager) return { success: false, output: "", error: "SubAgentManager not initialized" };
+    try {
+      const diff = subAgentManager.diffWorktree(params.agent_id as string);
+      return { success: true, output: JSON.stringify(diff) };
+    } catch (error) {
+      return { success: false, output: "", error: error instanceof Error ? error.message : String(error) };
+    }
+  },
+};
+
+export const taskApplyTool: ToolHandler = {
+  name: "task_apply",
+  definition: {
+    type: "function",
+    function: {
+      name: "task_apply",
+      description:
+        "完了したworktree taskの差分をcleanかつ同一baseのmain checkoutへ原子的に適用する。自動merge/commit/fallbackは行わない。",
+      parameters: {
+        type: "object",
+        properties: { agent_id: { type: "string", description: "worktree taskのagent ID" } },
+        required: ["agent_id"],
+      },
+    },
+  },
+  async execute(params: Record<string, unknown>) {
+    if (!subAgentManager) return { success: false, output: "", error: "SubAgentManager not initialized" };
+    try {
+      return { success: true, output: JSON.stringify(subAgentManager.applyWorktree(params.agent_id as string)) };
+    } catch (error) {
+      return { success: false, output: "", error: error instanceof Error ? error.message : String(error) };
+    }
+  },
+};
+
+export const taskDiscardTool: ToolHandler = {
+  name: "task_discard",
+  definition: {
+    type: "function",
+    function: {
+      name: "task_discard",
+      description: "完了・中断したmanaged worktreeと未回収変更を明示的に破棄する。任意pathは指定できない。",
+      parameters: {
+        type: "object",
+        properties: { agent_id: { type: "string", description: "worktree taskのagent ID" } },
+        required: ["agent_id"],
+      },
+    },
+  },
+  async execute(params: Record<string, unknown>) {
+    if (!subAgentManager) return { success: false, output: "", error: "SubAgentManager not initialized" };
+    try {
+      return { success: true, output: JSON.stringify(subAgentManager.discardWorktree(params.agent_id as string)) };
+    } catch (error) {
+      return { success: false, output: "", error: error instanceof Error ? error.message : String(error) };
+    }
   },
 };
 

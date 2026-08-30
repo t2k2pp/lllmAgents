@@ -9,6 +9,34 @@ import { ROOT_ANCESTORS, type AncestorTypes } from "../agent/delegation-context.
 import { validateAgainstSchema, formatValidationError } from "./schema-validator.js";
 import { progressIndicator } from "../cli/progress-indicator.js";
 import * as logger from "../utils/logger.js";
+import {
+  assertWorkspaceCommand,
+  createSharedWorkspace,
+  resolveWorkspacePath,
+  type WorkspaceContext,
+} from "../agent/workspace-context.js";
+
+const WORKTREE_AWARE_CORE = new Set(["file_read", "file_write", "file_edit", "glob", "grep", "bash"]);
+const WORKTREE_AGNOSTIC_CORE = new Set(["web_fetch", "web_search", "todo_write", "ask_user", "current_datetime"]);
+
+function prepareWorkspaceParams(
+  toolName: string,
+  params: Record<string, unknown>,
+  workspace: WorkspaceContext,
+): Record<string, unknown> {
+  if (workspace.mode !== "worktree") return params;
+  const next = { ...params };
+  if (["file_read", "file_write", "file_edit"].includes(toolName) && typeof next.file_path === "string") {
+    next.file_path = resolveWorkspacePath(workspace, next.file_path);
+  }
+  if (["glob", "grep"].includes(toolName)) {
+    next.path = resolveWorkspacePath(workspace, typeof next.path === "string" ? next.path : ".");
+  }
+  if (toolName === "bash") {
+    assertWorkspaceCommand(workspace, String(next.command ?? ""));
+  }
+  return next;
+}
 
 export class ToolExecutor {
   /**
@@ -24,6 +52,7 @@ export class ToolExecutor {
     private hookManager?: HookManager,
     ancestors: AncestorTypes = ROOT_ANCESTORS,
     private checkpointManager?: CheckpointManager,
+    private workspace: WorkspaceContext = createSharedWorkspace(),
   ) {
     this.ancestors = ancestors;
   }
@@ -50,6 +79,34 @@ export class ToolExecutor {
         output: "",
         error: `Invalid tool arguments: ${toolCall.function.arguments}`,
       };
+    }
+
+    if (this.workspace.mode === "worktree") {
+      const allowedByPolicy =
+        handler.workspacePolicy === "aware" ||
+        handler.workspacePolicy === "agnostic" ||
+        WORKTREE_AWARE_CORE.has(toolName) ||
+        WORKTREE_AGNOSTIC_CORE.has(toolName);
+      if (!allowedByPolicy || handler.workspacePolicy === "forbidden") {
+        return {
+          success: false,
+          output: "",
+          error:
+            `Tool '${toolName}' has no verified worktree isolation policy. ` +
+            "Use a workspace-aware core tool or run this task explicitly in shared mode.",
+          errorKind: "permanent",
+        };
+      }
+      try {
+        params = prepareWorkspaceParams(toolName, params, this.workspace);
+      } catch (error) {
+        return {
+          success: false,
+          output: "",
+          error: error instanceof Error ? error.message : String(error),
+          errorKind: "permanent",
+        };
+      }
     }
 
     // Phase E-4: Schema-strict validation — required / type / enum を実行前にチェック
@@ -106,7 +163,7 @@ export class ToolExecutor {
     }
     try {
       logger.debug(`Executing tool: ${toolName}`, params);
-      const result = await handler.execute(params, { ancestors: this.ancestors, source });
+      const result = await handler.execute(params, { ancestors: this.ancestors, source, workspace: this.workspace });
 
       // Post-tool hooks
       if (this.hookManager) {

@@ -51,6 +51,9 @@ import {
   taskListTool,
   taskSendTool,
   taskCancelTool,
+  taskDiffTool,
+  taskApplyTool,
+  taskDiscardTool,
   setSubAgentManager,
 } from "./tools/definitions/task.js";
 import { enterPlanModeTool, exitPlanModeTool, setPlanManager } from "./tools/definitions/plan-mode.js";
@@ -346,6 +349,9 @@ async function main(): Promise<void> {
   toolRegistry.register(taskListTool);
   toolRegistry.register(taskSendTool);
   toolRegistry.register(taskCancelTool);
+  toolRegistry.register(taskDiffTool);
+  toolRegistry.register(taskApplyTool);
+  toolRegistry.register(taskDiscardTool);
 
   // Skill tool
   toolRegistry.register(skillTool);
@@ -684,6 +690,7 @@ async function main(): Promise<void> {
     skillRegistry,
     pluginAgentLoader,
   );
+  subAgentManager.initializeWorktreeRecovery();
   setSubAgentManager(subAgentManager);
   setSkillSubAgentManager(subAgentManager);
 
@@ -719,10 +726,11 @@ async function main(): Promise<void> {
   {
     const cp = agent.getCheckpointManager();
     if (cp.getStatus().enabled && !(await cp.isGitReady())) {
-      console.log(
-        chalk.yellow("  ⚠ チェックポイントは有効ですが git が見つかりません。 スナップショットは記録されません。"),
+      throw new Error(
+        "チェックポイントは有効ですがGit capabilityを利用できません。" +
+          "Gitをインストールして再起動するか、configのcheckpoints.enabledをfalseにしてください。" +
+          "スナップショット0件のまま起動は継続しません。",
       );
-      console.log(chalk.dim("    git をインストールするか、 /checkpoint off で無効化してください。"));
     }
   }
 

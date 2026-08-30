@@ -19,6 +19,8 @@ export interface AgentDefinition {
    * docs/model-orchestration.md §3.1。 未指定ならメインLLM で起動する (従来通り)。
    */
   modelRef?: string;
+  /** filesystem境界。未指定は後方互換のshared。 */
+  isolation: "shared" | "worktree";
 }
 
 /**
@@ -87,6 +89,11 @@ function loadAgentFile(filePath: string): AgentDefinition | null {
     // model: は optional。 文字列以外 (flow 配列など) が来たら無視して従来動作にする。
     const rawModel = meta.model;
     const modelRef = typeof rawModel === "string" && rawModel.trim() !== "" ? rawModel.trim() : undefined;
+    const rawIsolation = meta.isolation;
+    if (rawIsolation !== undefined && rawIsolation !== "shared" && rawIsolation !== "worktree") {
+      logger.warn(`Agent file has invalid isolation '${String(rawIsolation)}': ${filePath}`);
+      return null;
+    }
 
     return {
       name,
@@ -97,6 +104,7 @@ function loadAgentFile(filePath: string): AgentDefinition | null {
       systemPrompt: body,
       source: filePath,
       modelRef,
+      isolation: rawIsolation === "worktree" ? "worktree" : "shared",
     };
   } catch (e) {
     logger.debug(`Failed to load agent file ${filePath}: ${e instanceof Error ? e.message : String(e)}`);

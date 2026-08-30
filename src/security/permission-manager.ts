@@ -32,6 +32,7 @@ const INHERENTLY_SAFE_TOOLS = new Set([
   "task_list",
   "task_send",
   "task_cancel",
+  "task_diff",
   "schedule_create",
   "schedule_list",
   "schedule_delete",

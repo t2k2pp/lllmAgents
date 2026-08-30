@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
+import { createSharedWorkspace, resolveWorkspacePath } from "../../agent/workspace-context.js";
 
 /**
  * 書き込み後の構文チェック。エラーがあればメッセージを返す。
@@ -110,8 +111,8 @@ export const fileWriteTool: ToolHandler = {
       },
     },
   },
-  async execute(params: Record<string, unknown>): Promise<ToolResult> {
-    const filePath = path.resolve(params.file_path as string);
+  async execute(params: Record<string, unknown>, context): Promise<ToolResult> {
+    const filePath = resolveWorkspacePath(context?.workspace ?? createSharedWorkspace(), params.file_path as string);
     const content = params.content as string;
 
     const dir = path.dirname(filePath);

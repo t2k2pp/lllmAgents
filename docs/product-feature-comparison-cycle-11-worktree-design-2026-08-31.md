@@ -2,10 +2,10 @@
 
 - 日付: 2026-08-31
 - 基準 commit: `ad1dde8b7b7953f00dd256ba0c97cc31d3860662`
-- 状態: **設計完了、実装未着手**
+- 状態: **実装・ローカル評価完了**（cross-OS / deploy の終端は実装commitに紐づくGitHub Actions checkを正本とする）
 - 観点: Codex / Claude Code の開発者観点から、機能名の有無だけでなく、通常操作での完成度、並列編集の正しさ、失敗の可視性、回収・保持・配布まで比較する
-- 今回の停止境界: 比較マトリックス、既存類似機能の照合、gap 選定、実装・評価設計まで。production code、test、配布物は変更しない
-- 次の実装 cycle の完了条件: `GAP-02` を fail-closed な worktree 分離として実装し、対象回帰、全 unit/E2E、cross-OS Git、lint/build/package/SEA、最新 push SHA の全依存 CI job を通す
+- 実装境界: 比較で選定した `GAP-02` を、workspace/Git/security/task lifecycle/回収 UI まで一体で実装する
+- 完了条件: 対象回帰、全 unit/E2E、cross-OS Git、lint/build/package/SEA、最新 push SHA の全依存 CI job を通す
 
 ## 1. 比較基準と証拠
 
@@ -32,7 +32,7 @@ OpenAI は、同じ project の複数 chat を独立 checkout で並列実行し
 | MCP / hooks / rules | MCP、hooks、rules | MCP、広い lifecycle hooks、permissions | MCP、hooks、rules | ○。中核はあるが hook event と管理面は狭い |
 | parallel / background lifecycle | parallel subagents、wait/close | subagents、agent view、tasks | `task`、`task_list/output/cancel`、並列上限 | ◎（parent 集約） |
 | 実行中 agent の steering | follow-up routing | named follow-up、team message | FIFO `task_send`、provider abort、stale tool skip | ◎（peer-to-peer はなし） |
-| **parallel editing の worktree 分離** | chat/scheduled task worktree | session/sub-agent worktree、`isolation: worktree` | context だけ分離し全 agent が同じ `process.cwd()` を共有 | **— (`GAP-02`)** |
+| **parallel editing の worktree 分離** | chat/scheduled task worktree | session/sub-agent worktree、`isolation: worktree` | `isolation: worktree`、agent別detached checkout、diff/apply/discard、変更保持 | **◎ (`GAP-02` closed)** |
 | plan / task / goal | plan、goal | plan、tasks | `/plan`、ToDo、Goal Seek、goal-loop | ◎ |
 | schedule / loop | scheduled tasks | scheduled tasks、`/loop` | `/loop` + `schedule_create/list/delete` | ○。session scoped、永続 scheduler ではない |
 | session resume / fork / naming | resume、fork、rename、archive | resume、fork、rename、session picker | `/resume`、`/fork`、`/rename` | ◎（archive はなし） |
@@ -68,7 +68,7 @@ OpenAI は、同じ project の複数 chat を独立 checkout で並列実行し
 
 | 候補 | 両製品との共通性 | 既存類似の充足度 | 利用価値 / リスク | 優先度 | 判断 |
 |---|---:|---:|---|:---:|---|
-| `GAP-02` sub-agent worktree 分離 | 高 | なし | parallel write の上書き・不整合を防ぎ、既存 task 群を完成させる | **P1** | **次 cycle で実装** |
+| `GAP-02` sub-agent worktree 分離 | 高 | なし | parallel write の上書き・不整合を防ぎ、既存 task 群を完成させる | **P1** | **実装・回帰追加済み** |
 | `GAP-08` structured non-interactive output | 高 | text pipeあり | CI/automation に有用だが並列編集の正しさを直さない | P2 | 後続 |
 | dedicated review UI | 高 | skill/agentあり | discovery と target 選択の UX gap。能力自体はある | P2 | 「類似機能なし」ではないため選外 |
 | conversation rewind | Claudeで強い | fork/checkpointあり | 有用だが会話履歴・filesystemの二相復元が必要 | P2 | 後続 |
@@ -81,12 +81,12 @@ OpenAI は、同じ project の複数 chat を独立 checkout で並列実行し
 
 | ID | 優先度 | 証拠・原因 | 影響 | 設計上の終端 |
 |---|:---:|---|---|---|
-| PAR-WT-01 | P1 | background/parallel agent が context だけ分離し、file/bash は同じ cwd を共有 | 同じ file の上書き、片方の test が他方の途中状態を検証、取消後の残存変更 | `GAP-02` 実装で agent ごとの checkout を所有させる |
-| WS-ROOT-02 | P1 | path tool、bash、permission、sandbox、system prompt が process-global cwd を参照 | `git worktree add`だけ追加すると、表示上は隔離済みでも main checkout を編集する偽の安全性 | immutable `WorkspaceContext` を ToolExecutor 全経路へ通し、main checkout redirect を fail-closed にする |
-| CHECKPOINT-GIT-03 | P1 | `/diff` は Git for Windows 標準位置を解決するが checkpoint は文字列 `git` のみ。明示 ON でも Git 不在時は警告して起動継続 | Windowsで機能間の判定が不一致。「保護 ON」だが snapshot 0件の状態を許す | Git capability を共通化し、明示 ON で利用不能なら welcome/agent起動前に停止 |
-| WT-SUPPLY-04 | P1 | repository-local Git hook/filter は checkout 中に process を起動し得る | untrusted repository から worktree 作成だけで任意 command 実行の可能性 | empty hooks path、fsmonitor無効化、local filter列挙・無効化。安全に解析不能なら作成拒否 |
-| WT-RETENTION-05 | P1 | background cancel/process crash と worktree cleanup の ownership が未設計 | 変更あり worktree の誤削除、または無期限蓄積 | active lock + durable metadata。変更あり/未push commitは自動削除しない |
-| DOC-WT-06 | P2 | backlog は `sub-agent.ts` だけを改修する M 規模・価値★☆☆と記載 | 実装者が workspace/security/cross-OS gate を省略する | 本設計へ正本を移し、backlog を P1/L・design-ready に更新 |
+| PAR-WT-01 | P1 | background/parallel agent が context だけ分離し、file/bash は同じ cwd を共有 | 同じ file の上書き、片方の test が他方の途中状態を検証、取消後の残存変更 | **closed**: agent ごとのcheckoutを所有し、並列同名編集と取消後保持を回帰化 |
+| WS-ROOT-02 | P1 | path tool、bash、permission、sandbox、system prompt が process-global cwd を参照 | `git worktree add`だけ追加すると、表示上は隔離済みでも main checkout を編集する偽の安全性 | **closed**: immutable `WorkspaceContext` とrealpath containmentを全file/path toolへ伝播 |
+| CHECKPOINT-GIT-03 | P1 | `/diff` は Git for Windows 標準位置を解決するが checkpoint は文字列 `git` のみ。明示 ON でも Git 不在時は警告して起動継続 | Windowsで機能間の判定が不一致。「保護 ON」だが snapshot 0件の状態を許す | **closed**: Git resolverを共通化し、checkpoint明示ONの利用不能を起動前error化 |
+| WT-SUPPLY-04 | P1 | repository-local Git hook/filter は checkout 中に process を起動し得る | untrusted repository から worktree 作成だけで任意 command 実行の可能性 | **closed**: empty hooks、fsmonitor無効化、実効filter/includeの作成前拒否を回帰化 |
+| WT-RETENTION-05 | P1 | background cancel/process crash と worktree cleanup の ownership が未設計 | 変更あり worktree の誤削除、または無期限蓄積 | **closed**: lockとdurable record、cancel/crash復旧、変更あり自動削除禁止を回帰化 |
+| DOC-WT-06 | P2 | backlog は `sub-agent.ts` だけを改修する M 規模・価値★☆☆と記載 | 実装者が workspace/security/cross-OS gate を省略する | **closed**: 本記録とbacklogを実装結果へ同期 |
 
 ## 6. 選定機能の外部契約
 
@@ -260,10 +260,23 @@ interface WorkspaceContext {
 - 作業開始時の tracked change: 0。`sandbox/`配下に大量の未追跡 user artifact があり、本設計の変更・stage対象外
 - 基準 `HEAD` と `origin/main`: ともに `ad1dde8b7b7953f00dd256ba0c97cc31d3860662`
 
-## 12. 今回の終端
+## 12. 実装で判明した追加事項と修正
 
-- `GAP-02`: **design-ready / implementation pending**。既存類似機能の重複ではないこと、実装面、安全境界、回収、評価gateまで確定
-- `PAR-WT-01`〜`WT-RETENTION-05`: 実装未着手のため open。次 cycle で Red→Green と実環境gateを閉じる
-- `DOC-WT-06`: 本設計とbacklog更新でclosed
-- production code/test/配布物: 変更なし
-- 今回のユーザー指定どおり、実装 cycle は開始しない
+| ID | 原因 | 修正 | 回帰証拠 |
+|---|---|---|---|
+| WT-APPLY-07 | tracked patchへuntracked binary diffを混在させても`git apply`が新規binaryを実体化しない | tracked差分はbinary patch、untrackedは排他的copyに分け、適用後にpath/type/mode/hashを照合。不一致時はrollbackしてworktree保持 | tracked/binary/untrackedの同時apply test |
+| WT-FILTER-08 | `git status`自体がrepository filterを起動し得るため、status後の検査では遅い | status前に対象tracked pathの実効filter属性をshellなしで検査し、外部driverが有効なら作成拒否 | marker processが起動しない悪性filter test |
+| WT-FILTER-09 | globalにfilter driverが存在するだけで、当該repository未使用でも拒否すると正常repoを壊す | 全設定名ではなくcheckout対象pathの実効属性だけを拒否 | 通常repoの実worktree suite |
+| WT-VERIFY-10 | diff文字列比較は改行・表現差で同じ最終状態を不一致にし得る | filesystem signatureによる最終状態検証へ変更 | Windows実Git apply test |
+| WT-META-11 | foreground `task`応答の組立てが`SubAgentResult`のworkspace metadataを落としていた | background/outputと同じisolation/workspace/base/state/filesを返す | foreground task tool回帰 |
+| WT-TIMEOUT-12 | 実Git統合testの既定10秒はWindows coverage並列時の11〜12秒実測を下回った | 重い2 scenarioだけ30秒にし、coverage全体を再実行 | coverage下で120 files / 1272 tests pass |
+| WT-MODE-13 | apply前のunsupported mode確認が実装設計だけで回帰化されていなかった | raw mode 120000/160000を適用前に拒否しworktree保持 | 実gitlink apply拒否test |
+
+## 13. 実装結果と終端
+
+- `GAP-02` と `PAR-WT-01`〜`WT-RETENTION-05`: **実装・対象回帰 closed**。`WorkspaceContext`、`WorktreeManager`、agent定義/taskの`isolation`、`task_diff/apply/discard`、`/tasks`を追加した。
+- 変更なしworktreeは自動除去し、変更・cancel・異常終了はdurable recordとともに保持する。process再起動後も`error`状態でdiff/discardへ回収し、勝手に削除しない。
+- applyはcleanかつ同じbaseのmainにだけ許可し、自動merge/commit/3-way/stash/fallbackを行わない。
+- Native Windowsではfile toolによるworktree編集とGit lifecycleを提供する。bashのwrite rootをOS強制できないため実行前に恒久エラーとし、WSL2またはfile toolを案内する。shared modeへ自動降格しない。
+- ローカル対象評価: 実Git worktree/security/sub-agent 20件がpass。`test:coverage`は120 files / 1272 pass / 11 skip、E2Eは`/tasks`を含む7件、lintはerror 0（既存warning 279 / info 97）、build、skill/package validation、runtime audit（0 vulnerability）がpass。
+- Windows SEAは`dist/localllm.exe`を生成し、実binaryの`--version` / `--help`を確認した。既存`deploy/localllm.exe`をPID 29368が使用中だったためlocal deploy directoryの上書きはfail-fastし、稼働processを強制終了しなかった。clean checkoutのdependent Windows deploy/exe smokeを最新push SHAのCIで閉じる。

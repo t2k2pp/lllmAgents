@@ -9,6 +9,7 @@ import { isDestructiveCommand } from "../../security/destructive-commands.js";
 import { loadConfig } from "../../config/config-manager.js";
 import { Utf8ChunkDecoder } from "../../utils/utf8-chunk-decoder.js";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
+import { createSharedWorkspace } from "../../agent/workspace-context.js";
 
 const DEFAULT_TIMEOUT = 120_000; // 2 minutes
 
@@ -99,12 +100,13 @@ interface BashToolHandler extends ToolHandler {
  */
 // 破壊的コマンド判定は src/security/destructive-commands.ts の正典リストに集約
 // （permission-manager の自動許可ゲートと同一ソース。 乖離防止＝Phase 3 レビュー対応）。
-function captureGitStatusSnapshot(): string {
+function captureGitStatusSnapshot(cwd: string): string {
   try {
     const out = execFileSync("git", ["status", "--short"], {
       encoding: "utf-8",
       timeout: 5000,
       stdio: ["ignore", "pipe", "ignore"],
+      cwd,
     });
     return out.trim();
   } catch {
@@ -164,9 +166,33 @@ export const bashTool: BashToolHandler = {
       currentProcess = null;
     }
   },
-  async execute(params: Record<string, unknown>): Promise<ToolResult> {
+  async execute(params: Record<string, unknown>, context): Promise<ToolResult> {
     const command = params.command as string;
     const timeout = (params.timeout as number) ?? DEFAULT_TIMEOUT;
+    const workspace = context?.workspace ?? createSharedWorkspace();
+    if (workspace.mode === "worktree") {
+      const processSandbox = getActiveProcessSandbox();
+      if (isWindows) {
+        return {
+          success: false,
+          output: "",
+          error:
+            "Native Windowsではbash processのfilesystem writeをworktreeだけへOS強制できません。" +
+            "WSL2内でlllmAgentsを起動するか、file_read/write/edit/glob/grepを使用してください。shared modeへは自動切替しません。",
+          errorKind: "permanent",
+        };
+      }
+      if (!processSandbox.isActive()) {
+        return {
+          success: false,
+          output: "",
+          error:
+            "worktree bashには有効なOS filesystem sandboxが必要です。process sandboxを有効化して再起動してください。" +
+            "sandbox無しのshellへは自動fallbackしません。",
+          errorKind: "permanent",
+        };
+      }
+    }
 
     // OS-level サンドボックスラップ
     let shell: string;
@@ -204,7 +230,8 @@ export const bashTool: BashToolHandler = {
         const config = loadConfig();
         // ~/.localllm は bash の書込許可に含めない（自アプリの config/API キー/セッションの
         // 改ざんを防ぐ。 読取も機密として遮断＝process-sandbox の computeSecretProtection）。
-        const allowedWriteDirs = [process.cwd(), ...config.security.allowedDirectories];
+        const allowedWriteDirs =
+          workspace.mode === "worktree" ? [workspace.root] : [workspace.root, ...config.security.allowedDirectories];
         // fs レベルなら在プロセスプロキシを起動し、 ネットを allowlist 経由に閉じる。
         //  - macOS (2b-1): Seatbelt が 127.0.0.1:proxyPort のみ許可。直結は遮断。
         //  - Linux/WSL2 (2b-2): bwrap --unshare-net + unix ソケット + socat ブリッジ。
@@ -244,7 +271,7 @@ export const bashTool: BashToolHandler = {
 
     // P3-B: 実行可能性を確認した後でのみ、破壊的コマンドの事前git statusを取得する。
     const destructive = isDestructiveCommand(command);
-    const preflightStatus = destructive ? captureGitStatusSnapshot() : "";
+    const preflightStatus = destructive ? captureGitStatusSnapshot(workspace.root) : "";
 
     return new Promise((resolve) => {
       let resolved = false;
@@ -273,7 +300,7 @@ export const bashTool: BashToolHandler = {
         delete childEnv.all_proxy;
       }
       const proc = spawn(shell, shellArgs, {
-        cwd: process.cwd(),
+        cwd: workspace.root,
         env: childEnv,
         stdio: ["ignore", "pipe", "pipe"],
       });

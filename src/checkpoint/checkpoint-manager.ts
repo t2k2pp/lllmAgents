@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as logger from "../utils/logger.js";
+import { resolveGitExecutable } from "../git/git-command.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -61,6 +62,7 @@ export class CheckpointManager {
   /** これを超えるファイルはステージから外す (シャドウGit肥大防止)。 0 で無制限 */
   private readonly maxFileSizeBytes: number;
   private gitAvailable: boolean | null = null;
+  private gitExecutable: string | null = null;
   private initialized = false;
   /** gc --auto を間引くためのコミット数カウンタ */
   private commitCount = 0;
@@ -139,7 +141,8 @@ export class CheckpointManager {
   private async ensureGit(): Promise<boolean> {
     if (this.gitAvailable !== null) return this.gitAvailable;
     try {
-      await execFileAsync("git", ["--version"]);
+      this.gitExecutable = resolveGitExecutable();
+      await execFileAsync(this.gitExecutable, ["--version"]);
       this.gitAvailable = true;
     } catch {
       this.gitAvailable = false;
@@ -149,8 +152,9 @@ export class CheckpointManager {
   }
 
   private git(args: string[]): Promise<{ stdout: string; stderr: string }> {
+    if (!this.gitExecutable) throw new Error("checkpoint Git capability is not initialized");
     // --git-dir と --work-tree を明示することで「作業フォルダの外」 に履歴を持つ
-    return execFileAsync("git", [`--git-dir=${this.gitDir}`, `--work-tree=${this.workTree}`, ...args], {
+    return execFileAsync(this.gitExecutable, [`--git-dir=${this.gitDir}`, `--work-tree=${this.workTree}`, ...args], {
       maxBuffer: 16 * 1024 * 1024,
     });
   }

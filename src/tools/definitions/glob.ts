@@ -2,6 +2,7 @@ import { glob as globFn } from "glob";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
+import { createSharedWorkspace, resolveWorkspacePath } from "../../agent/workspace-context.js";
 
 export const globTool: ToolHandler = {
   name: "glob",
@@ -38,10 +39,10 @@ export const globTool: ToolHandler = {
       },
     },
   },
-  async execute(params: Record<string, unknown>): Promise<ToolResult> {
+  async execute(params: Record<string, unknown>, context): Promise<ToolResult> {
     const pattern = params.pattern as string;
-    const cwd = (params.path as string) ?? process.cwd();
-    const cwdResolved = path.resolve(cwd);
+    const workspace = context?.workspace ?? createSharedWorkspace();
+    const cwdResolved = resolveWorkspacePath(workspace, (params.path as string) ?? ".");
 
     try {
       const matches = await globFn(pattern, {

@@ -164,6 +164,8 @@ stateDiagram-v2
 
     state SAM {
         [*] --> Initialize: タイプ決定(plan, explore, bash等)
+        Initialize --> CreateWorktree: isolation=worktree / clean HEADをdetached checkout
+        CreateWorktree --> IsolateContext: identity検証・lock
         Initialize --> IsolateContext: 独自のHistory空間生成
         IsolateContext --> SubLoop: 子AgentLoop実行
         SubLoop --> ToolExec: 限定されたツール群の使用
@@ -173,6 +175,9 @@ stateDiagram-v2
         SubLoop --> Finalize: タスク完了報告生成
         SubLoop --> Cancelled: task_cancel / AbortSignal
         ToolExec --> Cancelled: tool完了後に中断を検出
+        Finalize --> Retain: 変更・独自commitあり / durable metadata
+        Finalize --> Cleanup: 変更なし / unlock・remove
+        Cancelled --> Retain: 変更ありは保持
     }
 
     SAM --> Main : 報告/結果をMainのHistoryへ追加
@@ -188,6 +193,17 @@ tool実行中は強制停止せず、現在の1件を履歴へ反映した後、
 補ってtool pairingを維持します。次turn冒頭で追加指示を受付順にuser-roleへ注入しますが、
 `[parent-follow-up]`を付けて実ユーザー入力と区別します。本文は`task_list`とtool応答へ返しません。
 mailboxは20件、指示は1件4000文字、総LLM呼出は30回を上限とし、管理toolはmain orchestrator専権です。
+
+`isolation: worktree`では`WorkspaceContext`をSubAgent/ToolExecutorへ渡し、相対pathをagent固有のdetached
+checkoutへ解決します。file toolはrealpath containmentでsymlink/junctionと未作成の子pathを検査し、bashは
+worktree cwdとOS sandbox write rootを要求します。Native Windowsはshell writeをworktreeだけへ強制できないため
+bashを実行前に拒否し、WSL2またはfile toolを案内します。未知のplugin/MCP filesystem tool、main絶対path、
+parent traversal、`git -C`/`--git-dir`/`--work-tree`等もpermission判定前に拒否します。
+
+`WorktreeManager`はagent IDだけを外部キーにし、lock付きmetadataをmanaged rootへatomic保存します。変更なしは
+自動除去、変更・cancel・process再起動は保持し、`task_diff`で確認後に`task_apply`または`task_discard`で終端します。
+applyはcleanかつ同一baseのmainに限り、tracked binary patchとuntracked排他的copyを適用後、path/type/mode/hashが
+完全一致した時だけworktreeを除去します。競合や検証不一致では自動3-way・stash・shared fallbackを行いません。
 
 ### 2.3 プランモード (`PlanManager`) による状態制御
 

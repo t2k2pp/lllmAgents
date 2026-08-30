@@ -46,7 +46,7 @@ describe("コマンドレジストリ (PR-10)", () => {
   it("補完候補とヘルプ項目が全登録コマンド分自動生成される", () => {
     const completions = getRegistryCompletions();
     const helpEntries = getRegistryHelpEntries();
-    for (const name of ["/parallel", "/autorun", "/loglevel", "/doctor", "/diff", "/rename"]) {
+    for (const name of ["/parallel", "/autorun", "/loglevel", "/doctor", "/diff", "/rename", "/tasks"]) {
       expect(completions.some((c) => c.command === name)).toBe(true);
       expect(helpEntries.some((e) => e.name === name)).toBe(true);
     }

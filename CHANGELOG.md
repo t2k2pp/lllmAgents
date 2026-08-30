@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Sub-agent worktree分離 cycle 11 (2026-08-31)
+
+- Codex / Claude Codeとの機能比較と既存類似機能監査から、並列editing agentが同じcheckoutを共有する`GAP-02`をP1として実装
+- `task.isolation: worktree`とcustom agent frontmatterを追加し、agent別detached checkout、変更なし自動除去、変更・取消・異常終了の保持に対応
+- `task_diff` / `task_apply` / `task_discard`と`/tasks`を追加し、cleanかつ同一baseのmainへの明示回収と確認付き破棄を提供
+- file/path toolのworkspace root、realpath containment、Git redirect、未知plugin/MCP toolをfail-closedにし、Native Windowsのworktree bashはWSL2案内付きで実行前拒否
+- Git executable解決をdiff/checkpoint/worktreeで共通化し、checkpoint明示ON時のGit不在を警告継続せず起動前エラーに変更
+- repository hook/filter、base drift、binary/untracked apply、並列同名編集、cancel/crash/restart recoveryを実Git回帰で固定
+
 ### Native Computer Use比較・改善 cycle 10 (2026-08-30)
 
 - Codex / Claude / lllmAgentsのComputer Use機能比較マトリックスを追加し、`GAP-CU-01`を実装
