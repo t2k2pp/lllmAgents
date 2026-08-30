@@ -40,7 +40,7 @@ import { buildSystemPrompt, type SkillInfo, type LLMProfiles, type SystemPromptO
 import { compressText } from "./compress-text.js";
 import { loadMemory } from "./memory.js";
 import { loadProjectInstructions } from "./project-context.js";
-import { createSession, saveSession, type SessionData } from "./session-manager.js";
+import { createSession, normalizeSessionTitle, saveSession, type SessionData } from "./session-manager.js";
 import type { RoomId } from "./room-types.js";
 import { PlanManager } from "./plan-mode.js";
 import type { LLMEndpoint, SamplingParams } from "../config/types.js";
@@ -2912,6 +2912,14 @@ export class AgentLoop {
   /** 現在の会話セッション ID (resume 用)。 ~/.localllm/sessions/ 配下のファイル名と一致。 */
   getCurrentSessionId(): string {
     return this.session.meta.id;
+  }
+
+  /** 現在のsessionへ人が識別する名前を付け、atomic session保存へ即時反映する。 */
+  renameCurrentSession(title: string): string {
+    const normalized = normalizeSessionTitle(title);
+    this.session.meta.title = normalized;
+    this.saveCurrentSession();
+    return normalized;
   }
 
   /** 現在ロード中のセッションが属する Room (未タグなら undefined)。 docs/room-model-design.md。 */

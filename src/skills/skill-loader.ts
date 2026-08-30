@@ -35,12 +35,14 @@ export function parseSkillFile(content: string, filePath: string, builtIn: boole
 
   if (!meta.name || !meta.description) return null;
   const trigger = meta.trigger || `/${meta.name}`;
+  if (!/^\/[a-z0-9]+(?:-[a-z0-9]+)*$/.test(trigger)) return null;
 
   // context: "fork" のみ有効値として受け付ける
+  if (meta.context && meta.context !== "fork") return null;
   const context = meta.context === "fork" ? ("fork" as const) : undefined;
 
-  // tools: "[bash, file_read]" or "bash, file_read" 形式をパース
-  const toolsRaw = meta.tools;
+  // tools / Claude互換allowed-tools: "[bash, file_read]" or "bash, file_read" 形式をパース
+  const toolsRaw = meta.tools ?? meta["allowed-tools"];
   const tools = toolsRaw
     ? toolsRaw
         .replace(/^\[|\]$/g, "")
@@ -48,6 +50,7 @@ export function parseSkillFile(content: string, filePath: string, builtIn: boole
         .map((t) => t.trim())
         .filter(Boolean)
     : undefined;
+  if (tools?.some((tool) => !/^[a-zA-Z0-9_-]+$/.test(tool))) return null;
 
   return {
     name: meta.name,

@@ -8,6 +8,22 @@ import type { GoalDefinition, EvaluationRecord } from "./goal-slot.js";
 import type { RoomId } from "./room-types.js";
 
 const SESSION_DIR = path.join(os.homedir(), ".localllm", "sessions");
+const MAX_SESSION_TITLE_LENGTH = 80;
+
+/** session名を一覧・terminalで安全に表示できる可視1行へ正規化する。 */
+export function normalizeSessionTitle(value: string): string {
+  const normalized = value
+    .replace(/[\p{Cc}\p{Cf}]/gu, (character) => (character === "\u200c" || character === "\u200d" ? character : " "))
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized.replace(/[\u200c\u200d]/g, "")) {
+    throw new Error("session名が空です。可視文字を1文字以上指定してください。");
+  }
+  return [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(normalized)]
+    .slice(0, MAX_SESSION_TITLE_LENGTH)
+    .map((entry) => entry.segment)
+    .join("");
+}
 
 export interface SessionMeta {
   id: string;

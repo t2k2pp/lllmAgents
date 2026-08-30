@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 機能比較・差分レビュー cycle 9 (2026-08-30)
+
+- `/diff`を統計表示から、stage済み・未stage・未追跡を含む実差分表示へ拡張
+- PATHにGitがないWindowsでもGit for Windowsの標準install先を検証して利用し、Git不在・非repository・出力上限超過を復旧案内付きで表示
+- `/rename <name>`を追加し、現在sessionの人が識別できる名前をatomic保存して`/resume list`とpickerへ反映
+- skill validatorをruntimeの`trigger`/`context`/`tools`契約へ揃え、builtin/project skill全件を`--root`で検証
+- npm packageをruntime allowlistへ限定し、SEA・test・sandbox等の混入と32 MiB超過をCIで拒否
+- Codex / Claude Code / lllmAgentsの機能比較マトリックスcycle 9を追加
+
 ### TUI完成度レビュー cycle 7 (2026-08-27)
 
 - Alternate ScreenのPgUp/PgDnを入力待ち中だけでなくLLM・ツール実行中も有効にし、最古行まで遡れるよう修正

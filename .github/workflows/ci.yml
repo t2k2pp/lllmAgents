@@ -70,6 +70,8 @@ jobs:
       # devDependencies はビルド時のみ使うため対象外 (--omit=dev)。
       - name: Audit runtime dependencies
         run: npm audit --omit=dev --audit-level=high
+      - name: Validate npm package contents
+        run: npm run validate:package
 
   package-smoke:
     name: Windows deploy / exe smoke

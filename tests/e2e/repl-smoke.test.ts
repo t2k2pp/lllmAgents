@@ -19,12 +19,13 @@
  * (テキストのみ応答だと自己点検ループ/intent classifier の追加 LLM 呼び出しが発生するため)。
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MockLLMServer, type ChatMessage } from "./mock-llm.js";
+import { resolveGitExecutable } from "../../src/cli/worktree-diff.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TSX_CLI = path.join(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
@@ -80,10 +81,15 @@ interface RunResult {
 }
 
 /** アプリを非TTYパイプモードで起動し、入力行を先渡しして終了まで待つ */
-function runApp(lines: string[], args: string[] = ["--no-mcp"], home = tmpHome): Promise<RunResult> {
+function runApp(
+  lines: string[],
+  args: string[] = ["--no-mcp"],
+  home = tmpHome,
+  workingDirectory = workspace,
+): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [TSX_CLI, ENTRY, ...args], {
-      cwd: workspace,
+      cwd: workingDirectory,
       env: { ...process.env, HOME: home, USERPROFILE: home },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -269,6 +275,43 @@ describe("E2E smoke — 非TTYパイプモード起動", () => {
         expect(fs.existsSync(path.join(emptyHome, ".localllm")), diag(r)).toBe(false);
       } finally {
         fs.rmSync(emptyHome, { recursive: true, force: true });
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "シナリオ6: /diff が実差分と未追跡を表示し、/rename がsession一覧へ残る",
+    async () => {
+      const repo = fs.mkdtempSync(path.join(os.tmpdir(), "localllm-diff-e2e-"));
+      try {
+        const git = resolveGitExecutable();
+        execFileSync(git, ["init", "--quiet"], { cwd: repo });
+        execFileSync(git, ["config", "user.name", "E2E"], { cwd: repo });
+        execFileSync(git, ["config", "user.email", "e2e@example.invalid"], { cwd: repo });
+        fs.writeFileSync(path.join(repo, "tracked.txt"), "before\n", "utf8");
+        execFileSync(git, ["add", "tracked.txt"], { cwd: repo });
+        execFileSync(git, ["commit", "--quiet", "-m", "initial"], { cwd: repo });
+        fs.writeFileSync(path.join(repo, "tracked.txt"), "after\n", "utf8");
+        fs.writeFileSync(path.join(repo, "untracked.txt"), "new body\n", "utf8");
+
+        const r = await runApp(
+          ["/diff", "/rename cycle 9 release", "/resume list", "/quit"],
+          ["--no-mcp"],
+          tmpHome,
+          repo,
+        );
+
+        expect(r.timedOut, diag(r)).toBe(false);
+        expect(r.code, diag(r)).toBe(0);
+        expect(r.stdout, diag(r)).toContain("-before");
+        expect(r.stdout, diag(r)).toContain("+after");
+        expect(r.stdout, diag(r)).toContain("untracked.txt");
+        expect(r.stdout, diag(r)).toContain("+new body");
+        expect(r.stdout, diag(r)).toContain("session名を変更しました: cycle 9 release");
+        expect(r.stdout, diag(r)).toContain("cycle 9 release");
+      } finally {
+        fs.rmSync(repo, { recursive: true, force: true });
       }
     },
     TEST_TIMEOUT_MS,

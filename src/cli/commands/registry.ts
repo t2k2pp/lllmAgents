@@ -15,6 +15,8 @@ import { loglevelCommand } from "./loglevel.js";
 import { doctorCommand } from "./doctor.js";
 import { forgetCommand } from "./forget.js";
 import { handoffCommand } from "./handoff.js";
+import { diffCommand } from "./diff.js";
+import { renameCommand } from "./rename.js";
 
 const COMMANDS: ReplCommandDef[] = [
   parallelCommand,
@@ -23,6 +25,8 @@ const COMMANDS: ReplCommandDef[] = [
   doctorCommand,
   forgetCommand,
   handoffCommand,
+  diffCommand,
+  renameCommand,
 ];
 
 let lookupCache: Map<string, ReplCommandDef> | null = null;

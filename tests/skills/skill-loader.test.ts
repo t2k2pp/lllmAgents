@@ -57,4 +57,31 @@ describe("skill-loader UTF-8 handling", () => {
     expect(warn.mock.calls[0][0]).toContain("frontmatter");
     expect(warn.mock.calls[0][0]).not.toContain("UTF-8で保存");
   });
+
+  it("lllmAgents拡張frontmatterとClaude互換allowed-toolsを同じ実行契約へ変換する", () => {
+    const source = [
+      "---",
+      "name: review",
+      "description: 差分をレビューする",
+      "trigger: /review-diff",
+      "context: fork",
+      "allowed-tools: [file_read, grep]",
+      "---",
+      "# Review",
+    ].join("\n");
+
+    expect(parseSkillFile(source, "C:/skills/review/SKILL.md", false)).toMatchObject({
+      name: "review",
+      trigger: "/review-diff",
+      context: "fork",
+      tools: ["file_read", "grep"],
+    });
+  });
+
+  it("無効なtrigger/context/toolsを通常skillとして黙って読み替えない", () => {
+    const base = "---\nname: bad\ndescription: bad skill\n%s\n---\nbody";
+    for (const field of ["trigger: review", "context: inline", "tools: [file_read, ../bash]"]) {
+      expect(parseSkillFile(base.replace("%s", field), "C:/skills/bad/SKILL.md", false)).toBeNull();
+    }
+  });
 });

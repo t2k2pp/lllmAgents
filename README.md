@@ -116,9 +116,10 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/resume <id>` | セッション復元 |
 | `/continue` | 最新セッションを復元 |
 | `/fork [id\|latest]` | 現在または保存済み会話を新しいセッションへ分岐（元セッションは不変） |
+| `/rename <name>` | 現在のセッションへ名前を付け、`/resume list` と再開pickerへ保存 |
 | `/memory` | 永続メモリ表示 |
 | `/remember <text>` | メモリに追記 |
-| `/diff` | git diff 表示 |
+| `/diff` | stage済み・未stage・未追跡を含むworking treeの実Git差分を表示 |
 | `/plan` | プランモードに入る |
 | `/skills` | 利用可能なスキル一覧 |
 | `/status` | 全体ステータス（モデル・コンテキスト・タスク等） |

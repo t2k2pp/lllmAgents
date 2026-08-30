@@ -7,13 +7,22 @@
   "bin": {
     "localllm": "dist/index.js"
   },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "scripts/sync-skills.js",
+    "src/agents/builtin/**/*.md",
+    "src/rules/builtin/**/*.md",
+    "src/skills/builtin/**"
+  ],
   "scripts": {
     "build": "tsc",
     "build:exe": "node build-exe.js",
     "build:deploy": "node scripts/build-deploy.js --verbose",
     "setup:git-hooks": "node scripts/install-git-hooks.mjs",
     "sync:skills": "node scripts/sync-skills.js --verbose",
-    "validate:skills": "node scripts/validate-skill.mjs src/skills/builtin/product-quality-cycle .localllm/skills/demo-skill",
+    "validate:skills": "node scripts/validate-skill.mjs --root src/skills/builtin --root .localllm/skills --root .claude/skills",
+    "validate:package": "node scripts/validate-npm-package.mjs",
     "validate:commits": "node scripts/validate-commit-messages.mjs",
     "start": "tsx src/index.ts",
     "setup": "tsx src/index.ts --setup",

@@ -102,7 +102,6 @@ export function displayHelp(skills?: SkillSummary[], registryEntries?: RegistryH
     ${chalk.cyan("/queue")}          受信順キューの待ち状況 (/queue clear で type-ahead 破棄)
     ${chalk.cyan("/memory")}         自動メモリ表示
     ${chalk.cyan("/remember <text>")} メモリに追記
-    ${chalk.cyan("/diff")}           git diff表示
     ${chalk.cyan("/plan")}           プランモードに入る
     ${chalk.cyan("/skills")}         利用可能なスキル一覧
     ${chalk.cyan("/status")}         全体ステータス

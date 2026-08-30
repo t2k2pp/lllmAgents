@@ -46,7 +46,7 @@ describe("コマンドレジストリ (PR-10)", () => {
   it("補完候補とヘルプ項目が全登録コマンド分自動生成される", () => {
     const completions = getRegistryCompletions();
     const helpEntries = getRegistryHelpEntries();
-    for (const name of ["/parallel", "/autorun", "/loglevel", "/doctor"]) {
+    for (const name of ["/parallel", "/autorun", "/loglevel", "/doctor", "/diff", "/rename"]) {
       expect(completions.some((c) => c.command === name)).toBe(true);
       expect(helpEntries.some((e) => e.name === name)).toBe(true);
     }
@@ -93,5 +93,17 @@ describe("コマンドレジストリ (PR-10)", () => {
   it("/loglevel の不正引数はエラー案内のみで例外を出さない", async () => {
     const { ctx } = makeContext();
     await expect(Promise.resolve(mustGet("/loglevel").handler(ctx, ["bogus"]))).resolves.toBeUndefined();
+  });
+
+  it("/rename は空名を保存せず、指定名を現在sessionへ永続化する", async () => {
+    const { ctx } = makeContext();
+    const renameCurrentSession = vi.fn((title: string) => title);
+    Object.assign(ctx.agent, { renameCurrentSession });
+
+    await mustGet("/rename").handler(ctx, []);
+    expect(renameCurrentSession).not.toHaveBeenCalled();
+
+    await mustGet("/rename").handler(ctx, ["release", "readiness"]);
+    expect(renameCurrentSession).toHaveBeenCalledWith("release readiness");
   });
 });

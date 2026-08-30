@@ -7111,22 +7111,6 @@ export class REPL {
         break;
       }
 
-      case "/diff": {
-        console.log(chalk.dim("  直近のgit diffを表示..."));
-        const { execFileSync } = await import("node:child_process");
-        try {
-          // Security: Use execFileSync instead of execSync to prevent command injection
-          const diff = execFileSync("git", ["diff", "--stat"], {
-            encoding: "utf-8",
-            cwd: process.cwd(),
-          });
-          console.log(diff || "  変更なし");
-        } catch {
-          console.log(chalk.yellow("  gitリポジトリではないか、git diffの実行に失敗しました。"));
-        }
-        break;
-      }
-
       case "/plan":
         if (this.planManager?.isInPlanMode()) {
           console.log(chalk.yellow("  既にプランモードです。"));

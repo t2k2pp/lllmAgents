@@ -30,6 +30,7 @@
 | [product-feature-comparison-cycle-6-2026-08-26.md](product-feature-comparison-cycle-6-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第6回とsafe mode改善記録 |
 | [product-feature-comparison-cycle-7-2026-08-27.md](product-feature-comparison-cycle-7-2026-08-27.md) | Codex / Claude Code機能比較第7回とTUI session全期間scrollback改善記録 |
 | [product-feature-comparison-cycle-8-2026-08-29.md](product-feature-comparison-cycle-8-2026-08-29.md) | Codex / Claude Code機能比較第8回、日本語IME右端描画・fail-fast・session fork改善記録 |
+| [product-feature-comparison-cycle-9-2026-08-30.md](product-feature-comparison-cycle-9-2026-08-30.md) | Codex / Claude Code機能比較第9回、working-tree実差分とsession命名改善記録 |
 
 ## アーキテクチャ・ハーネス
 

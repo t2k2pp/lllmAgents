@@ -129,9 +129,10 @@ stateDiagram-v2
 | `/status` | セッション全体の状態を 1 画面で表示 (slot / context / capability / metrics / cost / tasks) |
 | `/todo` | 現在のTODOリストを表示します |
 | `/resume` | セッション復元 (引数なしで picker / `latest` で最新 / `list` で一覧) |
+| `/rename` | 現在のセッションを命名し、保存済み一覧と picker へ即時反映します |
 | `/memory` | 永続メモリの内容を表示します |
 | `/remember` | 指定した情報を永続メモリに記録します |
-| `/diff` | 現在のセッションでの変更差分を表示します |
+| `/diff` | stage済み・未stage・未追跡を含む working tree の実Git差分を表示します。Git不在・非repository・出力上限超過は復旧方法付きで失敗します |
 | `/integrations` | 外部統合 (Discord / Slack / Chatlog / Search) を 1 画面で設定 |
 | `/permission` | ツール実行権限を picker で編集 (Pattern rules / Auto / Require / Discord / Slack) |
 | `/stream` | 表示モード (ストリーミング / スピナー+Markdown) を toggle |

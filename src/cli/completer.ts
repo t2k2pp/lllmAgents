@@ -148,7 +148,6 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/continue", description: "[非推奨] /resume latest の alias" },
   { command: "/memory", description: "メモリ表示" },
   { command: "/remember", description: "メモリに追記", needsArg: true },
-  { command: "/diff", description: "git diff" },
   { command: "/plan", description: "プランモード" },
   { command: "/skills", description: "スキル一覧" },
   { command: "/checkpoint", description: "自動チェックポイント (シャドウGit) の状態/一覧" },
