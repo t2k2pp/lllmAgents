@@ -101,4 +101,4 @@
 - `npm.cmd run validate:skills -- --root .agents/skills` / `--root .claude/skills`: passed
 - `npm.cmd run analyze:loop -- --since 2026-08-27`: session 1、user span 1、stuck-loop 0
 - Windowsローカルでは`test:pty`は設計どおり非対応。Linux/macOS PTY（macOSは幅20、日本語右端、scrollback）は最新push SHAのCI結果で終端する
-- push後CI: `1dfb2c5`はLinux/macOS PTY fixtureの未知model capability未設定で失敗し、`216f3a8`では両OS PTYを含むtest matrixがgreen化。dependent package jobは、SEA生成成功後も削除済みCJSを旧CI smokeが要求して失敗した。SEA-only契約へgateを更新し、次SHAで全dependent jobsを再評価する
+- push後CI: `1dfb2c5`のLinux/macOS PTY fixture不備、`216f3a8`の旧CJS smoke不整合をそれぞれ原因修正した。実装境界`4050d73`の[CI run 33282756319](https://github.com/t2k2pp/lllmAgents/actions/runs/33282756319)でcommit policy、Ubuntu、macOS、Windows、dependent Windows SEA packageの全5 jobがsuccess。macOS幅20の日本語右端入力とscrollback、SEA-only配布を実環境で確認した。本記録commitも同じworkflowを完走した時点でcycle完了とする
