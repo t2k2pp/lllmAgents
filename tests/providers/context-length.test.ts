@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "../../src/providers/utils/context-length.js";
+import { inferContextLength } from "../../src/providers/utils/context-length.js";
 
 describe("inferContextLength — モデル名から context length を推定", () => {
   it("Claude 系は 200K", () => {
@@ -42,12 +42,8 @@ describe("inferContextLength — モデル名から context length を推定", (
     expect(inferContextLength("deepseek-r1")).toBe(128_000);
   });
 
-  it("未知モデルは 0 を返す (呼び出し側で FALLBACK_CONTEXT_WINDOW にフォールバック)", () => {
+  it("未知モデルは推測値へ置換せず 0 を返す", () => {
     expect(inferContextLength("totally-unknown-model")).toBe(0);
     expect(inferContextLength("custom-finetune-v1")).toBe(0);
-  });
-
-  it("FALLBACK_CONTEXT_WINDOW は 32K 以上 (4096 など旧式の小さな値ではない)", () => {
-    expect(FALLBACK_CONTEXT_WINDOW).toBeGreaterThanOrEqual(32_768);
   });
 });

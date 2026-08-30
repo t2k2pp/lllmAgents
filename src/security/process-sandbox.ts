@@ -6,7 +6,7 @@
  * - macOS: sandbox-exec(1) による sandbox-d プロファイル適用
  * - Windows: 未サポート（ネイティブは封じ込め無し。封じ込めが要る場合は WSL2 内で起動 →
  *   platform=linux となりこの Linux 経路が効く。docs/wsl-sandbox-design.md §3）
- * - フォールバック: ツール非存在時は設定に警告を出して no-op
+ * - 必須ツール非存在時は隔離なしで実行せず、依存と復旧手順を示してfail-fast
  *
  * レベル設計は「FS 書込」と「ネットワーク」の2軸（docs/wsl-sandbox-design.md §7）:
  * - "fs"   : FS 書込のみ隔離・ネットワークは allowlist 経由のみ（macOS / Linux は socat+ip 時）。
@@ -116,7 +116,7 @@ export function withSandboxState(
 /**
  * 設定とツール有無から実効レベルを決める純粋関数（platform 非依存にしテスト可能化）。
  * Phase 3 自動許可・proxy 起動・status 表示が全てこの戻り値に乗るため、 全分岐をテストで固定する。
- * - linux: fs/full は bwrap 必須（無ければ none / full は unshare あれば network へ降格）、 network は unshare 必須
+ * - linux: fs/full は bwrap 必須（無ければnone。別レベルへ自動降格しない）、network は unshare 必須
  * - darwin: sandbox-exec 必須。 fs/full/network はそのまま
  * - その他(win32 等): 常に none
  */
@@ -131,7 +131,7 @@ export function resolveEffectiveLevel(
     if (config.level === "fs") return tools.bwrap ? "fs" : "none";
     if (config.level === "full") {
       if (tools.bwrap) return "full";
-      return tools.unshare ? "network" : "none"; // FS 隔離不可なら最低限ネット隔離へ降格
+      return "none";
     }
     return tools.unshare ? "network" : "none"; // network レベル
   }
@@ -144,6 +144,50 @@ export function resolveEffectiveLevel(
   }
 
   return "none"; // Windows ネイティブは未サポート
+}
+
+export interface SandboxReadinessTools {
+  bwrap: boolean;
+  unshare: boolean;
+  sandboxExec: boolean;
+  socat: boolean;
+  ip: boolean;
+}
+
+/**
+ * 設定された隔離レベルをそのまま成立させられるか検査する。
+ * 不足時は別レベルやネット全開へ置換せず、実行を止めるための診断文を返す。
+ */
+export function getSandboxReadinessError(
+  plat: string,
+  config: { enabled: boolean; level: ProcessSandboxLevel },
+  tools: SandboxReadinessTools,
+): string | null {
+  if (!config.enabled || config.level === "none") return null;
+
+  const prefix = `processSandbox level=${config.level} を要求していますが`;
+  if (plat === "win32") {
+    return `${prefix}、Windows nativeでは対応していません。WSL2内で本アプリを起動するか、明示的に /sandbox off を選んでください。隔離なしでは実行しません。`;
+  }
+  if (plat === "darwin") {
+    return tools.sandboxExec
+      ? null
+      : `${prefix}、sandbox-execが見つかりません。macOSの実行環境を確認するか、明示的に /sandbox off を選んでください。隔離なしでは実行しません。`;
+  }
+  if (plat !== "linux") {
+    return `${prefix}、platform=${plat}は未対応です。明示的に /sandbox off を選ぶまで隔離なしでは実行しません。`;
+  }
+
+  if ((config.level === "fs" || config.level === "full") && !tools.bwrap) {
+    return `${prefix}、bwrapが見つかりません。bubblewrapを導入するか、明示的に /sandbox off を選んでください。別レベルへ降格して実行しません。`;
+  }
+  if (config.level === "network" && !tools.unshare) {
+    return `${prefix}、unshareが見つかりません。util-linuxを導入するか、明示的に /sandbox off を選んでください。隔離なしでは実行しません。`;
+  }
+  if (config.level === "fs" && (!tools.socat || !tools.ip)) {
+    return `${prefix}、ネットallowlist bridgeに必要な${!tools.socat ? " socat" : ""}${!tools.ip ? " ip" : ""}が見つかりません。socatとiproute2を導入するか、別の隔離レベルを明示選択してください。ネット全開では実行しません。`;
+  }
+  return null;
 }
 
 /** ツール存在チェック（複数パスを試す） */
@@ -400,6 +444,17 @@ export class ProcessSandbox {
     });
   }
 
+  /** 現在の設定を劣化なしで成立させられない場合のfail-fast診断。 */
+  getReadinessError(): string | null {
+    return getSandboxReadinessError(this.plat, this.config, {
+      bwrap: !!this.bwrap,
+      unshare: !!this.unshare,
+      sandboxExec: !!this.sandboxExec,
+      socat: !!this.socat,
+      ip: !!this.ip,
+    });
+  }
+
   /** 利用可能ツールの状態を返す（sandbox_info ツール用） */
   getAvailability(): SandboxAvailability {
     return {
@@ -429,6 +484,8 @@ export class ProcessSandbox {
     socketPath?: string,
     failClosedNet?: boolean,
   ): WrappedCommand {
+    const readinessError = this.getReadinessError();
+    if (readinessError) throw new Error(readinessError);
     const effective = this.getEffectiveLevel();
 
     if (effective === "none") {

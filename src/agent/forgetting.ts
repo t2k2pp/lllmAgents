@@ -620,8 +620,8 @@ export class ForgettingEngine {
 
   /**
    * 忘却プランを作る (適用はしない)。
-   * JSON パース失敗は 1 回だけ再試行し、 それでもだめなら null を返して
-   * 呼び出し側に圧縮フォールバックさせる (docs §4.3)。
+   * JSON パース失敗は同じ忘却経路で 1 回だけ再試行し、それでもだめなら null を返す。
+   * forget 単独モードは失敗を報告し、hybrid のみ明示された圧縮段階へ進む。
    */
   async plan(messages: Message[], targetTokens: number): Promise<ForgetPlan | null> {
     const segments = buildSegments(messages, this.keepRecentSegments);
@@ -657,7 +657,7 @@ export class ForgettingEngine {
 
     const { thin, drop, warnings } = validateChoice(segments, choice);
     if (thin.length === 0 && drop.length === 0) {
-      // 「何も忘れない」 は安全側だが縮約としては不成立。 圧縮にフォールバックさせる
+      // 「何も忘れない」 は安全側だが縮約としては不成立として返す。
       logger.info("[forget] モデルが thin/drop を 1 件も選ばなかったため忘却は不成立");
       return null;
     }

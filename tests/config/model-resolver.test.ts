@@ -99,7 +99,7 @@ describe("model-resolver: ref の解決", () => {
     expect(r?.slot).toBeUndefined();
   });
 
-  it("未定義の ref は undefined (呼出側で main フォールバック)", () => {
+  it("未定義の ref は undefined", () => {
     recordEntry(local("qwen3-32b"));
     expect(resolveModelRef("deep")).toBeUndefined();
     expect(resolveModelRef("")).toBeUndefined();
@@ -108,19 +108,18 @@ describe("model-resolver: ref の解決", () => {
   });
 });
 
-describe("model-resolver: main フォールバック", () => {
+describe("model-resolver: main の既定選択", () => {
   it("ref 未指定なら main を返す", () => {
     const e = recordEntry(local("qwen3-32b"))!;
     setSlot("main", e.id);
     expect(resolveModelRefOrMain(undefined)?.entryId).toBe(e.id);
   });
 
-  it("解決できない ref は main にフォールバックする", () => {
+  it("明示した ref を解決できなければ main に置換しない", () => {
     const e = recordEntry(local("qwen3-32b"))!;
     setSlot("main", e.id);
     const r = resolveModelRefOrMain("deep");
-    expect(r?.entryId).toBe(e.id);
-    expect(r?.slot).toBe("main");
+    expect(r).toBeUndefined();
   });
 
   it("main も未割当なら undefined", () => {
@@ -187,12 +186,12 @@ describe("model-resolver: 暗号化 apiKey と合言葉", () => {
     expect(resolveModelRef("deep")).toBeUndefined();
   });
 
-  it("解決できない暗号化 entry でも main フォールバックは効く", () => {
+  it("解決できない暗号化 entry を main に置換しない", () => {
     const main = recordEntry(local("qwen3-32b"))!;
     setSlot("main", main.id);
     const enc = recordEntry({ providerType: "anthropic", model: "claude-sonnet-4-6", apiKey: "encrypted:deadbeef" })!;
     setSlot("deep", enc.id);
-    expect(resolveModelRefOrMain("deep")?.entryId).toBe(main.id);
+    expect(resolveModelRefOrMain("deep")).toBeUndefined();
   });
 });
 

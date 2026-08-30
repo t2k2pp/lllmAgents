@@ -146,18 +146,19 @@ export function applyGuards(action: StrategyAction, input: GuardInput): GuardOut
   };
 
   if (current === "clear" && input.midSpan) {
-    // 作業の合間に履歴を消すと、 モデルが今やっていることの文脈ごと失う
-    downgrade("forget", "作業の途中 (ツール実行の合間) のため履歴は消しません");
+    // 作業の合間に履歴を変更すると、モデルが今やっていることの文脈を失い得る。
+    downgrade("none", "作業の途中 (ツール実行の合間) のため履歴変更を見送ります");
   }
   if (current === "clear" && input.hasInProgressTodo) {
-    downgrade("forget", "着手中の ToDo が残っているため履歴は消しません");
+    downgrade("none", "着手中の ToDo が残っているため履歴変更を見送ります");
   }
   if (current === "clear" && input.goalActive) {
-    downgrade("forget", "Goal Seek 実行中のため目標追跡の連続性を優先します");
+    downgrade("none", "Goal Seek 実行中のため履歴変更を見送ります");
   }
-  // 確認が必要なのに取れない場合のみ格下げする。 aggressive は確認そのものが不要なので対象外
+  // 確認が必要なのに取れない場合は、別の履歴変更へ自動で切り替えず見送る。
+  // aggressive は確認そのものが不要なので対象外。
   if (current === "clear" && input.mode === "auto" && !input.canConfirm) {
-    downgrade("compress", "確認を取れない経路 (非 TTY / Discord / Slack) のため");
+    downgrade("none", "確認を取れない経路 (非 TTY / Discord / Slack) のため履歴変更を見送ります");
   }
 
   return { action: current, downgrades, skipped: false };
@@ -354,12 +355,12 @@ export class ContextStrategy {
       });
     }
 
-    // 同じ区切りで一度「何もしない」 を選ばれていたら、 clear の再提案はしない (格下げして続行)
+    // 同じ区切りで一度「何もしない」 を選ばれていたら、別の履歴変更も自動実行しない。
     let action = guarded.action;
     const downgrades = [...guarded.downgrades];
     if (action === "clear" && this.isDeclined(input.fingerprint)) {
-      downgrades.push("clear → forget: 同じ区切りで既に見送りを選択済み");
-      action = "forget";
+      downgrades.push("clear → none: 同じ区切りで既に見送りを選択済み");
+      action = "none";
     }
 
     return this.record({ ...base, proposed, action, downgrades });

@@ -439,7 +439,7 @@ export function reconcileSlotsFromConfig(config: Config): void {
   }
 
   // vision slot (docs/model-registry.md Phase 5): config.visionLLM ↔ slots.named.vision
-  // visionLLM が null の場合は main にフォールバックするので vision slot は未割当のまま。
+  // visionLLM が null の場合は main が既定の画像担当なので、vision slot は未割当のまま。
   const visionId = ensureEntry(config.visionLLM ?? undefined);
   if (visionId) {
     store.slots.named ??= {};

@@ -22,6 +22,8 @@ export interface SessionMeta {
    * Room の「最後の会話」は room 一致セッションの updatedAt 最大で導出する。
    */
   room?: RoomId;
+  /** /fork で分岐した元セッション。元データは変更せず、系譜だけ新セッションへ記録する。 */
+  forkedFrom?: string;
 }
 
 /**
@@ -70,6 +72,21 @@ export function createSession(model: string, room?: RoomId): SessionData {
     },
     messages: [],
   };
+}
+
+/**
+ * 保存済み/現在のセッションから独立した会話分岐を作る。
+ * messages/todos/goal はdeep copyし、以後の変更が元セッションへ伝播しない。
+ */
+export function forkSession(source: SessionData): SessionData {
+  const fork = createSession(source.meta.model, source.meta.room);
+  fork.meta.forkedFrom = source.meta.id;
+  fork.meta.title = source.meta.title ? `${source.meta.title} (fork)` : "(fork)";
+  fork.messages = structuredClone(source.messages);
+  fork.todos = source.todos === undefined ? undefined : structuredClone(source.todos);
+  fork.goal = source.goal === undefined ? undefined : structuredClone(source.goal);
+  fork.meta.messageCount = fork.messages.length;
+  return fork;
 }
 
 export function saveSession(session: SessionData): void {

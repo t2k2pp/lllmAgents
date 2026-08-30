@@ -41,6 +41,8 @@ try {
     });
     let output = "";
     let sentHelp = false;
+    let sentJapanese = false;
+    let japaneseSeen = false;
     let sentPageUp = false;
     let pageUpOutputStart = 0;
     let scrollSeen = false;
@@ -51,11 +53,18 @@ try {
       if (!scrollSeen && output.includes(driver.scrollMarker)) {
         scrollSeen = true;
       }
+      if (!japaneseSeen && output.includes(driver.imeMarker)) japaneseSeen = true;
       if (!sentQuit && output.includes(driver.quitMarker)) {
         sentQuit = true;
       }
-      if (driver.parentSubmits && !sentHelp && /LocalLLM Agent/i.test(output)) {
+      if (driver.parentSubmits && !sentJapanese && /LocalLLM Agent/i.test(output)) {
+        sentJapanese = true;
+        child.stdin.write("日本語入力の右端折返し確認");
+      }
+      if (driver.parentSubmits && sentJapanese && !sentHelp && output.includes("日本語入力の右端折返し確認")) {
+        japaneseSeen = true;
         sentHelp = true;
+        child.stdin.write("\x15");
         child.stdin.write(submitPtyLine("/help"));
       }
       if (driver.parentSubmits && sentHelp && !sentPageUp && /Ctrl\+C/.test(output)) {
@@ -83,7 +92,7 @@ try {
     });
     child.on("close", (code, signal) => {
       clearTimeout(timer);
-      resolveRun({ code, signal, output, sentQuit, scrollSeen, timedOut });
+      resolveRun({ code, signal, output, sentQuit, scrollSeen, japaneseSeen, timedOut });
     });
   });
   if (
@@ -91,12 +100,14 @@ try {
     result.timedOut ||
     !result.sentQuit ||
     !result.scrollSeen ||
+    !result.japaneseSeen ||
     !/Goodbye!/i.test(result.output)
   ) {
     console.error(result.output);
     throw new Error(
       `PTY smoke failed (exit ${result.code}, signal ${result.signal ?? "none"}, ` +
-        `quitSent ${result.sentQuit}, scrollSeen ${result.scrollSeen}, timedOut ${result.timedOut})`,
+        `quitSent ${result.sentQuit}, scrollSeen ${result.scrollSeen}, ` +
+        `japaneseSeen ${result.japaneseSeen}, timedOut ${result.timedOut})`,
     );
   }
   console.log("real PTY smoke passed");

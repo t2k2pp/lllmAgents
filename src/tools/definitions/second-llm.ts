@@ -82,8 +82,8 @@ function buildSecondLLMFailureError(toolName: string, e: unknown): string {
     `  (a) リトライする (${category === "RATE_LIMIT" || category === "TIMEOUT" || category === "SERVER_ERROR" ? "推奨" : "効果薄"})\n` +
     `  (b) メイン側で実行 (ユーザーが許可する場合のみ)\n` +
     `  (c) モデル設定を見直す (/second status / /second setup azure-* 等)\n` +
-    `[例外] 経路の指示がユーザーから無く、 自分が「セカンド委任が適切」 と判断して呼んだだけのケースは、 ` +
-    `失敗してもメイン側でフォールバックしてよい (経路はあなた自身の選択だったため)。`
+    `[禁止] 経路を自分で選んだ場合も、失敗をメイン側の実行や別モデルで自動代替してはいけない。 ` +
+    `同じ経路を再試行するか、経路変更前に ask_user で許可を得る。`
   );
 }
 

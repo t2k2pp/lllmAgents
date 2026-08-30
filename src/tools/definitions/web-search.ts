@@ -3,7 +3,7 @@ import type { SearchConfig } from "../../config/types.js";
 
 /**
  * Web search tool.
- * Supports SearXNG (JSON API) and DuckDuckGo HTML (fallback).
+ * Supports explicitly configured SearXNG or DuckDuckGo HTML.
  */
 export function createWebSearchTool(searchConfig?: SearchConfig): ToolHandler {
   const provider = searchConfig?.provider ?? "duckduckgo";
@@ -42,17 +42,14 @@ export function createWebSearchTool(searchConfig?: SearchConfig): ToolHandler {
         }
         return await searchDuckDuckGo(query, maxResults);
       } catch (e) {
-        // SearXNG失敗時はDuckDuckGoにフォールバック
-        if (provider === "searxng") {
-          try {
-            const fallback = await searchDuckDuckGo(query, maxResults);
-            fallback.output = `[SearXNG unavailable, fell back to DuckDuckGo]\n\n${fallback.output}`;
-            return fallback;
-          } catch (_) {
-            // fall through
-          }
-        }
-        return { success: false, output: "", error: String(e) };
+        return {
+          success: false,
+          output: "",
+          error:
+            `Configured search provider '${provider}' failed: ${String(e)}. ` +
+            "Check that provider, or explicitly change search.provider in config; another provider was not used automatically.",
+          errorKind: "transient",
+        };
       }
     },
   };

@@ -35,15 +35,16 @@ interface JsonSchemaNode {
  *  - items (array)
  *  - description (description 注入)
  *
- * 非対応 / 簡略化:
- *  - anyOf/oneOf/allOf → z.any() フォールバック (1 件のみ存在: current-datetime)
+ * 非対応:
+ *  - anyOf/oneOf/allOf等は登録時にfail-fast（未知型をz.any()で通さない）
  *  - additionalProperties → 無視 (Zod default は strict)
  *  - nested object の深い構造 → 再帰対応するが過剰検証は避ける
  */
 export function jsonSchemaToZodShape(schema: JsonSchemaNode | undefined): ZodRawShape {
-  if (!schema || schema.type !== "object" || !schema.properties) {
-    return {};
-  }
+  if (!schema) return {};
+  if (schema.type !== "object")
+    throw new Error(`MCP tool schema root must be object (received: ${String(schema.type)})`);
+  if (!schema.properties) return {};
   const required = new Set(schema.required ?? []);
   const shape: Record<string, ZodTypeAny> = {};
   for (const [key, propSchema] of Object.entries(schema.properties)) {
@@ -78,15 +79,15 @@ function jsonPropToZod(prop: JsonSchemaNode): ZodTypeAny {
     case "boolean":
       return z.boolean();
     case "array": {
-      const items = prop.items ? jsonPropToZod(prop.items) : z.any();
-      return z.array(items);
+      if (!prop.items) throw new Error("MCP tool array schema requires items");
+      return z.array(jsonPropToZod(prop.items));
     }
     case "object": {
       const nested = jsonSchemaToZodShape(prop);
       return Object.keys(nested).length > 0 ? z.object(nested) : z.record(z.string(), z.any());
     }
     default:
-      return z.any();
+      throw new Error(`Unsupported MCP tool schema type: ${String(type)}`);
   }
 }
 

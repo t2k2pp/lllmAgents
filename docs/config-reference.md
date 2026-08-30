@@ -177,7 +177,7 @@
 | `providerType` | ProviderType (ローカル) または CloudProviderType | Yes | 推論サーバーの種別。 ローカル: `"ollama"` \| `"lmstudio"` \| `"llamacpp"` \| `"vllm"`。 クラウド: `"vertex-ai"` \| `"azure-openai"` \| `"azure-gpt"` \| `"azure-claude"` \| `"azure-foundry"` \| `"azure-anthropic"` \| `"anthropic"` \| `"claude-cli"` |
 | `baseUrl` | string | Local Only | APIエンドポイントURL (ローカル系のみ)。 クラウド系では `endpoint` / `apiKey` を使う |
 | `model` | string | Yes | モデル名（サーバーに登録されている名前） |
-| `contextWindow` | number | No | コンテキストウィンドウサイズ（トークン数）。未指定時はサーバーから取得を試みる |
+| `contextWindow` | number | No | コンテキストウィンドウサイズ（トークン数）。未指定時はサーバー値→既知モデル名の順で解決し、どちらも不明なら推測値へ置換せず設定を要求して起動停止 |
 | `apiKey` | string | Cloud | クラウド系 (`anthropic` / `azure-*`) の認証情報。 `env:VAR_NAME` / `encrypted:...` / 平文。 `anthropic` は省略時 `env:ANTHROPIC_API_KEY` にフォールバック |
 | `endpoint` | string | Azure | Azure 系のリソース endpoint (`https://...`) |
 | `deploymentName` | string | Azure | Azure OpenAI / Azure Claude の deployment 名 (Foundry / Anthropic / GPT-Responses は不要) |
@@ -186,6 +186,18 @@
 | `top_p` | number | No | Top-p (nucleus sampling)。[後述](#サンプリングパラメータ) |
 | `top_k` | number | No | Top-k sampling。[後述](#サンプリングパラメータ) |
 | `repetition_penalty` | number | No | 繰り返しペナルティ。[後述](#サンプリングパラメータ) |
+
+未知・独自モデルは、context長だけで能力tierを推測しない。モデル名から判定できない場合は次のように明示する。
+
+```json
+{
+  "modelCapabilities": {
+    "my-private-model": { "tier": "T2", "contextWindow": 48000 }
+  }
+}
+```
+
+`tier` は `T1` / `T2` / `T3`。`contextWindow` とtierのどちらかを確定できなければ、起動時に設定箇所を示して停止する。
 
 デフォルトポート（baseUrl未指定時のフォールバック）:
 
@@ -411,6 +423,7 @@ CLI からは `/integrations` → Slack の picker で対話設定 (canonical)�
 | `searxngUrl` | string | — | SearXNGのJSON APIエンドポイント (例: `http://localhost:8888`) |
 
 CLIコマンド `/search provider searxng` → `/search url http://localhost:8888` でも設定可能。
+選択したproviderが失敗した場合、別providerへ自動切替はしない。接続を直すか、`/search provider ...`で明示的に変更する。
 
 ## obsidian — Obsidianナレッジベース連携
 

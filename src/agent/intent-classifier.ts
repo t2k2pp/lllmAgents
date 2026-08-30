@@ -167,17 +167,14 @@ export class IntentClassifier {
       const response = await collectResponse(gen);
       const result = extractClassification(response.content, ["task", "question", "conversation"] as IntentType[]);
 
-      if (result) {
-        logger.debug(`Intent classified by LLM: ${result}`);
-        return result;
-      }
+      if (!result) throw new Error("応答に有効な intent 分類がありません");
+      logger.debug(`Intent classified by LLM: ${result}`);
+      return result;
     } catch (e) {
-      logger.debug(`Intent LLM classification failed: ${e}`);
+      const message = `Intent 分類に失敗しました: ${e instanceof Error ? e.message : String(e)}`;
+      logger.warn(message);
+      throw new Error(message, { cause: e });
     }
-
-    // フォールバック: 判定不能ならタスクとして扱う（安全側に倒す）
-    logger.debug("Intent classification fallback: task");
-    return "task";
   }
 
   /**
@@ -206,17 +203,14 @@ export class IntentClassifier {
       const response = await collectResponse(gen);
       const result = extractClassification(response.content, ["completed", "in_progress", "other"] as CompletionType[]);
 
-      if (result) {
-        logger.debug(`Completion classified by LLM: ${result}`);
-        return result;
-      }
+      if (!result) throw new Error("応答に有効な completion 分類がありません");
+      logger.debug(`Completion classified by LLM: ${result}`);
+      return result;
     } catch (e) {
-      logger.debug(`Completion LLM classification failed: ${e}`);
+      const message = `Completion 分類に失敗しました: ${e instanceof Error ? e.message : String(e)}`;
+      logger.warn(message);
+      throw new Error(message, { cause: e });
     }
-
-    // フォールバック: 判定不能なら「その他」（リプロンプト発動側に倒す）
-    logger.debug("Completion classification fallback: other");
-    return "other";
   }
 
   /**

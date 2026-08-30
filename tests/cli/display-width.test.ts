@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getDisplayWidth } from "../../src/cli/interactive-input.js";
+import { nextGraphemeBoundary, previousGraphemeBoundary } from "../../src/utils/display-width.js";
 
 describe("getDisplayWidth", () => {
   it("should return 0 for empty string", () => {
@@ -68,5 +69,23 @@ describe("getDisplayWidth", () => {
     expect(getDisplayWidth("@src/cli/")).toBe(9); // all ASCII
     // File path with Japanese
     expect(getDisplayWidth("@テスト.ts")).toBe(10); // 1 + 3×2 + 3 = 10
+  });
+});
+
+describe("Unicode grapheme editing", () => {
+  it("結合文字とZWJ emojiを1文字として数える", () => {
+    expect(getDisplayWidth("e\u0301")).toBe(1);
+    expect(getDisplayWidth("👩‍💻")).toBe(2);
+    expect(getDisplayWidth("🇯🇵")).toBe(2);
+  });
+
+  it("cursor移動境界がsurrogate/結合文字/ZWJの途中に入らない", () => {
+    const value = "e\u0301👩‍💻日";
+    const afterAccent = "e\u0301".length;
+    const afterEmoji = afterAccent + "👩‍💻".length;
+    expect(nextGraphemeBoundary(value, 0)).toBe(afterAccent);
+    expect(nextGraphemeBoundary(value, afterAccent)).toBe(afterEmoji);
+    expect(previousGraphemeBoundary(value, afterEmoji)).toBe(afterAccent);
+    expect(previousGraphemeBoundary(value, value.length)).toBe(afterEmoji);
   });
 });

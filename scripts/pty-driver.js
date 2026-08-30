@@ -1,20 +1,26 @@
 const EXPECT_QUIT_MARKER = "__PTY_QUIT_SENT__";
 const EXPECT_SCROLL_MARKER = "__PTY_SCROLL_SEEN__";
+const EXPECT_IME_MARKER = "__PTY_IME_SEEN__";
 const SCROLL_CAPABLE_TERM = "xterm-256color";
 
 const EXPECT_PROGRAM = `
 set timeout 30
 log_user 1
 spawn -noecho $env(PTY_NODE) $env(PTY_TSX) $env(PTY_ENTRY) --no-mcp
+stty columns 20 rows 24
 expect {
   -re {LocalLLM Agent} {
-    send -- "/help\\r"
+    send -- "日本語入力の右端折返し確認"
   }
   timeout {
     puts stderr "__PTY_TIMEOUT__"
     exit 124
   }
 }
+expect -re {日本語入力の右端折返し確認}
+puts "${EXPECT_IME_MARKER}"
+send -- "\\025"
+send -- "/help\\r"
 expect -re {Ctrl\\+C}
 send -- "\\033\\[5~"
 expect -re {PgDn}
@@ -43,6 +49,7 @@ export function ptyDriver(platform, { node, tsx, entry }) {
       parentSubmits: false,
       quitMarker: EXPECT_QUIT_MARKER,
       scrollMarker: EXPECT_SCROLL_MARKER,
+      imeMarker: EXPECT_IME_MARKER,
     };
   }
 
@@ -56,5 +63,6 @@ export function ptyDriver(platform, { node, tsx, entry }) {
     parentSubmits: true,
     quitMarker: EXPECT_QUIT_MARKER,
     scrollMarker: EXPECT_SCROLL_MARKER,
+    imeMarker: EXPECT_IME_MARKER,
   };
 }

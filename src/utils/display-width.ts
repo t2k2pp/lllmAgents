@@ -41,17 +41,58 @@ export function isFullwidthCodePoint(code: number): boolean {
   );
 }
 
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const MARK = /^\p{Mark}$/u;
+const EMOJI = /\p{Extended_Pictographic}|\p{Emoji_Presentation}/u;
+const REGIONAL_INDICATOR = /\p{Regional_Indicator}/u;
+
+/** Unicode grapheme cluster（ユーザーが1文字として扱う単位）へ分割する。 */
+export function splitGraphemes(str: string): string[] {
+  return Array.from(graphemeSegmenter.segment(str), ({ segment }) => segment);
+}
+
+/** cursor が途中にあっても、直前の grapheme cluster の先頭を返す。 */
+export function previousGraphemeBoundary(str: string, cursor: number): number {
+  let previous = 0;
+  for (const { index } of graphemeSegmenter.segment(str)) {
+    if (index >= cursor) break;
+    previous = index;
+  }
+  return previous;
+}
+
+/** cursor が途中にあっても、直後の grapheme cluster の末尾を返す。 */
+export function nextGraphemeBoundary(str: string, cursor: number): number {
+  for (const { index, segment } of graphemeSegmenter.segment(str)) {
+    const end = index + segment.length;
+    if (end > cursor) return end;
+  }
+  return str.length;
+}
+
+function getGraphemeWidth(grapheme: string): number {
+  let hasPrintableBase = false;
+  let wide = false;
+  for (const char of grapheme) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code < 32 || code === 0x7f || code === 0x200d || code === 0xfe0e || code === 0xfe0f || MARK.test(char)) {
+      continue;
+    }
+    hasPrintableBase = true;
+    if (isFullwidthCodePoint(code) || EMOJI.test(char) || REGIONAL_INDICATOR.test(char)) wide = true;
+  }
+  if (!hasPrintableBase) return 0;
+  // VS16 は直前の文字を emoji presentation（通常2桁）へ切り替える。
+  return wide || grapheme.includes("\ufe0f") ? 2 : 1;
+}
+
 /**
  * 文字列のターミナル表示幅を計算する。
  * 全角文字(CJK, ひらがな, カタカナ等) = 2カラム、半角 = 1カラム。
  */
 export function getDisplayWidth(str: string): number {
   let width = 0;
-  for (const char of str) {
-    const code = char.codePointAt(0) ?? 0;
-    if (code < 32) continue; // 制御文字は幅0
-    width += isFullwidthCodePoint(code) ? 2 : 1;
-  }
+  for (const grapheme of splitGraphemes(str)) width += getGraphemeWidth(grapheme);
   return width;
 }
 
@@ -64,7 +105,7 @@ export function truncateToWidth(str: string, maxCols: number): string {
   if (getDisplayWidth(str) <= maxCols) return str;
   let w = 0;
   let out = "";
-  for (const ch of str) {
+  for (const ch of splitGraphemes(str)) {
     const cw = getDisplayWidth(ch);
     if (w + cw + 1 > maxCols) break; // "…"の1カラム分を確保
     out += ch;

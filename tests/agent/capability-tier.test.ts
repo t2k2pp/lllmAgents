@@ -32,7 +32,7 @@ describe("resolveCapability — 完全一致テーブル", () => {
 
   for (const [modelId, expectedTier, description] of cases) {
     it(`${modelId} → ${expectedTier} (${description})`, () => {
-      const profile = resolveCapability(modelId);
+      const profile = resolveCapability(modelId, 128_000);
       expect(profile.tier).toBe(expectedTier);
       expect(profile.contextWindow).toBeGreaterThan(0);
     });
@@ -87,14 +87,14 @@ describe("resolveCapability — ヒューリスティック (パターン外)", 
   // tier 判定はモデル名のサイズ表記のみ使う (ctxWindow とは独立)。
   // ctxWindow の解決は providers/utils/context-length.ts (inferContextLength) に一元化済。
 
-  it("model 名に 70b 表記があれば T2 (ctx は inferContextLength 任せ)", () => {
-    const profile = resolveCapability("custom-model-70b-merged");
+  it("model 名に 70b 表記があれば、明示ctxを使って T2", () => {
+    const profile = resolveCapability("custom-model-70b-merged", 32_768);
     expect(profile.tier).toBe("T2");
     expect(profile.contextWindow).toBeGreaterThan(0); // 値の出所は問わない
   });
 
-  it("model 名に 7b 表記があれば T3", () => {
-    const profile = resolveCapability("custom-fine-tune-7b-v2");
+  it("model 名に 7b 表記があれば、明示ctxを使って T3", () => {
+    const profile = resolveCapability("custom-fine-tune-7b-v2", 32_768);
     expect(profile.tier).toBe("T3");
   });
 
@@ -107,21 +107,24 @@ describe("resolveCapability — ヒューリスティック (パターン外)", 
 
   it("ctxWindow 未指定で既知パターンに合えば inferContextLength が使われる", () => {
     // "llama" は inferContextLength で 128K (3.x default) になる
-    const profile = resolveCapability("llama-3.2-something", undefined);
+    const profile = resolveCapability("llama-3.2-something", undefined, { tier: "T3" });
     expect(profile.contextWindow).toBe(128_000);
     expect(profile.reason).toContain("ctx=infer");
   });
 
-  it("ctxWindow 未指定で完全未知なら FALLBACK_CONTEXT_WINDOW (32K)", () => {
-    const profile = resolveCapability("opaque-private-model");
-    expect(profile.contextWindow).toBe(32_768);
-    expect(profile.reason).toContain("ctx=fallback");
+  it("ctxWindow 未指定で完全未知なら推測値へ置換せず停止する", () => {
+    expect(() => resolveCapability("opaque-private-model")).toThrow("contextWindow を確定できません");
   });
 
-  it("情報無しのフォールバックは T2 (中庸)", () => {
-    const profile = resolveCapability("opaque-private-model");
-    expect(profile.tier).toBe("T2");
-    expect(profile.reason).toContain("fallback");
+  it("contextWindow だけ既知でも未知モデルの tier を T2 に自動置換しない", () => {
+    expect(() => resolveCapability("opaque-private-model", 32_768)).toThrow("能力tierを自動判定できません");
+  });
+
+  it("未知モデルは明示した contextWindow と tier なら解決できる", () => {
+    const profile = resolveCapability("opaque-private-model", undefined, { contextWindow: 48_000, tier: "T3" });
+    expect(profile.contextWindow).toBe(48_000);
+    expect(profile.tier).toBe("T3");
+    expect(profile.reason).toContain("explicit tier=T3");
   });
 });
 

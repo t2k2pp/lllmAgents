@@ -96,6 +96,7 @@ export function displayHelp(skills?: SkillSummary[], registryEntries?: RegistryH
     ${chalk.cyan("/exit-goal-seek")}  Goal Seek mode を抜ける (acceptance 未達成でも user 明示で中断)
     ${chalk.cyan("/sessions [N]")}   保存済みセッション一覧 (デフォルト 20 件)
     ${chalk.cyan("/resume [id]")}    セッション復元 (引数なしで対話的選択)
+    ${chalk.cyan("/fork [id]")}      会話を新しいセッションへ分岐 (元セッションは不変)
     ${chalk.cyan("/continue")}       最新セッションを復元
     ${chalk.cyan("/room")}           会話 Room (A/B/C) の表示・移動・再開 (REPL=A/Discord=B/Slack=C)
     ${chalk.cyan("/queue")}          受信順キューの待ち状況 (/queue clear で type-ahead 破棄)

@@ -20,7 +20,7 @@ import * as logger from "./logger.js";
 
 /** リサイズ時に試す最長辺の上限 (px)。大きい順に試し、目標以下になった時点で確定 */
 const RESIZE_STEPS = [2048, 1536, 1280, 1024, 768];
-/** JPEG フォールバック時に試す品質。高い順に試す */
+/** JPEG 変換段階で試す品質。高い順に試す */
 const JPEG_QUALITY_STEPS = [85, 70, 55, 40];
 /** 実バイト数の目標に対する安全マージン (上限ギリギリを避ける) */
 const SAFETY_RATIO = 0.9;
@@ -29,7 +29,7 @@ const SAFETY_RATIO = 0.9;
  * jimp の遅延ロード。
  * SEA (exe) ビルドでは jimp が esbuild の external に指定されバンドルに含まれない。
  * playwright と同じく createRequire で node_modules から読む。
- * jimp が見つからなければ null を返す (呼び出し側でフォールバック)。
+ * jimp が見つからなければ null を返し、呼び出し側が添付準備を失敗させる。
  */
 let _jimpModule: typeof import("jimp") | null | undefined;
 async function loadJimp(): Promise<typeof import("jimp") | null> {
@@ -57,10 +57,7 @@ async function loadJimp(): Promise<typeof import("jimp") | null> {
     }
   }
 
-  logger.warn(
-    "jimp が見つかりません。画像の自動縮小は無効です (オリジナルをそのまま添付します)。" +
-      "npm install jimp で導入できます。",
-  );
+  logger.warn("jimp が見つかりません。上限超過画像は添付できません。npm install jimp で導入できます。");
   _jimpModule = null;
   return null;
 }
@@ -92,26 +89,29 @@ function makeTempPath(originalPath: string, ext: string): string {
  * 添付用にファイルを準備する。
  * 元サイズが maxBytes 以下ならオリジナルをそのまま使う (無加工)。
  * 超過時は一時ディレクトリに縮小版を生成して返す。
- * 縮小に失敗、または縮小しても目標に収まらない場合でもオリジナルを返す
- * (送信側で最終的な上限超過をハンドルする)。
+ * 縮小に失敗、または目標に収まらない場合は理由を示して失敗させる。
  */
 export async function prepareForDiscord(filePath: string, maxBytes: number): Promise<PreparedAttachment> {
   let originalSize: number;
   try {
     originalSize = fs.statSync(filePath).size;
-  } catch {
-    // stat 不能 (存在しない等) はそのまま返し、送信側のエラーに委ねる
-    return { path: filePath, isTemp: false };
+  } catch (error) {
+    throw new Error(
+      `添付ファイルを読み取れません: ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+      {
+        cause: error,
+      },
+    );
   }
 
   if (originalSize <= maxBytes) {
     return { path: filePath, isTemp: false };
   }
 
-  // jimp が使えない場合はオリジナルをそのまま返す
+  // 上限超過時に縮小できなければ、送信可能に見せず停止する。
   const jimpMod = await loadJimp();
   if (!jimpMod) {
-    return { path: filePath, isTemp: false };
+    throw new Error(`上限超過画像を縮小できません: jimp が見つかりません (${filePath})`);
   }
   const { Jimp } = jimpMod;
 
@@ -160,23 +160,12 @@ export async function prepareForDiscord(filePath: string, maxBytes: number): Pro
       }
     }
 
-    // 3) ここまで来たら最小品質の JPEG を採用 (目標未達でもオリジナルよりは小さい)。
-    const fallbackBuf = await jpegBase.getBuffer("image/jpeg", {
-      quality: JPEG_QUALITY_STEPS[JPEG_QUALITY_STEPS.length - 1],
-    });
-    if (fallbackBuf.length < originalSize) {
-      const out = makeTempPath(filePath, ".jpg");
-      fs.writeFileSync(out, fallbackBuf);
-      return {
-        path: out,
-        isTemp: true,
-        note: `${formatBytes(originalSize)}→${formatBytes(fallbackBuf.length)}に縮小 (最小品質)`,
-      };
-    }
+    throw new Error(
+      `画像を添付上限内に縮小できません: ${formatBytes(originalSize)} > ${formatBytes(maxBytes)} (${filePath})`,
+    );
   } catch (e) {
-    logger.warn(`画像の縮小に失敗しました (オリジナルを使用): ${filePath}: ${e}`);
+    const message = `画像の縮小に失敗しました: ${filePath}: ${e instanceof Error ? e.message : String(e)}`;
+    logger.warn(message);
+    throw new Error(message, { cause: e });
   }
-
-  // 縮小できなかった場合はオリジナルを返す
-  return { path: filePath, isTemp: false };
 }

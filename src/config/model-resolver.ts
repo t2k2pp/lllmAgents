@@ -10,7 +10,7 @@
  *  - 暗号化 apiKey の復号に使う合言葉を起動時に 1 回だけ預かる
  *
  * ここでは対話プロンプトを一切出さない。 ツール実行中に合言葉を聞くと描画が壊れるため、
- * 解決できない場合は undefined を返し、 呼び出し側が main へフォールバックする。
+ * 解決できない場合は undefined を返す。明示された参照を別モデルへ自動置換してはならない。
  */
 
 import type { LLMEndpoint, LLMRegistryEntry } from "./types.js";
@@ -121,7 +121,7 @@ function materialize(entry: LLMRegistryEntry, slot: string | undefined): Resolve
 }
 
 /**
- * ref を解決する。 解決できなければ undefined (呼び出し側で main にフォールバック)。
+ * ref を解決する。解決できなければ undefined。明示refを別モデルへ置換しない。
  *
  * 文法 (設計書 §3.1):
  *   main / second / <slot-name>  slot 参照
@@ -161,15 +161,11 @@ export function resolveModelRef(ref: string): ResolvedModel | undefined {
 }
 
 /**
- * main へのフォールバック込みで ref を解決する。 サブエージェント起動はこちらを使う。
- * ref 未指定、 または解決失敗時は main slot を返す (main も解決できなければ undefined)。
+ * ref を解決する。未指定時だけ既定の main slot を返す。
+ * 明示された ref の解決失敗は undefined とし、別モデルへ自動置換しない。
  */
 export function resolveModelRefOrMain(ref: string | undefined): ResolvedModel | undefined {
-  if (ref?.trim()) {
-    const resolved = resolveModelRef(ref);
-    if (resolved) return resolved;
-  }
-  return resolveModelRef("main");
+  return ref?.trim() ? resolveModelRef(ref) : resolveModelRef("main");
 }
 
 export interface ResolvableSlot {

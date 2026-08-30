@@ -81,10 +81,13 @@ describe("prepareForDiscord", () => {
     expect(fs.readFileSync(src).equals(originalBytes)).toBe(true);
   });
 
-  it("存在しないファイルはそのまま返す (送信側に委ねる)", async () => {
+  it("存在しないファイルを送信側の別挙動へ委ねず失敗させる", async () => {
     const missing = tmpFile("nope.png");
-    const r = await prepareForDiscord(missing, 1024);
-    expect(r.isTemp).toBe(false);
-    expect(r.path).toBe(missing);
+    await expect(prepareForDiscord(missing, 1024)).rejects.toThrow("添付ファイルを読み取れません");
+  });
+
+  it("縮小しても上限に入らない画像を上限超過のまま返さない", async () => {
+    const src = await writeNoisyPng(64);
+    await expect(prepareForDiscord(src, 1)).rejects.toThrow("添付上限内に縮小できません");
   });
 });

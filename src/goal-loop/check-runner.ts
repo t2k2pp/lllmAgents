@@ -6,13 +6,14 @@
  * そのため検証コマンドは LLM/bash ツール経由でなく、ハーネスが直接 spawn して exit code を取る。
  * これにより「テストが通ったか」は ground-truth (客観) で判定される。
  *
- * shell 解決は src/tools/definitions/bash.ts と同じ流儀:
- *   - Windows: git-bash (無ければ cmd.exe)
+ * shell 解決は src/tools/definitions/bash.ts と同じ契約:
+ *   - Windows: git-bash 必須 (無ければ実行前に明示失敗)
  *   - その他: /bin/sh -c
  * cwd は呼び出し元 (= process.cwd()) と一致させ、エージェントの編集と同じ場所で検証する。
  */
 
-import { spawn, execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import { findGitBash, resolveWindowsBashCommand } from "../tools/definitions/bash.js";
 
 export interface CheckResult {
   /** 実行した検証コマンド */
@@ -39,32 +40,18 @@ function tail(s: string, n: number = TAIL_CHARS): string {
   return "…(先頭省略)…\n" + s.slice(s.length - n);
 }
 
-/** Windows で git-bash の絶対パスを探す (bash.ts の getGitBash と同等の最小版) */
-function findGitBash(): string | null {
-  try {
-    const out = execFileSync("where", ["bash.exe"], { encoding: "utf-8", timeout: 3000 });
-    const first = out.split(/\r?\n/).find((l) => l.trim().length > 0);
-    return first ? first.trim() : null;
-  } catch {
-    return null;
-  }
-}
-
 interface ResolvedShell {
   shell: string;
   args: string[];
-  /** true の場合は Node にシェルの引用符処理を任せ、command 自体を spawn する。 */
-  nativeShell?: boolean;
 }
 
-function resolveShell(command: string): ResolvedShell {
-  if (process.platform === "win32") {
-    const bash = findGitBash();
-    if (bash) return { shell: bash, args: ["-c", command] };
-    // cmd.exe を executable + argv で直接 spawn すると、Node の Windows 引用符変換と
-    // cmd.exe の /c 後の再解釈が衝突し、引用符を含むコマンドが無出力で即終了する。
-    // shell オプション経由なら Node が `/d /s /c "..."` を一貫して組み立てる。
-    return { shell: process.env.ComSpec || "cmd.exe", args: [], nativeShell: true };
+export function resolveCheckShell(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+  bashPath: string | null = platform === "win32" ? findGitBash() : null,
+): ResolvedShell {
+  if (platform === "win32") {
+    return resolveWindowsBashCommand(command, bashPath);
   }
   return { shell: "/bin/sh", args: ["-c", command] };
 }
@@ -82,7 +69,7 @@ export interface RunCheckOptions {
 export async function runCheck(command: string, opts: RunCheckOptions = {}): Promise<CheckResult> {
   const cwd = opts.cwd ?? process.cwd();
   const timeoutMs = opts.timeoutMs ?? 120_000;
-  const { shell, args, nativeShell } = resolveShell(command);
+  const { shell, args } = resolveCheckShell(command);
   const start = Date.now();
 
   const isWindows = process.platform === "win32";
@@ -95,21 +82,19 @@ export async function runCheck(command: string, opts: RunCheckOptions = {}): Pro
 
     // 非 Windows は detached で自身の process group を作り、timeout 時に group ごと kill する
     // (shell だけ kill すると sleep 等の子が orphan として残り close が遅延するため)。
-    const proc = nativeShell
-      ? spawn(command, { cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"], shell })
-      : spawn(shell, args, {
-          cwd,
-          env: process.env,
-          stdio: ["ignore", "pipe", "pipe"],
-          detached: !isWindows,
-        });
+    const proc = spawn(shell, args, {
+      cwd,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: !isWindows,
+    });
 
     const killTree = () => {
       try {
         if (!isWindows && proc.pid) {
           process.kill(-proc.pid, "SIGKILL"); // 負の pid = process group
         } else if (proc.pid) {
-          // proc.kill() は cmd.exe だけを終了し、npm/node 等の孫プロセスを残す。
+          // Windowsではshellだけでなくnpm/node等の孫プロセスも止める。
           // /T でプロセスツリー全体を、/F でタイムアウト時に確実に終了する。
           const killer = spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], {
             stdio: "ignore",

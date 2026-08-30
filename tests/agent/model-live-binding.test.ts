@@ -18,13 +18,13 @@ const security: SecurityConfig = {
 
 describe("AgentLoop live model binding", () => {
   it("model 単体切替でも実行中 binding を更新し、未反映の誤警告を作らない", () => {
-    const loop = new AgentLoop(provider, "qwen-old", new ToolRegistry(), new PermissionManager(security), 8192, 0.8);
-    loop.setLiveBinding({ providerType: "ollama", model: "qwen-old", baseUrl: "http://localhost:11434" });
+    const loop = new AgentLoop(provider, "qwen-old-7b", new ToolRegistry(), new PermissionManager(security), 8192, 0.8);
+    loop.setLiveBinding({ providerType: "ollama", model: "qwen-old-7b", baseUrl: "http://localhost:11434" });
 
-    loop.setModel("qwen-new");
+    loop.setModel("qwen-new-7b");
 
-    expect(loop.getLiveBinding()?.model).toBe("qwen-new");
-    expect(loop.getLiveBinding()?.signature).toContain("|qwen-new|");
-    expect(loop.getLiveBinding()?.label).toContain("qwen-new");
+    expect(loop.getLiveBinding()?.model).toBe("qwen-new-7b");
+    expect(loop.getLiveBinding()?.signature).toContain("|qwen-new-7b|");
+    expect(loop.getLiveBinding()?.label).toContain("qwen-new-7b");
   });
 });

@@ -131,7 +131,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/model vision list", description: "vision slot の利用可能モデル一覧から選択 (vision 対応モデル優先)" },
   { command: "/model vision context", description: "vision slot のコンテキスト長を変更 (例: 128k)", needsArg: true },
   { command: "/model vision description", description: "vision slot の特性説明", needsArg: true },
-  { command: "/model vision clear", description: "vision slot を解除 (main LLM にフォールバック)" },
+  { command: "/model vision clear", description: "vision slot を解除 (main LLM が画像を担当)" },
   { command: "/todo", description: "タスクリスト (active のみ / all=全件 / archive=完了済み削除)" },
   {
     command: "/goal-seek",
@@ -142,6 +142,8 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/resume", description: "セッション復元 (引数なしで picker / latest = 最新 / list = 一覧)" },
   { command: "/resume latest", description: "最新セッションを即復元 (旧 /continue)" },
   { command: "/resume list", description: "保存セッション一覧 (旧 /sessions)" },
+  { command: "/fork", description: "現在の会話を新しいセッションへ分岐 (元セッションは不変)" },
+  { command: "/fork latest", description: "最新の保存セッションから分岐" },
   { command: "/sessions", description: "[非推奨] /resume list の alias" },
   { command: "/continue", description: "[非推奨] /resume latest の alias" },
   { command: "/memory", description: "メモリ表示" },

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { runCheck } from "../../src/goal-loop/check-runner.js";
+import { resolveCheckShell, runCheck } from "../../src/goal-loop/check-runner.js";
 
 // check-runner は LLM 非依存の決定的ゲート。exit code を正しく拾えるかを検証する。
 // 設計: docs/goal-loop-deterministic-check-design.md §4.3
@@ -9,6 +9,10 @@ import { runCheck } from "../../src/goal-loop/check-runner.js";
 const SPAWN_TIMEOUT_MS = 30_000;
 
 describe("runCheck", () => {
+  it("WindowsでGit Bashが無ければcmd.exeへ置換せず明示失敗する", () => {
+    expect(() => resolveCheckShell("echo ok", "win32", null)).toThrow(/Git Bash.*cmd\.exeでは実行しません/);
+  });
+
   it(
     "exit 0 のコマンドは passed=true",
     async () => {
@@ -33,7 +37,7 @@ describe("runCheck", () => {
   it(
     "stdout / stderr を捕捉する",
     async () => {
-      // cmd.exe / POSIX shell のどちらでも同じ意味になる Node コマンドを使う。
+      // Git Bash / POSIX shell のどちらでも同じ意味になる Node コマンドを使う。
       const r = await runCheck("node -e \"console.log('hello-out');console.error('hello-err');process.exit(1)\"");
       expect(r.stdoutTail).toContain("hello-out");
       expect(r.stderrTail).toContain("hello-err");

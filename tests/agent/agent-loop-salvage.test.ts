@@ -78,7 +78,7 @@ async function runWith(firstResponse: ChatChunk[]): Promise<string[]> {
   registry.register(makeProbeTool("salvage_probe", executed, ref));
   const permissions = new PermissionManager(makeSecurityConfig(["salvage_probe"]));
   const provider = makeProvider([firstResponse, [{ type: "done", finishReason: "stop" }]]);
-  const loop = new AgentLoop(provider, "test-model-7b", registry, permissions, 8192, 0.8);
+  const loop = new AgentLoop(provider, "test-model-7b", registry, permissions, 128_000, 0.8);
   ref.loop = loop;
   await loop.run("テスト依頼");
   return executed;

@@ -28,24 +28,18 @@ describe("compressText — サイズガードと原文保持", () => {
     // 原文より長い応答を返させる
     const r = await compressText(mockProvider(LONG + LONG), "m", "メモ", LONG);
     expect(r.applied).toBe(false);
-    expect(r.text).toBe(LONG); // 原文にフォールバック
+    expect(r.text).toBe(LONG); // サイズガードは原文を保持する
     expect(r.note).toContain("原文を使用");
   });
 
-  it("空応答なら applied=false で原文を使う", async () => {
-    const r = await compressText(mockProvider("   "), "m", "メモ", LONG);
-    expect(r.applied).toBe(false);
-    expect(r.text).toBe(LONG);
-    expect(r.note).toContain("空応答");
+  it("空応答を原文使用の成功に置換しない", async () => {
+    await expect(compressText(mockProvider("   "), "m", "メモ", LONG)).rejects.toThrow("空応答");
   });
 
-  it("provider が例外を投げても投げ返さず原文を使う", async () => {
+  it("provider 例外を原文使用の成功に置換しない", async () => {
     const throwing = mockProvider(() => {
       throw new Error("boom");
     });
-    const r = await compressText(throwing, "m", "プロジェクト指示", LONG);
-    expect(r.applied).toBe(false);
-    expect(r.text).toBe(LONG);
-    expect(r.note).toContain("圧縮失敗");
+    await expect(compressText(throwing, "m", "プロジェクト指示", LONG)).rejects.toThrow("boom");
   });
 });

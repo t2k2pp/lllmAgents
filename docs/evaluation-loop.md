@@ -105,17 +105,16 @@ Evaluator起動
 **最大イテレーション**: 10回（安全弁）
 **実行メソッド**: `SecondLLMManager.runAsEvaluator()`
 
-### 3.2 フォールバック評価（mainLLM使用時）
+### 3.2 独立Evaluatorを利用できない場合
 
-secondLLMが利用不可の場合、mainLLMで1回呼び切りのフォールバック。
-この場合はファイル内容をプロンプトに埋め込む（mainLLMにツールループさせるとメインの会話と衝突するため）。
+secondLLMが利用不可の場合はEvaluatorを未実行として可視化する。mainLLMの自己評価へ自動置換しない。
 
 ### 3.3 LLM選択
 
 | 構成 | メインLLM | Evaluator LLM | 評価方式 |
 |------|----------|---------------|---------|
 | 推奨構成 | 27B | secondLLM | エージェンティック（ツール付きループ） |
-| 最小構成 | 27B | 同じ27B（別コンテキスト） | フォールバック（1回呼び切り） |
+| 最小構成 | 27B | 未設定 | 未実行を通知（独立Evaluatorを設定するまで評価結果を作らない） |
 
 ### 3.4 既存資産との関係
 
@@ -210,7 +209,7 @@ bashで適切な検証コマンドを実行してください:
 
 ```typescript
 export class Evaluator {
-  // secondLLMがあればエージェンティック、なければmainLLMフォールバック
+  // secondLLMがあればエージェンティック評価、なければ未実行を報告
   async evaluate(params: {
     filePaths: string[];        // ファイルパス一覧のみ（内容は渡さない）
     originalRequest: string;
@@ -359,7 +358,7 @@ options: [
 
 ### Phase 2: Evaluatorの基盤 ✅ 完了
 - `src/agent/evaluator.ts` 新規作成
-- secondLLM ?? mainLLM の自動選択
+- secondLLMを独立Evaluatorとして使用。未設定時は未実行を可視化
 - ドキュメント系ファイルの完了時にEvaluator自動起動
 
 ### Phase 2.5: Evaluatorのエージェンティック化 ✅ 完了（2026-04-16）
@@ -367,7 +366,7 @@ options: [
 - `SecondLLMManager.runAsEvaluator()` 新規追加（読み取り専用ツール: file_read, grep, glob）
 - ファイル内容のプロンプト埋め込みを廃止、パス一覧のみ渡す設計に変更
 - `pendingDocReview`（ドキュメントのみ）→ `pendingEvalFiles`（コード+ドキュメント全体）に拡張
-- mainLLMフォールバック（secondLLM未設定時）は従来の1回呼び切りを維持
+- secondLLM未設定時のmainLLM自己評価を廃止（2026-08-29）。評価失敗・非JSONも合格扱いしない
 
 ### Phase 3: 評価基準のチューニング（未着手）
 - タスク種別ごとの評価プロンプト最適化

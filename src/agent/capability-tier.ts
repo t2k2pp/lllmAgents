@@ -15,14 +15,14 @@
  *
  * 設計判断 (2026-05-07 の認識訂正):
  *   - **contextWindow は Tier 判定の入力ではなく、 出力フィールド**。
- *     - 真値は src/index.ts の 4 段 chain (config → provider.getModelInfo →
- *       inferContextLength → FALLBACK_CONTEXT_WINDOW) で決まる
+ *     - 真値は config / provider.getModelInfo / 既知モデル名の推論で決め、
+ *       確定できなければ明示設定を要求する
  *     - resolveCapability の引数 ctxWindow にそれが渡って来る前提
- *     - ctxWindow 未指定時の fallback も既存 inferContextLength に委譲し、
+ *     - ctxWindow 未指定時の既知モデル名推論は inferContextLength に委譲し、
  *       capability-tier 内に独自のテーブルを持たない (= 重複層を作らない)
  *   - tier 判定はモデル名の一致のみ。 contextWindow は判定に使わない。
  */
-import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "../providers/utils/context-length.js";
+import { inferContextLength } from "../providers/utils/context-length.js";
 
 export type Tier = "T1" | "T2" | "T3";
 
@@ -256,8 +256,8 @@ const PATTERN_RULES: Array<{
 /**
  * モデル ID と オプションのコンテキスト窓から能力プロファイルを解決する。
  *
- * tier 判定 (KNOWN_MODELS / PATTERN_RULES / 名前ヒューリスティック / fallback) と、
- * contextWindow の解決 (引数 → inferContextLength → FALLBACK_CONTEXT_WINDOW) は
+ * tier 判定 (KNOWN_MODELS / PATTERN_RULES / 名前ヒューリスティック / 明示override) と、
+ * contextWindow の解決 (引数 → 明示override → inferContextLength) は
  * 直交。 後者は providers/utils/context-length.ts に一元化済 (重複層を作らない)。
  *
  * @param modelId - LLM モデルの識別子 (例: "claude-opus-4-7", "gpt-5.4", "llama-3.2-7b")
@@ -270,9 +270,9 @@ export function resolveCapability(
   override?: CapabilityOverride,
 ): CapabilityProfile {
   const id = modelId.toLowerCase().trim();
-  // contextWindow は引数 → inferContextLength → FALLBACK の順で 1 回だけ解決。
+  // contextWindow は引数/明示override → inferContextLength の順で 1 回だけ解決。
   // tier 判定とは独立しており、 KNOWN_MODELS / PATTERN_RULES は持たない。
-  const resolvedCtx = resolveContextWindow(modelId, ctxWindow);
+  const resolvedCtx = resolveContextWindow(modelId, ctxWindow ?? override?.contextWindow);
 
   // 1. 完全一致 (tier 判定)
   if (KNOWN_MODELS[id]) {
@@ -316,30 +316,32 @@ export function resolveCapability(
     return applyOverride(profile, override);
   }
 
-  // 4. フォールバック: T2 中庸 (情報が無さすぎる時の安全側)
-  const fallback: CapabilityProfile = {
-    ...TIER_DEFAULTS.T2,
-    tier: "T2",
+  // 4. 自動判定不能なら、ユーザーが明示した tier だけを使う。
+  if (!override?.tier) {
+    throw new Error(
+      `未知モデル '${modelId}' の能力tierを自動判定できません。 ` +
+        `config.json の modelCapabilities.${JSON.stringify(modelId)}.tier に T1/T2/T3 を明示してください。`,
+    );
+  }
+  const explicit: CapabilityProfile = {
+    ...TIER_DEFAULTS[override.tier],
+    tier: override.tier,
     contextWindow: resolvedCtx.value,
-    reason: `fallback: unknown model, defaulting to T2 (medium) (ctx=${resolvedCtx.source})`,
+    reason: `unknown model with explicit tier=${override.tier} (ctx=${resolvedCtx.source})`,
   };
-  return applyOverride(fallback, override);
+  return applyOverride(explicit, override);
 }
 
 /**
- * contextWindow の真値解決。 src/index.ts の 4 段 chain と同じ優先順位:
- *   引数 ctxWindow → inferContextLength(modelId) → FALLBACK_CONTEXT_WINDOW
- *
- * resolveCapability 単体テスト・引数省略経路ではこの fallback が使われる。
- * 実 caller (AgentLoop / SecondLLMManager) は ctxWindow を必ず渡すので、
- * ここの fallback は実運用では発火しない (前提として)。
+ * contextWindow の真値解決。引数または明示overrideを優先し、既知モデル名だけ推論する。
+ * どちらからも確定できなければ、誤った上限で実行せず設定方法を示して停止する。
  */
 function resolveContextWindow(
   modelId: string,
   ctxWindow: number | undefined,
 ): {
   value: number;
-  source: "arg" | "infer" | "fallback";
+  source: "arg" | "infer";
 } {
   if (typeof ctxWindow === "number" && ctxWindow > 0) {
     return { value: ctxWindow, source: "arg" };
@@ -348,7 +350,10 @@ function resolveContextWindow(
   if (inferred > 0) {
     return { value: inferred, source: "infer" };
   }
-  return { value: FALLBACK_CONTEXT_WINDOW, source: "fallback" };
+  throw new Error(
+    `モデル '${modelId}' の contextWindow を確定できません。 ` +
+      `mainLLM.contextWindow または modelCapabilities.${JSON.stringify(modelId)}.contextWindow を明示してください。`,
+  );
 }
 
 function filterUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
@@ -383,7 +388,7 @@ function applyOverride(profile: CapabilityProfile, override?: CapabilityOverride
 
 /**
  * モデル名のパラメータ数表記 (例: "-7b", "-32b") から tier を推測。
- * 該当しない場合は null を返し、 caller は fallback (T2) を使う。
+ * 該当しない場合は null を返し、caller は明示tierを要求する。
  *
  * (旧 inferTierFromContext は ctxWindow を判定材料に使っていたが、 ctxWindow は
  * tier 判定とは独立な値であるべきため廃止。 ここでは名前情報のみ使う。)

@@ -53,7 +53,7 @@ import { AgentLoop } from "../../src/agent/agent-loop.js";
 function createSafeLoop(provider: LLMProvider): AgentLoop {
   return new AgentLoop(
     provider,
-    "mock-model",
+    "mock-model-7b",
     new ToolRegistry(),
     new PermissionManager({ autoApproveTools: [], allowedDirectories: [], rules: [] }),
     8192,
@@ -96,7 +96,7 @@ describe("AgentLoop safe mode", () => {
     const loop = createSafeLoop(provider);
     expectSafePrompt(loop);
 
-    loop.updateLLMProfiles({ main: { model: "mock-model", providerType: "vllm" } });
+    loop.updateLLMProfiles({ main: { model: "mock-model-7b", providerType: "vllm" } });
     expectSafePrompt(loop);
 
     loop.restoreSession({

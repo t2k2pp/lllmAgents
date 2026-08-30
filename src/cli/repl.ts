@@ -20,7 +20,7 @@ import {
 import { formatTodos, formatTodosActive, clearTodos, archiveCompletedTodos } from "../tools/definitions/todo-write.js";
 import type { GoalDefinition } from "../agent/goal-slot.js";
 import { getGoal as getGoalSlot } from "../agent/goal-slot.js";
-import { listSessions, loadSession, getLatestSession } from "../agent/session-manager.js";
+import { listSessions, loadSession, getLatestSession, forkSession, saveSession } from "../agent/session-manager.js";
 import { normalizeRoomId } from "../agent/room-types.js";
 import { loadMemory, saveMemory } from "../agent/memory.js";
 import { resolveAtMentions, printMentionFeedback } from "./input-resolver.js";
@@ -1673,7 +1673,7 @@ export class REPL {
     console.log(chalk.bold("\n  ── Slots ──"));
     console.log(`  ${"main".padEnd(8)} ${nameOf(slots.main || undefined, "(未割当)")}`);
     console.log(`  ${"second".padEnd(8)} ${nameOf(slots.second, "(未割当)")}`);
-    console.log(`  ${"vision".padEnd(8)} ${nameOf(slots.named?.vision, "(未割当 → main にフォールバック)")}`);
+    console.log(`  ${"vision".padEnd(8)} ${nameOf(slots.named?.vision, "(未割当: main が画像を担当)")}`);
 
     const free = listNamedSlots();
     for (const { slot, entryId } of free) {
@@ -2389,7 +2389,7 @@ export class REPL {
   /**
    * Vision LLM (vision slot) のサブコマンドハンドラ (Phase 5)。
    * 画像認識を含むマルチモーダル言語生成 AI (Claude / Gemini / GPT-4o / Llama Vision 等) を
-   * /model vision <sub> 経由で操作する。 visionLLM 未設定時は main slot に自動フォールバック。
+   * /model vision <sub> 経由で操作する。visionLLM 未設定時はmainが既定の画像担当。
    *
    * docs/model-registry.md §4.1
    */
@@ -2400,7 +2400,7 @@ export class REPL {
     if (!subCmd || subCmd === "status" || subCmd === "info") {
       console.log(chalk.bold("\n  ── Vision LLM ──"));
       if (!ep) {
-        console.log(chalk.dim(`  状態: ${chalk.yellow("未設定 (main LLM にフォールバック)")}`));
+        console.log(chalk.dim(`  状態: ${chalk.yellow("未設定 (main LLM が画像を担当)")}`));
         console.log(chalk.dim(`  設定するには: /model vision setup`));
       } else {
         const loc = ep.baseUrl ?? ep.endpoint ?? "(クラウド)";
@@ -2417,7 +2417,7 @@ export class REPL {
             `\n  ※ 画像認識を含むマルチモーダル言語生成 AI を指定 (Claude Sonnet / Gemini Pro / Llama Vision 等)`,
           ),
         );
-        console.log(chalk.dim(`  ※ 解除して main にフォールバックする場合は /model vision clear`));
+        console.log(chalk.dim(`  ※ 解除して main を画像担当に戻す場合は /model vision clear`));
       }
       console.log();
       return;
@@ -2425,13 +2425,13 @@ export class REPL {
 
     if (subCmd === "clear") {
       if (!ep) {
-        console.log(chalk.dim("  vision LLM は元から未設定です (main にフォールバック中)。"));
+        console.log(chalk.dim("  vision LLM は元から未設定です (main が画像を担当中)。"));
         return;
       }
       this.config.visionLLM = null;
       saveConfig(this.config);
       await this.applyVisionLLMEndpoint();
-      console.log(chalk.green("  Vision LLM をクリアしました (main LLM にフォールバック)。"));
+      console.log(chalk.green("  Vision LLM をクリアしました (main LLM が画像を担当します)。"));
       return;
     }
 
@@ -2578,7 +2578,7 @@ export class REPL {
     console.log(chalk.dim("    /model vision list             利用可能モデル一覧から選択"));
     console.log(chalk.dim("    /model vision context <128k>   コンテキスト長変更"));
     console.log(chalk.dim("    /model vision description <text>  特性説明"));
-    console.log(chalk.dim("    /model vision clear            未設定に戻す (main にフォールバック)"));
+    console.log(chalk.dim("    /model vision clear            未設定に戻す (main が画像を担当)"));
     console.log(
       chalk.dim("\n  ※ 画像認識を含むマルチモーダル言語生成 AI を指定します (CLIP/YOLO 等の専用視覚モデルではない)"),
     );
@@ -3772,7 +3772,7 @@ export class REPL {
   /**
    * Vision LLM の hot-swap (Phase 5)。 config.visionLLM の変更を visionService に反映し、
    * registry の vision slot も更新する。 visionLLM が null の場合は main provider に
-   * フォールバック (= 起動時の挙動と同じ)。
+   * 既定のmain画像担当へ戻す (= 起動時の挙動と同じ)。
    */
   private async applyVisionLLMEndpoint(): Promise<void> {
     if (!this.visionService) return;
@@ -3790,7 +3790,7 @@ export class REPL {
           /* ignore */
         }
       } else {
-        // visionLLM クリア → main provider にフォールバック
+        // visionLLM クリア → 既定の main provider が画像を担当
         this.visionService.setProvider(this.agent.getProvider(), this.config.mainLLM.model);
         // vision slot を解除 (registry helper を呼ぶ — clearSlot)
         try {
@@ -4680,6 +4680,7 @@ export class REPL {
             const cfg = this.config.security.processSandbox ?? { enabled: false, level: "none" as const };
             const sb = new ProcessSandbox(cfg);
             const eff = sb.getAvailability().effectiveLevel;
+            const readinessError = sb.getReadinessError();
             console.log(
               chalk.dim(
                 `  方式: processSandbox (${isMacOS ? "sandbox-exec" : insideWsl ? "bwrap (WSL2)" : "bwrap/unshare"})  /  設定 enabled=${cfg.enabled}, level=${cfg.level}`,
@@ -4703,6 +4704,7 @@ export class REPL {
             } else {
               console.log(`  実効: ${chalk.yellow("OFF")}`);
             }
+            if (readinessError) console.log(chalk.red(`  実行停止: ${readinessError}`));
             // allowlist が実際に効くのは fs かつ強制可能な環境のみ。 それ以外は参考表示。
             const allow = resolveAllowedDomains(this.config.security.processSandbox?.allowedHosts);
             const enforced = eff === "fs" && enforceable;
@@ -4778,7 +4780,14 @@ export class REPL {
                     : "fs"; // 既定は fs: 書込スコープのみ・ネットは許可（開発を止めない）
               // allowedHosts / autoAllowBashWhenContained を保持（全置換で育てた allowlist と
               // opt-out が無言で消える事故を防ぐ）。
-              this.config.security.processSandbox = withSandboxState(this.config.security.processSandbox, true, level);
+              const next = withSandboxState(this.config.security.processSandbox, true, level);
+              const candidate = new ProcessSandbox(next);
+              const readinessError = candidate.getReadinessError();
+              if (readinessError) {
+                console.log(chalk.red(`  封じ込めを有効化できません: ${readinessError}`));
+                break;
+              }
+              this.config.security.processSandbox = next;
               saveConfig(this.config);
               resetActiveProcessSandbox();
               reconcileSandboxProxy(); // 実効レベルに合わせ proxy を停止/維持（単一窓口）
@@ -4788,13 +4797,7 @@ export class REPL {
                   `  封じ込め ON (config 保存、 level=${level})。 ${isMacOS ? "sandbox-exec" : "bwrap/unshare"} で適用 (次の bash から即反映)。`,
                 ),
               );
-              if (eff === "none") {
-                console.log(
-                  chalk.yellow(
-                    "  ⚠ 隔離ツールが見つからず実効レベルは none です (Linux/WSL2: bwrap, macOS: sandbox-exec が必要)。",
-                  ),
-                );
-              } else if (eff === "fs") {
+              if (eff === "fs") {
                 const enforceable = getActiveProcessSandbox().getAvailability().netAllowlistEnforceable;
                 if (enforceable) {
                   console.log(
@@ -5488,9 +5491,7 @@ export class REPL {
             console.log(chalk.dim(`  詳細:   /model vision  /  変更: /model vision setup`));
           } else {
             console.log(chalk.bold("\n  ── Vision LLM ──"));
-            console.log(
-              chalk.dim(`  ${chalk.yellow("未設定")} (main LLM にフォールバック)。 設定: /model vision setup`),
-            );
+            console.log(chalk.dim(`  ${chalk.yellow("未設定")} (main LLM が画像を担当)。 設定: /model vision setup`));
           }
           if (this.config.secondLLM?.enabled) {
             console.log(chalk.bold("\n  ── セカンドLLM ──"));
@@ -7055,6 +7056,36 @@ export class REPL {
         break;
       }
 
+      case "/fork": {
+        // 引数なしは現在の会話、ID/latest指定時は保存済み会話を元に、独立sessionへ分岐する。
+        let sourceId = args[0]?.trim();
+        let source = null;
+        if (!sourceId) {
+          this.agent.saveCurrentSession();
+          sourceId = this.agent.getCurrentSessionId();
+          source = loadSession(sourceId);
+        } else if (sourceId.toLowerCase() === "latest") {
+          source = getLatestSession();
+        } else {
+          source = loadSession(sourceId);
+        }
+        if (!source) {
+          console.log(chalk.red(`  分岐元セッション ${sourceId ?? "(current)"} が見つかりません。`));
+          console.log(chalk.dim("  /resume list で保存済みセッションを確認できます。"));
+          break;
+        }
+        const forked = forkSession(source);
+        saveSession(forked);
+        this.agent.restoreSession(forked);
+        console.log(
+          chalk.dim(
+            `  セッションを分岐しました: ${chalk.cyan(source.meta.id)} → ${chalk.cyan(forked.meta.id)} (${forked.meta.messageCount} messages)`,
+          ),
+        );
+        console.log(chalk.dim(`  元セッションは変更されません。戻るには /resume ${source.meta.id}`));
+        break;
+      }
+
       case "/memory": {
         const mem = loadMemory();
         if (mem) {
@@ -7154,7 +7185,7 @@ export class REPL {
           const vLoc = v.baseUrl ?? v.endpoint ?? "(クラウド)";
           console.log(chalk.dim(`  Vision:  ${v.providerType}:${v.model} @ ${vLoc}`));
         } else {
-          console.log(chalk.dim(`  Vision:  ${chalk.yellow("未設定")} (main にフォールバック)`));
+          console.log(chalk.dim(`  Vision:  ${chalk.yellow("未設定")} (main が画像を担当)`));
         }
 
         // ─── Context ───

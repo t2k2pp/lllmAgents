@@ -1,7 +1,7 @@
 import { OpenAICompatProvider } from "./openai-compat.js";
 import type { ChatParams, ChatWithToolsParams, ChatChunk } from "./base-provider.js";
 import type { ModelInfo } from "../config/types.js";
-import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "./utils/context-length.js";
+import { inferContextLength } from "./utils/context-length.js";
 
 interface AzureOpenAIConfig {
   endpoint: string; // e.g., https://my-resource.openai.azure.com
@@ -59,7 +59,7 @@ export class AzureOpenAIProvider extends OpenAICompatProvider {
       {
         name: this.azureConfig.deploymentName,
         size: 0,
-        contextLength: inferContextLength(this.azureConfig.deploymentName) || FALLBACK_CONTEXT_WINDOW,
+        contextLength: inferContextLength(this.azureConfig.deploymentName),
         supportsVision: false,
         supportsFunctionCalling: true,
       },

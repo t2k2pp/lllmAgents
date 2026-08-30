@@ -222,7 +222,7 @@ export class ContextManager {
    * 「何をするか」 だけを決めて「どうやるか」 は知らなくてよい形にする。
    *
    * clear は引き継ぎメモの生成に成功したときだけ履歴を消す。 失敗時は履歴に触れず
-   * applied=false で返し、 呼び出し側が forget へ格下げする (docs §8)。
+   * applied=false で返し、呼び出し側は履歴を保持して失敗を報告する (docs §8)。
    */
   async applyStrategy(
     history: MessageHistory,
@@ -288,8 +288,8 @@ export class ContextManager {
   /**
    * 閾値超過時の縮約本体。 mode に応じて忘却・圧縮を選ぶ (docs §6)。
    *
-   * どの経路でも最終的に圧縮へ落ちられるようにしてあるため、
-   * 忘却が失敗しても最悪でも従来 (= 常に圧縮) と同じ動作になる。
+   * forget は指定された手段だけを実行し、失敗時に別手段へ自動で切り替えない。
+   * hybrid はユーザーが明示的に選んだ複合手段として、忘却後の圧縮までを一つの処理として扱う。
    */
   async reduce(history: MessageHistory): Promise<ReduceOutcome> {
     const beforeTokens = estimateMessageTokens(history.getMessages());
@@ -307,10 +307,17 @@ export class ContextManager {
     }
 
     // 毎ターン忘却が走ると LLM 呼び出しが毎ターン増えるため最短間隔を設ける (docs §10)。
-    // 間隔内なら忘却は飛ばして従来通り圧縮する。
+    // forget 単独モードでは、間隔内に別手段へ切り替えず理由を明示して停止する。
     const minInterval = this.forgettingConfig.minIntervalTurns ?? DEFAULT_MIN_INTERVAL_TURNS;
     if (this.turn - this.lastForgetTurn < minInterval) {
-      logger.info(`[forget] 直近の忘却から ${minInterval} ターン未満のため圧縮に回します`);
+      if (this.reductionMode === "forget") {
+        throw new Error(
+          `contextReduction=forget は直近の忘却から ${minInterval} ターン未満のため実行できません。 ` +
+            "間隔を空けるか、複合処理を許可する場合は contextReduction=hybrid を明示してください。",
+        );
+      }
+
+      logger.info(`[hybrid] 直近の忘却から ${minInterval} ターン未満のため、明示された複合処理の圧縮段階を実行します`);
       await this.compress(history);
       return {
         method: "compress",
@@ -318,7 +325,7 @@ export class ContextManager {
         compressed: true,
         beforeTokens,
         afterTokens: estimateMessageTokens(history.getMessages()),
-        note: "忘却の最短間隔内のため圧縮を実行",
+        note: "hybrid の忘却最短間隔内のため圧縮段階を実行",
       };
     }
 
@@ -326,12 +333,16 @@ export class ContextManager {
     const afterForget = estimateMessageTokens(history.getMessages());
     const freed = Math.max(0, beforeTokens - afterForget);
 
-    // フォールバック判定。
-    //  - forget モード: 忘却が「適用できなかった」 ときだけ圧縮 (その回だけ)
-    //  - hybrid モード: 削減が目標の sufficiencyRatio に届かなければ続けて圧縮
+    if (this.reductionMode === "forget" && !forgetResult.applied) {
+      throw new Error(
+        `contextReduction=forget を適用できませんでした: ${forgetResult.reason ?? "理由不明"}。 ` +
+          "履歴は保持しました。圧縮も許可する場合は contextReduction=hybrid を明示してください。",
+      );
+    }
+
+    // hybrid は明示された複合処理として、削減が目標に届かなければ圧縮段階へ進む。
     const sufficiency = this.forgettingConfig.sufficiencyRatio ?? DEFAULT_SUFFICIENCY_RATIO;
-    const needCompress =
-      this.reductionMode === "forget" ? !forgetResult.applied : !forgetResult.applied || freed < target * sufficiency;
+    const needCompress = this.reductionMode === "hybrid" && (!forgetResult.applied || freed < target * sufficiency);
 
     if (!needCompress) {
       return {

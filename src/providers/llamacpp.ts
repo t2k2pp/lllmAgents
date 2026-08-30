@@ -1,7 +1,7 @@
 import type { ModelInfo, ModelDetail } from "../config/types.js";
 import { OpenAICompatProvider } from "./openai-compat.js";
 import { httpGet } from "../utils/http-client.js";
-import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "./utils/context-length.js";
+import { inferContextLength } from "./utils/context-length.js";
 
 interface LlamaCppModel {
   id: string;
@@ -71,10 +71,7 @@ export class LlamaCppProvider extends OpenAICompatProvider {
           size: m.meta?.n_params ?? 0,
           // /props.n_ctx は --parallel で分割された per-slot 値で、実際に使える ctx を表す。
           // /models の n_ctx_train は学習時最大値で runtime と乖離するため /props を優先。
-          contextLength:
-            runtimeCtx > 0
-              ? runtimeCtx
-              : (m.meta?.n_ctx_train ?? (inferContextLength(m.id) || FALLBACK_CONTEXT_WINDOW)),
+          contextLength: runtimeCtx > 0 ? runtimeCtx : (m.meta?.n_ctx_train ?? inferContextLength(m.id)),
           supportsVision: visionSupported,
           supportsFunctionCalling: true,
         }));
@@ -89,7 +86,7 @@ export class LlamaCppProvider extends OpenAICompatProvider {
     const models = await this.listModels();
     const found = models.find((m) => m.name === modelName);
     const ctxFromList = found?.contextLength ?? 0;
-    const contextLength = ctxFromList > 0 ? ctxFromList : inferContextLength(modelName) || FALLBACK_CONTEXT_WINDOW;
+    const contextLength = ctxFromList > 0 ? ctxFromList : inferContextLength(modelName);
     const props = await this.getProps();
     return {
       name: modelName,

@@ -10,15 +10,21 @@
  * - Shift+Enter でマルチライン入力（モダンターミナル対応）
  * - 入力履歴 (↑↓)
  * - マルチバイト文字（日本語）対応
- * - TTY非対応時はreadlineフォールバック
+ * - 非TTYでは明示的なline-input mode
  */
 
 import * as readline from "node:readline";
 import chalk from "chalk";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
-import { getDisplayWidth, stripAnsi, truncateToWidth } from "../utils/display-width.js";
+import {
+  getDisplayWidth,
+  nextGraphemeBoundary,
+  previousGraphemeBoundary,
+  stripAnsi,
+  truncateToWidth,
+} from "../utils/display-width.js";
 import { screen } from "./screen-manager.js";
-import { getOpsLogger } from "../utils/ops-logger.js";
+import { layoutInputBuffer } from "./input-layout.js";
 
 // 幅計算は共通実装を使う (docs/tui-alternate-screen.md §11: 幅計算を 2 箇所に書かない)。
 // 既存の import 元を壊さないよう、ここから再エクスポートする。
@@ -44,44 +50,6 @@ export interface InteractiveInputOptions {
 /** Ctrl+C が押されたことを示す特殊値 */
 export const SIGINT_SIGNAL = "\x03";
 
-// ─── stdin チャンク分類 ──────────────────────────────────
-
-/** classifyChunkNewline の判定結果 */
-export type ChunkNewlineKind =
-  /** 改行を含まない (通常のタイプ・IME確定テキスト) */
-  | "none"
-  /** 本文の途中に改行がある = マルチライン貼り付け (Enter は改行挿入として扱う) */
-  | "paste-burst"
-  /** 改行が末尾のみ = 「1行ぶんのテキスト + Enter」 または単発 Enter (Enter は確定として扱う) */
-  | "line-submit";
-
-const CR = 0x0d;
-const LF = 0x0a;
-
-/**
- * 生 stdin チャンクの改行位置から「貼り付け」 と「行確定」 を区別する。
- *
- * 背景 (2026-06-13): IME で日本語を確定した直後の Enter を ConPTY が
- * 「続けて\r」 のような 1 チャンクに合流させることがある。 旧判定
- * (複数バイト + 改行 = 貼り付け) はこれを貼り付けと誤検出し、 Enter が
- * 確定でなく改行挿入になって「一度無駄に Enter を押さないと送信できない」
- * 症状を起こした。 真のマルチライン貼り付けは本文の途中に改行を持つので、
- * 「改行が末尾だけ」 のチャンクは行確定として扱う。
- *
- * トレードオフ: ブラケット貼り付け非対応端末 (legacy conhost) で貼り付けが
- * 行単位のチャンクに分かれて届いた場合、 1 行目が即確定し得る。 タイプした
- * Enter の飲み込み (毎回の送信失敗) の方が実害が大きいため行確定側に倒す。
- */
-export function classifyChunkNewline(chunk: Buffer): ChunkNewlineKind {
-  if (chunk.length === 0) return "none";
-  let end = chunk.length;
-  while (end > 0 && (chunk[end - 1] === CR || chunk[end - 1] === LF)) end--;
-  const body = chunk.subarray(0, end);
-  if (body.includes(CR) || body.includes(LF)) return "paste-burst"; // 本文中に改行
-  if (end === chunk.length) return "none"; // 改行を含まない
-  return "line-submit"; // 改行は末尾のみ ("テキスト+Enter" 合流 or 単発 Enter)
-}
-
 // ─── メインクラス ───────────────────────────────────────
 
 export class InteractiveInput {
@@ -90,42 +58,10 @@ export class InteractiveInput {
   private history: string[] = [];
   private historyIndex = -1;
   private keypressInitialized = false;
-  private dataListenerInstalled = false;
-  /** stdin に「本文中に改行を含む」 chunk が届いた直近時刻 + 猶予 (ms) — この時刻まで届く \r は改行扱い */
-  private pasteBurstUntilMs = 0;
-  /**
-   * stdin に「改行が末尾のみ」 の chunk が届いた直近時刻 + 猶予 (ms)。
-   * この時刻までの \r は貼り付け判定 (pasteBurst / 連続キー間隔) を打ち消して
-   * 通常の確定 Enter として扱う。 IME 確定 + Enter の ConPTY 合流対策 (2026-06-13)。
-   */
-  private lineSubmitUntilMs = 0;
-
-  /** rawModeWatchdog が発火した回数 (§7.3 — 0 のままなら当て木を外せる) */
-  private watchdogFireCount = 0;
 
   constructor(options: InteractiveInputOptions = {}) {
     this.commandProvider = options.commandProvider ?? (() => []);
     this.filePathProvider = options.filePathProvider ?? (() => []);
-  }
-
-  /**
-   * rawModeWatchdog の発火をログに残す (§7.3)。
-   *
-   * 所有権を ScreenManager に一元化した以上、ここが発火するのは「誰かがまだ勝手に
-   * stdin を触っている」 という設計違反の証拠である。黙って直すと気付けないので記録する。
-   * 500ms ごとに走るためログが溢れないよう、最初の数回だけ出す。
-   */
-  private logWatchdogFired(reason: string): void {
-    this.watchdogFireCount++;
-    if (this.watchdogFireCount > 5) return;
-    try {
-      getOpsLogger().warn("tui", `rawModeWatchdog fired: ${reason}`, {
-        count: this.watchdogFireCount,
-        note: "docs/tui-alternate-screen.md §7.3 — stdin の所有権が一元化されていれば発火しないはず",
-      });
-    } catch {
-      /* ログ失敗で入力を止めない */
-    }
   }
 
   /**
@@ -136,14 +72,14 @@ export class InteractiveInput {
    */
   async question(prefix: string, options?: { disableMenu?: boolean }): Promise<string> {
     if (!process.stdin.isTTY) {
-      return this.fallbackQuestion(prefix);
+      return this.nonTTYQuestion(prefix);
     }
     return this.interactiveQuestion(prefix, options?.disableMenu ?? false);
   }
 
-  // ─── readline フォールバック（非TTY） ────────────────
+  // ─── 非TTY line-input mode ────────────────────────
 
-  private fallbackQuestion(prefix: string): Promise<string> {
+  private nonTTYQuestion(prefix: string): Promise<string> {
     // 非TTYモードでは NonTTYReader シングルトンを使う
     // （readline.createInterface を毎回作ると内部バッファが失われる問題を回避）
     process.stdout.write(prefix);
@@ -179,50 +115,6 @@ export class InteractiveInput {
         this.keypressInitialized = true;
       }
 
-      // 生 stdin チャンクを観測して貼り付けを検出（ブラケット貼り付け非対応端末向け）。
-      // emitKeypressEvents の data 購読と並行して動き、keypress イベントより前に発火する。
-      // 同じ chunk から keypress イベントが順次発火するため、その間 isPasteBurst を有効化する。
-      if (!this.dataListenerInstalled) {
-        stdin.on("data", (chunk: Buffer) => {
-          // 改行の位置で「マルチライン貼り付け」 と「行確定」 を区別する (classifyChunkNewline)。
-          //   paste-burst: 本文中に改行 = 貼り付けほぼ確実 → 200ms の間 \r を改行扱い
-          //                (同じ貼り付けから後続の keypress が発火し終わるまで保持)
-          //   line-submit: 改行が末尾のみ = 「タイプした 1 行 + Enter」 の合流 or 単発 Enter
-          //                → 200ms の間 \r を確定扱い (貼り付けバースト継続中を除く)
-          // 単独マルチバイト文字 (日本語 IME 確定など) は改行を含まないのでどちらにも該当しない。
-          const kind = classifyChunkNewline(chunk);
-          const now = Date.now();
-          if (kind === "paste-burst") {
-            this.pasteBurstUntilMs = now + 200;
-          } else if (kind === "line-submit" && now >= this.pasteBurstUntilMs) {
-            this.lineSubmitUntilMs = now + 200;
-          }
-        });
-        this.dataListenerInstalled = true;
-      }
-
-      // 入力待ち中のウォッチドッグ: バックグラウンド処理（Discord/Slack/ループ経由の
-      // processInput）が interruptWatcher.stop() や inquirer 後始末で raw mode を外したり
-      // stdin を pause すると、プロンプト表示中なのに入力が反応しなくなる。
-      // 定期検査で自動復旧し、「一度改行しないと入力できない」状態を防ぐ。
-      //
-      // §7.3 / docs/stdin-ownership.md §4: raw mode を ScreenManager がセッション単位で
-      // 保持するようになった今、これは本来不要な当て木である。いきなり外すと想定漏れの
-      // 経路で穴が開いたときに無防備になるので残すが、**発火したらログに残す**。
-      // 発火しなくなったことを実運用で確認できてから削除する。
-      const rawModeWatchdog = setInterval(() => {
-        if (!stdin.isTTY) return;
-        if (!stdin.isRaw) {
-          stdin.setRawMode(true);
-          this.logWatchdogFired("raw mode が解除されていたので再適用した");
-        }
-        if (stdin.isPaused()) {
-          stdin.resume();
-          this.logWatchdogFired("stdin が pause されていたので resume した");
-        }
-      }, 500);
-      rawModeWatchdog.unref?.();
-
       // ─── 状態 ──────────────────────────────────
 
       let buffer = "";
@@ -239,14 +131,6 @@ export class InteractiveInput {
       let inPaste = false;
       /** 貼り付け中に蓄積される文字（終了マーカー受信時に一括で buffer に反映） */
       let pasteAccumulated = "";
-      /** 直前キーイベントの時刻（ms） — ブラケット貼り付け非対応端末向けのフォールバック */
-      let lastKeyTimeMs = 0;
-      /** 直前のキーが \r (CR) だったか — \r\n が連続して届いた場合に \n を吸収するために使う */
-      let lastKeyWasReturn = false;
-      /** 連続キー検出閾値 — これ未満の間隔で届いた \r は貼り付けとみなし改行として扱う。
-       *  人間の最速タイプは概ね 130ms/key なので 30ms なら安全に区別できる。 */
-      const FAST_PASTE_DELTA_MS = 30;
-
       const prefixLen = getDisplayWidth(stripAnsi(prefix));
       // 継続行のプレフィックス（プロンプトと同じ幅のスペース）
       const contPrefixStr = " ".repeat(prefixLen);
@@ -263,70 +147,7 @@ export class InteractiveInput {
        * ターミナルの幅に合わせて物理行（スクリーン行）へ分割し、
        * それぞれの行に対するテキスト、開始インデックス、およびカーソルの(物理行, 列)を算出する
        */
-      const getLayout = () => {
-        const columns = process.stdout.columns || 80;
-        const logicalLines = buffer.split("\n");
-        const screenLines: { text: string; startIndex: number }[] = [];
-
-        let cRow = 0;
-        let cCol = 0;
-        let currentPos = 0;
-
-        for (let i = 0; i < logicalLines.length; i++) {
-          const logicalLine = logicalLines[i];
-          let currentScreenLine = "";
-          let lineStartIndex = currentPos;
-          let currentLineWidth = i === 0 && screenLines.length === 0 ? prefixLen : contPrefixLen;
-
-          if (logicalLine.length === 0) {
-            if (currentPos === cursorPos) {
-              cRow = screenLines.length;
-              cCol = 0;
-            }
-            screenLines.push({ text: "", startIndex: lineStartIndex });
-            currentPos++; // \n
-            continue;
-          }
-
-          const chars = Array.from(logicalLine);
-          for (let charIdx = 0; charIdx < chars.length; charIdx++) {
-            if (currentPos === cursorPos) {
-              cRow = screenLines.length;
-              cCol = currentScreenLine.length;
-            }
-
-            const char = chars[charIdx];
-            const charW = getDisplayWidth(char);
-
-            // ターミナル幅を超過する場合、そこで行を折り返す（ハードラップ）
-            if (currentLineWidth + charW > columns) {
-              screenLines.push({ text: currentScreenLine, startIndex: lineStartIndex });
-              currentScreenLine = char;
-              lineStartIndex = currentPos;
-              currentLineWidth = contPrefixLen + charW;
-            } else {
-              currentScreenLine += char;
-              currentLineWidth += charW;
-            }
-            currentPos += char.length;
-          }
-
-          if (currentPos === cursorPos) {
-            cRow = screenLines.length;
-            cCol = currentScreenLine.length;
-          }
-
-          screenLines.push({ text: currentScreenLine, startIndex: lineStartIndex });
-          currentPos++; // \n
-        }
-
-        if (cursorPos === buffer.length) {
-          cRow = Math.max(0, screenLines.length - 1);
-          cCol = screenLines.length > 0 ? screenLines[cRow].text.length : 0;
-        }
-
-        return { screenLines, row: cRow, col: cCol };
-      };
+      const getLayout = () => layoutInputBuffer(buffer, cursorPos, prefixLen, process.stdout.columns || 80);
 
       const getLinePrefixLayout = (screenIndex: number): string => (screenIndex === 0 ? prefix : contPrefixStr);
 
@@ -652,7 +473,6 @@ export class InteractiveInput {
       // ─── 終了処理 ─────────────────────────────
 
       const cleanup = (): void => {
-        clearInterval(rawModeWatchdog);
         clearMenuDisplay();
         // ブラケット貼り付けモードを無効化
         out("\x1b[?2004l");
@@ -747,24 +567,6 @@ export class InteractiveInput {
           return;
         }
 
-        // ── 連続キー時刻を更新（ブラケット貼り付け非対応端末向けフォールバック判定用） ──
-        const now = Date.now();
-        const keyDelta = lastKeyTimeMs === 0 ? Infinity : now - lastKeyTimeMs;
-        lastKeyTimeMs = now;
-        // 二段構えの貼り付け検出:
-        //   (a) 生 stdin chunk で複数バイト+改行を観測 → pasteBurstUntilMs まで保持
-        //   (b) 直前キーから FAST_PASTE_DELTA_MS 未満で連続発火 → 貼り付け中とみなす
-        // line-submit 窓 (改行が末尾のみのチャンク = タイプ入力の確定) は貼り付け判定より優先。
-        // ConPTY が「続けて\r」 を 1 チャンクで届けると (a) 改行入りチャンク (b) keyDelta≈0 の
-        // 両方が誤発動して Enter が飲み込まれるため、 ここで両方を打ち消す (2026-06-13)。
-        const isPasteBurst =
-          now < this.lineSubmitUntilMs ? false : now < this.pasteBurstUntilMs || keyDelta < FAST_PASTE_DELTA_MS;
-
-        // \r の直後でも \n 以外のキーが来たら CRLF 吸収状態を解除
-        if (lastKeyWasReturn && key.name !== "enter") {
-          lastKeyWasReturn = false;
-        }
-
         // ── Ctrl+C ──
         if (key.ctrl && key.name === "c") {
           cleanup();
@@ -783,15 +585,8 @@ export class InteractiveInput {
 
         // ── Shift+Enter → 改行挿入（マルチライン入力） ──
         // Shift+Enter: モダンターミナル (Windows Terminal + CSI u, iTerm2, kitty)
-        // Ctrl+J:      ユニバーサルフォールバック (\n = 0x0A → key.name="enter")
+        // Ctrl+J:      明示的にサポートする代替ショートカット (\n = 0x0A → key.name="enter")
         if ((key.name === "return" && key.shift) || key.name === "enter") {
-          // CRLF 吸収: 直前のキーが \r で、これが直後に届いた \n なら、既に \r 側で
-          // 改行処理済みなので無視する。Ctrl+J 単独入力の場合は lastKeyWasReturn=false。
-          if (key.name === "enter" && lastKeyWasReturn) {
-            lastKeyWasReturn = false;
-            return;
-          }
-          lastKeyWasReturn = false;
           // メニューが表示中なら先に閉じる
           if (menuVisible) {
             dismissMenu();
@@ -805,18 +600,6 @@ export class InteractiveInput {
 
         // ── Enter ──
         if (key.name === "return") {
-          // フォールバック: ブラケット貼り付け非対応端末で貼り付けの \r が届いた場合、
-          // pasteBurst 中なら改行として扱う（次の \n が CRLF の続きとして来た場合は吸収）
-          if (isPasteBurst && !key.shift) {
-            if (menuVisible) dismissMenu();
-            buffer = buffer.slice(0, cursorPos) + "\n" + buffer.slice(cursorPos);
-            cursorPos++;
-            renderInput();
-            lastKeyWasReturn = true;
-            return;
-          }
-          // 通常の Enter は確定動作 — lastKeyWasReturn は立てない（直後の \n は別入力扱い）
-          lastKeyWasReturn = false;
           if (menuVisible && menuItems.length > 0) {
             const selectedValue = menuItems[selectedIndex].value;
             selectItem();
@@ -936,7 +719,7 @@ export class InteractiveInput {
         // ── ← ──
         if (key.name === "left") {
           if (cursorPos > 0) {
-            cursorPos--;
+            cursorPos = previousGraphemeBoundary(buffer, cursorPos);
             renderInput();
             if (menuVisible) {
               updateMenu();
@@ -949,7 +732,7 @@ export class InteractiveInput {
         // ── → ──
         if (key.name === "right") {
           if (cursorPos < buffer.length) {
-            cursorPos++;
+            cursorPos = nextGraphemeBoundary(buffer, cursorPos);
             renderInput();
             if (menuVisible) {
               updateMenu();
@@ -983,8 +766,9 @@ export class InteractiveInput {
         // ── Backspace ──
         if (key.name === "backspace") {
           if (cursorPos > 0) {
-            buffer = buffer.slice(0, cursorPos - 1) + buffer.slice(cursorPos);
-            cursorPos--;
+            const previous = previousGraphemeBoundary(buffer, cursorPos);
+            buffer = buffer.slice(0, previous) + buffer.slice(cursorPos);
+            cursorPos = previous;
             renderInput();
             if (buffer.length === 0) {
               dismissMenu();
@@ -999,7 +783,8 @@ export class InteractiveInput {
         // ── Delete ──
         if (key.name === "delete") {
           if (cursorPos < buffer.length) {
-            buffer = buffer.slice(0, cursorPos) + buffer.slice(cursorPos + 1);
+            const next = nextGraphemeBoundary(buffer, cursorPos);
+            buffer = buffer.slice(0, cursorPos) + buffer.slice(next);
             renderInput();
             if (!buffer.includes("\n")) {
               updateMenu();

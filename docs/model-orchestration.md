@@ -33,7 +33,7 @@ Claude Code が Fable / Opus / Sonnet / Haiku を **タスクごとに選び分�
 - それぞれに **役割 (slot) の名前** を付ける (`fast` / `deep` / `review` / `cheap` …)
 - **サブエージェント定義側**が「自分はこの slot で走る」 と宣言できる
 - **モデル自身**が委任時に「このタスクは deep で」 と指名できる
-- 指名がなければ従来通り main にフォールバックする (= 無破壊)
+- 指名がなければmainを既定モデルとして使う
 
 ### 1.3 スコープ外 (今回やらない)
 
@@ -123,10 +123,10 @@ export interface ResolvedModel {
   label: string;
 }
 
-/** ref を解決する。 解決できなければ undefined (呼び出し側で main にフォールバック) */
+/** ref を解決する。解決できなければ undefined */
 export function resolveModelRef(ref: string): ResolvedModel | undefined;
 
-/** main へのフォールバック込み。 サブエージェント起動はこちらを使う */
+/** ref 未指定時だけ main を既定として解決する。明示refの失敗は undefined */
 export function resolveModelRefOrMain(ref: string | undefined): ResolvedModel | undefined;
 
 /**
@@ -185,7 +185,7 @@ model: review        # ← 追加。 ModelRef 文法 (§3.1)
 
 - `AgentDefinition` に `modelRef?: string` を追加 (frontmatter キーは `model`)
 - **未指定なら従来通り** `SubAgentManager` が持つ main provider を使う
-- 指定された slot が未割当なら **警告ログ + main フォールバック** (起動は止めない)
+- 指定された slot が未割当なら、設定方法を示して **起動を停止**する (mainへ置換しない)
 
 ビルトイン 5 定義には **今回は何も書かない**。 デフォルト挙動を変えないため。
 user が `~/.localllm/agents/` 等に置く自前定義で使える口を開ける、 が主目的。
@@ -247,15 +247,16 @@ model: "このタスクを実行するモデル。 省略時はメインLLM。
 
 `enum` は使わない。 slot は動的に増減するため、 enum に固定するとツール定義の
 キャッシュとズレたときに全 task 呼び出しが弾かれる。 文字列として受け、
-解決失敗時は main にフォールバック + 結果に注記を返す (**silent な差し替えはしない**)。
+解決失敗時はtaskを失敗させ、`/models slot <ref> <モデル>` の設定方法を返す。
 
 ### 5.2 未定義 slot を指定されたとき
 
-```json
-{ "success": true, "result": "...", "modelNote": "指定された model 'deep' は未割当のため main で実行しました。 /models slot deep <モデル> で割り当てられます。" }
+```text
+Error: 指定された model 'deep' を解決できないためサブエージェントを起動しません。
+/models slot deep <モデル> で割り当ててください。
 ```
 
-結果を握りつぶさず、 かつ実行は止めない。 `docs` の「silent な欠損は禁止」 方針に従う。
+別モデルの結果を要求したモデルの成果に見せない。未指定時のmain利用は既定動作であり、明示指定失敗時の代替ではない。
 
 ---
 
@@ -306,7 +307,7 @@ system prompt に短いブロックを足す。
   ── Slots ──
   main     anthropic:claude-sonnet-4-6 @ api.anthropic.com
   second   ollama:qwen3-32b @ 192.168.1.33:11434
-  vision   (未割当 → main にフォールバック)
+  vision   (未割当: main が画像を担当)
   fast     ollama:qwen3-9b @ 192.168.1.33:11434
   deep     azure-anthropic:claude-opus-4-6
 

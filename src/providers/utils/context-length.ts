@@ -3,8 +3,8 @@
  *
  * 設計方針:
  * - 各プロバイダの listModels/getModelInfo で「実 API から取得できない場合」の
- *   一次推定として使う。確信が無いモデルは 0 を返し、呼び出し側で
- *   FALLBACK_CONTEXT_WINDOW にフォールバックさせる。
+ *   一次推定として使う。確信が無いモデルは0を返し、呼び出し側は実API値または
+ *   ユーザーの明示設定を要求する。推測定数で実行は継続しない。
  * - 4096 のような小さな値を捏造して返すと、auto-compression が早期発火し
  *   tool_call/tool_result 履歴破損を誘発するため避ける。
  * - 著名モデルだけ網羅し、未知モデルは 0 を返す (heuristic vs unknown を明確化)。
@@ -52,12 +52,5 @@ export function inferContextLength(modelName: string): number {
   if (/phi-?3.*medium|phi-?3\.5|phi-?4/.test(m)) return 128_000;
   if (/phi/.test(m)) return 4_096;
 
-  return 0; // 不明 — 呼び出し側で FALLBACK_CONTEXT_WINDOW にフォールバック
+  return 0; // 不明 — 呼び出し側で明示設定を要求する
 }
-
-/**
- * 「不明」プロバイダの最終フォールバック。
- * ローカル LLM でも 32K は珍しくない時代なので、4096 ではなく 32_768 を採用。
- * これでも実値より小さければユーザーが mainLLM.contextWindow を明示設定する想定。
- */
-export const FALLBACK_CONTEXT_WINDOW = 32_768;

@@ -143,29 +143,29 @@ describe("applyGuards — 実行しない条件と格下げ", () => {
     expect(r.action).toBe("forget-thinking");
   });
 
-  it("in_progress の ToDo があれば clear を forget に格下げする", () => {
+  it("in_progress の ToDo があれば clear を見送り、別の履歴変更へ切り替えない", () => {
     const r = applyGuards("clear", { ...guardBase, hasInProgressTodo: true });
-    expect(r.action).toBe("forget");
+    expect(r.action).toBe("none");
     expect(r.downgrades).toHaveLength(1);
-    expect(r.downgrades[0]).toContain("clear → forget");
+    expect(r.downgrades[0]).toContain("clear → none");
   });
 
-  it("Goal Seek 実行中なら clear を forget に格下げする", () => {
+  it("Goal Seek 実行中なら clear を見送る", () => {
     const r = applyGuards("clear", { ...guardBase, goalActive: true });
-    expect(r.action).toBe("forget");
+    expect(r.action).toBe("none");
     expect(r.downgrades[0]).toContain("Goal Seek");
   });
 
-  it("span の途中では clear を forget に格下げする (作業中に履歴を消さない)", () => {
+  it("span の途中では clear を見送る (作業中に履歴を変更しない)", () => {
     const r = applyGuards("clear", { ...guardBase, midSpan: true });
-    expect(r.action).toBe("forget");
+    expect(r.action).toBe("none");
     expect(r.downgrades[0]).toContain("作業の途中");
   });
 
-  it("auto かつ確認を取れない経路なら clear を compress に格下げする", () => {
+  it("auto かつ確認を取れない経路なら clear を見送り、別の履歴変更へ切り替えない", () => {
     const r = applyGuards("clear", { ...guardBase, canConfirm: false });
-    expect(r.action).toBe("compress");
-    expect(r.downgrades[0]).toContain("clear → compress");
+    expect(r.action).toBe("none");
+    expect(r.downgrades[0]).toContain("clear → none");
   });
 
   it("aggressive なら確認不要なので非 TTY でも clear のまま", () => {
@@ -273,11 +273,11 @@ describe("ContextStrategy", () => {
     expect(second.skipped).toBe(true);
   });
 
-  it("見送りを選ばれた区切りでは clear を再提案しない", () => {
+  it("見送りを選ばれた区切りでは別の履歴変更も自動実行しない", () => {
     const s = ready();
     s.decline(input.fingerprint);
     const d = s.decide(input);
-    expect(d.action).toBe("forget");
+    expect(d.action).toBe("none");
     expect(d.downgrades.join()).toContain("既に見送りを選択済み");
   });
 

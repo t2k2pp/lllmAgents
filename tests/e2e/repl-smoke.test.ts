@@ -80,11 +80,11 @@ interface RunResult {
 }
 
 /** アプリを非TTYパイプモードで起動し、入力行を先渡しして終了まで待つ */
-function runApp(lines: string[], args: string[] = ["--no-mcp"]): Promise<RunResult> {
+function runApp(lines: string[], args: string[] = ["--no-mcp"], home = tmpHome): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [TSX_CLI, ENTRY, ...args], {
       cwd: workspace,
-      env: { ...process.env, HOME: tmpHome, USERPROFILE: tmpHome },
+      env: { ...process.env, HOME: home, USERPROFILE: home },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -129,6 +129,9 @@ beforeAll(async () => {
           baseUrl,
           model: "mock-model",
           contextWindow: 32768,
+        },
+        modelCapabilities: {
+          "mock-model": { tier: "T2", contextWindow: 32768 },
         },
       },
       null,
@@ -247,6 +250,26 @@ describe("E2E smoke — 非TTYパイプモード起動", () => {
       expect(serializedMessages).not.toContain(projectMarker);
       expect(serializedMessages).not.toContain(memoryMarker);
       expect(serializedMessages).not.toContain(ruleMarker);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "シナリオ5: --help は初期化や外部接続を行わず終了する",
+    async () => {
+      const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), "localllm-help-e2e-"));
+      try {
+        const r = await runApp([], ["--help"], emptyHome);
+
+        expect(r.timedOut, diag(r)).toBe(false);
+        expect(r.code, diag(r)).toBe(0);
+        expect(r.stdout, diag(r)).toContain("Usage:");
+        expect(r.stdout, diag(r)).toContain("--no-alt-screen");
+        expect(r.stdout, diag(r)).not.toContain("Discord");
+        expect(fs.existsSync(path.join(emptyHome, ".localllm")), diag(r)).toBe(false);
+      } finally {
+        fs.rmSync(emptyHome, { recursive: true, force: true });
+      }
     },
     TEST_TIMEOUT_MS,
   );

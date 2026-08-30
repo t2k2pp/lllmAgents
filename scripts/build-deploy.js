@@ -97,14 +97,6 @@ function copyExe() {
   cpSync(EXE_SRC, EXE_DST);
   const sz = statSync(EXE_DST).size;
   log(`exe copied (${Math.round(sz / (1024 * 1024))}MB)`);
-
-  // Fallback mode 用に .cjs もコピー (SEAが失敗した時用)
-  const cjsSrc = EXE_SRC.replace(EXE_NAME, "localllm.cjs");
-  const cjsDst = EXE_DST.replace(EXE_NAME, "localllm.cjs");
-  if (existsSync(cjsSrc)) {
-    cpSync(cjsSrc, cjsDst);
-    log(`cjs bundle copied`);
-  }
 }
 
 function copySkills() {

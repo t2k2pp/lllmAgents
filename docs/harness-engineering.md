@@ -13,7 +13,7 @@
 
 2. **bash.ts: cmd.exe → git bash に変更**
    - 設計書では「文字化け対策」だけだったが、根本原因（cmd.exeで実行していた）を修正
-   - Windows環境でgit bashを自動検出して使用。見つからない場合のみcmd.exeフォールバック
+   - Windows環境でgit bashを自動検出して使用。見つからない場合は意味の異なるcmd.exeへ置換せず、導入手順付きで実行前に失敗
    - これにより `cat`, `head`, `grep` 等のUnixコマンドがWindowsでも動作するようになった
 
 3. **file_edit連続失敗追跡 → agent-loop.ts に実装**

@@ -1,7 +1,7 @@
 import * as esbuild from "esbuild";
-import fs from "fs";
-import { execSync } from "child_process";
-import path from "path";
+import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { getGitRevision } from "./scripts/git-revision.js";
 
 const DIST_DIR = "dist";
@@ -13,8 +13,8 @@ const SEA_BLOB = path.join(DIST_DIR, "sea-prep.blob");
 
 // 注: かつて `node --build-sea` というモダンな単一コマンド経路が提案されていたが、
 // Node 24.13 までで実装されておらず常に bad option エラーになる。本実装は
-// `--experimental-sea-config` + postject の "legacy" 経路のみを使用し、
-// 致命的な失敗時には末尾の catch でシェルラッパへフォールバックする。
+// `--experimental-sea-config` + postject の "legacy" 経路だけを正式な生成経路とする。
+// どこか一段でも失敗した場合は非同等なシェルラッパを生成せず、ビルドを失敗させる。
 
 if (!fs.existsSync(DIST_DIR)) fs.mkdirSync(DIST_DIR, { recursive: true });
 
@@ -101,7 +101,7 @@ async function build() {
         if (/Architectures in the fat file/i.test(lipoInfo)) {
           const arch = process.arch === "arm64" ? "arm64" : "x86_64";
           console.log(`       (darwin) universal binary detected → lipo -thin ${arch}`);
-          const thinTmp = exeDest + ".thin";
+          const thinTmp = `${exeDest}.thin`;
           execSync(`lipo -thin ${arch} "${exeDest}" -output "${thinTmp}"`, { stdio: "inherit" });
           fs.rmSync(exeDest, { force: true });
           fs.renameSync(thinTmp, exeDest);
@@ -116,7 +116,7 @@ async function build() {
       console.log("       (darwin) stripping existing Apple signature...");
       try {
         execSync(`codesign --remove-signature "${exeDest}"`, { stdio: "inherit" });
-      } catch (e) {
+      } catch {
         console.warn("       WARN: codesign --remove-signature failed.");
       }
     }
@@ -134,20 +134,7 @@ async function build() {
       execSync(`codesign --force --sign - "${exeDest}"`, { stdio: "inherit" });
     }
   } catch (err) {
-    // ---- Fallback: SEA ビルドが何らかの理由で失敗した場合、薄いシェル/バッチラッパ
-    //      に退化して少なくとも動く状態にする (homebrew node 等の救済)。
-    //      この経路では node ランタイムが配布先にも必要になる点に注意。
-    console.error("\nSEA build failed, falling back to shell wrapper mode...");
-    console.error(`  Reason: ${err.message}`);
-    if (process.platform === "win32") {
-      const batContent = `@echo off\r\nnode "%~dp0${APP_NAME}.cjs" %*\r\n`;
-      fs.writeFileSync(path.join(DIST_DIR, EXE_NAME), batContent);
-    } else {
-      const shContent = `#!/bin/bash\nexec node "$(dirname "$0")/${APP_NAME}.cjs" "$@"\n`;
-      fs.writeFileSync(exeDest, shContent);
-      fs.chmodSync(exeDest, 0o755);
-    }
-    console.log(`Fallback wrapper created at: ${exeDest}`);
+    throw new Error(`SEA executable build failed; no wrapper was generated: ${err.message}`, { cause: err });
   }
 
   console.log(`\nSUCCESS! Executable created at: ${exeDest}`);

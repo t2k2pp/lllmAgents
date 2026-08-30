@@ -232,7 +232,7 @@ Claude Code の“正解”：**ネットは OFF ではなく「プロキシ経�
 - **proxy がハング/応答しない**：在プロセス設計のため REPL の event loop に影響しうる。`/sandbox off` で `proxy.stop()`（listen 解放）→ 必要なら REPL 再起動。終了時は `saveBeforeExit` で `getSandboxProxy()?.stop()` を呼ぶ。
 - **socat 子プロセスの孤児（Linux）**：`socat ... fork` の子は親 kill で落ちないことがある。bwrap の `--new-session`＋namespace teardown で最終的に回収されるが、 残る場合は `pkill -f 'lllm-proxy'` 等。
 - **一時成果物の残骸**：`$TMPDIR/lllm-sandbox-*`（Seatbelt プロファイル）・`$TMPDIR/lllm-proxy-<pid>.sock`（unix ソケット）。**起動時に `cleanupStaleSandboxArtifacts()` が pid 生存チェック付きで掃除**（生きているプロセス・自プロセスのものは残す）。SIGKILL 時は cleanup callback が走らず残るが次回起動で回収。
-- **socat/ip 不足（Linux）**：`/sandbox on` 時にその場で黄色警告（allowlist 未強制＝ネット全開）。`sudo apt install socat iproute2` で解消。
+- **socat/ip 不足（Linux）**：`/sandbox on fs`を保存せず、既に同設定ならbashを実行前に停止する。`sudo apt install socat iproute2`等で依存を満たすか、別level/`off`を明示選択する。ネット全開では続行しない。
 - **CI**：`.github/workflows/ci.yml` で ubuntu/macos の matrix。Linux runner は bwrap/socat/iproute2 を入れて bwrap FS 隔離の統合テストを実走（`process-sandbox.bwrap.integration.test`）、 macOS runner は Seatbelt 統合テストを実走。socat ネットブリッジ(2b-2)の実走検証は WSL2 実機が引き続き必要。
 
 ## §7.4 検証手順・CI が保証する範囲（QA 引き継ぎ向け）
@@ -267,8 +267,8 @@ REPL 内（/sandbox on で fs・status が「ネット: allowlist 経由のみ�
 
 1. ネイティブ Windows は封じ込め非対応（git bash 実行）。封じ込めは WSL2 内起動が前提。
 2. 変種2（WSL2 内）で `/mnt/c` を触ると I/O が遅い。成果物を WSL ネイティブ FS に置けば速い。
-3. ネット allowlist の強制には OS 機能が要る：macOS=sandbox-exec、Linux=bwrap+socat+ip。不足時は fs でもネット全開（status で「未強制」と明示）。
-4. bwrap/sandbox-exec が無い環境では実効レベル none（警告表示）。Linux `full` で bwrap 無し時は `unshare` があれば `network` へ降格（none ではない。`getEffectiveLevel`）。
+3. ネット allowlist の強制には OS 機能が要る：macOS=sandbox-exec、Linux=bwrap+socat+ip。不足時は設定を成立不能として実行停止する。
+4. bwrap/sandbox-execが無い環境では隔離なしや別levelへ自動降格しない。依存導入、level変更、`/sandbox off`のいずれかをユーザーが明示する。
 5. 配布：変種2 用に WSL 内で動かす手段（WSL 内で `npm run start`、または Linux ビルド提供）の案内が必要。
 6. ドメインフロンティング（CONNECT は SNI を見ない）・許可ドメイン自体への exfil（Gist 等）・インタプリタ難読化による破壊は脅威モデル上の残存リスク（TLS 非終端の割り切り・§7.1/§7.2）。
 7. ~~`network` レベルの FS 挙動に OS 差~~ → **解消済み**：`buildSeatbeltProfile` を修正し、 FS 隔離は `fs`/`full` のみ・`network` は file-write 全許可（FS 開放）に。macOS/Linux とも `network`=ネットのみ隔離で揃えた（あるべき論＋Claude Code の独立2軸に一致）。

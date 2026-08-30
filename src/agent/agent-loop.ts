@@ -699,7 +699,7 @@ export class AgentLoop {
           if (this.wasInPlanMode && !inPlanMode) this.queueBreak("P2", `P2:${++this.breakSeq}`);
           this.wasInPlanMode = inPlanMode;
         } catch (e) {
-          logger.debug(`[strategy] plan mode 退出の検出に失敗 (無視): ${e}`);
+          logger.warn(`[strategy] plan mode 退出の検出に失敗しました: ${e}`);
         }
         // 区切りシグナルによる整理。 閾値超過による下の安全網とは独立した経路
         await this.runContextStrategy(true);
@@ -720,6 +720,7 @@ export class AgentLoop {
           } catch (e) {
             reduceSpinner.fail("コンテキストの整理に失敗しました");
             logger.error("Context reduction failed:", e);
+            throw e;
           }
         }
 
@@ -1486,36 +1487,46 @@ export class AgentLoop {
           textContent.trim().length > 0 &&
           !this.planManager?.isInPlanMode()
         ) {
-          const result = await this.evaluator.evaluate({
-            filePaths: pendingEvalFiles,
-            originalRequest: userMessageText,
-            assistantResponse: textContent,
-          });
-          if (!result.passed) {
-            selfCheckRounds++;
-            flushAssistantText(false); // span 継続 (自己点検) — 表示は白、final ではない
-            const feedback = Evaluator.formatForInjection(result);
-            console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`));
-            this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`);
-            // Evaluator 指摘は in-turn 専用、 thinking も保全。 表示済みテキストは保全 (displayed)。
-            this.history.addAssistantMessage(textContent, undefined, {
-              ephemeral: true,
-              thinking: thinkingContent,
-              displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
-            });
-            this.history.addUserMessage(
-              formatSelfCheck(
-                selfCheckRounds,
-                MAX_SELF_CHECK_ROUNDS,
-                userMessageText,
-                `Evaluatorから以下の指摘があります:\n${feedback}`,
+          if (!this.evaluator.isAvailable()) {
+            console.log(
+              chalk.yellow(
+                "  Evaluatorは未実行: 独立したsecondLLMが利用できません。mainLLMによる自己評価へ自動置換しません。",
               ),
-              { ephemeral: true },
             );
-            continue;
+            this.notice("warn", "Evaluator未実行: secondLLMを設定すると独立レビューを有効化できます");
+            pendingEvalFiles = [];
+          } else {
+            const result = await this.evaluator.evaluate({
+              filePaths: pendingEvalFiles,
+              originalRequest: userMessageText,
+              assistantResponse: textContent,
+            });
+            if (!result.passed) {
+              selfCheckRounds++;
+              flushAssistantText(false); // span 継続 (自己点検) — 表示は白、final ではない
+              const feedback = Evaluator.formatForInjection(result);
+              console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`));
+              this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] Evaluator不合格`);
+              // Evaluator 指摘は in-turn 専用、 thinking も保全。 表示済みテキストは保全 (displayed)。
+              this.history.addAssistantMessage(textContent, undefined, {
+                ephemeral: true,
+                thinking: thinkingContent,
+                displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
+              });
+              this.history.addUserMessage(
+                formatSelfCheck(
+                  selfCheckRounds,
+                  MAX_SELF_CHECK_ROUNDS,
+                  userMessageText,
+                  `Evaluatorから以下の指摘があります:\n${feedback}`,
+                ),
+                { ephemeral: true },
+              );
+              continue;
+            }
+            // 合格 → クリアして通常フローへ
+            pendingEvalFiles = [];
           }
-          // 合格 → クリアして通常フローへ
-          pendingEvalFiles = [];
         }
         // 自己点検上限到達: Evaluatorもクリアして通常フローへ
         if (pendingEvalFiles.length > 0 && selfCheckRounds >= MAX_SELF_CHECK_ROUNDS) {
@@ -1989,13 +2000,11 @@ export class AgentLoop {
         },
       });
 
-      // 引き継ぎメモの生成に失敗したら履歴には触れていない。 forget に格下げして続行する (docs §8)
+      // 引き継ぎメモの生成に失敗した場合、履歴には触れず失敗を明示する。
       if (!outcome.applied && action === "clear") {
-        const msg = `コンテキスト戦略: clear → forget に格下げしました (${outcome.note ?? "引き継ぎメモを生成できませんでした"})`;
+        const msg = `コンテキスト戦略: clear を適用できなかったため履歴を保持しました (${outcome.note ?? "引き継ぎメモを生成できませんでした"})`;
         console.log(chalk.yellow(`  ${msg}`));
         this.notice("warn", msg);
-        const fallback = await this.contextManager.applyStrategy(this.history, "forget");
-        this.reportStrategyOutcome(decision, fallback);
         return;
       }
       this.reportStrategyOutcome(decision, outcome);
@@ -3409,20 +3418,15 @@ export class AgentLoop {
    * 設定不在時は undefined を返す (= 自動判定のみ)。
    */
   private getCapabilityOverride(modelId: string): import("./capability-tier.js").CapabilityOverride | undefined {
-    try {
-      const cfg = loadConfig();
-      const overrides = cfg.modelCapabilities;
-      if (!overrides) return undefined;
-      // 完全一致のみ (lowercase 比較で柔軟に)
-      const id = modelId.toLowerCase().trim();
-      for (const key of Object.keys(overrides)) {
-        if (key.toLowerCase().trim() === id) return overrides[key];
-      }
-      return undefined;
-    } catch {
-      // config 読込失敗時は override なしで自動判定
-      return undefined;
+    const cfg = loadConfig();
+    const overrides = cfg.modelCapabilities;
+    if (!overrides) return undefined;
+    // 完全一致のみ (lowercase 比較で柔軟に)
+    const id = modelId.toLowerCase().trim();
+    for (const key of Object.keys(overrides)) {
+      if (key.toLowerCase().trim() === id) return overrides[key];
     }
+    return undefined;
   }
 
   getSamplingParams(): SamplingParams {

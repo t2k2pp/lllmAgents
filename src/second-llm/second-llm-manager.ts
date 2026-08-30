@@ -6,6 +6,7 @@ import { DelegationGuard } from "./delegation-guard.js";
 import { createSecondLLMProvider } from "../providers/provider-factory.js";
 import { LLMLogger } from "../agent/llm-logger.js";
 import { resolveCapability } from "../agent/capability-tier.js";
+import { loadConfig } from "../config/config-manager.js";
 import { getOpsLogger } from "../utils/ops-logger.js";
 import { HarnessState, enrichToolResult, buildSubAgentStrategyPrompt } from "../agent/harness-intervention.js";
 import type { SecondLLMConfig, SecondLLMEndpoint } from "../config/types.js";
@@ -28,17 +29,17 @@ const EVALUATOR_ALLOWED_TOOLS = ["file_read", "grep", "glob"];
 // 優先順位:
 //   1. endpoint.temperature 等 (ユーザーが /second temperature で設定した値)
 //   2. config.secondLLM.samplingDefaults (config.json で用途別に指定された値)
-//   3. 下記ハードコード fallback (後方互換のため残す)
+//   3. 下記の製品既定値
 //
 // 用途別の既定温度:
 //   - consult / runAsAgent: 0.2 (バランス: 多少の創造性 + ある程度の決定性)
 //   - runAsEvaluator: 0.1 (決定論寄り、 評価結果の再現性確保)
 
-/** consult (単発相談) のハードコード fallback 温度 */
+/** consult (単発相談) の製品既定温度 */
 const DEFAULT_TEMPERATURE_CONSULT = 0.2;
-/** runAsAgent (タスク委任) のハードコード fallback 温度 */
+/** runAsAgent (タスク委任) の製品既定温度 */
 const DEFAULT_TEMPERATURE_AGENT = 0.2;
-/** runAsEvaluator (成果物レビュー) のハードコード fallback 温度 */
+/** runAsEvaluator (成果物レビュー) の製品既定温度 */
 const DEFAULT_TEMPERATURE_EVALUATOR = 0.1;
 
 /**
@@ -132,9 +133,9 @@ export class SecondLLMManager {
    * 優先順位:
    *   1. endpoint.temperature 等 (= /second temperature 等で個別設定された値)
    *   2. config.samplingDefaults.{consultTemperature|agentTemperature|evaluatorTemperature}
-   *   3. ハードコード fallback (DEFAULT_TEMPERATURE_*)
+   *   3. 製品既定値 (DEFAULT_TEMPERATURE_*)
    *
-   * @param mode 用途。 fallback の選び方とラベル用。
+   * @param mode 用途別の製品既定値を選ぶための識別子。
    */
   private resolveSampling(mode: "consult" | "agent" | "evaluator"): {
     temperature: number;
@@ -150,14 +151,14 @@ export class SecondLLMManager {
         : mode === "agent"
           ? defaults?.agentTemperature
           : defaults?.evaluatorTemperature;
-    const hardcodedFallback =
+    const productDefault =
       mode === "consult"
         ? DEFAULT_TEMPERATURE_CONSULT
         : mode === "agent"
           ? DEFAULT_TEMPERATURE_AGENT
           : DEFAULT_TEMPERATURE_EVALUATOR;
     return {
-      temperature: ep?.temperature ?? configDefault ?? hardcodedFallback,
+      temperature: ep?.temperature ?? configDefault ?? productDefault,
       ...(ep?.top_p !== undefined && { top_p: ep.top_p }),
       ...(ep?.top_k !== undefined && { top_k: ep.top_k }),
       ...(ep?.repetition_penalty !== undefined && { repetition_penalty: ep.repetition_penalty }),
@@ -273,7 +274,16 @@ export class SecondLLMManager {
       // メインとセカンドで「同じ原則を共有する」 ことが目的 (非対称性の解消)。
       // Phase B-4: セカンドLLM 自身の能力ティアを解決して shared-principles に渡す。
       // セカンド側で T3 なら few-shot 風に短文化、 T1 なら concise が反映される。
-      const secondTier = resolveCapability(this.endpoint.model, this.endpoint.contextWindow ?? undefined).tier;
+      const configuredCapabilities = loadConfig().modelCapabilities;
+      const modelId = this.endpoint.model.toLowerCase().trim();
+      const capabilityOverride = configuredCapabilities
+        ? Object.entries(configuredCapabilities).find(([key]) => key.toLowerCase().trim() === modelId)?.[1]
+        : undefined;
+      const secondTier = resolveCapability(
+        this.endpoint.model,
+        this.endpoint.contextWindow ?? undefined,
+        capabilityOverride,
+      ).tier;
       const systemPrompt = buildSubAgentStrategyPrompt(secondTier);
       const messages: Message[] = [
         { role: "system", content: systemPrompt },

@@ -73,7 +73,7 @@ config.security.processSandbox.level   = "network" | "full"
 
 **書き込み許可ディレクトリ（full レベル）**: `cwd`, `~/.localllm`, `allowedDirectories` 設定値のみ writable。
 
-**フォールバック**: `bwrap`/`unshare`/`sandbox-exec` が存在しない場合は自動的に `none` にデグレード（ログに警告なし）。`sandbox_info` ツールでツール有無を確認できる。
+**必須能力不足時**: `bwrap`/`unshare`/`sandbox-exec` が存在しない、またはLinux `fs` のallowlist bridgeに必要な`socat`/`ip`が無い場合は、設定した隔離を弱めずbashを実行前に停止する。診断には要求level、不足tool、導入または明示的な`/sandbox off`を含める。`sandbox_info`でもtool有無を確認できる。
 
 **注意**: `processSandbox.enabled = false`（デフォルト）では従来どおりアプリレベルのみ。有効化はユーザーの明示的な設定変更が必要。
 

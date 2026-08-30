@@ -84,7 +84,7 @@ ${latestToolCalls}
 {"verdict": "answered" | "took_step" | "stalled", "reason": "<簡潔な根拠 1-2 文>"}`;
 }
 
-function parseJudgeResponse(raw: string): JudgeProgressResult {
+export function parseJudgeResponse(raw: string): JudgeProgressResult {
   const jsonMatch = raw.match(/\{[\s\S]*?\}/);
   if (jsonMatch) {
     try {
@@ -94,12 +94,11 @@ function parseJudgeResponse(raw: string): JudgeProgressResult {
       if (verdict === "answered" || verdict === "took_step" || verdict === "stalled") {
         return { verdict, reason };
       }
-    } catch {
-      /* fall through */
+    } catch (error) {
+      throw new Error(`progress judge が不正な JSON を返しました: ${String(error)}`);
     }
   }
-  // パース失敗時のフォールバック: 緩め判定 (stalled に倒さない)
-  return { verdict: "took_step", reason: "judge 出力 parse 失敗、 緩めで took_step に倒す" };
+  throw new Error("progress judge の応答に有効な verdict JSON がありません");
 }
 
 /**
@@ -152,7 +151,8 @@ export async function judgeProgress(input: JudgeProgressInput): Promise<JudgePro
     logger.debug(`[progress-judge] verdict=${result.verdict} reason=${result.reason.slice(0, 80)}`);
     return result;
   } catch (e) {
-    logger.warn(`[progress-judge] failed, falling back to took_step: ${String(e).slice(0, 100)}`);
-    return { verdict: "took_step", reason: `judge 呼出失敗、 緩めで took_step に倒す (${String(e).slice(0, 60)})` };
+    const message = `progress judge の判定に失敗しました: ${e instanceof Error ? e.message : String(e)}`;
+    logger.warn(`[progress-judge] ${message.slice(0, 160)}`);
+    throw new Error(message, { cause: e });
   }
 }

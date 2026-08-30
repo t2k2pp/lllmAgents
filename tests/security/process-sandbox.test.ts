@@ -4,6 +4,7 @@ import {
   buildBwrapAllowlistArgs,
   buildSeatbeltProfile,
   defaultSecretDenyDirs,
+  getSandboxReadinessError,
   withSandboxState,
   resolveEffectiveLevel,
 } from "../../src/security/process-sandbox.js";
@@ -25,7 +26,7 @@ describe("resolveEffectiveLevel (全 OS×ツール×レベルの分岐・#4)", (
     expect(resolveEffectiveLevel("linux", { enabled: true, level: "fs" }, all)).toBe("fs");
     expect(resolveEffectiveLevel("linux", { enabled: true, level: "fs" }, { ...none, unshare: true })).toBe("none");
   });
-  it("linux full: bwrap→full / bwrap無し+unshare→network 降格 / 何も無し→none", () => {
+  it("linux full: bwrapが無ければnetworkへ降格せずnone", () => {
     expect(resolveEffectiveLevel("linux", { enabled: true, level: "full" }, all)).toBe("full");
     expect(
       resolveEffectiveLevel(
@@ -33,7 +34,7 @@ describe("resolveEffectiveLevel (全 OS×ツール×レベルの分岐・#4)", (
         { enabled: true, level: "full" },
         { bwrap: false, unshare: true, sandboxExec: false },
       ),
-    ).toBe("network");
+    ).toBe("none");
     expect(resolveEffectiveLevel("linux", { enabled: true, level: "full" }, none)).toBe("none");
   });
   it("linux network: unshare 必須", () => {
@@ -48,6 +49,39 @@ describe("resolveEffectiveLevel (全 OS×ツール×レベルの分岐・#4)", (
   });
   it("win32 等は常に none", () => {
     expect(resolveEffectiveLevel("win32", { enabled: true, level: "fs" }, all)).toBe("none");
+  });
+});
+
+describe("getSandboxReadinessError (設定した隔離を無言で弱めない)", () => {
+  const all = { bwrap: true, unshare: true, sandboxExec: true, socat: true, ip: true };
+
+  it("無効化を明示した状態はエラーにしない", () => {
+    expect(getSandboxReadinessError("linux", { enabled: false, level: "fs" }, all)).toBeNull();
+  });
+
+  it("Linux fullはbwrap不足をunshareで代替しない", () => {
+    const error = getSandboxReadinessError("linux", { enabled: true, level: "full" }, { ...all, bwrap: false });
+    expect(error).toMatch(/level=full/);
+    expect(error).toMatch(/bwrap/);
+    expect(error).toMatch(/実行しません/);
+  });
+
+  it("Linux fsはallowlist bridgeの依存不足をネット全開にしない", () => {
+    const error = getSandboxReadinessError(
+      "linux",
+      { enabled: true, level: "fs" },
+      { ...all, socat: false, ip: false },
+    );
+    expect(error).toMatch(/socat/);
+    expect(error).toMatch(/iproute2/);
+    expect(error).toMatch(/実行しません/);
+  });
+
+  it("macOSはsandbox-exec不足、Windows nativeは未対応を明示する", () => {
+    expect(getSandboxReadinessError("darwin", { enabled: true, level: "fs" }, { ...all, sandboxExec: false })).toMatch(
+      /sandbox-exec/,
+    );
+    expect(getSandboxReadinessError("win32", { enabled: true, level: "fs" }, all)).toMatch(/WSL2/);
   });
 });
 

@@ -88,10 +88,36 @@ import { shutdownHttpClient } from "./utils/http-client.js";
 import { installCrashHandlers, setCrashContext, setTerminalRestore } from "./utils/crash-handler.js";
 import { applyLogRetention } from "./utils/log-rotation.js";
 import { checkForUpdate } from "./utils/update-check.js";
-import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "./providers/utils/context-length.js";
+import { inferContextLength } from "./providers/utils/context-length.js";
 import { resolveStartupMode } from "./cli/startup-mode.js";
 
+const HELP_TEXT = `LocalLLM Agent
+
+Usage:
+  localllm [options]
+
+Options:
+  -h, --help          Show this help and exit
+  --version           Show the version and exit
+  --setup             Run the setup wizard
+  --safe-mode         Start without customizations
+  --no-mcp            Start without MCP servers
+  --no-alt-screen     Disable the terminal alternate screen
+  --install-browser   Install the browser runtime
+  --check-browser     Verify the browser runtime`;
+
 async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log(HELP_TEXT);
+    return;
+  }
+  if (args.includes("--version")) {
+    const { getVersionString } = await import("./version.js");
+    console.log(`localllm ${getVersionString()}`);
+    return;
+  }
+
   // 未捕捉例外での即死時にセッション保存・端末復元・クラッシュログを行う
   // (docs/production-readiness.md PR-01)。最初に登録する。
   installCrashHandlers();
@@ -122,15 +148,7 @@ async function main(): Promise<void> {
     });
   }
 
-  const args = process.argv.slice(2);
   const startupMode = resolveStartupMode(args);
-
-  // バージョン表示 (PR-12)。不具合報告用に「バージョン+コミット」を1行で出す。
-  if (args.includes("--version")) {
-    const { getVersionString } = await import("./version.js");
-    console.log(`localllm ${getVersionString()}`);
-    process.exit(0);
-  }
 
   // イベントリスナーのメモリリーク警告対策 (inquirer等が多用されるため)
   process.stdin.setMaxListeners(100);
@@ -375,7 +393,7 @@ async function main(): Promise<void> {
     enabled: startupMode.customizations.hooks,
   });
 
-  // Context window: 明示設定 > プロバイダ getModelInfo > モデル名ヒューリスティック > FALLBACK_CONTEXT_WINDOW
+  // Context window: 明示設定 > プロバイダ getModelInfo > モデル名ヒューリスティック。解決不能なら起動を止める。
   let contextWindow = config.mainLLM.contextWindow ?? 0;
   let ctxSource = contextWindow > 0 ? "config" : "";
   if (!ctxSource) {
@@ -401,15 +419,9 @@ async function main(): Promise<void> {
     }
   }
   if (!ctxSource) {
-    contextWindow = FALLBACK_CONTEXT_WINDOW;
-    ctxSource = "fallback";
-    getOpsLogger().warn(
-      "config",
-      `contextWindow fell back to ${FALLBACK_CONTEXT_WINDOW} — set mainLLM.contextWindow explicitly to override.`,
-      {
-        model: config.mainLLM.model,
-        provider: config.mainLLM.providerType,
-      },
+    throw new Error(
+      `mainLLM.contextWindowを解決できません (provider=${config.mainLLM.providerType}, model=${config.mainLLM.model})。` +
+        " config.jsonのmainLLM.contextWindowへ実際のトークン数を設定してください。推測値では起動しません。",
     );
   }
   getOpsLogger().info("config", "contextWindow resolved", {

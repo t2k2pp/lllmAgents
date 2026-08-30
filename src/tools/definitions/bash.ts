@@ -13,7 +13,7 @@ import type { ToolHandler, ToolResult } from "../tool-registry.js";
 const DEFAULT_TIMEOUT = 120_000; // 2 minutes
 
 /** Windows で git bash のパスを探す。見つからなければ null */
-function findGitBash(): string | null {
+export function findGitBash(): string | null {
   const candidates = [
     path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "bin", "bash.exe"),
     path.join(process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Git", "bin", "bash.exe"),
@@ -56,6 +56,20 @@ function convertWindowsPaths(command: string): string {
     /([A-Za-z]):\\([\w.\-\\/ ]+)/g,
     (_match, drive: string, rest: string) => `${drive}:/${rest.replace(/\\/g, "/")}`,
   );
+}
+
+/**
+ * Windowsでもbash toolのPOSIX意味論を固定する。cmd.exeは引用符・pipe・環境変数・組込みが
+ * 異なるため、自動置換すると同じcommandが別の操作になる。Git Bashが無ければ明示失敗する。
+ */
+export function resolveWindowsBashCommand(command: string, bashPath: string | null): { shell: string; args: string[] } {
+  if (!bashPath) {
+    throw new Error(
+      "bash toolに必要なGit Bashが見つかりません。Git for Windowsをインストールして再起動してください。" +
+        " コマンドの意味が変わるためcmd.exeでは実行しません。",
+    );
+  }
+  return { shell: bashPath, args: ["-c", convertWindowsPaths(command)] };
 }
 
 let streamOutputEnabled = false;
@@ -110,7 +124,7 @@ export const bashTool: BashToolHandler = {
     function: {
       name: "bash",
       description:
-        "シェルコマンドを実行する (Windows では git bash、なければ cmd.exe)。\n" +
+        "シェルコマンドを実行する (Windows では Git Bash が必須。見つからなければ実行前に失敗する)。\n" +
         "[使うべき場面] (1) ファイル探索 (find, ls -la), " +
         "(2) git/npm/python 等のツール実行, " +
         "(3) 専用ツールが無い操作 (ファイル移動 mv, 圧縮 tar, etc.)。\n" +
@@ -154,10 +168,6 @@ export const bashTool: BashToolHandler = {
     const command = params.command as string;
     const timeout = (params.timeout as number) ?? DEFAULT_TIMEOUT;
 
-    // P3-B: 破壊的コマンド検出 → 事前 git status スナップショットを保持
-    const destructive = isDestructiveCommand(command);
-    const preflightStatus = destructive ? captureGitStatusSnapshot() : "";
-
     // OS-level サンドボックスラップ
     let shell: string;
     let shellArgs: string[];
@@ -169,22 +179,27 @@ export const bashTool: BashToolHandler = {
     let proxyStartError: string | undefined;
 
     if (isWindows) {
-      // Windows ネイティブ: git bash (無ければ cmd.exe)。 OS レベルの封じ込めは無し。
+      // Windows ネイティブ: Git Bash必須。 OS レベルの封じ込めは無し。
       // 封じ込めが必要な場合は WSL2 の中で本アプリを起動する。 その時は platform=linux と
       // なり、 下の processSandbox 経路がそのまま効く (docs/wsl-sandbox-design.md §3・§4.6)。
-      const bash = getGitBash();
-      if (bash) {
-        // git bash を使用（Unix構文対応）
-        // Windowsパスのバックスラッシュをスラッシュに変換（bash のエスケープ解釈を防止）
-        shell = bash;
-        shellArgs = ["-c", convertWindowsPaths(command)];
-      } else {
-        // git bash が見つからない場合は cmd.exe フォールバック
-        shell = "cmd.exe";
-        shellArgs = ["/c", command];
+      try {
+        const resolved = resolveWindowsBashCommand(command, getGitBash());
+        shell = resolved.shell;
+        shellArgs = resolved.args;
+      } catch (error) {
+        return {
+          success: false,
+          output: "",
+          error: error instanceof Error ? error.message : String(error),
+          errorKind: "permanent",
+        };
       }
     } else {
       const sandbox = getActiveProcessSandbox();
+      const readinessError = sandbox.getReadinessError();
+      if (readinessError) {
+        return { success: false, output: "", error: readinessError, errorKind: "permanent" };
+      }
       if (sandbox.isActive()) {
         const config = loadConfig();
         // ~/.localllm は bash の書込許可に含めない（自アプリの config/API キー/セッションの
@@ -226,6 +241,10 @@ export const bashTool: BashToolHandler = {
         shellArgs = ["-c", command];
       }
     }
+
+    // P3-B: 実行可能性を確認した後でのみ、破壊的コマンドの事前git statusを取得する。
+    const destructive = isDestructiveCommand(command);
+    const preflightStatus = destructive ? captureGitStatusSnapshot() : "";
 
     return new Promise((resolve) => {
       let resolved = false;

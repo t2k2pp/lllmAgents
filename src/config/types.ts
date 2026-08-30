@@ -72,7 +72,7 @@ export interface CostConfig {
 /**
  * セカンドLLM の用途別サンプリング既定値 (D9: 2026-04-30 決定)。
  * `endpoint.temperature` 等が指定されていればそちらが優先。 ここが未指定なら
- * SecondLLMManager 内のハードコード fallback (consult/agent=0.2 / evaluator=0.1) が効く。
+ * SecondLLMManager の製品既定値 (consult/agent=0.2 / evaluator=0.1) を使う。
  */
 export interface SecondLLMSamplingDefaults {
   /** consult (単発相談) 用の既定温度 */
@@ -168,7 +168,7 @@ export interface SecurityConfig {
 /**
  * コンテキスト縮約の手段 (docs/context-forgetting.md §6)。
  *  - compress: 従来通り常に要約圧縮
- *  - forget: 常に忘却。 忘却が失敗したらその回だけ圧縮にフォールバック
+ *  - forget: 常に忘却。適用不能時は履歴を保持して理由を報告し、別手段へ切り替えない
  *  - hybrid (既定): まず忘却を試し、 削減が目標の 60% に届かなければ続けて圧縮
  */
 export type ReductionMode = "compress" | "forget" | "hybrid";

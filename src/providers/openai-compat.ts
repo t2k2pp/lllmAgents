@@ -10,7 +10,7 @@ import type {
   TokenUsage,
 } from "./base-provider.js";
 import { httpGet, httpPostStream } from "../utils/http-client.js";
-import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "./utils/context-length.js";
+import { inferContextLength } from "./utils/context-length.js";
 
 interface OpenAIModelResponse {
   data: Array<{ id: string; object: string }>;
@@ -102,7 +102,7 @@ export class OpenAICompatProvider implements LLMProvider {
     const models = await this.listModels();
     const found = models.find((m) => m.name === modelName);
     const ctxFromList = found?.contextLength ?? 0;
-    const contextLength = ctxFromList > 0 ? ctxFromList : inferContextLength(modelName) || FALLBACK_CONTEXT_WINDOW;
+    const contextLength = ctxFromList > 0 ? ctxFromList : inferContextLength(modelName);
     return {
       name: modelName,
       size: found?.size ?? 0,

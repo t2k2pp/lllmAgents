@@ -52,8 +52,8 @@ ${text}`;
 }
 
 /**
- * テキスト塊を圧縮する。 失敗・空応答・非縮小のいずれでも原文にフォールバックする
- * (applied=false)。 例外を投げない。
+ * テキスト塊を圧縮する。非縮小は原文を保持したまま applied=false で報告する。
+ * provider 失敗・空応答は圧縮成功として扱わず、呼び出し元へ例外を返す。
  */
 export async function compressText(
   provider: LLMProvider,
@@ -74,9 +74,9 @@ export async function compressText(
     const compressed = response.content.trim();
     const afterTokens = estimateTokens(compressed);
 
-    // サイズガード: 空 or 縮まないなら原文を使う
+    // 空応答は provider 契約違反として失敗させる。別の入力へ自動置換しない。
     if (!compressed) {
-      return { text, original: text, beforeTokens, afterTokens: 0, applied: false, note: "空応答のため原文を使用" };
+      throw new Error(`compressText が「${label}」に空応答を返しました`);
     }
     if (afterTokens >= beforeTokens) {
       return {
@@ -90,7 +90,8 @@ export async function compressText(
     }
     return { text: compressed, original: text, beforeTokens, afterTokens, applied: true };
   } catch (e) {
-    logger.warn(`compressText failed for "${label}": ${e}`);
-    return { text, original: text, beforeTokens, afterTokens: beforeTokens, applied: false, note: `圧縮失敗: ${e}` };
+    const message = `compressText failed for "${label}": ${e instanceof Error ? e.message : String(e)}`;
+    logger.warn(message);
+    throw new Error(message, { cause: e });
   }
 }

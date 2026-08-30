@@ -1,7 +1,7 @@
 import type { ModelInfo, ModelDetail } from "../config/types.js";
 import { OpenAICompatProvider } from "./openai-compat.js";
 import { httpGet, httpPost } from "../utils/http-client.js";
-import { inferContextLength, FALLBACK_CONTEXT_WINDOW } from "./utils/context-length.js";
+import { inferContextLength } from "./utils/context-length.js";
 
 interface OllamaTag {
   name: string;
@@ -63,12 +63,12 @@ export class OllamaProvider extends OpenAICompatProvider {
         (v) => tag.name.toLowerCase().includes(v) || family.toLowerCase().includes(v),
       );
 
-      let contextLength = inferContextLength(tag.name) || FALLBACK_CONTEXT_WINDOW;
+      let contextLength = inferContextLength(tag.name);
       try {
         const detail = await this.getModelDetail(tag.name);
         if (detail.contextLength > 0) contextLength = detail.contextLength;
       } catch {
-        // モデル名ヒューリスティック / FALLBACK_CONTEXT_WINDOW を維持
+        // show APIで取得不能ならモデル名ヒューリスティックの結果（未知なら0）を維持
       }
 
       models.push({
@@ -94,7 +94,7 @@ export class OllamaProvider extends OpenAICompatProvider {
       name: modelName,
     });
 
-    let contextLength = inferContextLength(modelName) || FALLBACK_CONTEXT_WINDOW;
+    let contextLength = inferContextLength(modelName);
     if (res.ok && res.data?.model_info) {
       // Look for context length in model_info keys
       for (const [key, value] of Object.entries(res.data.model_info)) {

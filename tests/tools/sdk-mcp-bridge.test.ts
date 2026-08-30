@@ -3,10 +3,10 @@ import { z } from "zod";
 import { jsonSchemaToZodShape } from "../../src/tools/sdk-mcp-bridge.js";
 
 describe("jsonSchemaToZodShape — JSON Schema を SDK 用 Zod shape に変換", () => {
-  it("空 / 非 object スキーマは {} を返す", () => {
+  it("空スキーマは{}、非object rootは診断付きで失敗", () => {
     expect(jsonSchemaToZodShape(undefined)).toEqual({});
-    expect(jsonSchemaToZodShape({})).toEqual({});
-    expect(jsonSchemaToZodShape({ type: "string" })).toEqual({});
+    expect(() => jsonSchemaToZodShape({})).toThrow(/root must be object/);
+    expect(() => jsonSchemaToZodShape({ type: "string" })).toThrow(/received: string/);
   });
 
   it("必須 string / number / boolean を Zod 型に変換", () => {
@@ -89,14 +89,13 @@ describe("jsonSchemaToZodShape — JSON Schema を SDK 用 Zod shape に変換",
     expect(z.object(shape).safeParse({ config: { port: 80 } }).success).toBe(false);
   });
 
-  it("未知の type は z.any() フォールバック", () => {
-    const shape = jsonSchemaToZodShape({
-      type: "object",
-      properties: { mystery: { type: "anyOf" as never } },
-      required: ["mystery"],
-    });
-    // any なので何でも通る
-    expect(z.object(shape).safeParse({ mystery: { a: 1 } }).success).toBe(true);
-    expect(z.object(shape).safeParse({ mystery: "x" }).success).toBe(true);
+  it("未知のtypeはz.any()で通さず登録時に失敗", () => {
+    expect(() =>
+      jsonSchemaToZodShape({
+        type: "object",
+        properties: { mystery: { type: "anyOf" as never } },
+        required: ["mystery"],
+      }),
+    ).toThrow(/Unsupported MCP tool schema type: anyOf/);
   });
 });

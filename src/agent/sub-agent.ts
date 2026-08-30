@@ -593,26 +593,24 @@ export class SubAgentManager {
    * 解決先が main slot と同じ entry なら自分の provider をそのまま使う
    * (/model url 等でランタイム差し替えされた接続を尊重するため)。
    *
-   * ここではログを出さない。 解決失敗は note で返し、 起動側 (launch*) が 1 回だけ警告する。
+   * 明示された参照を解決できない場合は起動を停止し、別モデルへ自動で切り替えない。
    */
   resolveModelFor(type: SubAgentType, explicitRef?: string): SubAgentModelChoice {
-    const fallback: SubAgentModelChoice = { provider: this.provider, model: this.model, usageSlot: "main" };
+    const mainChoice: SubAgentModelChoice = { provider: this.provider, model: this.model, usageSlot: "main" };
     const ref = explicitRef?.trim() || getLoader().get(type)?.modelRef;
-    if (!ref) return fallback;
+    if (!ref) return mainChoice;
 
     const resolved = resolveModelRef(ref);
     if (!resolved) {
-      return {
-        ...fallback,
-        note:
-          `指定された model '${ref}' は未割当のため main で実行しました。 ` +
-          `/models slot ${ref} <モデル> で割り当てられます。`,
-      };
+      throw new Error(
+        `指定された model '${ref}' を解決できないためサブエージェントを起動しません。 ` +
+          `/models slot ${ref} <モデル> で割り当ててください。`,
+      );
     }
 
     // main と同じ entry に解決された場合は従来経路 (自分の provider) を使う
     const mainId = getSlot("main");
-    if (mainId && resolved.entryId === mainId) return fallback;
+    if (mainId && resolved.entryId === mainId) return mainChoice;
 
     return {
       provider: resolved.provider,
@@ -622,11 +620,9 @@ export class SubAgentManager {
     };
   }
 
-  /** launch* 共通: モデルを解決し、 解決失敗なら 1 回だけ警告する。 */
+  /** launch* 共通: モデルを解決する。 */
   private pickModel(type: SubAgentType, modelRef?: string): SubAgentModelChoice {
-    const choice = this.resolveModelFor(type, modelRef);
-    if (choice.note) logger.warn(choice.note);
-    return choice;
+    return this.resolveModelFor(type, modelRef);
   }
 
   launchBackground(

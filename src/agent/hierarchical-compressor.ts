@@ -102,16 +102,15 @@ function parseSummaryResponse(raw: string): { summary: string; keyFacts: string[
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[0]);
-      return {
-        summary: parsed.summary ?? raw,
-        keyFacts: Array.isArray(parsed.keyFacts) ? parsed.keyFacts : [],
-      };
-    } catch {
-      /* fall through */
+      if (typeof parsed.summary !== "string" || !Array.isArray(parsed.keyFacts)) {
+        throw new Error("summary/keyFacts shape mismatch");
+      }
+      return { summary: parsed.summary, keyFacts: parsed.keyFacts.filter((fact: unknown) => typeof fact === "string") };
+    } catch (error) {
+      throw new Error(`Context summarizer returned invalid JSON: ${String(error)}`, { cause: error });
     }
   }
-  // JSONパース失敗時は応答全体を要約として使用
-  return { summary: raw, keyFacts: [] };
+  throw new Error("Context summarizer returned no JSON object; history was not replaced.");
 }
 
 export class HierarchicalCompressor {
@@ -187,21 +186,10 @@ export class HierarchicalCompressor {
         createdAt: Date.now(),
       };
     } catch (e) {
-      // LLM失敗時のフォールバック: ユーザー発言だけ抽出
-      logger.warn(`Layer 1 summarization failed, using fallback: ${e}`);
-      const userMessages = messages
-        .filter((m) => m.role === "user")
-        .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
-        .join("\n");
-      const fallback = userMessages.slice(0, 500);
-      return {
-        id: generateBlockId(),
-        layer: 1,
-        summary: fallback,
-        keyFacts: [],
-        tokenCount: estimateTokens(fallback),
-        createdAt: Date.now(),
-      };
+      throw new Error(
+        `Layer 1 context summarization failed; history was not replaced with a lossy substitute: ${String(e)}`,
+        { cause: e },
+      );
     }
   }
 

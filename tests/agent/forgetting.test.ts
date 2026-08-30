@@ -340,7 +340,7 @@ describe("ForgettingEngine", () => {
     expect(() => new MessageHistory("sys").replaceMessages(raw)).not.toThrow();
   });
 
-  it("JSON パース失敗は 1 回だけ再試行し、 それでもだめなら不成立 (圧縮フォールバック用)", async () => {
+  it("JSON パース失敗は同じ経路で 1 回だけ再試行し、それでもだめなら忘却不成立", async () => {
     const provider = stubProvider(["わかりません", "やっぱりわかりません"]);
     const chatSpy = vi.spyOn(provider, "chat");
     const engine = new ForgettingEngine(provider, "m", { keepRecentSegments: 1 });
