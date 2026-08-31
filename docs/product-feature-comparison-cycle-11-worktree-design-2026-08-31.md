@@ -279,5 +279,6 @@ interface WorkspaceContext {
 - 変更なしworktreeは自動除去し、変更・cancel・異常終了はdurable recordとともに保持する。process再起動後も`error`状態でdiff/discardへ回収し、勝手に削除しない。
 - applyはcleanかつ同じbaseのmainにだけ許可し、自動merge/commit/3-way/stash/fallbackを行わない。
 - Native Windowsではfile toolによるworktree編集とGit lifecycleを提供する。bashのwrite rootをOS強制できないため実行前に恒久エラーとし、WSL2またはfile toolを案内する。shared modeへ自動降格しない。
-- ローカル対象評価: 実Git worktree/security/sub-agent 20件がpass。`test:coverage`は120 files / 1272 pass / 11 skip、E2Eは`/tasks`を含む7件、lintはerror 0（既存warning 279 / info 97）、build、skill/package validation、runtime audit（0 vulnerability）がpass。
+- ローカル対象評価: 実Git worktree/security/sub-agent 21件がpass。`test:coverage`は120 files / 1273 pass / 11 skip、E2Eは`/tasks`を含む7件、lintはerror 0（既存warning 279 / info 97）、build、skill/package validation、runtime audit（0 vulnerability）がpass。
 - Windows SEAは`dist/localllm.exe`を生成し、実binaryの`--version` / `--help`を確認した。既存`deploy/localllm.exe`をPID 29368が使用中だったためlocal deploy directoryの上書きはfail-fastし、稼働processを強制終了しなかった。clean checkoutのdependent Windows deploy/exe smokeを最新push SHAのCIで閉じる。
+- 実装境界`471f51e`、Windows path correction `ce5081a` / `ca5f046`までをCI run `33355424642`（commit policy、Ubuntu、macOS、Windows、dependent Windows deploy/exe smokeの全5 job success）で確認した。
