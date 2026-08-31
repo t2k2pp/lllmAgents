@@ -918,6 +918,13 @@ export class AgentLoop {
                           const initialStatus = chalk.dim(
                             formatBufferedResponseStatus(initialPreview, receivedTokens, 0, columns),
                           );
+                          if (process.env.LLM_DEBUG_HTTP) {
+                            console.error(
+                              `[LLM_DEBUG_UI] response-preview first-chunk chars=${visibleTextContent.length} ` +
+                                `stdoutTTY=${Boolean(process.stdout.isTTY)} stderrTTY=${Boolean(process.stderr.isTTY)} ` +
+                                `alternate=${screen.isAlternate()} exclusive=${screen.isExclusive()}`,
+                            );
+                          }
                           thinkingSpinner = createSpinner({
                             // 初回frame自体へ本文を入れる。start後のtext差替えだけに依存すると、
                             // alternate-screen側がplaceholder frameだけを捕捉する場合がある。

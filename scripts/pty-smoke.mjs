@@ -107,6 +107,9 @@ try {
         HOME: tempHome,
         USERPROFILE: tempHome,
         NO_COLOR: "1",
+        // failure annotationでprovider到達とAgentLoop preview到達を分離する。
+        // 本文は記録せず、既存の明示HTTP debug modeをこのsmokeだけで有効化する。
+        LLM_DEBUG_HTTP: "1",
       }),
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -122,6 +125,7 @@ try {
     let sentPreview = false;
     let previewSeen = false;
     let previewSeenBeforeFinal = false;
+    let previewChunkSeen = false;
     let sentQuit = false;
     let timedOut = false;
     const capture = (chunk) => {
@@ -134,6 +138,9 @@ try {
       if (!previewSeen && (output.includes(driver.previewMarker) || output.includes(driver.previewSeenMarker))) {
         previewSeen = true;
         previewSeenBeforeFinal = Date.now() < finalChunkSentAt;
+      }
+      if (!previewChunkSeen && output.includes("[LLM_DEBUG_UI] response-preview first-chunk")) {
+        previewChunkSeen = true;
       }
       if (!sentQuit && output.includes(driver.quitMarker)) {
         sentQuit = true;
@@ -193,6 +200,7 @@ try {
         previewSubmitted: sentPreview,
         previewSeen,
         previewSeenBeforeFinal,
+        previewChunkSeen,
         requestSeen: Number.isFinite(requestReceivedAt),
         responseStarted: Number.isFinite(responseStartedAt),
         timedOut,
@@ -216,7 +224,7 @@ try {
       `japaneseSeen ${result.japaneseSeen}, previewSubmitted ${result.previewSubmitted}, ` +
       `previewSeen ${result.previewSeen}, ` +
       `previewBeforeFinal ${result.previewSeenBeforeFinal}, requestSeen ${result.requestSeen}, ` +
-      `responseStarted ${result.responseStarted}, ` +
+      `responseStarted ${result.responseStarted}, previewChunkSeen ${result.previewChunkSeen}, ` +
       `timedOut ${result.timedOut})`;
     // Actionsの匿名APIでも原因flagをannotationから取得できるようにする。
     console.error(`::error title=Real PTY smoke failed::${failure}`);
