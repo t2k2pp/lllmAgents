@@ -20,6 +20,7 @@ const configDir = join(tempHome, ".localllm");
 mkdirSync(configDir, { recursive: true });
 const previewHoldMs = 3_000;
 let finalChunkSentAt = Number.POSITIVE_INFINITY;
+let requestReceivedAt = Number.POSITIVE_INFINITY;
 const mockServer = http.createServer((req, res) => {
   if (req.method === "GET" && req.url?.startsWith("/v1/models")) {
     res.writeHead(200, { "content-type": "application/json" });
@@ -31,6 +32,7 @@ const mockServer = http.createServer((req, res) => {
     res.end();
     return;
   }
+  requestReceivedAt = Date.now();
   req.resume();
   req.on("end", () => {
     res.writeHead(200, { "content-type": "text/event-stream" });
@@ -111,6 +113,8 @@ try {
     let sentPageUp = false;
     let pageUpOutputStart = 0;
     let scrollSeen = false;
+    let sentPageDown = false;
+    let pageDownOutputStart = 0;
     let sentPreview = false;
     let previewSeen = false;
     let previewSeenBeforeFinal = false;
@@ -122,6 +126,7 @@ try {
         scrollSeen = true;
       }
       if (!japaneseSeen && output.includes(driver.imeMarker)) japaneseSeen = true;
+      if (!sentPreview && output.includes(driver.previewSubmittedMarker)) sentPreview = true;
       if (!previewSeen && (output.includes(driver.previewMarker) || output.includes(driver.previewSeenMarker))) {
         previewSeen = true;
         previewSeenBeforeFinal = Date.now() < finalChunkSentAt;
@@ -146,7 +151,13 @@ try {
       }
       if (driver.parentSubmits && sentPageUp && !scrollSeen && output.slice(pageUpOutputStart).includes("PgDn")) {
         scrollSeen = true;
+        sentPageDown = true;
+        pageDownOutputStart = output.length;
         child.stdin.write("\x1b[6~");
+      }
+      // PageDownと本文を同じstdin chunkへ詰めると、raw key parserがescape sequenceの
+      // 後続として本文まで消費し得る。入力欄の再描画を観測してから別chunkで送る。
+      if (driver.parentSubmits && sentPageDown && !sentPreview && output.slice(pageDownOutputStart).includes("> ")) {
         sentPreview = true;
         child.stdin.write(submitPtyLine("PREVIEW_REQUEST"));
       }
@@ -175,8 +186,10 @@ try {
         sentQuit,
         scrollSeen,
         japaneseSeen,
+        previewSubmitted: sentPreview,
         previewSeen,
         previewSeenBeforeFinal,
+        requestSeen: Number.isFinite(requestReceivedAt),
         timedOut,
       });
     });
@@ -195,8 +208,10 @@ try {
     const failure =
       `PTY smoke failed (exit ${result.code}, signal ${result.signal ?? "none"}, ` +
       `quitSent ${result.sentQuit}, scrollSeen ${result.scrollSeen}, ` +
-      `japaneseSeen ${result.japaneseSeen}, previewSeen ${result.previewSeen}, ` +
-      `previewBeforeFinal ${result.previewSeenBeforeFinal}, timedOut ${result.timedOut})`;
+      `japaneseSeen ${result.japaneseSeen}, previewSubmitted ${result.previewSubmitted}, ` +
+      `previewSeen ${result.previewSeen}, ` +
+      `previewBeforeFinal ${result.previewSeenBeforeFinal}, requestSeen ${result.requestSeen}, ` +
+      `timedOut ${result.timedOut})`;
     // Actionsの匿名APIでも原因flagをannotationから取得できるようにする。
     console.error(`::error title=Real PTY smoke failed::${failure}`);
     throw new Error(failure);

@@ -2,6 +2,7 @@ const EXPECT_QUIT_MARKER = "__PTY_QUIT_SENT__";
 const EXPECT_SCROLL_MARKER = "__PTY_SCROLL_SEEN__";
 const EXPECT_IME_MARKER = "__PTY_IME_SEEN__";
 const EXPECT_PREVIEW_MARKER = "__PTY_PREVIEW_SEEN__";
+const EXPECT_PREVIEW_SUBMITTED_MARKER = "__PTY_PREVIEW_SUBMITTED__";
 const RESPONSE_PREVIEW_TEXT = "PV42";
 const RESPONSE_FINAL_TEXT = "FINAL99";
 const SCROLL_CAPABLE_TERM = "xterm-256color";
@@ -39,7 +40,9 @@ send -- "\\033\\[5~"
 expect -re {PgDn}
 puts "${EXPECT_SCROLL_MARKER}"
 send -- "\\033\\[6~"
+expect -re {> }
 send -- "PREVIEW_REQUEST\\r"
+puts "${EXPECT_PREVIEW_SUBMITTED_MARKER}"
 set timeout 2
 expect {
   -re {${RESPONSE_PREVIEW_TEXT}} {
@@ -78,6 +81,7 @@ export function ptyDriver(platform, { node, tsx, entry }) {
       imeMarker: EXPECT_IME_MARKER,
       previewMarker: RESPONSE_PREVIEW_TEXT,
       previewSeenMarker: EXPECT_PREVIEW_MARKER,
+      previewSubmittedMarker: EXPECT_PREVIEW_SUBMITTED_MARKER,
       finalMarker: RESPONSE_FINAL_TEXT,
     };
   }
@@ -95,6 +99,7 @@ export function ptyDriver(platform, { node, tsx, entry }) {
     imeMarker: EXPECT_IME_MARKER,
     previewMarker: RESPONSE_PREVIEW_TEXT,
     previewSeenMarker: EXPECT_PREVIEW_MARKER,
+    previewSubmittedMarker: EXPECT_PREVIEW_SUBMITTED_MARKER,
     finalMarker: RESPONSE_FINAL_TEXT,
   };
 }

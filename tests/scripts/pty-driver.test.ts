@@ -18,6 +18,7 @@ describe("PTY smoke driver", () => {
     expect(driver.scrollMarker).toBe("__PTY_SCROLL_SEEN__");
     expect(driver.imeMarker).toBe("__PTY_IME_SEEN__");
     expect(driver.previewMarker).toBe("PV42");
+    expect(driver.previewSubmittedMarker).toBe("__PTY_PREVIEW_SUBMITTED__");
     expect(driver.finalMarker).toBe("FINAL99");
     expect(driver.env.TERM).toBe("xterm-256color");
   });
@@ -28,11 +29,13 @@ describe("PTY smoke driver", () => {
     expect(driver.parentSubmits).toBe(false);
     expect(driver.args.join("\n")).toContain('send -- "/help\\r"');
     expect(driver.args.join("\n")).toContain('send -- "\\033\\[5~"');
+    expect(driver.args.join("\n")).toContain("expect -re {> }");
     expect(driver.args.join("\n")).toContain("__PTY_SCROLL_SEEN__");
     expect(driver.args.join("\n")).toContain("__PTY_IME_SEEN__");
     expect(driver.args.join("\n")).toContain("stty columns 20 rows 24");
     expect(driver.args.join("\n")).toContain("日本語入力の右端折返し確認");
     expect(driver.args.join("\n")).toContain('send -- "PREVIEW_REQUEST\\r"');
+    expect(driver.args.join("\n")).toContain("__PTY_PREVIEW_SUBMITTED__");
     expect(driver.args.join("\n")).toContain("__PTY_PREVIEW_TIMEOUT__");
     expect(driver.args.join("\n")).toContain("PV42");
     expect(driver.args.join("\n")).toContain("FINAL99");
