@@ -39,6 +39,7 @@
 | ドキュメント | Status | 内容 |
 |---|---|---|
 | [product-feature-comparison-cycle-11-worktree-design-2026-08-31.md](product-feature-comparison-cycle-11-worktree-design-2026-08-31.md) | implemented | Codex/Claude比較、類似機能監査、sub-agent worktree分離の実装・安全・評価記録 |
+| [product-feature-comparison-cycle-12-workflow-learning-2026-08-31.md](product-feature-comparison-cycle-12-workflow-learning-2026-08-31.md) | implemented | Codex Record & Replay / Claude skills比較と操作学習gapの実装・評価記録 |
 | [harness-engineering.md](harness-engineering.md) | implemented | ハーネス改善の起点 (テトリスセッション分析→システムプロンプト再設計ほか) |
 | [harness-engineering-phase5.md](harness-engineering-phase5.md) | in-progress | Phase 5 計画 — Claude Code 比較で見える本質的弱点と段階的改善 |
 | [harness-engineering-phase5-progress.md](harness-engineering-phase5-progress.md) | in-progress | Phase 5 の進捗トラッカー |
@@ -127,6 +128,7 @@
 | [product-quality-cycle-skill.md](product-quality-cycle-skill.md) | implemented | 観点指定の商品品質レビュー・改善サイクルスキル |
 | [plugin-bundle-design.md](plugin-bundle-design.md) | implemented | 明示的に信頼したローカルplugin bundleのmanifest・安全境界・loader設計 |
 | [safe-mode-design.md](safe-mode-design.md) | implemented | カスタマイズを一括停止して診断・復旧する`--safe-mode`の境界 |
+| [workflow-learning.md](workflow-learning.md) | implemented | browser/computer操作を秘密値を除いた手動起動skillへ変換する契約と安全境界 |
 | [blender-mcp-integration.md](blender-mcp-integration.md) | implemented | Blender MCP 連携の改修ポイント |
 
 ## 調査・提案 (未実装の構想)

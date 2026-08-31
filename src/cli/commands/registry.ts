@@ -18,6 +18,7 @@ import { handoffCommand } from "./handoff.js";
 import { diffCommand } from "./diff.js";
 import { renameCommand } from "./rename.js";
 import { tasksCommand } from "./tasks.js";
+import { learnCommand } from "./learn.js";
 
 const COMMANDS: ReplCommandDef[] = [
   parallelCommand,
@@ -29,6 +30,7 @@ const COMMANDS: ReplCommandDef[] = [
   diffCommand,
   renameCommand,
   tasksCommand,
+  learnCommand,
 ];
 
 let lookupCache: Map<string, ReplCommandDef> | null = null;

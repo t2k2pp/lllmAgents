@@ -253,6 +253,13 @@ graph TD
         CU6(computer_scroll):::ask
     end
 
+    subgraph WorkflowLearning [操作学習 - 4ツール]
+        WL1(workflow_learn_start):::ask
+        WL2(workflow_learn_status):::ask
+        WL3(workflow_learn_finish):::ask
+        WL4(workflow_learn_cancel):::ask
+    end
+
     subgraph Schedule [session schedule - 3ツール]
         C1(schedule_create):::safe
         C2(schedule_list):::safe
@@ -270,6 +277,8 @@ graph TD
 - **`ask`（要確認）**: 実行前にインタラクティブな承認ダイアログを表示します。明示的に指定されていないツールはすべて `ask` にフォールバックします。
 
 `computer_*`は通常の`ask`より厳しく、local CLIで呼出しごとの一回許可だけを選択できます。autorun、`autoApproveTools`、allow rule、保存済み許可で省略できず、Discord/Slackからは常に拒否されます。
+
+`workflow_learn_*`はlocal CLI限定で、sub-agent worktreeとDiscord/Slackからは拒否されます。記録中の成功した直列`browser_*` / `computer_*`だけを対象とし、失敗・並列実行を含む記録は`finish`できません。入力値と一時識別子をplaceholder化し、`.localllm/skills/<name>/SKILL.md`へ既存fileを上書きせず保存します。
 
 ### 3.1 ツール詳細仕様
 
@@ -296,6 +305,10 @@ graph TD
 | | `computer_type` | ask (毎回) | 指定windowへ最大4000 UTF-16 code unitのtextを入力します。確認表示には本文を出しません。 |
 | | `computer_key` | ask (毎回) | 指定windowへ許可済みkeyまたは最大4 keyのchordを送ります。 |
 | | `computer_scroll` | ask (毎回) | Windows/Linux X11で指定window内の座標へ範囲制限したwheel eventを送ります。macOSではtoolを登録しません。 |
+| **操作学習** | `workflow_learn_start` | ask | local CLIで明示されたbrowser/computer操作記録を開始します。必要capabilityがなければ復旧方法付きで失敗します。 |
+| | `workflow_learn_status` | ask | 記録名、scope、成功/失敗step数、利用可能scopeを表示します。 |
+| | `workflow_learn_finish` | ask | 失敗のない記録を秘密値placeholder化済みの手動起動project skillへ保存します。 |
+| | `workflow_learn_cancel` | ask | 現在の記録だけを破棄します。操作対象と既存skillは変更しません。 |
 | **画像解析** | `vision_analyze` | auto | スクリーンショットやローカル画像を、画像解析専用のサブLLM（OllamaのLlava等）に渡して状態を視覚的に説明させます。 |
 | **タスク管理** | `todo_write` | auto (常時) | エージェント自身が行動計画を整理するためのTODOリストをワークスペースに作成・更新します。 |
 | | `task` | ask | 独立したコンテキストを持つ **子エージェント（SubAgent）** を生成し、スコープを限定したタスクを並列で実行・委譲します。 |
@@ -311,7 +324,7 @@ graph TD
 | | `schedule_delete` | auto (常時) | ID指定または全件のscheduleを取消します。 |
 | | `enter_plan_mode` | auto (常時) | 破壊的なツール実行を封印し、システムの調査・設計のみを行う「プランモード」に入ります。 |
 | | `exit_plan_mode` | auto (常時) | プランモードを終了し、計画内容を `~/.localllm/plans/` に保存してユーザー承認を待ちます。 |
-| | `skill` | ask | ユーザーが配置した独自Markdownスキルを実行します。内蔵スキル（commit, pr-review, tdd, build-fix 等）も含みます。 |
+| | `skill` | ask | ユーザーが配置した独自Markdownスキルを実行します。`disable-model-invocation: true`のskillはモデルから実行できず、ユーザーのslash入力だけを受け付けます。 |
 | | `ask_user` | auto (常時) | エージェントが単独で判断できない問題が発生した場合、コンソール経由でユーザーに直接質問します。 |
 
 ---

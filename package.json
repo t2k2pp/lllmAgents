@@ -31,6 +31,7 @@
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:pty": "node scripts/pty-smoke.mjs",
     "test:computer-use:windows": "npm run build && node scripts/computer-use-windows-smoke.mjs",
+    "test:workflow-learning:browser": "npm run build && node scripts/workflow-learning-browser-smoke.mjs",
     "test:all": "vitest run && vitest run --config vitest.e2e.config.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

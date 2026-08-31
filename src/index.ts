@@ -69,6 +69,8 @@ import { knowledgeSaveTool, setObsidianConfig } from "./tools/definitions/knowle
 import { knowledgeSearchTool } from "./tools/definitions/knowledge-search.js";
 import { responseCompleteTool } from "./tools/definitions/response-complete.js";
 import { createScheduleTools } from "./tools/definitions/schedule.js";
+import { createWorkflowLearningTools } from "./tools/definitions/workflow-learn.js";
+import { WorkflowLearner } from "./workflow-learning/workflow-learner.js";
 import { LoopManager } from "./loop/loop-manager.js";
 
 import { displayWelcome } from "./cli/renderer.js";
@@ -303,6 +305,10 @@ async function main(): Promise<void> {
 
   // Create tool registry with ALL tools
   const toolRegistry = new ToolRegistry();
+  const workflowLearner = new WorkflowLearner(
+    process.cwd(),
+    startupMode.customizations.skills && !args.includes("--no-skills") && config.skillsEnabled !== false,
+  );
 
   // File tools
   toolRegistry.register(fileReadTool);
@@ -366,7 +372,7 @@ async function main(): Promise<void> {
     playwrightManager = new PlaywrightManager();
     const browserTools = createBrowserTools(playwrightManager);
     for (const tool of browserTools) {
-      toolRegistry.register(tool);
+      toolRegistry.register(workflowLearner.wrapTool(tool));
     }
     // ランタイムスモーク (ブラウザ成果物の破滅的失敗を検知)。 docs/checkpoint-and-smoke-design.md §5
     toolRegistry.register(createGameSmokeTool(playwrightManager));
@@ -379,7 +385,7 @@ async function main(): Promise<void> {
   const computerCap = probeComputerUseCapability(config, args.includes("--computer-use"));
   if (computerCap.ready && computerCap.platform) {
     for (const tool of createComputerTools(createDesktopDriver(computerCap.platform))) {
-      toolRegistry.register(tool);
+      toolRegistry.register(workflowLearner.wrapTool(tool));
     }
     console.log(chalk.yellow(`  Native Computer Use: enabled (${computerCap.reason})`));
   } else if (computerCap.source !== "disabled") {
@@ -522,6 +528,9 @@ async function main(): Promise<void> {
   }
   setSkillRegistry(skillRegistry);
   setSkillPermissionManager(permissions);
+  for (const tool of createWorkflowLearningTools(workflowLearner, skillRegistry)) {
+    toolRegistry.register(tool);
+  }
 
   // Second LLM (Agent Loop作成前に初期化 — システムプロンプトに反映するため)
   const secondLLMManager = new SecondLLMManager(toolRegistry, permissions);
@@ -578,6 +587,7 @@ async function main(): Promise<void> {
     name: s.name,
     trigger: s.trigger,
     description: s.description,
+    disableModelInvocation: s.disableModelInvocation,
   }));
 
   // Agent loop
@@ -859,6 +869,7 @@ async function main(): Promise<void> {
     roomManager,
     roomQueue,
     loopManager,
+    workflowLearner,
   );
   // schedule toolsはREPL sessionだけに登録する。background Discord/Slack面では公開しない。
   for (const tool of createScheduleTools(loopManager, (prompt, id) => repl.runScheduledPrompt(prompt, id))) {

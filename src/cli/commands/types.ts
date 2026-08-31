@@ -12,6 +12,8 @@
  */
 import type { Config } from "../../config/types.js";
 import type { AgentLoop } from "../../agent/agent-loop.js";
+import type { SkillRegistry } from "../../skills/skill-registry.js";
+import type { WorkflowLearner } from "../../workflow-learning/workflow-learner.js";
 
 /**
  * コマンドから見える REPL の能力。REPL 本体 (repl.ts) が生成して handler に渡す。
@@ -22,6 +24,8 @@ export interface ReplCommandContext {
   config: Config;
   /** ctx.config の現在の内容を config.json に保存する */
   saveConfig(): void;
+  skillRegistry?: SkillRegistry;
+  workflowLearner?: WorkflowLearner;
 }
 
 /** 補完候補1件。completer.ts の CommandDef と同形 */

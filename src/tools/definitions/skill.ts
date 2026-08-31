@@ -69,6 +69,17 @@ export const skillTool: ToolHandler = {
       };
     }
 
+    if (skill.disableModelInvocation) {
+      return {
+        success: false,
+        output: "",
+        error:
+          `スキル '${skill.name}' は手動起動専用です。モデルからは実行できません。` +
+          `ユーザーがREPLで ${skill.trigger} を直接入力してください。`,
+        errorKind: "permanent",
+      };
+    }
+
     // Resolve skill directory for script references
     const skillDir = path.dirname(skill.filePath);
 

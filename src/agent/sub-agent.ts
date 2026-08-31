@@ -236,6 +236,12 @@ export function resolvePreloadedSkills(
     if (!skill) {
       throw new Error(`Preloaded skill '${name}' for sub-agent '${agentType}' was not found or is disabled.`);
     }
+    if (skill.disableModelInvocation) {
+      throw new Error(
+        `Sub-agent '${agentType}' cannot preload manual-only skill '${skill.name}'. ` +
+          `The user must invoke ${skill.trigger} directly in the main REPL.`,
+      );
+    }
     if (seen.has(skill.name)) continue;
     seen.add(skill.name);
     resolved.push(skill);

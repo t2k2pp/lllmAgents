@@ -135,6 +135,8 @@ export class REPL {
     private roomQueue?: import("../agent/room-run-queue.js").RoomRunQueue,
     /** `/loop` とモデル向けschedule toolsが共有するsession-scoped manager */
     private loopManager: LoopManager = new LoopManager(),
+    /** browser/computer操作をproject skillへ昇格する明示recording session */
+    private workflowLearner?: import("../workflow-learning/workflow-learner.js").WorkflowLearner,
   ) {
     // スキル情報を取得してメニュープロバイダーに渡す
     const skillInfos = skillRegistry
@@ -3816,7 +3818,12 @@ export class REPL {
     const hasSecondLLM = this.secondLLMManager?.isAvailable() ?? false;
     const profiles = buildLLMProfiles(this.config, hasSecondLLM);
     const skillInfos = this.skillRegistry
-      ? this.skillRegistry.list().map((s) => ({ name: s.name, trigger: s.trigger, description: s.description }))
+      ? this.skillRegistry.list().map((s) => ({
+          name: s.name,
+          trigger: s.trigger,
+          description: s.description,
+          disableModelInvocation: s.disableModelInvocation,
+        }))
       : undefined;
     this.agent.updateLLMProfiles(profiles, skillInfos, hasSecondLLM, !!this.config.obsidian?.vaultPath);
   }
@@ -4355,6 +4362,8 @@ export class REPL {
           agent: this.agent,
           config: this.config,
           saveConfig: () => saveConfig(this.config),
+          skillRegistry: this.skillRegistry,
+          workflowLearner: this.workflowLearner,
         },
         args,
       );

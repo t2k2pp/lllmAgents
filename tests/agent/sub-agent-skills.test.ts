@@ -158,6 +158,25 @@ describe("sub-agent skill preloading", () => {
     expect(captured).toHaveLength(0);
   });
 
+  it("manual-only skillをsub-agent preloadで迂回起動しない", async () => {
+    const manual = skills.get("call-skill");
+    if (!manual) throw new Error("test skill missing");
+    manual.disableModelInvocation = true;
+    const manager = new SubAgentManager(
+      captureProvider(captured),
+      "test-model",
+      new ToolRegistry(),
+      permissions,
+      skills,
+    );
+    await expect(
+      manager.launchForeground("general-purpose", "manual skill", "answer once", undefined, undefined, undefined, [
+        "call-skill",
+      ]),
+    ).rejects.toThrow("manual-only skill 'call-skill'");
+    expect(captured).toHaveLength(0);
+  });
+
   it("task toolが呼出時skills指定を公開する", () => {
     const properties = taskTool.definition.function.parameters.properties as Record<string, unknown>;
     expect(properties).toHaveProperty("skills");

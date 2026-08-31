@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### 操作学習・機能比較 cycle 12 (2026-08-31)
+
+- Codex Record & Replay / Claude skills / lllmAgentsの機能比較から、browser/computer操作を実演から再利用workflowへ変換できない`GAP-WL-01`を実装
+- `/learn start|status|finish|cancel`と`workflow_learn_*`を追加し、成功した直列tool callをproject-local skillへatomic保存
+- 入力文字列、URL query/fragment、screenshot path、一時window ID、tool出力を保存せずplaceholder化し、既存skill・symlink経由のproject外pathを拒否
+- 失敗・並列操作を含む記録は黙って省略せずskill化を拒否し、生成skillを`disable-model-invocation: true`の手動起動専用に制限
+- 実Playwright smokeでDOM入力・click・結果観測・秘密値非永続化を検証する`test:workflow-learning:browser`を追加
+
 ### Sub-agent worktree分離 cycle 11 (2026-08-31)
 
 - Codex / Claude Codeとの機能比較と既存類似機能監査から、並列editing agentが同じcheckoutを共有する`GAP-02`をP1として実装

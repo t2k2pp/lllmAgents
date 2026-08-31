@@ -809,6 +809,14 @@ export function formatToolSummary(toolName: string, params: Record<string, unkno
       return `window key: id=${params.window_id} keys=${Array.isArray(params.keys) ? params.keys.join("+") : "invalid"}`;
     case "computer_scroll":
       return `window scroll: id=${params.window_id} (${params.x},${params.y}) delta_y=${params.delta_y}`;
+    case "workflow_learn_start":
+      return `操作記録を開始: ${params.name} (scope=${params.scope})`;
+    case "workflow_learn_status":
+      return "操作記録の状態を表示";
+    case "workflow_learn_finish":
+      return "成功した操作記録をproject skillとして保存";
+    case "workflow_learn_cancel":
+      return "操作記録を保存せず破棄";
     case "web_fetch":
       return `取得: ${params.url}`;
     case "web_search":

@@ -11,6 +11,7 @@ const allowedKeys = new Set([
   "trigger",
   "context",
   "tools",
+  "disable-model-invocation",
 ]);
 
 function fail(message) {
@@ -50,6 +51,10 @@ function validateSkill(dir) {
   if (trigger && !/^\/[a-z0-9]+(?:-[a-z0-9]+)*$/.test(trigger)) fail(`${file}: triggerが不正です: ${trigger}`);
   const context = fields.get("context");
   if (context && context !== "fork") fail(`${file}: contextはforkだけを指定できます: ${context}`);
+  const disableModelInvocation = fields.get("disable-model-invocation");
+  if (fields.has("disable-model-invocation") && !["true", "false"].includes(disableModelInvocation)) {
+    fail(`${file}: disable-model-invocationはtrueまたはfalseだけを指定できます: ${disableModelInvocation}`);
+  }
   for (const key of ["tools", "allowed-tools"]) {
     const raw = fields.get(key);
     if (!raw) continue;

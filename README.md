@@ -18,6 +18,7 @@
 - **画像生成**: Azure GPT Images / Stable Diffusion WebUI / ComfyUI に対応（ON/OFF 可能、`/image` で設定・直接生成、`/cost` でコスト確認）
 - **ブラウザ操作**: Playwright統合によるWeb自動化
 - **Native Computer Use**: 明示opt-inしたlocal CLIから、選択したOS windowだけをcapture・click・入力（毎回確認、remote操作は禁止）
+- **操作学習**: 成功したbrowser/computer操作を、秘密値を除いた手動起動skillとしてprojectへ保存
 - **マルチライン入力**: Shift+Enter / Ctrl+J で改行、@path でファイル参照
 - **インタラクティブUI**: `/`コマンドと`@`ファイルパスの補完ドロップダウン
 - **スキルベースワークフロー**: 開発・レビュー・調査等のワークフローをスキルとして定義、LLMが必要に応じて選択
@@ -100,6 +101,21 @@ Windows、macOS、Linux X11に対応します。macOSは`cliclick`とAccessibili
 
 全`computer_*`操作はlocal CLI限定で、autorunや永続許可の設定に関係なく呼出しごとに確認します。Discord/Slackからのhost desktop操作と全画面captureは提供しません。詳細は[Native Computer Use設計](docs/native-computer-use.md)を参照してください。
 
+### 操作学習（明示記録）
+
+local CLIで、エージェントに実演させたbrowser/computer操作をproject-local skillへ変換できます。
+
+```text
+/learn start save-report browser レポート画面へ入力して保存する
+> 対象画面を開き、入力して保存し、結果を確認して
+/learn finish
+/save-report
+```
+
+成功した対象tool callだけを順番に記録し、`.localllm/skills/<name>/SKILL.md`へatomicに保存します。入力文字列、URLのquery/fragment、screenshot保存先、一時window ID、tool出力は保存せずplaceholder化します。失敗または並列操作を含む実演はskill化せず、既存skillも上書きしません。
+
+生成skillは`disable-model-invocation: true`の手動起動専用です。skillの存在は操作許可を意味せず、再生時も通常のpermission確認、現在DOMのselector再確認、`computer_windows`によるwindow再選択が必要です。Discord/Slackとworktree agentからの記録・保存は拒否します。任意の人間のmouse操作を画面録画する機能ではなく、エージェントが実行して成否を観測できるbrowser/computer tool軌跡を対象にします。詳細は[操作学習設計](docs/workflow-learning.md)を参照してください。
+
 ### Safe mode（カスタマイズ起因の故障診断）
 
 ```bash
@@ -139,6 +155,7 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/diff` | stage済み・未stage・未追跡を含むworking treeの実Git差分を表示 |
 | `/plan` | プランモードに入る |
 | `/skills` | 利用可能なスキル一覧 |
+| `/learn [status\|start\|finish\|cancel]` | browser/computer操作の明示記録を管理し、秘密値を除いた手動起動skillとして保存 |
 | `/status` | 全体ステータス（モデル・コンテキスト・タスク等） |
 | `/cost` | セッションのトークン使用量・コスト表示（画像生成コスト含む） |
 | `/image` | 画像生成の設定・実行 (`on` / `off` / `setup <azure\|sd-webui\|comfyui>` / `set` (既定の品質・解像度のみ変更) / `use <name>` / `list` / `test` / `gen <prompt>`) |

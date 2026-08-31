@@ -87,6 +87,7 @@ src/
 ├── hooks/          - HookManager (Pre/PostToolUse, Session lifecycle)
 ├── rules/          - RuleLoader + builtin rules (security, coding-style, git-workflow)
 ├── skills/         - SkillRegistry + builtin skills (dev-workflow, code-review, research 等)
+├── workflow-learning/ - browser/computer tool軌跡のsanitizationとproject skill化
 ├── security/       - PermissionManager, Sandbox, RuleEngine
 ├── config/         - ConfigManager, セットアップウィザード
 ├── browser/        - PlaywrightManager

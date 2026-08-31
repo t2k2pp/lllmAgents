@@ -84,4 +84,25 @@ describe("skill-loader UTF-8 handling", () => {
       expect(parseSkillFile(base.replace("%s", field), "C:/skills/bad/SKILL.md", false)).toBeNull();
     }
   });
+
+  it("Claude互換disable-model-invocationをmanual-only契約として読む", () => {
+    const source = [
+      "---",
+      "name: learned",
+      "description: 明示起動だけを許す",
+      "disable-model-invocation: true",
+      "---",
+      "manual workflow",
+    ].join("\n");
+    expect(parseSkillFile(source, "C:/skills/learned/SKILL.md", false)).toMatchObject({
+      name: "learned",
+      disableModelInvocation: true,
+    });
+    expect(
+      parseSkillFile(source.replace("disable-model-invocation: true", "disable-model-invocation: yes"), "bad", false),
+    ).toBeNull();
+    expect(
+      parseSkillFile(source.replace("disable-model-invocation: true", "disable-model-invocation:"), "empty", false),
+    ).toBeNull();
+  });
 });

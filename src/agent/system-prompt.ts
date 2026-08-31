@@ -22,6 +22,7 @@ export interface SkillInfo {
   name: string;
   trigger: string;
   description: string;
+  disableModelInvocation?: boolean;
 }
 
 export interface LLMProfileInfo {
@@ -261,7 +262,12 @@ ${memory}`);
 
   // Skills (dynamic list)
   if (skills && skills.length > 0) {
-    const skillLines = skills.map((s) => `- ${s.trigger}: ${s.description}`).join("\n");
+    const skillLines = skills
+      .map(
+        (s) =>
+          `- ${s.trigger}: ${s.description}${s.disableModelInvocation ? " (manual-only; do not invoke through the skill tool)" : ""}`,
+      )
+      .join("\n");
     parts.push(`
 # Available skills (reference)
 Use a skill only when the user explicitly invokes it, or when it is needed to fulfill the user's request:

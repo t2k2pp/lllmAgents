@@ -9,6 +9,8 @@ export interface SkillDefinition {
   context?: "fork";
   /** context:fork 時に許可するツールリスト（未指定時は全ツール） */
   tools?: string[];
+  /** true の場合は user が slash trigger を直接入力した時だけ実行できる。 */
+  disableModelInvocation?: boolean;
   /**
    * 将来拡張用: スキルのグループタグ (例: ["design"], ["dev", "review"])。
    * SKILL.md の frontmatter で group: ... と書けるよう型として用意。

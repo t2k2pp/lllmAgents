@@ -41,6 +41,11 @@ export function parseSkillFile(content: string, filePath: string, builtIn: boole
   if (meta.context && meta.context !== "fork") return null;
   const context = meta.context === "fork" ? ("fork" as const) : undefined;
 
+  if (meta["disable-model-invocation"] !== undefined && !["true", "false"].includes(meta["disable-model-invocation"])) {
+    return null;
+  }
+  const disableModelInvocation = meta["disable-model-invocation"] === "true";
+
   // tools / Claude互換allowed-tools: "[bash, file_read]" or "bash, file_read" 形式をパース
   const toolsRaw = meta.tools ?? meta["allowed-tools"];
   const tools = toolsRaw
@@ -61,6 +66,7 @@ export function parseSkillFile(content: string, filePath: string, builtIn: boole
     builtIn,
     context,
     tools,
+    disableModelInvocation,
   };
 }
 
