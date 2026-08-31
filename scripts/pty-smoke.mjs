@@ -21,6 +21,7 @@ mkdirSync(configDir, { recursive: true });
 const previewHoldMs = 3_000;
 let finalChunkSentAt = Number.POSITIVE_INFINITY;
 let requestReceivedAt = Number.POSITIVE_INFINITY;
+let responseStartedAt = Number.POSITIVE_INFINITY;
 const mockServer = http.createServer((req, res) => {
   if (req.method === "GET" && req.url?.startsWith("/v1/models")) {
     res.writeHead(200, { "content-type": "application/json" });
@@ -33,8 +34,8 @@ const mockServer = http.createServer((req, res) => {
     return;
   }
   requestReceivedAt = Date.now();
-  req.resume();
   req.on("end", () => {
+    responseStartedAt = Date.now();
     res.writeHead(200, { "content-type": "text/event-stream" });
     const send = (body) => res.write(`data: ${JSON.stringify(body)}\n\n`);
     // previewを先に送り、最終本文を意図的に遅らせる。buffered modeが先頭本文を
@@ -69,6 +70,9 @@ const mockServer = http.createServer((req, res) => {
       res.end();
     }, previewHoldMs).unref?.();
   });
+  // listenerを先に登録する。短いbodyではresume直後にendへ到達し得るため、逆順だと
+  // mockがrequestを受けてもSSEを1byteも返さないraceになる。
+  req.resume();
 });
 await new Promise((resolveListen) => mockServer.listen(0, "127.0.0.1", resolveListen));
 const mockAddress = mockServer.address();
@@ -190,6 +194,7 @@ try {
         previewSeen,
         previewSeenBeforeFinal,
         requestSeen: Number.isFinite(requestReceivedAt),
+        responseStarted: Number.isFinite(responseStartedAt),
         timedOut,
       });
     });
@@ -211,6 +216,7 @@ try {
       `japaneseSeen ${result.japaneseSeen}, previewSubmitted ${result.previewSubmitted}, ` +
       `previewSeen ${result.previewSeen}, ` +
       `previewBeforeFinal ${result.previewSeenBeforeFinal}, requestSeen ${result.requestSeen}, ` +
+      `responseStarted ${result.responseStarted}, ` +
       `timedOut ${result.timedOut})`;
     // Actionsの匿名APIでも原因flagをannotationから取得できるようにする。
     console.error(`::error title=Real PTY smoke failed::${failure}`);
