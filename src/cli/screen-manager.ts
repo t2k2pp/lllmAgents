@@ -529,7 +529,9 @@ export class ScreenManagerImpl implements ScreenManager {
     if (!text || !this.started || !this.alternate || this.isExclusive()) return;
     this.statusLine = text;
     this.statusAtMs = Date.now();
-    this.scheduleRender();
+    // 最初の可視tokenは体感TTFTそのものなので、16msのframe集約へ戻さない。
+    // 直前のora frameが描画予約済みでも、ここでcancelして最新本文を同期描画する。
+    this.renderNow();
   }
 
   clearTransientStatus(): void {

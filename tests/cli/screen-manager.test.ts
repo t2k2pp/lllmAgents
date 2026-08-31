@@ -458,7 +458,7 @@ describe("ScreenManager: 代替画面でのスピナー状態行 (§5 補足)", 
     written.length = 0;
 
     screen.updateTransientStatus("応答中: PV42");
-    vi.advanceTimersByTime(20);
+    // 最初の可視tokenはframe timerを待たず、その呼出し内で描画される。
     expect(all()).toContain("応答中: PV42");
 
     written.length = 0;

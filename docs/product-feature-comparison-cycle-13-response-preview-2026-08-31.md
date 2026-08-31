@@ -52,6 +52,7 @@
 | UX-07 | P1 | run `33445065726`では入力・HTTP・表示のどこで停止したか判別不能だった。PageDownと本文も待機せず連続送信していた | prompt再描画後に本文を別chunkで送信し、`previewSubmitted` / `requestSeen` flagをActions annotationへ追加 | run `33445587420`で両flagがtrueとなり入力・HTTP到達を実証 | 修正済み |
 | UX-08 | P1 | run `33445587420`は`previewSubmitted=true` / `requestSeen=true` / `previewSeen=false`。mock serverが`req.resume()`後に`end` listenerを登録し、短いbodyでeventを取り逃すraceがあった | `end` listenerを先に登録してからbodyをdrainし、`responseStarted` flagも追加 | run `33445892804`で両OSとも`responseStarted=true`を実証 | 修正済み |
 | UX-09 | P1 | run `33445892804`は両OSで`responseStarted=true`でも`previewSeen=false`。user-visible statusがoraの複数writeを推定する経路だけに依存していた | ScreenManagerへ明示的な一過性status APIを追加し、受信chunkから直接更新・停止時解除 | ScreenManager unit、次runのLinux/macOS実PTY | 修正済み・CI再検証待ち |
+| UX-10 | P1 | run `33446816215`も両OSで`responseStarted=true` / `previewSeen=false`。明示status APIが初回可視tokenを16msのframe queueへ戻し、描画中は更新要求を捨てる契約だった | 初回preview更新は予約済みframeを取消して同期描画し、unitもtimerを進めず表示を要求 | ScreenManager immediate-render unit、次runのLinux/macOS実PTY | 修正済み・CI再検証待ち |
 
 ## 5. 評価
 
