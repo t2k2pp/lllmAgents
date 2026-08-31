@@ -9,6 +9,7 @@ import { globalTokenTracker } from "../cost/token-tracker.js";
 import { globalCostCalculator } from "../cost/cost-calculator.js";
 // プロンプト表示中はライブ領域を排他所有する (docs/tui-alternate-screen.md §4.3)
 import { select } from "../cli/prompt-gate.js";
+import { screen } from "../cli/screen-manager.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
@@ -848,6 +849,7 @@ export class AgentLoop {
                 }
                 thinkingSpinner = null;
               }
+              screen.clearTransientStatus();
             };
 
             for await (const chunk of abortableIterator(gen, () => this._aborted)) {
@@ -913,19 +915,25 @@ export class AgentLoop {
                           hasStartedOutput = true;
                           receivingStartTime = Date.now();
                           const initialPreview = process.stderr.isTTY || process.stdout.isTTY ? visibleTextContent : "";
+                          const initialStatus = chalk.dim(
+                            formatBufferedResponseStatus(initialPreview, receivedTokens, 0, columns),
+                          );
                           thinkingSpinner = createSpinner({
                             // 初回frame自体へ本文を入れる。start後のtext差替えだけに依存すると、
                             // alternate-screen側がplaceholder frameだけを捕捉する場合がある。
                             // 非TTYでは最終Markdownとの重複を避け、従来の受信状態だけを出す。
-                            text: chalk.dim(formatBufferedResponseStatus(initialPreview, receivedTokens, 0, columns)),
+                            text: initialStatus,
                             spinner: "dots",
                           }).start();
+                          screen.updateTransientStatus(initialStatus);
                         } else if (thinkingSpinner !== null) {
                           const recvElapsed = (Date.now() - receivingStartTime) / 1000;
                           const rate = recvElapsed > 0.3 ? Math.round(receivedTokens / recvElapsed) : 0;
-                          thinkingSpinner.text = chalk.dim(
+                          const status = chalk.dim(
                             formatBufferedResponseStatus(visibleTextContent, receivedTokens, rate, columns),
                           );
+                          thinkingSpinner.text = status;
+                          screen.updateTransientStatus(status);
                         }
                       }
                     }

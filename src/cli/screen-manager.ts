@@ -201,6 +201,10 @@ export interface ScreenManager {
   writeLive(text: string): void;
   /** ライブ領域の高さが変わった等で描き直しを要求する (代替画面のみ有効) */
   refreshLive(): void;
+  /** spinner libraryのframe分割に依存せず、一過性の状態行を更新する */
+  updateTransientStatus(text: string): void;
+  /** 一過性の状態行を消す */
+  clearTransientStatus(): void;
   /** ライブ領域を取得する。解放関数を返す */
   acquireLive(owner: LiveOwner): () => void;
   /** 今ライブ領域を持っている所有者 (いなければ undefined) */
@@ -514,6 +518,24 @@ export class ScreenManagerImpl implements ScreenManager {
   refreshLive(): void {
     if (!this.alternate) return;
     this.scheduleRender();
+  }
+
+  /**
+   * 代替画面の状態行を明示更新する。
+   * oraのcursor制御と本文は複数writeに分かれるため、Proxy越しのframe推定だけを
+   * user-visible progressの唯一の経路にしない。
+   */
+  updateTransientStatus(text: string): void {
+    if (!text || !this.started || !this.alternate || this.isExclusive()) return;
+    this.statusLine = text;
+    this.statusAtMs = Date.now();
+    this.scheduleRender();
+  }
+
+  clearTransientStatus(): void {
+    if (!this.statusLine) return;
+    this.statusLine = "";
+    if (this.alternate) this.scheduleRender();
   }
 
   /**
