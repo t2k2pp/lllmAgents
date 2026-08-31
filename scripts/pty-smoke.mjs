@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ptyDriver } from "./pty-driver.js";
+import { interactivePtyEnv, ptyDriver } from "./pty-driver.js";
 import { submitPtyLine } from "./pty-input.js";
 
 if (process.platform === "win32") {
@@ -96,7 +96,12 @@ try {
   const result = await new Promise((resolveRun, reject) => {
     const child = spawn(driver.executable, driver.args, {
       cwd: tempWork,
-      env: { ...process.env, ...driver.env, HOME: tempHome, USERPROFILE: tempHome, NO_COLOR: "1" },
+      env: interactivePtyEnv(process.env, {
+        ...driver.env,
+        HOME: tempHome,
+        USERPROFILE: tempHome,
+        NO_COLOR: "1",
+      }),
       stdio: ["pipe", "pipe", "pipe"],
     });
     let output = "";

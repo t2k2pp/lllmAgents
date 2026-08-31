@@ -47,14 +47,15 @@
 | UX-02 | P1 | 既存PTY smokeはLLMを呼ばず、表示回帰を検出できない | mock LLMが先頭text後にfinalを3秒保留し、2秒以内のpreview表示を必須化 | Linux `script` / macOS `expect` CI経路 | 修正済み |
 | UX-03 | P2 | 生chunkを状態行へ出すとANSI/controlで描画を壊し得る | SGR/control除去と空白正規化 | ANSI/newline/BEL unit | 修正済み |
 | UX-04 | P2 | 固定文字数truncateは日本語の全角幅で折返す | 共通display-widthで列幅truncate、狭幅は本文優先 | 幅20の日本語unit | 修正済み |
+| UX-05 | P1 | 初回CI run `33443572716`のLinux/macOS実PTYで、親の`CI`環境変数を継承したOraが対話spinnerを無効化 | 対話PTY子だけ`CI`キーを除去し、非対話の親CI契約は維持 | interactive child env unit、次runのLinux/macOS実PTY | 修正済み・CI再検証待ち |
 
 ## 5. 評価
 
 - baseline: 通常権限で122 files（2 skipped）、1288 tests（11 skipped）成功。sandbox内のVitest起動は既知のesbuild parent directory access制限で失敗し、通常権限で製品不具合でないことを確認。
-- targeted: response preview、PTY driver、agent-loop salvageの3 files・10 tests成功。
+- targeted: response preview、PTY driver、agent-loop salvageの3 files・11 tests成功。
 - build/typecheck: `npm run build`成功。
 - lint: error 0。既存279 warnings / 97 infosはnon-blocking設定。
-- full unit: 123 files（2 skipped）、1292 tests（11 skipped）成功。
+- full unit: 123 files（2 skipped）、1293 tests（11 skipped）成功。
 - E2E: 7 tests成功。
 - coverage: statements 42.76%、branches 75.69%、functions 65.64%、lines 42.76%。
 - skill/package: 25 skills検証成功。package dry-runは538 files、9.3 MiBで成功。

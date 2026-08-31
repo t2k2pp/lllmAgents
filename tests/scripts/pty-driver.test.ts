@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { ptyDriver } from "../../scripts/pty-driver.js";
+import { interactivePtyEnv, ptyDriver } from "../../scripts/pty-driver.js";
 
 const command = { node: "/runtime/node", tsx: "/repo/tsx.mjs", entry: "/repo/index.ts" };
 
 describe("PTY smoke driver", () => {
+  it("CI上でも対話spinnerを描画する子環境を作る", () => {
+    const env = interactivePtyEnv({ CI: "true", KEEP: "yes" }, { TERM: "xterm-256color" });
+    expect(env).toEqual({ KEEP: "yes", TERM: "xterm-256color" });
+    expect("CI" in env).toBe(false);
+  });
+
   it("Linuxではutil-linux scriptを使い、親プロセスが入力を送る", () => {
     const driver = ptyDriver("linux", command);
     expect(driver.executable).toBe("script");

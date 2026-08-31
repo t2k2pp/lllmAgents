@@ -6,6 +6,16 @@ const RESPONSE_PREVIEW_TEXT = "PV42";
 const RESPONSE_FINAL_TEXT = "FINAL99";
 const SCROLL_CAPABLE_TERM = "xterm-256color";
 
+/**
+ * CI上でも子プロセスは実ユーザーと同じ対話TTYとして起動する。
+ * OraはCIの値ではなくCIキーの存在だけでspinnerを無効化するため、継承させない。
+ */
+export function interactivePtyEnv(baseEnv, overrides = {}) {
+  const env = { ...baseEnv, ...overrides };
+  delete env.CI;
+  return env;
+}
+
 const EXPECT_PROGRAM = `
 set timeout 30
 log_user 1
