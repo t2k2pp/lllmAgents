@@ -11,6 +11,8 @@ describe("PTY smoke driver", () => {
     expect(driver.parentSubmits).toBe(true);
     expect(driver.scrollMarker).toBe("__PTY_SCROLL_SEEN__");
     expect(driver.imeMarker).toBe("__PTY_IME_SEEN__");
+    expect(driver.previewMarker).toBe("PV42");
+    expect(driver.finalMarker).toBe("FINAL99");
     expect(driver.env.TERM).toBe("xterm-256color");
   });
 
@@ -24,6 +26,10 @@ describe("PTY smoke driver", () => {
     expect(driver.args.join("\n")).toContain("__PTY_IME_SEEN__");
     expect(driver.args.join("\n")).toContain("stty columns 20 rows 24");
     expect(driver.args.join("\n")).toContain("日本語入力の右端折返し確認");
+    expect(driver.args.join("\n")).toContain('send -- "PREVIEW_REQUEST\\r"');
+    expect(driver.args.join("\n")).toContain("__PTY_PREVIEW_TIMEOUT__");
+    expect(driver.args.join("\n")).toContain("PV42");
+    expect(driver.args.join("\n")).toContain("FINAL99");
     expect(driver.args.join("\n")).toContain('send -- "/quit\\r"');
     expect(driver.env).toEqual({
       PTY_NODE: command.node,

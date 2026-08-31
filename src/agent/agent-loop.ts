@@ -52,6 +52,7 @@ import { getOpsLogger } from "../utils/ops-logger.js";
 import { LLMLogger } from "./llm-logger.js";
 import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
+import { formatBufferedResponseStatus } from "../cli/response-preview.js";
 import { getFirstUseGuide, getFailureGuide } from "./tool-guides.js";
 import { IntentClassifier, type CompletionType } from "./intent-classifier.js";
 import { Evaluator } from "./evaluator.js";
@@ -733,6 +734,7 @@ export class AgentLoop {
         let success = false;
 
         let receivedTokens = 0; // スピナーモード: 受信トークンカウンター
+        let visibleTextContent = ""; // スピナーモード: thinking除去済みのlive preview元
         let thinkingStarted = false; // ストリーミングモード: [思考]ヘッダー表示済みフラグ
         let finishReason = "stop"; // LLMの終了理由（"length"なら出力が途中で切れた）
         let tokensIn: number | undefined;
@@ -904,6 +906,7 @@ export class AgentLoop {
                       // <think>...</think> タグをフィルタリング（古いOllamaの場合contentに含まれる）
                       const displayText = filterThinkingTags(chunk.text);
                       if (displayText) {
+                        visibleTextContent += displayText;
                         receivedTokens += displayText.split(/\s+/).length;
                         if (!hasStartedOutput) {
                           hasStartedOutput = true;
@@ -916,8 +919,10 @@ export class AgentLoop {
                         if (thinkingSpinner !== null) {
                           const recvElapsed = (Date.now() - receivingStartTime) / 1000;
                           const rate = recvElapsed > 0.3 ? Math.round(receivedTokens / recvElapsed) : 0;
-                          const rateText = rate > 0 ? `, ${rate} tok/s` : "";
-                          thinkingSpinner.text = chalk.dim(`  受信中... (${receivedTokens} tok${rateText})`);
+                          const columns = process.stderr.columns || process.stdout.columns || 80;
+                          thinkingSpinner.text = chalk.dim(
+                            formatBufferedResponseStatus(visibleTextContent, receivedTokens, rate, columns),
+                          );
                         }
                       }
                     }
@@ -1041,6 +1046,7 @@ export class AgentLoop {
               hasStartedOutput = false;
               thinkingSpinner = null;
               receivedTokens = 0;
+              visibleTextContent = "";
               thinkingStarted = false;
               continue;
             }
@@ -1065,6 +1071,7 @@ export class AgentLoop {
               hasStartedOutput = false;
               thinkingSpinner = null;
               receivedTokens = 0;
+              visibleTextContent = "";
               thinkingStarted = false;
               continue;
             } else {

@@ -75,7 +75,7 @@
 - 待機中: `LLM処理中... (0:41 · 37msg · ~14.2K/128K)`
   - `37msg` = `this.history.getMessages().length`
   - `~14.2K/128K` = 前ターンのpromptTokens / contextWindow
-- 受信中: `受信中... (1243 tok, 28 tok/s)`
+- 受信中: `応答中: 調査結果をまとめています… (1243 tok, 28 tok/s)`（既定のbuffered modeでも先頭本文をlive表示）
   - 既存の `receivedTokens` に加え、最初のテキストチャンク受信時刻から tok/s を算出
 - `lastPromptTokens` インスタンスフィールドで前ターンのpromptTokens値をキャッシュ
 

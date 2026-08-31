@@ -452,7 +452,7 @@ CLIコマンド `/knowledge vault <path>` でも設定可能。設定すると�
 
 | キー | 型 | デフォルト | 説明 |
 |------|-----|----------|------|
-| `streamingDisplay` | boolean | false | LLM応答をリアルタイム表示するか。`false` ならスピナー+完了後Markdownレンダリング |
+| `streamingDisplay` | boolean | false | LLM応答を逐次本文として表示するか。`false` でも受信中は1行previewを表示し、完了後にMarkdownを確定レンダリング |
 | `maxParallelTools` | number | 3 | ツールの最大同時実行数。vLLMのKVキャッシュやリソースに合わせて調整 |
 | `notifications.minDurationSec` | number | 0 | この秒数未満で完了したタスクは webhook 完了通知を送らない（docs/task-report-notification-design.md） |
 | `goalSeek.autoPropose` | boolean | true | 複雑なタスクで Goal Seek 昇格を自動提案する（docs/goal-promotion-design.md） |
