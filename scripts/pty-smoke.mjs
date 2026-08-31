@@ -22,6 +22,7 @@ const previewHoldMs = 3_000;
 let finalChunkSentAt = Number.POSITIVE_INFINITY;
 let requestReceivedAt = Number.POSITIVE_INFINITY;
 let responseStartedAt = Number.POSITIVE_INFINITY;
+let firstChunkWrittenAt = Number.POSITIVE_INFINITY;
 const mockServer = http.createServer((req, res) => {
   if (req.method === "GET" && req.url?.startsWith("/v1/models")) {
     res.writeHead(200, { "content-type": "application/json" });
@@ -37,10 +38,15 @@ const mockServer = http.createServer((req, res) => {
   req.on("end", () => {
     responseStartedAt = Date.now();
     res.writeHead(200, { "content-type": "text/event-stream" });
+    // delayed SSEの先頭byteがOS/socket bufferingに留まると、UIではなくmockの
+    // flush待ちを測ってしまう。headerを確定しNagleを切ってから先頭chunkを書く。
+    res.flushHeaders();
+    res.socket?.setNoDelay(true);
     const send = (body) => res.write(`data: ${JSON.stringify(body)}\n\n`);
     // previewを先に送り、最終本文を意図的に遅らせる。buffered modeが先頭本文を
     // live表示できなければ、PTY側の2秒timeoutがfinal到着前に失敗する。
     send({ choices: [{ index: 0, delta: { content: "PV42 応答を準備中" }, finish_reason: null }] });
+    firstChunkWrittenAt = Date.now();
     setTimeout(() => {
       finalChunkSentAt = Date.now();
       send({ choices: [{ index: 0, delta: { content: " FINAL99" }, finish_reason: null }] });
@@ -203,6 +209,7 @@ try {
         previewChunkSeen,
         requestSeen: Number.isFinite(requestReceivedAt),
         responseStarted: Number.isFinite(responseStartedAt),
+        firstChunkWritten: Number.isFinite(firstChunkWrittenAt),
         timedOut,
       });
     });
@@ -224,7 +231,8 @@ try {
       `japaneseSeen ${result.japaneseSeen}, previewSubmitted ${result.previewSubmitted}, ` +
       `previewSeen ${result.previewSeen}, ` +
       `previewBeforeFinal ${result.previewSeenBeforeFinal}, requestSeen ${result.requestSeen}, ` +
-      `responseStarted ${result.responseStarted}, previewChunkSeen ${result.previewChunkSeen}, ` +
+      `responseStarted ${result.responseStarted}, firstChunkWritten ${result.firstChunkWritten}, ` +
+      `previewChunkSeen ${result.previewChunkSeen}, ` +
       `timedOut ${result.timedOut})`;
     // Actionsの匿名APIでも原因flagをannotationから取得できるようにする。
     console.error(`::error title=Real PTY smoke failed::${failure}`);
