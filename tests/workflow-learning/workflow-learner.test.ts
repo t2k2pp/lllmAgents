@@ -188,6 +188,21 @@ describe("WorkflowLearner", () => {
     expect(fs.existsSync(path.join(outside, "skills", "escape-demo"))).toBe(false);
   });
 
+  it("project rootが同一実体へのpath aliasでもreal skill root内へ保存する", async () => {
+    const aliasParent = tempProject();
+    const realProject = tempProject();
+    const projectAlias = path.join(aliasParent, "project-alias");
+    fs.symlinkSync(realProject, projectAlias, process.platform === "win32" ? "junction" : "dir");
+    const learner = new WorkflowLearner(projectAlias);
+    const click = learner.wrapTool(handler("browser_click"));
+    learner.start("alias-demo", "path aliasの操作", "browser");
+    await click.execute({ selector: "#safe" });
+    const result = learner.finish(new SkillRegistry());
+    expect(fs.realpathSync(result.filePath)).toBe(
+      fs.realpathSync(path.join(realProject, ".localllm", "skills", "alias-demo", "SKILL.md")),
+    );
+  });
+
   it("対象外scopeの操作は記録せず、cancelは永続物を作らない", async () => {
     const project = tempProject();
     const learner = new WorkflowLearner(project);

@@ -279,7 +279,9 @@ export class WorkflowLearner {
     }
 
     const skillsRoot = this.ensureSafeSkillsRoot();
-    const skillDir = this.skillDir(active.name);
+    // macOSの /var -> /private/var のようなpath aliasでも、検証済みreal rootを
+    // 起点に保存先を組み立て、同一directoryをescapeと誤判定しない。
+    const skillDir = path.join(skillsRoot, active.name);
     if (!isWithin(skillsRoot, skillDir)) throw new Error("Resolved skill path escaped the project skill directory.");
     if (fs.existsSync(skillDir)) {
       throw new Error(`Skill '${active.name}' already exists at ${skillDir}. Existing skills are never overwritten.`);

@@ -56,11 +56,12 @@ OpenAI Record & Replayが人のmacOS操作を直接記録するのに対し、�
 | WL-04 | P1 | 学習skillがmodelから自動起動されるとGUI操作の意図確認を迂回する | `disable-model-invocation`をloader/validator/skill tool/sub-agentへ一貫適用 | manual-only tool/preload tests |
 | WL-05 | P2 | 初回実装で`/learn start`等は補完されたが親`/learn`が補完候補にならない | 親completion entryを追加 | command registry test Red→Green |
 | WL-06 | P2 | 実browser gate初回は対応Chromium実体がなく起動失敗 | Chromiumを導入し、gateはskip/fakeへ落とさず再実行 | 実DOM smoke pass |
+| WL-07 | P1 | 初回pushのmacOS coverageで`/var`と`/private/var`を別pathと見なし、4件の保存testがescape判定で失敗 | 検証済みreal skill rootから保存先を構築し、containment強度を維持 | path alias regressionと次pushのmacOS CI |
 
 ## 5. 評価
 
 - baseline: sandbox内`npm test`は既知のesbuild filesystem制限で起動不能。許可された通常実行では120 files（2 skipped）、1273 tests（11 skipped）成功。
-- targeted: 5 files、32 tests成功。
+- targeted: 5 files、33 tests成功（macOS path alias回帰を含む）。
 - build: `npm run build`成功。
 - browser smoke: 実ChromiumでDOMへ`SMOKE-SECRET-42`を入力しbuttonをclick、`saved:<redacted>`を画面状態から観測。4 steps、2 placeholders、manual-only=true、secret persisted=false。
 - full unit: 122 files成功、2 files skipped。1287 tests成功、11 tests skipped。
