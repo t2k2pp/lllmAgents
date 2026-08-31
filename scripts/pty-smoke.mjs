@@ -192,12 +192,14 @@ try {
     !/Goodbye!/i.test(result.output)
   ) {
     console.error(result.output);
-    throw new Error(
+    const failure =
       `PTY smoke failed (exit ${result.code}, signal ${result.signal ?? "none"}, ` +
-        `quitSent ${result.sentQuit}, scrollSeen ${result.scrollSeen}, ` +
-        `japaneseSeen ${result.japaneseSeen}, previewSeen ${result.previewSeen}, ` +
-        `previewBeforeFinal ${result.previewSeenBeforeFinal}, timedOut ${result.timedOut})`,
-    );
+      `quitSent ${result.sentQuit}, scrollSeen ${result.scrollSeen}, ` +
+      `japaneseSeen ${result.japaneseSeen}, previewSeen ${result.previewSeen}, ` +
+      `previewBeforeFinal ${result.previewSeenBeforeFinal}, timedOut ${result.timedOut})`;
+    // Actionsの匿名APIでも原因flagをannotationから取得できるようにする。
+    console.error(`::error title=Real PTY smoke failed::${failure}`);
+    throw new Error(failure);
   }
   console.log("real PTY smoke passed");
 } finally {

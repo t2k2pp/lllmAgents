@@ -908,18 +908,21 @@ export class AgentLoop {
                       if (displayText) {
                         visibleTextContent += displayText;
                         receivedTokens += displayText.split(/\s+/).length;
+                        const columns = process.stderr.columns || process.stdout.columns || 80;
                         if (!hasStartedOutput) {
                           hasStartedOutput = true;
                           receivingStartTime = Date.now();
+                          const initialPreview = process.stderr.isTTY || process.stdout.isTTY ? visibleTextContent : "";
                           thinkingSpinner = createSpinner({
-                            text: chalk.dim(`  受信中... (${receivedTokens} tok)`),
+                            // 初回frame自体へ本文を入れる。start後のtext差替えだけに依存すると、
+                            // alternate-screen側がplaceholder frameだけを捕捉する場合がある。
+                            // 非TTYでは最終Markdownとの重複を避け、従来の受信状態だけを出す。
+                            text: chalk.dim(formatBufferedResponseStatus(initialPreview, receivedTokens, 0, columns)),
                             spinner: "dots",
                           }).start();
-                        }
-                        if (thinkingSpinner !== null) {
+                        } else if (thinkingSpinner !== null) {
                           const recvElapsed = (Date.now() - receivingStartTime) / 1000;
                           const rate = recvElapsed > 0.3 ? Math.round(receivedTokens / recvElapsed) : 0;
-                          const columns = process.stderr.columns || process.stdout.columns || 80;
                           thinkingSpinner.text = chalk.dim(
                             formatBufferedResponseStatus(visibleTextContent, receivedTokens, rate, columns),
                           );
