@@ -271,7 +271,7 @@ interface WorkspaceContext {
 | WT-META-11 | foreground `task`応答の組立てが`SubAgentResult`のworkspace metadataを落としていた | background/outputと同じisolation/workspace/base/state/filesを返す | foreground task tool回帰 |
 | WT-TIMEOUT-12 | 実Git統合testの既定10秒はWindows coverage並列時の11〜12秒実測を下回った | 重い2 scenarioだけ30秒にし、coverage全体を再実行 | coverage下で120 files / 1272 tests pass |
 | WT-MODE-13 | apply前のunsupported mode確認が実装設計だけで回帰化されていなかった | raw mode 120000/160000を適用前に拒否しworktree保持 | 実gitlink apply拒否test |
-| WT-WINPATH-14 | 初回pushのWindows CIで、Git common-dirの相対/絶対表現をNode側で補正した結果、同一worktreeをidentity不一致と判定 | Git自身の`rev-parse --path-format=absolute`でtop/common-dirを正規化し、mismatch時はexpected/observedを表示 | correction commitのWindows coverageとdependent deploy job |
+| WT-WINPATH-14 | 初回pushではGit common-dirの相対表現、次のWindows CIでは`RUNNER~1`と`runneradmin`という8.3/長いpath表現の差により、同一worktreeをidentity不一致と判定 | Git自身の`rev-parse --path-format=absolute`でtop/common-dirを正規化し、既存entryはvolume/file ID（`dev`/`ino`）でも同一性を照合。mismatch時はexpected/observedを表示 | alias identity test、実Git worktree suite、correction commitのWindows coverageとdependent deploy job |
 
 ## 13. 実装結果と終端
 

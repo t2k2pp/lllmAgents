@@ -40,8 +40,22 @@ function readNulList(value: string): string[] {
   return value.split("\0").filter(Boolean);
 }
 
-function samePath(a: string, b: string): boolean {
-  return safeResolvePath(a) === safeResolvePath(b);
+/**
+ * 既存filesystem entryの同一性を比較する。
+ *
+ * Windowsでは同じdirectoryがGitから長いpath、Nodeから8.3短縮pathで返ることが
+ * あるため、文字列表現だけでなくvolume/file ID（dev/ino）も照合する。
+ */
+export function sameFilesystemPath(a: string, b: string): boolean {
+  if (safeResolvePath(a) === safeResolvePath(b)) return true;
+
+  try {
+    const left = fs.statSync(a);
+    const right = fs.statSync(b);
+    return left.dev === right.dev && left.ino !== 0 && left.ino === right.ino;
+  } catch {
+    return false;
+  }
 }
 
 function resolveRepositoryPath(git: string, cwd: string, selector: "--show-toplevel" | "--git-common-dir"): string {
@@ -401,7 +415,7 @@ export class WorktreeManager {
     if (!fs.existsSync(worktreePath)) throw new Error(`Managed worktreeが見つかりません: ${worktreePath}`);
     const top = resolveRepositoryPath(this.git, worktreePath, "--show-toplevel");
     const common = resolveRepositoryPath(this.git, worktreePath, "--git-common-dir");
-    if (!samePath(top, worktreePath) || !samePath(common, this.commonDir)) {
+    if (!sameFilesystemPath(top, worktreePath) || !sameFilesystemPath(common, this.commonDir)) {
       throw new Error(
         "Managed worktreeのGit identityが作成時と一致しません。操作を停止しました。" +
           ` top=${top} expectedTop=${safeResolvePath(worktreePath)}` +
@@ -417,7 +431,7 @@ export class WorktreeManager {
   private assertManagedPath(target: string): void {
     const root = safeResolvePath(this.managedRoot);
     const resolved = safeResolvePath(target);
-    if (!pathStartsWith(resolved, root) || samePath(resolved, root)) {
+    if (!pathStartsWith(resolved, root) || sameFilesystemPath(resolved, root)) {
       throw new Error(`Managed root外のworktree pathを拒否しました: ${target}`);
     }
   }
@@ -495,7 +509,7 @@ export class WorktreeManager {
       if (!name.startsWith(".record-") || !name.endsWith(".json")) continue;
       try {
         const parsed = JSON.parse(fs.readFileSync(path.join(this.managedRoot, name), "utf8")) as PersistedRecord;
-        if (parsed.version !== META_VERSION || !samePath(parsed.mainCheckoutRoot, this.repoRoot)) continue;
+        if (parsed.version !== META_VERSION || !sameFilesystemPath(parsed.mainCheckoutRoot, this.repoRoot)) continue;
         if (
           ["cleaned", "applied", "discarded"].includes(parsed.workspaceState) &&
           Date.now() - Date.parse(parsed.updatedAt) > TERMINAL_METADATA_RETENTION_MS

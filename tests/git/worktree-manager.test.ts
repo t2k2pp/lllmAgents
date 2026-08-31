@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveGitExecutable } from "../../src/git/git-command.js";
-import { WorktreeManager } from "../../src/git/worktree-manager.js";
+import { sameFilesystemPath, WorktreeManager } from "../../src/git/worktree-manager.js";
 
 const roots: string[] = [];
 
@@ -30,6 +30,22 @@ afterEach(() => {
 });
 
 describe("WorktreeManager", () => {
+  it("同じentryのaliasを文字列表現ではなくfilesystem identityで判定する", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "lllm-worktree-alias-"));
+    roots.push(root);
+    const real = path.join(root, "runneradmin");
+    const alias = path.join(root, "RUNNER~1");
+    const other = path.join(root, "other");
+    fs.writeFileSync(real, "same entry", "utf8");
+    // 8.3名が有効なWindowsではaliasはこの時点で既に存在する。
+    // それ以外の環境では同じfile IDを持つhard linkで同じ契約を検証する。
+    if (!fs.existsSync(alias)) fs.linkSync(real, alias);
+    fs.writeFileSync(other, "other entry", "utf8");
+
+    expect(sameFilesystemPath(alias, real)).toBe(true);
+    expect(sameFilesystemPath(alias, other)).toBe(false);
+  });
+
   it("mainを不変に保って変更を保持し、明示applyで完全なfilesystem stateを回収する", () => {
     const { repo, managed, git } = initRepo();
     const manager = new WorktreeManager({ mainRoot: repo, managedRoot: managed, git });
