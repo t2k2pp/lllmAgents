@@ -40,11 +40,11 @@ describe("PTY smoke driver", () => {
     expect(driver.args.join("\n")).toContain("PV42");
     expect(driver.args.join("\n")).toContain("FINAL99");
     expect(driver.args.join("\n")).toContain('send -- "/quit\\r"');
+    const previewAt = driver.args.join("\n").lastIndexOf("expect -re {PV42}");
     const finalAt = driver.args.join("\n").lastIndexOf("expect -re {FINAL99}");
-    const returnedPromptAt = driver.args.join("\n").lastIndexOf("expect -re {> }");
     const quitAt = driver.args.join("\n").lastIndexOf('send -- "/quit\\r"');
-    expect(returnedPromptAt).toBeGreaterThan(finalAt);
-    expect(quitAt).toBeGreaterThan(returnedPromptAt);
+    expect(quitAt).toBeGreaterThan(previewAt);
+    expect(finalAt).toBeGreaterThan(quitAt);
     expect(driver.env).toEqual({
       PTY_NODE: command.node,
       PTY_TSX: command.tsx,

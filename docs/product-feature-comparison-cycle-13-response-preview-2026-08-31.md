@@ -59,7 +59,8 @@
 | UX-14 | P1 | run `33465117715`はparser到達後もpreview分岐へ未到達。VLLM think-filter出口かAgentLoopのdisplay mode分岐か未確定 | think-filter出口、AgentLoop text入口、`streamingDisplay`値を本文非記録の明示debug flagとしてannotationへ追加 | run `33465444230`で両OSともfilter出口・AgentLoop到達、`streamingDisplay=false`を実証 | 修正済み |
 | UX-15 | P1 | run `33465444230`はbuffered分岐へ到達後、最初のpreview組立前で停止。待機spinner停止、thinking解除、think-tag filterのどこか未確定 | 3境界を個別の本文非記録flag / filtered文字数としてannotationへ追加 | run `33465741626`で両OSとも`waitingSpinnerStopped=false`を実証 | 修正済み |
 | UX-16 | P1 | Linux/macOS実PTYだけでOraの待機spinner停止が戻らず、受信済みtextのpreview処理を塞ぐ。疑似TTY単体では再現せず端末実装依存 | alternate screenの待機・thinking・preview状態をScreenManager直接管理へ統一し、Oraは通常画面だけで使用 | ScreenManager unit、次runのLinux/macOS delayed SSE実PTY | 修正済み・CI再検証待ち |
-| UX-17 | P1 | run `33466220944`のUbuntuは`previewSeen=true` / `previewBeforeFinal=true`で本機能は合格したが、最終本文表示と次の入力欄復帰の間にPTY試験が`/quit`を送りtimeout | Linux/macOSとも次の`> `プロンプト復帰を観測してから`/quit`を送る | PTY driver unit、次runのLinux/macOS delayed SSE実PTY | 修正済み・CI再検証待ち |
+| UX-17 | P1 | run `33466220944`のUbuntuは`previewSeen=true` / `previewBeforeFinal=true`で本機能は合格したが、最終本文表示と次の入力欄復帰の間にPTY試験が`/quit`を送りtimeout | Linux/macOSとも次の`> `プロンプト復帰を観測してから`/quit`を送る案を検証 | run `33466602563`で両OSともalternate-screenの復帰promptを生byte列では安定観測できないと判明 | UX-18へ再設計 |
+| UX-18 | P1 | run `33466602563`は両OSともpreview先行表示に合格したが、alternate-screenの復帰promptを生byte列`> `で観測できず試験が終了操作を送れなかった | preview表示直後のrun中type-aheadへ`/quit`を送り、最終本文後にキューから安全に終了する実ユーザー経路を検証 | PTY driver unit、次runのLinux/macOS delayed SSE実PTY | 修正済み・CI再検証待ち |
 
 ## 5. 評価
 

@@ -53,11 +53,10 @@ expect {
     exit 125
   }
 }
-set timeout 30
-expect -re {${RESPONSE_FINAL_TEXT}}
-expect -re {> }
 puts "${EXPECT_QUIT_MARKER}"
 send -- "/quit\\r"
+set timeout 30
+expect -re {${RESPONSE_FINAL_TEXT}}
 expect {
   timeout {
     puts stderr "__PTY_TIMEOUT__"
