@@ -4,7 +4,7 @@
 - 基準commit: `1fd2b12`
 - 対象gap: `GAP-REL-01`
 - 観点: 公開版と実行binaryの同一性、更新可否の診断、release失敗の可視性
-- 状態: 実装・ローカル評価済み。latest pushed SHAのCI監視前
+- 状態: implemented。実装commit `c6c49f0` とGitHub Actions run `33504021430`で全依存job成功
 
 ## 1. 比較根拠
 
@@ -84,6 +84,7 @@
 - skill/package/audit: 25 skills passed。npm packageは538 files、9.3 MiB。lockfile基準runtime auditは0 vulnerabilities。
 - SEA: `dist/localllm.exe`を生成し、隔離HOMEでversion、実GitHubへのJSON更新診断、状態非生成を確認。`v0.4.1 (build 1fd2b12-dirty)`、`blocked`/exit 1、asset 0件を実証。
 - deploy directory全体は既存`deploy/localllm.exe`をPID 11524が使用中だったため、build scriptが上書きをfail-fastした。processは停止せず、clean checkoutのWindows deploy/exe smokeを最新push SHAのCIで閉じる。
+- CI: 実装commit `c6c49f0`のrun `33504021430`でcommit message policy、Ubuntu/macOS/Windows test、依存するWindows deploy / exe smokeがすべてsuccess。clean checkoutの配布binary表示と`.deploy-meta.json`一致検査を通過。
 
 ## 6. 完了gate
 
@@ -94,5 +95,5 @@
 - [x] 明示更新診断とrelease asset fail-fast
 - [x] targeted test / build / live GitHub診断
 - [x] full unit / E2E / coverage / package / audit / SEA smoke
-- [ ] task差分だけをcommit/push
-- [ ] latest pushed SHAの全依存CI job
+- [x] task差分だけをcommit/push (`c6c49f0`)
+- [x] latest pushed implementation SHAの全依存CI job (`33504021430`)
