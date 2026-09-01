@@ -54,12 +54,13 @@
 | UX-09 | P1 | run `33445892804`は両OSで`responseStarted=true`でも`previewSeen=false`。user-visible statusがoraの複数writeを推定する経路だけに依存していた | ScreenManagerへ明示的な一過性status APIを追加し、受信chunkから直接更新・停止時解除 | ScreenManager unit、次runのLinux/macOS実PTY | 修正済み・CI再検証待ち |
 | UX-10 | P1 | run `33446816215`も両OSで`responseStarted=true` / `previewSeen=false`。明示status APIが初回可視tokenを16msのframe queueへ戻し、描画中は更新要求を捨てる契約だった | 初回preview更新は予約済みframeを取消して同期描画し、unitもtimerを進めず表示を要求 | ScreenManager immediate-render unit、次runのLinux/macOS実PTY | 修正済み・CI再検証待ち |
 | UX-11 | P1 | run `33447276315`のmacOSでも同期描画後に`previewSeen=false`。provider単体では先頭chunkを約21msでyieldしたため、AgentLoop到達と画面反映の境界が未確定 | 明示debug時だけ本文非記録のTTY/alternate/exclusive/chunk到達情報を出し、PTY annotationへ`previewChunkSeen`を追加 | run `33447866610`で両OSとも`previewChunkSeen=false`を実証 | 修正済み |
-| UX-12 | P1 | run `33447866610`はmock側の`responseStarted=true`でもAgentLoopにchunk未到達。mockが`writeHead`/`write`の呼出時刻だけを記録し、先頭SSE byteのflush境界を保証していなかった | `flushHeaders()`と`setNoDelay(true)`後に先頭chunkを書き、`firstChunkWritten`もannotationへ追加 | 次runのLinux/macOS実PTY | 修正済み・CI再検証待ち |
+| UX-12 | P1 | run `33447866610`はmock側の`responseStarted=true`でもAgentLoopにchunk未到達。mockが`writeHead`/`write`の呼出時刻だけを記録し、先頭SSE byteのflush境界を保証していなかった | `flushHeaders()`と`setNoDelay(true)`後に先頭chunkを書き、`firstChunkWritten`もannotationへ追加 | run `33448302713`で両OSとも`firstChunkWritten=true`を実証 | 修正済み |
+| UX-13 | P1 | run `33448302713`は先頭chunk書込後も`previewChunkSeen=false`。provider parserとAgentLoopのどちらで停止したか、また別POSTを誤計測したか未確定 | 明示debug時に本文非記録のSSE text delta到達を出し、`postRequests` / `providerTextChunkSeen`をPTY annotationへ追加 | 次runのLinux/macOS annotation | 診断中 |
 
 ## 5. 評価
 
 - baseline: 通常権限で122 files（2 skipped）、1288 tests（11 skipped）成功。sandbox内のVitest起動は既知のesbuild parent directory access制限で失敗し、通常権限で製品不具合でないことを確認。
-- targeted: ScreenManager、response preview、PTY driver、agent-loop salvageの4 files・92 tests成功。
+- targeted: OpenAI-compatible provider、ScreenManager、response preview、PTY driver、agent-loop salvageの5 files・95 tests成功。
 - build/typecheck: `npm run build`成功。
 - lint: error 0。既存279 warnings / 97 infosはnon-blocking設定。
 - full unit: 123 files（2 skipped）、1294 tests（11 skipped）成功。

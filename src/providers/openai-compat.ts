@@ -246,6 +246,9 @@ export class OpenAICompatProvider implements LLMProvider {
 
             // Text content
             if (delta.content) {
+              if (process.env.LLM_DEBUG_HTTP) {
+                console.error(`[LLM_DEBUG_HTTP] SSE text delta chars=${delta.content.length}`);
+              }
               yield { type: "text", text: delta.content };
             }
 

@@ -23,6 +23,7 @@ let finalChunkSentAt = Number.POSITIVE_INFINITY;
 let requestReceivedAt = Number.POSITIVE_INFINITY;
 let responseStartedAt = Number.POSITIVE_INFINITY;
 let firstChunkWrittenAt = Number.POSITIVE_INFINITY;
+let postRequestCount = 0;
 const mockServer = http.createServer((req, res) => {
   if (req.method === "GET" && req.url?.startsWith("/v1/models")) {
     res.writeHead(200, { "content-type": "application/json" });
@@ -35,6 +36,7 @@ const mockServer = http.createServer((req, res) => {
     return;
   }
   requestReceivedAt = Date.now();
+  postRequestCount++;
   req.on("end", () => {
     responseStartedAt = Date.now();
     res.writeHead(200, { "content-type": "text/event-stream" });
@@ -132,6 +134,7 @@ try {
     let previewSeen = false;
     let previewSeenBeforeFinal = false;
     let previewChunkSeen = false;
+    let providerTextChunkSeen = false;
     let sentQuit = false;
     let timedOut = false;
     const capture = (chunk) => {
@@ -147,6 +150,9 @@ try {
       }
       if (!previewChunkSeen && output.includes("[LLM_DEBUG_UI] response-preview first-chunk")) {
         previewChunkSeen = true;
+      }
+      if (!providerTextChunkSeen && output.includes("[LLM_DEBUG_HTTP] SSE text delta")) {
+        providerTextChunkSeen = true;
       }
       if (!sentQuit && output.includes(driver.quitMarker)) {
         sentQuit = true;
@@ -207,9 +213,11 @@ try {
         previewSeen,
         previewSeenBeforeFinal,
         previewChunkSeen,
+        providerTextChunkSeen,
         requestSeen: Number.isFinite(requestReceivedAt),
         responseStarted: Number.isFinite(responseStartedAt),
         firstChunkWritten: Number.isFinite(firstChunkWrittenAt),
+        postRequestCount,
         timedOut,
       });
     });
@@ -232,6 +240,7 @@ try {
       `previewSeen ${result.previewSeen}, ` +
       `previewBeforeFinal ${result.previewSeenBeforeFinal}, requestSeen ${result.requestSeen}, ` +
       `responseStarted ${result.responseStarted}, firstChunkWritten ${result.firstChunkWritten}, ` +
+      `postRequests ${result.postRequestCount}, providerTextChunkSeen ${result.providerTextChunkSeen}, ` +
       `previewChunkSeen ${result.previewChunkSeen}, ` +
       `timedOut ${result.timedOut})`;
     // Actionsの匿名APIでも原因flagをannotationから取得できるようにする。
