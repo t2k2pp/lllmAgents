@@ -4,7 +4,7 @@
 - 基準commit: `02d7bda`
 - 対象gap: `GAP-UX-01`
 - 観点: ユーザーが「応答が返ってこない」と感じる空白時間と、受信済み本文の可視性
-- 状態: 完了（実装commit `c23630a`、CI run `33467517193`の全依存job成功）
+- 状態: 完了（実装commit `c23630a` / run `33467517193`、closure commit `3492fa4` / run `33467849555`の全依存job成功）
 
 ## 1. 比較根拠
 
@@ -77,6 +77,7 @@
 - runtime audit: production dependencyはhigh以上を含め0 vulnerabilities。
 - Linux・macOS実PTY: 3秒遅延SSEで`previewSeen=true` / `previewBeforeFinal=true`、type-aheadされた`/quit`を最終本文後に処理して正常終了。
 - implementation CI: commit `c23630a`、run [`33467517193`](https://github.com/t2k2pp/lllmAgents/actions/runs/33467517193)。Commit message policy、Windows/Ubuntu/macOS test、Windows deploy / exe smokeの全5 job成功。
+- closure CI: commit `3492fa4`、run [`33467849555`](https://github.com/t2k2pp/lllmAgents/actions/runs/33467849555)。同じ全5 job成功。
 
 ## 6. 残差
 
@@ -96,4 +97,4 @@
 - [x] Linux/macOS delayed SSE実PTY
 - [x] task差分だけをcommit/push
 - [x] implementation SHAの全依存CI job
-- [ ] このclosure文書commitをpushし、そのlatest SHAの全依存CI jobを確認
+- [x] closure文書commit `3492fa4`の全依存CI job
