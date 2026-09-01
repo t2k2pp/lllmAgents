@@ -39,6 +39,7 @@
  * なく `screen.writeLive()` を使う。ライブ領域の描画はスクロールバックには記録しない。
  */
 import { getDisplayWidth, truncateAnsiToWidth } from "../utils/display-width.js";
+import { DISABLE_MOUSE_TRACKING, ENABLE_MOUSE_TRACKING, TerminalScrollInputParser } from "./terminal-input.js";
 
 /**
  * 差し替え前に捕まえた生の書き出し口。
@@ -284,12 +285,8 @@ const MAX_RENDER_PASSES = 3;
  */
 const CTRL_C_BYTE = 0x03;
 
-/** PageUp / PageDown。修飾キー付きのCSI (`\x1b[5;2~`等) も同じ操作として扱う。 */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: raw stdinのANSI CSI検出そのものが目的
-const SCROLL_KEY_PATTERN = /\x1b\[(5|6)(?:;\d+)?~/g;
-
-/** 複数data chunkへ分割されたCSIを復元するために保持する最大文字数。 */
-const SCROLL_SEQUENCE_TAIL_CHARS = 24;
+/** マウスホイール1 eventあたりの移動行数。端末の一般的なwheel stepに合わせる。 */
+const MOUSE_WHEEL_SCROLL_LINES = 3;
 
 /** stdin のチャンクに Ctrl+C が含まれるか。encoding 設定次第で文字列で届くことがある */
 function containsCtrlC(chunk: Buffer | string | null | undefined): boolean {
@@ -352,8 +349,8 @@ export class ScreenManagerImpl implements ScreenManager {
   private stdinConsumers = 0;
   /** 最下位の `\x03` 監視 (§3.3)。保持中だけ購読する */
   private sigintFallback: ((chunk: Buffer | string) => void) | null = null;
-  /** PageUp/PageDownのCSIがdata chunk境界を跨いだ場合の末尾。 */
-  private scrollSequenceTail = "";
+  /** PageUp/PageDownとmouse reportをdata chunk境界越しに復元する。 */
+  private readonly scrollInputParser = new TerminalScrollInputParser();
   /** 代替画面で表示するスピナーの最新フレーム (ライブ領域の所有者がいないときだけ描く) */
   private statusLine = "";
   private statusAtMs = 0;
@@ -390,8 +387,8 @@ export class ScreenManagerImpl implements ScreenManager {
     }
     if (!this.alternate) return;
 
-    // 代替画面へ入り、画面を消してから初回描画する
-    this.sink("\x1b[?1049h\x1b[2J\x1b[H");
+    // 代替画面へ入り、マウスホイールを入力履歴の↑↓ではなく固有reportとして受け取る。
+    this.sink(`\x1b[?1049h\x1b[2J\x1b[H${ENABLE_MOUSE_TRACKING}`);
     this.resizeHandler = () => this.renderNow();
     try {
       process.stdout.on("resize", this.resizeHandler);
@@ -421,8 +418,8 @@ export class ScreenManagerImpl implements ScreenManager {
     this.alternate = false;
 
     if (wasAlternate) {
-      // カーソルを戻し、ブラケット貼り付けを解除してから通常画面へ
-      this.sink("\x1b[?25h\x1b[?2004l\x1b[?1049l");
+      // mouse report、ブラケット貼り付け、カーソルを戻してから通常画面へ
+      this.sink(`\x1b[?25h\x1b[?2004l${DISABLE_MOUSE_TRACKING}\x1b[?1049l`);
       // 退避中の出力はすべてスクロールバックにも記録済み。書き戻しに含まれるので
       // ここで再度流すと二重になる。捨てているのではなく下で必ず出力される
       this.queue = [];
@@ -574,6 +571,7 @@ export class ScreenManagerImpl implements ScreenManager {
 
   acquireLive(owner: LiveOwner): () => void {
     const entry: OwnerEntry = { owner };
+    const wasExclusive = this.isExclusive();
     // 所有者の種別を問わず raw を再確認する (docs/stdin-ownership.md §3.1)。
     // 段階 4 は `if (!owner.redraw) return` で inquirer をスキップしていたが、
     // 塞ぎたいのは「inquirer が自分で raw にする前の一瞬」 なのでスキップしてはいけない。
@@ -585,6 +583,8 @@ export class ScreenManagerImpl implements ScreenManager {
       if (owner.redraw) {
         this.scheduleRender();
       } else {
+        // inquirer等へ画面を渡す間はmouse reportを止め、相手本来の入力契約を保つ。
+        if (!wasExclusive) this.sink(DISABLE_MOUSE_TRACKING);
         // 排他所有 = inquirer に画面を明け渡す。直前までの内容を上から並べ、
         // カーソルを内容の直後に置いて「そこから下は inquirer のもの」 にする
         this.renderForPrompt();
@@ -596,6 +596,7 @@ export class ScreenManagerImpl implements ScreenManager {
       // 二重解放は無視する (withPrompt の finally が例外経路と重なることがある)
       if (released) return;
       released = true;
+      const wasExclusive = this.isExclusive();
       const index = this.owners.indexOf(entry);
       if (index !== -1) this.owners.splice(index, 1);
       // cooked に戻さない。代わりに raw を再確認し直す (docs/stdin-ownership.md §3.2)。
@@ -605,6 +606,7 @@ export class ScreenManagerImpl implements ScreenManager {
       // 入れ子の内側が解けただけならまだ流さない。外側の排他所有者が残っている
       if (this.isExclusive()) return;
       if (this.alternate) {
+        if (wasExclusive) this.sink(ENABLE_MOUSE_TRACKING);
         // 内容はスクロールバックに記録済み。全画面再描画で一度に出る
         this.queue = [];
         this.renderNow();
@@ -711,7 +713,7 @@ export class ScreenManagerImpl implements ScreenManager {
   /** セッション終了。ここで初めて cooked に戻す (§3.1) */
   private releaseStdinRaw(): void {
     this.uninstallSigintFallback();
-    this.scrollSequenceTail = "";
+    this.scrollInputParser.reset();
     if (!this.stdinRawHeld) return;
     this.stdinRawHeld = false;
     this.stdinSuspended = false;
@@ -735,6 +737,7 @@ export class ScreenManagerImpl implements ScreenManager {
     if (!this.stdinRawHeld || this.stdinSuspended) return;
     this.stdinSuspended = true;
     this.uninstallSigintFallback();
+    if (this.alternate && !this.isExclusive()) this.sink(DISABLE_MOUSE_TRACKING);
     const stdin = this.stdin;
     if (!stdin?.isTTY) return;
     try {
@@ -754,6 +757,7 @@ export class ScreenManagerImpl implements ScreenManager {
       this.stdinSuspended = true;
       throw error;
     }
+    if (this.alternate && !this.isExclusive()) this.sink(ENABLE_MOUSE_TRACKING);
     this.installSigintFallback();
   }
 
@@ -827,21 +831,13 @@ export class ScreenManagerImpl implements ScreenManager {
     }
   }
 
-  /** raw stdinのdata chunkからPageUp/PageDownを観測する。入力自体は消費せず、他のlistenerへも届く。 */
+  /** raw stdinからPageUp/PageDownとマウスホイールを観測する。入力自体は他listenerへも届く。 */
   private handleScrollInput(chunk: Buffer | string): void {
-    const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-    const previousTailLength = this.scrollSequenceTail.length;
-    const combined = this.scrollSequenceTail + text;
-    SCROLL_KEY_PATTERN.lastIndex = 0;
-    for (const match of combined.matchAll(SCROLL_KEY_PATTERN)) {
-      const end = (match.index ?? 0) + match[0].length;
-      // 前回tailに完全に含まれていたsequenceは再処理しない。chunk境界を跨いだものと
-      // 今回chunk内で完結したものだけがpreviousTailLengthを越える。
-      if (end <= previousTailLength) continue;
-      if (match[1] === "5") this.scrollUp();
-      else this.scrollDown();
+    for (const action of this.scrollInputParser.feed(chunk)) {
+      const lines = action.source === "wheel" ? MOUSE_WHEEL_SCROLL_LINES : undefined;
+      if (action.direction === "up") this.scrollUp(lines);
+      else this.scrollDown(lines);
     }
-    this.scrollSequenceTail = combined.slice(-SCROLL_SEQUENCE_TAIL_CHARS);
   }
 
   // ─── スクロールバックの保持 (§3.4) ───────────────────

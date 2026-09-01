@@ -125,11 +125,11 @@ try {
     let sentHelp = false;
     let sentJapanese = false;
     let japaneseSeen = false;
-    let sentPageUp = false;
-    let pageUpOutputStart = 0;
+    let sentMouseUp = false;
+    let mouseUpOutputStart = 0;
     let scrollSeen = false;
-    let sentPageDown = false;
-    let pageDownOutputStart = 0;
+    let sentMouseDown = false;
+    let mouseDownOutputStart = 0;
     let sentPreview = false;
     let previewSeen = false;
     let previewSeenBeforeFinal = false;
@@ -198,20 +198,26 @@ try {
         child.stdin.write("\x15");
         child.stdin.write(submitPtyLine("/help"));
       }
-      if (driver.parentSubmits && sentHelp && !sentPageUp && /Ctrl\+C/.test(output)) {
-        sentPageUp = true;
-        pageUpOutputStart = output.length;
-        child.stdin.write("\x1b[5~");
+      if (
+        driver.parentSubmits &&
+        sentHelp &&
+        !sentMouseUp &&
+        /Ctrl\+C/.test(output) &&
+        output.includes("\x1b[?1000h\x1b[?1006h")
+      ) {
+        sentMouseUp = true;
+        mouseUpOutputStart = output.length;
+        child.stdin.write("\x1b[<64;10;4M");
       }
-      if (driver.parentSubmits && sentPageUp && !scrollSeen && output.slice(pageUpOutputStart).includes("PgDn")) {
+      if (driver.parentSubmits && sentMouseUp && !scrollSeen && output.slice(mouseUpOutputStart).includes("PgDn")) {
         scrollSeen = true;
-        sentPageDown = true;
-        pageDownOutputStart = output.length;
-        child.stdin.write("\x1b[6~");
+        sentMouseDown = true;
+        mouseDownOutputStart = output.length;
+        child.stdin.write("\x1b[<65;10;4M");
       }
-      // PageDownと本文を同じstdin chunkへ詰めると、raw key parserがescape sequenceの
-      // 後続として本文まで消費し得る。入力欄の再描画を観測してから別chunkで送る。
-      if (driver.parentSubmits && sentPageDown && !sentPreview && output.slice(pageDownOutputStart).includes("> ")) {
+      // mouse reportと本文を同じstdin chunkへ詰めず、入力欄の再描画後に送る。
+      // これによりreadlineへreport断片が混入していないことも後続requestで検証する。
+      if (driver.parentSubmits && sentMouseDown && !sentPreview && output.slice(mouseDownOutputStart).includes("> ")) {
         sentPreview = true;
         child.stdin.write(submitPtyLine("PREVIEW_REQUEST"));
       }

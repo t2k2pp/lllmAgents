@@ -36,10 +36,10 @@ puts "${EXPECT_IME_MARKER}"
 send -- "\\025"
 send -- "/help\\r"
 expect -re {Ctrl\\+C}
-send -- "\\033\\[5~"
+send -- "\\033\\[<64;10;4M"
 expect -re {PgDn}
 puts "${EXPECT_SCROLL_MARKER}"
-send -- "\\033\\[6~"
+send -- "\\033\\[<65;10;4M"
 expect -re {> }
 send -- "PREVIEW_REQUEST\\r"
 puts "${EXPECT_PREVIEW_SUBMITTED_MARKER}"

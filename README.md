@@ -78,7 +78,8 @@ $ npm start
 | ` ``` ` | マルチライン入力モード開始/終了（明示的な代替入力） |
 | `@path` | ファイル/フォルダの内容をプロンプトに添付 |
 | `/command` | スラッシュコマンド（補完ドロップダウン付き） |
-| `PgUp` / `PgDn` | Alternate Screen TUIの過去ログを遡る / 最新へ戻る（LLM・ツール実行中も有効） |
+| マウスホイール | Alternate Screen TUIの過去ログを上下する（LLM・ツール実行中も有効） |
+| `PgUp` / `PgDn` | Alternate Screen TUIの過去ログをページ移動する（LLM・ツール実行中も有効） |
 | `Ctrl+C` | 現在の操作をキャンセル |
 
 端末本来のscrollback・選択・コピーを優先したい場合は、`npm start -- --no-alt-screen`

@@ -42,6 +42,7 @@
 | [product-feature-comparison-cycle-12-workflow-learning-2026-08-31.md](product-feature-comparison-cycle-12-workflow-learning-2026-08-31.md) | implemented | Codex Record & Replay / Claude skills比較と操作学習gapの実装・評価記録 |
 | [product-feature-comparison-cycle-13-response-preview-2026-08-31.md](product-feature-comparison-cycle-13-response-preview-2026-08-31.md) | implemented | Codex/Claude streaming比較と応答preview・実PTY評価記録 |
 | [product-feature-comparison-cycle-14-release-version-2026-09-01.md](product-feature-comparison-cycle-14-release-version-2026-09-01.md) | implemented | Codex/Claude更新機能比較、version単一ソース化と明示更新診断の実装・評価記録 |
+| [product-quality-cycle-15-tui-mouse-scrollback-2026-09-01.md](product-quality-cycle-15-tui-mouse-scrollback-2026-09-01.md) | in-progress | Alternate Screenのマウススクロールバック不具合と実PTY評価記録 |
 | [harness-engineering.md](harness-engineering.md) | implemented | ハーネス改善の起点 (テトリスセッション分析→システムプロンプト再設計ほか) |
 | [harness-engineering-phase5.md](harness-engineering-phase5.md) | in-progress | Phase 5 計画 — Claude Code 比較で見える本質的弱点と段階的改善 |
 | [harness-engineering-phase5-progress.md](harness-engineering-phase5-progress.md) | in-progress | Phase 5 の進捗トラッカー |

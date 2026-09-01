@@ -165,6 +165,7 @@ describe("ScreenManager: 代替画面の入退場 (§3.1 / §8)", () => {
     const { screen, all } = createAltHarness();
     screen.start();
     expect(all()).toContain("\x1b[?1049h");
+    expect(all()).toContain("\x1b[?1000h\x1b[?1006h");
     expect(screen.isAlternate()).toBe(true);
     screen.stop();
   });
@@ -178,6 +179,7 @@ describe("ScreenManager: 代替画面の入退場 (§3.1 / §8)", () => {
     screen.stop();
 
     const output = all();
+    expect(output).toContain("\x1b[?1006l\x1b[?1000l");
     expect(output).toContain("\x1b[?1049l");
     // 代替画面を抜けた「後」 に書き戻すこと (中で出すと画面ごと消える)
     const afterLeave = output.slice(output.indexOf("\x1b[?1049l"));
@@ -550,6 +552,42 @@ describe("ScreenManager: session全期間のスクロールキー", () => {
     screen.stop();
   });
 
+  it("入力待ち中でもSGRマウスホイールで履歴を上下できる", () => {
+    const { stdin, emitData } = fakeStdin();
+    const screen = new ScreenManagerImpl({
+      sink: () => {},
+      stdin,
+      alternate: true,
+      rows: () => 5,
+      columns: () => 20,
+    });
+    screen.write("1\n2\n3\n4\n5\n6\n7\n8\n");
+    screen.start();
+    screen.acquireLive({ name: "interactive-input", redraw: () => {}, height: () => 1 });
+
+    emitData(Buffer.from("\x1b[<64;10;4M"));
+    expect(screen.scrollOffset()).toBe(3);
+
+    emitData(Buffer.from("\x1b[<65;10;4M"));
+    expect(screen.scrollOffset()).toBe(0);
+    screen.stop();
+  });
+
+  it("chunk境界を跨ぐ修飾付きマウスホイールを1回だけ処理する", () => {
+    const { stdin, emitData } = fakeStdin();
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin, alternate: true, rows: () => 5 });
+    screen.write("1\n2\n3\n4\n5\n6\n7\n8\n");
+    screen.start();
+
+    emitData(Buffer.from("\x1b[<68;10"));
+    expect(screen.scrollOffset()).toBe(0);
+    emitData(Buffer.from(";4M"));
+    expect(screen.scrollOffset()).toBe(3);
+    emitData(Buffer.from("x"));
+    expect(screen.scrollOffset()).toBe(3);
+    screen.stop();
+  });
+
   it("chunk境界で分割されたPgUpも1回だけ処理する", () => {
     const { stdin, emitData } = fakeStdin();
     const screen = new ScreenManagerImpl({
@@ -574,15 +612,20 @@ describe("ScreenManager: session全期間のスクロールキー", () => {
 
   it("排他prompt中はPageUpをpromptへ譲り、履歴を動かさない", () => {
     const { stdin, emitData } = fakeStdin();
-    const screen = new ScreenManagerImpl({ sink: () => {}, stdin, alternate: true, rows: () => 5 });
+    const written: string[] = [];
+    const screen = new ScreenManagerImpl({ sink: (text) => written.push(text), stdin, alternate: true, rows: () => 5 });
     screen.write("1\n2\n3\n4\n5\n6\n7\n8\n");
     screen.start();
+    written.length = 0;
     const release = screen.acquireLive({ name: "inquirer" });
 
+    expect(written.join("")).toContain("\x1b[?1006l\x1b[?1000l");
     emitData(Buffer.from("\x1b[5~"));
     expect(screen.scrollOffset()).toBe(0);
 
+    written.length = 0;
     release();
+    expect(written.join("")).toContain("\x1b[?1000h\x1b[?1006h");
     screen.stop();
   });
 });
@@ -771,17 +814,22 @@ describe("ScreenManager: suspendStdin / resumeStdin (§3.4)", () => {
 
   it("suspend で cooked に戻し、resume で raw に戻す", () => {
     const { stdin, state } = fakeStdin();
-    const screen = new ScreenManagerImpl({ sink: () => {}, stdin });
+    const written: string[] = [];
+    const screen = new ScreenManagerImpl({ sink: (text) => written.push(text), stdin, alternate: true });
     screen.start();
+    written.length = 0;
     screen.suspendStdin();
     expect(state.isRaw).toBe(false);
     expect(screen.holdsStdinRaw()).toBe(false);
     expect(state.listeners.length).toBe(0);
+    expect(written.join("")).toContain("\x1b[?1006l\x1b[?1000l");
 
+    written.length = 0;
     screen.resumeStdin();
     expect(state.isRaw).toBe(true);
     expect(screen.holdsStdinRaw()).toBe(true);
     expect(state.listeners.length).toBe(1);
+    expect(written.join("")).toContain("\x1b[?1000h\x1b[?1006h");
     screen.stop();
   });
 

@@ -26,7 +26,7 @@ export function displayWelcome(
   console.log(chalk.dim(`  CWD: ${process.cwd()}`));
   console.log(chalk.dim(`  Type /help for commands, /quit to exit.`));
   if (screen.isAlternate()) {
-    console.log(chalk.dim(`  TUI履歴: PgUp / PgDn（通常scrollback: 次回起動時 --no-alt-screen）`));
+    console.log(chalk.dim(`  TUI履歴: マウスホイール / PgUp / PgDn（通常scrollback: 次回起動時 --no-alt-screen）`));
   }
   console.log(chalk.dim(`  マルチライン: Shift+Enter / Ctrl+J (代替入力: \`\`\`)\n`));
 }
@@ -119,7 +119,8 @@ export function displayHelp(skills?: SkillSummary[], registryEntries?: RegistryH
 ${registrySection}
 ${skillSection}
   ${chalk.bold("入力:")}
-    PgUp/PgDn   TUIの過去ログを遡る / 最新へ戻る（LLM・ツール実行中も有効）
+    ホイール     TUIの過去ログを上下する（LLM・ツール実行中も有効）
+    PgUp/PgDn   TUIの過去ログをページ移動する（LLM・ツール実行中も有効）
     Shift+Enter  改行を挿入（マルチライン入力）
     Ctrl+J       改行を挿入（Shift+Enter非対応ターミナル用）
     \`\`\`          マルチライン入力モード（明示的な代替入力）

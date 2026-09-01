@@ -54,7 +54,7 @@
    │                                               │
    │   スクロールバック領域 (viewport)               │  ← ScreenManager が所有
    │   ・過去の出力を行配列として保持                 │     行配列の末尾 N 行を描画
-   │   ・PgUp/PgDn で遡れる                          │
+   │   ・マウスホイール / PgUp / PgDn で遡れる       │
    │                                               │
    ├───────────────────────────────────────────────┤
    │   ライブ領域 (下端 1〜数行)                      │  ← 1 人だけが所有できる
@@ -155,9 +155,11 @@ private viewOffset = 0;           // 0 = 最下部に追従。 >0 で遡り中
 - `viewOffset > 0` (遡り中) のとき新しい出力が来ても **視点を動かさない**。
   読んでいる最中に勝手にスクロールするのは最悪の体験である。
   代わりに下端に `▼ 新しい出力が N 行` を出す
-- PgUp / PgDn は入力プロンプトだけでなく、ScreenManager が stdin を保持する
+- マウスホイール / PgUp / PgDn は入力プロンプトだけでなく、ScreenManager が stdin を保持する
   **セッション全期間**で処理する。LLM応答中・ツール実行中も履歴を遡れることを
-  実PTY smokeで保証する。inquirer等の排他プロンプト中は、プロンプト側のキー意味を優先する
+  実PTY smokeで保証する。Alternate Screen開始時にSGR mouse reportを有効化し、ホイールが
+  入力履歴の上下キーへ変換されることを防ぐ。readlineへ分割されたreport断片は入力欄から除外する。
+  inquirer等の排他プロンプト中はmouse reportを一時解除し、プロンプト側の入力契約を優先する
 - 遡り中は案内表示に1行使うため、最大offsetも案内を除いたcontent heightで計算し、
   最古行まで到達できることをunit testで保証する
 
@@ -361,7 +363,8 @@ release()     →  所有者がいなくなったら raw mode を解除
 | `src/cli/prompt-gate.ts` | **新規**。 `withPrompt()` (§4.3) |
 | `src/cli/output-router.ts` | **新規**。 `console` / `stdout.write` の差し替え (§3.3) |
 | `src/index.ts` | 起動直後に router を仕込み `screen.start()`。 終了処理 (§8) |
-| `src/cli/interactive-input.ts` | ソフト所有者として `acquireLive` (§4.2)。 描画は `writeLive` 経由。 PgUp/PgDn |
+| `src/cli/interactive-input.ts` | ソフト所有者として `acquireLive` (§4.2)。描画は `writeLive` 経由。mouse report断片は入力文字へ混ぜない |
+| `src/cli/terminal-input.ts` | PageUp/PageDown・SGR/X10 mouse reportの復元とreadline入力filter |
 | `src/cli/progress-indicator.ts` | ソフト所有者化 |
 | `src/utils/spinner.ts` | 排他所有中は描かない。 代替画面では出力先を ScreenManager へ |
 | `src/utils/display-width.ts` | **新規**。 幅計算の共通化 (§11) |
@@ -426,7 +429,7 @@ release()     →  所有者がいなくなったら raw mode を解除
 4. LLM 応答のストリーミング中に `ask_user` が出ても選択肢が埋もれない (不具合 2)
 5. 応答完了直後にすぐタイプできる (Enter を先に押す必要がない) (不具合 4)
 6. 入力中にバックグラウンド通知が来ても、 入力中の文字列が消えない
-7. PgUp/PgDn でスクロールバックを遡れる。 遡り中に新出力が来ても視点が飛ばない
+7. マウスホイール / PgUp / PgDn でスクロールバックを遡れる。遡り中に新出力が来ても視点が飛ばず、ホイール操作が入力履歴や入力文字へ化けない
 8. Ctrl+C 2 回・未捕捉例外で終了しても端末が壊れない
 9. 日本語・結合文字・ZWJ絵文字混じりの入力が右端へ達しても、1文字ごとの余計な改行や文字分割が起きない
 10. LLM 思考中のスピナー (「考え中...」) が画面下端に 1 行で出て、 応答が始まると消える

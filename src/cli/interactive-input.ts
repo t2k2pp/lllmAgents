@@ -25,6 +25,7 @@ import {
 } from "../utils/display-width.js";
 import { screen } from "./screen-manager.js";
 import { layoutInputBuffer } from "./input-layout.js";
+import { MouseKeypressFilter } from "./terminal-input.js";
 
 // 幅計算は共通実装を使う (docs/tui-alternate-screen.md §11: 幅計算を 2 箇所に書かない)。
 // 既存の import 元を壊さないよう、ここから再エクスポートする。
@@ -131,6 +132,8 @@ export class InteractiveInput {
       let inPaste = false;
       /** 貼り付け中に蓄積される文字（終了マーカー受信時に一括で buffer に反映） */
       let pasteAccumulated = "";
+      /** ScreenManagerが処理したmouse reportをreadline分割後の入力文字列から除外する。 */
+      const mouseKeypressFilter = new MouseKeypressFilter();
       const prefixLen = getDisplayWidth(stripAnsi(prefix));
       // 継続行のプレフィックス（プロンプトと同じ幅のスペース）
       const contPrefixStr = " ".repeat(prefixLen);
@@ -566,6 +569,8 @@ export class InteractiveInput {
           }
           return;
         }
+
+        if (screen.isAlternate() && mouseKeypressFilter.shouldIgnore(key.sequence)) return;
 
         // ── Ctrl+C ──
         if (key.ctrl && key.name === "c") {

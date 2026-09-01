@@ -28,7 +28,8 @@ describe("PTY smoke driver", () => {
     expect(driver.executable).toBe("expect");
     expect(driver.parentSubmits).toBe(false);
     expect(driver.args.join("\n")).toContain('send -- "/help\\r"');
-    expect(driver.args.join("\n")).toContain('send -- "\\033\\[5~"');
+    expect(driver.args.join("\n")).toContain('send -- "\\033\\[<64;10;4M"');
+    expect(driver.args.join("\n")).toContain('send -- "\\033\\[<65;10;4M"');
     expect(driver.args.join("\n")).toContain("expect -re {> }");
     expect(driver.args.join("\n")).toContain("__PTY_SCROLL_SEEN__");
     expect(driver.args.join("\n")).toContain("__PTY_IME_SEEN__");
