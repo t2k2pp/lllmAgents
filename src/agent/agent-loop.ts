@@ -793,26 +793,38 @@ export class AgentLoop {
             }
             const ctxInfo = ctxFragments.join(" · ");
             let receivingStartTime = 0; // 最初のテキストチャンク受信時刻（tok/s 計算用）
+            const managedStatus = screen.isAlternate();
+            let waitingStatusActive = true;
 
-            let waitingSpinner: ReturnType<typeof createSpinner> | null = createSpinner({
-              text: chalk.dim(`  LLM処理中... (0:00 · ${ctxInfo})`),
-              spinner: "dots",
-            }).start();
+            const initialWaitingStatus = chalk.dim(`  LLM処理中... (0:00 · ${ctxInfo})`);
+            let waitingSpinner: ReturnType<typeof createSpinner> | null = managedStatus
+              ? null
+              : createSpinner({ text: initialWaitingStatus, spinner: "dots" }).start();
+            if (managedStatus) screen.updateTransientStatus(initialWaitingStatus);
 
             // 経過時間の定期更新（1秒ごと）
             const waitingTimer = setInterval(() => {
-              if (waitingSpinner) {
+              if (waitingStatusActive) {
                 const elapsed = Math.floor((Date.now() - waitingStartTime) / 1000);
-                waitingSpinner.text = chalk.dim(`  LLM処理中... (${formatElapsed(elapsed)} · ${ctxInfo})`);
+                const status = chalk.dim(`  LLM処理中... (${formatElapsed(elapsed)} · ${ctxInfo})`);
+                if (managedStatus) screen.updateTransientStatus(status);
+                else if (waitingSpinner) waitingSpinner.text = status;
               }
             }, 1000);
 
             const stopWaitingSpinner = (): void => {
+              if (!waitingStatusActive) return;
+              waitingStatusActive = false;
               if (waitingTimer) clearInterval(waitingTimer);
-              if (waitingSpinner) {
-                const elapsed = Math.floor((Date.now() - waitingStartTime) / 1000);
+              const elapsed = Math.floor((Date.now() - waitingStartTime) / 1000);
+              if (managedStatus) {
+                screen.clearTransientStatus();
                 if (elapsed >= 2) {
                   // 2秒以上待った場合のみ経過時間を表示
+                  console.log(chalk.dim(`  LLM応答開始 (${formatElapsed(elapsed)} · ${ctxInfo})`));
+                }
+              } else if (waitingSpinner) {
+                if (elapsed >= 2) {
                   waitingSpinner.succeed(chalk.dim(`  LLM応答開始 (${formatElapsed(elapsed)} · ${ctxInfo})`));
                 } else {
                   waitingSpinner.stop();
@@ -825,14 +837,19 @@ export class AgentLoop {
             // thinking フェーズが長引いても進捗が見える (2026-05-14 修正)。
             let thinkingStartTime = 0;
             let thinkingTimer: ReturnType<typeof setInterval> | null = null;
+            let thinkingStatusActive = false;
             const startThinkingSpinner = (): void => {
-              if (thinkingSpinner) return;
+              if (thinkingSpinner || thinkingStatusActive) return;
               thinkingStartTime = Date.now();
-              thinkingSpinner = createSpinner(chalk.dim("  考え中...")).start();
+              thinkingStatusActive = managedStatus;
+              if (managedStatus) screen.updateTransientStatus(chalk.dim("  考え中..."));
+              else thinkingSpinner = createSpinner(chalk.dim("  考え中...")).start();
               thinkingTimer = setInterval(() => {
-                if (thinkingSpinner) {
+                if (thinkingSpinner || thinkingStatusActive) {
                   const elapsed = Math.floor((Date.now() - thinkingStartTime) / 1000);
-                  thinkingSpinner.text = chalk.dim(`  考え中... (${formatElapsed(elapsed)})`);
+                  const status = chalk.dim(`  考え中... (${formatElapsed(elapsed)})`);
+                  if (managedStatus) screen.updateTransientStatus(status);
+                  else if (thinkingSpinner) thinkingSpinner.text = status;
                 }
               }, 1000);
             };
@@ -849,7 +866,13 @@ export class AgentLoop {
                 }
                 thinkingSpinner = null;
               }
-              screen.clearTransientStatus();
+              if (thinkingStatusActive) {
+                thinkingStatusActive = false;
+                screen.clearTransientStatus();
+                if (failMessage !== undefined) console.log(chalk.red(`✖ ${failMessage}`));
+              } else {
+                screen.clearTransientStatus();
+              }
             };
 
             for await (const chunk of abortableIterator(gen, () => this._aborted)) {
@@ -940,22 +963,20 @@ export class AgentLoop {
                                 `alternate=${screen.isAlternate()} exclusive=${screen.isExclusive()}`,
                             );
                           }
-                          thinkingSpinner = createSpinner({
-                            // 初回frame自体へ本文を入れる。start後のtext差替えだけに依存すると、
-                            // alternate-screen側がplaceholder frameだけを捕捉する場合がある。
-                            // 非TTYでは最終Markdownとの重複を避け、従来の受信状態だけを出す。
-                            text: initialStatus,
-                            spinner: "dots",
-                          }).start();
-                          screen.updateTransientStatus(initialStatus);
-                        } else if (thinkingSpinner !== null) {
+                          if (managedStatus) {
+                            thinkingStatusActive = true;
+                            screen.updateTransientStatus(initialStatus);
+                          } else {
+                            thinkingSpinner = createSpinner({ text: initialStatus, spinner: "dots" }).start();
+                          }
+                        } else if (thinkingSpinner !== null || thinkingStatusActive) {
                           const recvElapsed = (Date.now() - receivingStartTime) / 1000;
                           const rate = recvElapsed > 0.3 ? Math.round(receivedTokens / recvElapsed) : 0;
                           const status = chalk.dim(
                             formatBufferedResponseStatus(visibleTextContent, receivedTokens, rate, columns),
                           );
-                          thinkingSpinner.text = status;
-                          screen.updateTransientStatus(status);
+                          if (managedStatus) screen.updateTransientStatus(status);
+                          else if (thinkingSpinner) thinkingSpinner.text = status;
                         }
                       }
                     }
