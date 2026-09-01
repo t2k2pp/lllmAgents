@@ -4,7 +4,7 @@
 - 基準commit: `dc377c9`
 - 対象gap: `GAP-STEER-01`
 - 観点: 長時間のforeground処理中に届いたユーザーの訂正・追加条件を、失わず、手遅れになる前に現在の処理へ反映できること
-- 状態: **実装・ローカル評価完了**（cross-OS実PTY／deployの終端はpush後の最新SHA CIを正本とする）
+- 状態: **実装・評価・最新SHA CI完了**
 
 ## 1. 比較根拠
 
@@ -35,7 +35,7 @@
 | ID | 優先度 | 症状・原因 | 改善設計 | 回帰証拠 | 状態 |
 |---|---|---|---|---|---|
 | STEER-01 | P1 | `pendingInputs`を`AgentLoop.run()`終了後にしかdrainせず、長いtool連鎖への訂正が手遅れになる | `AgentLoop.queueSteering()`を追加し、reply完了／tool result記録直後にFIFO user messageを同じrunへ注入 | reply境界・tool境界integration | 修正済み |
-| STEER-02 | P1 | 実PTYは処理中`/quit`の次turn実行だけを検証し、通常messageの同一turn反映を検出できない | delayed SSE中に通常messageを送り、2回目のLLM要求と`STEER_OK`応答を必須化 | PTY driver unit成功。Linux/macOS実PTYはCIで実行 | 実装済み・CI待ち |
+| STEER-02 | P1 | 実PTYは処理中`/quit`の次turn実行だけを検証し、通常messageの同一turn反映を検出できない | delayed SSE中に通常messageを送り、2回目のLLM要求と`STEER_OK`応答を必須化 | PTY driver unit、Linux/macOS実PTY成功 | 修正済み |
 | STEER-03 | P2 | queueが無制限で、受理不能状態の契約もなかった | steerを20件・各4000文字に制限し、空・超過・満杯・非実行中を状態で返してUIに理由表示 | limit unit | 修正済み |
 | STEER-04 | P1 | abort/errorが反映境界より先に終わると、AgentLoop側へ渡した入力の所有者が曖昧になり得る | REPL finallyで未反映steerをtakeし、turn後FIFOへ移して表示 | queue ownership unit・既存abort経路 | 修正済み |
 | STEER-05 | P2 | 処理中入力は受理件数だけで、一覧・個別編集・取り戻しUIがない | composerを常時表示するTUI再設計が必要 | 比較差分 | 範囲外。今回の同一turn反映gateを妨げないUX拡張 |
@@ -53,7 +53,7 @@
 - build / lint: TypeScript build成功。lintはerror 0、既存warning 279 / info 97。
 - package / policy: skill validation、version policy、npm package validation（540 files、9.3 MiB）、OS非依存runtime audit（high以上0件）成功。
 - Windows SEA: fresh `dist/localllm.exe`を生成し、`--version`、`--help`、`--check-computer-use`がexit 0。既存`deploy/localllm.exe`をPID 27604が実行中のためdeploy directory上書きはfail-fastし、processを停止しなかった。clean checkoutのdependent Windows deploy / exe smokeを最新SHA CIで閉じる。
-- Linux/macOS実PTY: push後CIでdelayed SSE preview、通常type-ahead受理、同一runの2回目要求、終了まで確認する。
+- CI: 実装commit `1764ecd`のrun [`33569171125`](https://github.com/t2k2pp/lllmAgents/actions/runs/33569171125)でcommit policy、Ubuntu、macOS、Windows、依存するWindows deploy / exe smokeの全5 job成功。Linux/macOS実PTYはdelayed SSE preview、通常type-ahead受理、同一runの2回目要求と`STEER_OK`応答、終了まで確認した。
 
 ## 5. 完了gate
 
@@ -61,6 +61,6 @@
 - [x] P1 gapの原因・影響・設計を記録
 - [x] reply/tool両境界の実装とintegration test
 - [x] 全ローカル品質gate（実行中deploy binaryの上書きだけCIへ移管）
-- [ ] Linux/macOS実PTY
-- [ ] task差分だけをcommit/push
-- [ ] 最新push SHAの全依存CI job
+- [x] Linux/macOS実PTY
+- [x] task差分だけをcommit/push（実装境界 `1764ecd`）
+- [x] 最新push SHAの全依存CI job（run `33569171125`、全5 job success）
