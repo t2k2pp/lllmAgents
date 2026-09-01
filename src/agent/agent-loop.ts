@@ -891,6 +891,9 @@ export class AgentLoop {
                 case "text":
                   if (chunk.text) {
                     stopWaitingSpinner();
+                    if (process.env.LLM_DEBUG_HTTP) {
+                      console.error("[LLM_DEBUG_UI] response-preview waiting-spinner-stopped");
+                    }
                     if (this.streamingDisplay) {
                       // ストリーミングモード: リアルタイム表示
                       stopThinkingSpinner();
@@ -911,8 +914,14 @@ export class AgentLoop {
                       // スピナーモード: バッファリング + "受信中..." スピナー
                       // 「考え中…」 から「受信中…」 への切替なので thinkingTimer も止める
                       stopThinkingSpinner();
+                      if (process.env.LLM_DEBUG_HTTP) {
+                        console.error("[LLM_DEBUG_UI] response-preview thinking-spinner-stopped");
+                      }
                       // <think>...</think> タグをフィルタリング（古いOllamaの場合contentに含まれる）
                       const displayText = filterThinkingTags(chunk.text);
+                      if (process.env.LLM_DEBUG_HTTP) {
+                        console.error(`[LLM_DEBUG_UI] response-preview filtered chars=${displayText.length}`);
+                      }
                       if (displayText) {
                         visibleTextContent += displayText;
                         receivedTokens += displayText.split(/\s+/).length;

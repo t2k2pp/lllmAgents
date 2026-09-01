@@ -56,7 +56,8 @@
 | UX-11 | P1 | run `33447276315`のmacOSでも同期描画後に`previewSeen=false`。provider単体では先頭chunkを約21msでyieldしたため、AgentLoop到達と画面反映の境界が未確定 | 明示debug時だけ本文非記録のTTY/alternate/exclusive/chunk到達情報を出し、PTY annotationへ`previewChunkSeen`を追加 | run `33447866610`で両OSとも`previewChunkSeen=false`を実証 | 修正済み |
 | UX-12 | P1 | run `33447866610`はmock側の`responseStarted=true`でもAgentLoopにchunk未到達。mockが`writeHead`/`write`の呼出時刻だけを記録し、先頭SSE byteのflush境界を保証していなかった | `flushHeaders()`と`setNoDelay(true)`後に先頭chunkを書き、`firstChunkWritten`もannotationへ追加 | run `33448302713`で両OSとも`firstChunkWritten=true`を実証 | 修正済み |
 | UX-13 | P1 | run `33448302713`は先頭chunk書込後も`previewChunkSeen=false`。provider parserとAgentLoopのどちらで停止したか、また別POSTを誤計測したか未確定 | 明示debug時に本文非記録のSSE text delta到達を出し、`postRequests` / `providerTextChunkSeen`をPTY annotationへ追加 | run `33465117715`で両OSとも`postRequests=1` / `providerTextChunkSeen=true`を実証 | 修正済み |
-| UX-14 | P1 | run `33465117715`はparser到達後もpreview分岐へ未到達。VLLM think-filter出口かAgentLoopのdisplay mode分岐か未確定 | think-filter出口、AgentLoop text入口、`streamingDisplay`値を本文非記録の明示debug flagとしてannotationへ追加 | 次runのLinux/macOS annotation | 診断中 |
+| UX-14 | P1 | run `33465117715`はparser到達後もpreview分岐へ未到達。VLLM think-filter出口かAgentLoopのdisplay mode分岐か未確定 | think-filter出口、AgentLoop text入口、`streamingDisplay`値を本文非記録の明示debug flagとしてannotationへ追加 | run `33465444230`で両OSともfilter出口・AgentLoop到達、`streamingDisplay=false`を実証 | 修正済み |
+| UX-15 | P1 | run `33465444230`はbuffered分岐へ到達後、最初のpreview組立前で停止。待機spinner停止、thinking解除、think-tag filterのどこか未確定 | 3境界を個別の本文非記録flag / filtered文字数としてannotationへ追加 | 次runのLinux/macOS annotation | 診断中 |
 
 ## 5. 評価
 

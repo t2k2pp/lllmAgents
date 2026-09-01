@@ -138,6 +138,9 @@ try {
     let providerFilteredChunkSeen = false;
     let agentTextChunkSeen = false;
     let agentStreamingDisplay = null;
+    let waitingSpinnerStopped = false;
+    let thinkingSpinnerStopped = false;
+    let previewFilteredChars = null;
     let sentQuit = false;
     let timedOut = false;
     const capture = (chunk) => {
@@ -163,6 +166,16 @@ try {
       if (!agentTextChunkSeen && output.includes("[LLM_DEBUG_UI] agent-loop text-chunk")) {
         agentTextChunkSeen = true;
         agentStreamingDisplay = output.includes("streamingDisplay=true");
+      }
+      if (!waitingSpinnerStopped && output.includes("[LLM_DEBUG_UI] response-preview waiting-spinner-stopped")) {
+        waitingSpinnerStopped = true;
+      }
+      if (!thinkingSpinnerStopped && output.includes("[LLM_DEBUG_UI] response-preview thinking-spinner-stopped")) {
+        thinkingSpinnerStopped = true;
+      }
+      if (previewFilteredChars === null) {
+        const filteredMatch = output.match(/\[LLM_DEBUG_UI\] response-preview filtered chars=(\d+)/);
+        if (filteredMatch) previewFilteredChars = Number(filteredMatch[1]);
       }
       if (!sentQuit && output.includes(driver.quitMarker)) {
         sentQuit = true;
@@ -227,6 +240,9 @@ try {
         providerFilteredChunkSeen,
         agentTextChunkSeen,
         agentStreamingDisplay,
+        waitingSpinnerStopped,
+        thinkingSpinnerStopped,
+        previewFilteredChars,
         requestSeen: Number.isFinite(requestReceivedAt),
         responseStarted: Number.isFinite(responseStartedAt),
         firstChunkWritten: Number.isFinite(firstChunkWrittenAt),
@@ -255,7 +271,9 @@ try {
       `responseStarted ${result.responseStarted}, firstChunkWritten ${result.firstChunkWritten}, ` +
       `postRequests ${result.postRequestCount}, providerTextChunkSeen ${result.providerTextChunkSeen}, ` +
       `providerFilteredChunkSeen ${result.providerFilteredChunkSeen}, agentTextChunkSeen ${result.agentTextChunkSeen}, ` +
-      `agentStreamingDisplay ${result.agentStreamingDisplay}, previewChunkSeen ${result.previewChunkSeen}, ` +
+      `agentStreamingDisplay ${result.agentStreamingDisplay}, waitingSpinnerStopped ${result.waitingSpinnerStopped}, ` +
+      `thinkingSpinnerStopped ${result.thinkingSpinnerStopped}, previewFilteredChars ${result.previewFilteredChars}, ` +
+      `previewChunkSeen ${result.previewChunkSeen}, ` +
       `timedOut ${result.timedOut})`;
     // Actionsの匿名APIでも原因flagをannotationから取得できるようにする。
     console.error(`::error title=Real PTY smoke failed::${failure}`);
