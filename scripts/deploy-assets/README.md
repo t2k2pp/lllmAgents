@@ -102,11 +102,13 @@ localllm --install-browser
 
 ## バージョン情報
 
-`.deploy-meta.json` にビルド時のバージョン・Node 版数が記録されています。
+`.deploy-meta.json` に公開版、build commit、表示文字列、Node版数が記録されています。公開版は3桁SemVer、buildはcommitとして分離され、tracked変更を含む開発buildには`-dirty`が付きます。
+
+最新版と配布物の状態は`localllm --check-update`（機械処理は`--json`併用）で診断できます。新版releaseに配布物が無い場合は既存binaryを自動置換せず、明示エラーになります。
 
 ## サポート
 
 リポジトリ: https://github.com/t2k2pp/lllmAgents
 
-不具合報告には `localllm --version` の出力 (バージョン+コミット) と、
+不具合報告には `localllm --version` の出力 (公開版+build commit) と、
 可能なら REPL の `/doctor` 診断結果を添えてください。

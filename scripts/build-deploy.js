@@ -16,6 +16,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, cpSync, rmSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getGitBuildId } from "./git-revision.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -135,9 +136,13 @@ function copyAsset(src, dst, label) {
 
 function writeMeta() {
   const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+  const build = getGitBuildId({ cwd: ROOT });
   const meta = {
+    schemaVersion: 1,
     name: pkg.name,
     version: pkg.version,
+    build,
+    displayVersion: `v${pkg.version} (build ${build})`,
     builtAt: new Date().toISOString(),
     node: process.version,
     platform: process.platform,

@@ -273,8 +273,15 @@ describe("E2E smoke — 非TTYパイプモード起動", () => {
         expect(r.stdout, diag(r)).toContain("--no-alt-screen");
         expect(r.stdout, diag(r)).toContain("--computer-use");
         expect(r.stdout, diag(r)).toContain("--check-computer-use");
+        expect(r.stdout, diag(r)).toContain("--check-update");
         expect(r.stdout, diag(r)).not.toContain("Discord");
         expect(fs.existsSync(path.join(emptyHome, ".localllm")), diag(r)).toBe(false);
+
+        const version = await runApp([], ["--version"], emptyHome);
+        expect(version.code, diag(version)).toBe(0);
+        expect(version.stdout, diag(version)).toMatch(/localllm v0\.4\.1 \(build [0-9a-f]+(?:-dirty)?\)/);
+        expect(version.stdout, diag(version)).not.toContain("unknown");
+        expect(fs.existsSync(path.join(emptyHome, ".localllm")), diag(version)).toBe(false);
       } finally {
         fs.rmSync(emptyHome, { recursive: true, force: true });
       }

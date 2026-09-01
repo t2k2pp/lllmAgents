@@ -94,7 +94,7 @@ import { initOpsLogger, getOpsLogger, parseOpsLogLevel } from "./utils/ops-logge
 import { shutdownHttpClient } from "./utils/http-client.js";
 import { installCrashHandlers, setCrashContext, setTerminalRestore } from "./utils/crash-handler.js";
 import { applyLogRetention } from "./utils/log-rotation.js";
-import { checkForUpdate } from "./utils/update-check.js";
+import { checkForUpdate, formatUpdateInspection, inspectUpdate } from "./utils/update-check.js";
 import { inferContextLength } from "./providers/utils/context-length.js";
 import { resolveStartupMode } from "./cli/startup-mode.js";
 
@@ -106,6 +106,7 @@ Usage:
 Options:
   -h, --help          Show this help and exit
   --version           Show the version and exit
+  --check-update      Check GitHub release/version/assets and exit (--json supported)
   --setup             Run the setup wizard
   --safe-mode         Start without customizations
   --no-mcp            Start without MCP servers
@@ -124,6 +125,19 @@ async function main(): Promise<void> {
   if (args.includes("--version")) {
     const { getVersionString } = await import("./version.js");
     console.log(`localllm ${getVersionString()}`);
+    return;
+  }
+  if (args.includes("--check-update")) {
+    const result = await inspectUpdate();
+    const json = args.includes("--json");
+    const output = formatUpdateInspection(result, { json });
+    if (result.status === "blocked" || result.status === "unavailable") {
+      if (json) console.log(output);
+      else console.error(output);
+      process.exitCode = 1;
+    } else {
+      console.log(output);
+    }
     return;
   }
 
@@ -634,7 +648,7 @@ async function main(): Promise<void> {
     getOpsLogger().warn("retention", "log retention failed", { error: String(e) });
   }
 
-  // 更新通知 (PR-14)。対話セッションのみ・非同期・失敗は黙ってスキップ。
+  // 更新通知 (PR-14)。対話セッションのみ・非同期。通信不能は起動を妨げず、release不整合は隠さない。
   // await しない (起動をネットワーク待ちにしない)。
   if (process.stdout.isTTY && config.updateCheck?.enabled !== false) {
     void checkForUpdate().then((notice) => {

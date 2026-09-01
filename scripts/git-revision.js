@@ -32,3 +32,29 @@ export function getGitRevision({
   }
   return "unknown";
 }
+
+/**
+ * 配布物のbuild identity。tracked変更を含む場合はcommitだけを名乗らず`-dirty`を付ける。
+ * untrackedはbuild inputに含まれないことがあるため判定対象外とする。
+ */
+export function getGitBuildId({
+  cwd = process.cwd(),
+  candidates = gitExecutableCandidates(),
+  run = execFileSync,
+  exists = existsSync,
+} = {}) {
+  for (const executable of candidates) {
+    if (executable !== "git" && !exists(executable)) continue;
+    try {
+      const revision = run(executable, ["rev-parse", "--short", "HEAD"], { cwd, encoding: "utf8" }).trim();
+      const dirty = run(executable, ["status", "--porcelain", "--untracked-files=no"], {
+        cwd,
+        encoding: "utf8",
+      }).trim();
+      return dirty ? `${revision}-dirty` : revision;
+    } catch {
+      // PATH候補が無い、またはリポジトリ外なら次候補へ
+    }
+  }
+  return "unknown";
+}

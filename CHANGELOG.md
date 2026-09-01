@@ -1,8 +1,15 @@
 # Changelog
 
-このファイルはリリースごとの主要な変更を記録する。形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠し、バージョンは semver。リリース時は `package.json` / `src/version.ts` のバージョンを揃え、`v<version>` タグを打つ (docs/production-readiness.md PR-12)。
+このファイルはリリースごとの主要な変更を記録する。形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠する。公開版は `package.json` を単一ソースとする3桁SemVer、build identityはGit commitとして分離する。リリース前に `npm run validate:version -- --tag v<version>` を通す (docs/production-readiness.md PR-12)。
 
 ## [Unreleased]
+
+### リリース・バージョン整合 cycle 14 (2026-09-01)
+
+- 公開版を3桁SemVer、実体識別をcommit由来buildとして分離し、tracked変更を含むbuildへ`-dirty`を付け、`package.json`を単一ソース化
+- `validate:version`でmanifest/lock/CHANGELOG/release tagの不一致をCI検出
+- `--check-update [--json]`を追加し、通信不能・不正tag・release asset欠落を理由と復旧手順付きで明示診断
+- 公開`v0.4.1`に対して実体が`0.4.0`、CHANGELOG項目なし、asset 0件だった履歴不整合を記録し、公開履歴を改変せず現行版を整合
 
 ### 操作学習・機能比較 cycle 12 (2026-08-31)
 
@@ -77,6 +84,12 @@
 - HTTP 接続失敗・Web ツール失敗時に残るタイマーと AbortSignal listener を解放
 - ループ分析から内部・test sessionを除外し、promptをopt-in、home path・tool引数値をredact
 - 組み込み `product-quality-cycle` スキルを追加し、観点指定のレビュー・設計・実装・評価・記録を再実行可能化
+
+## [0.4.1] - 2026-08-13
+
+公開tag/releaseは存在したが、tag先の`package.json`と`src/version.ts`が`0.4.0`のまま、CHANGELOG項目と配布assetも無かった。履歴は書き換えず、2026-09-01にmanifest/表示を`0.4.1`へ整合し、以後のCI検査を追加した。
+
+- Qwen 3.6モデル対応
 
 ### 製品品質 (docs/production-readiness.md P3+P4)
 

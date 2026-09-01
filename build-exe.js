@@ -2,7 +2,7 @@ import * as esbuild from "esbuild";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { getGitRevision } from "./scripts/git-revision.js";
+import { getGitBuildId } from "./scripts/git-revision.js";
 
 const DIST_DIR = "dist";
 const APP_NAME = "localllm";
@@ -10,6 +10,11 @@ const EXE_NAME = process.platform === "win32" ? `${APP_NAME}.exe` : APP_NAME;
 const CJS_BUNDLE = path.join(DIST_DIR, `${APP_NAME}.cjs`);
 const SEA_CONFIG = path.join(DIST_DIR, "sea-config.json");
 const SEA_BLOB = path.join(DIST_DIR, "sea-prep.blob");
+const packageVersion = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
+
+if (typeof packageVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(packageVersion)) {
+  throw new Error(`package.json version must be MAJOR.MINOR.PATCH; observed ${JSON.stringify(packageVersion)}`);
+}
 
 // 注: かつて `node --build-sea` というモダンな単一コマンド経路が提案されていたが、
 // Node 24.13 までで実装されておらず常に bad option エラーになる。本実装は
@@ -30,10 +35,10 @@ fs.writeFileSync(
 
 // コミットハッシュを exe に埋め込む (src/version.ts の __APP_COMMIT__ を置換)。
 // 配布 exe の起動バナー・--version・クラッシュログから中身を特定するため (PR-12)。
-const appCommit = getGitRevision();
+const appCommit = getGitBuildId();
 
 async function build() {
-  console.log(`[1/5] Bundling application with esbuild... (commit ${appCommit})`);
+  console.log(`[1/5] Bundling application with esbuild... (version ${packageVersion}, build ${appCommit})`);
   await esbuild.build({
     entryPoints: ["src/index.ts"],
     bundle: true,
@@ -58,6 +63,7 @@ async function build() {
     ],
     define: {
       "import.meta.url": "import_meta_url",
+      __APP_VERSION__: JSON.stringify(packageVersion),
       __APP_COMMIT__: JSON.stringify(appCommit),
     },
     inject: [shimPath],

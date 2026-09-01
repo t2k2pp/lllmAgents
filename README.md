@@ -54,7 +54,7 @@ npm start
 ```
 $ npm start
 
-  LocalLLM Agent v0.3.0
+  LocalLLM Agent v0.4.1 (build abc1234)
   Model: qwen3.5:27b @ http://192.168.1.33:11434 (Ollama)
   Context: 130K tokens | Skills: 4
   CWD: /home/user/my-project
@@ -100,6 +100,22 @@ node dist/index.js --check-computer-use
 Windows、macOS、Linux X11に対応します。macOSは`cliclick`とAccessibility/Screen Recording権限、LinuxはX11、`xdotool`、ImageMagickが必要です。Waylandやdependency不足ではbrowser操作へ自動代替せず、復旧方法を表示して起動を停止します。
 
 全`computer_*`操作はlocal CLI限定で、autorunや永続許可の設定に関係なく呼出しごとに確認します。Discord/Slackからのhost desktop操作と全画面captureは提供しません。詳細は[Native Computer Use設計](docs/native-computer-use.md)を参照してください。
+
+### バージョンと更新診断
+
+公開版は`MAJOR.MINOR.PATCH`の3桁、同じ公開版内の実体はGit commit由来のbuildで識別します。tracked変更を含む開発buildはcommitだけを名乗らず`-dirty`を付けます。
+
+```bash
+localllm --version
+# localllm v0.4.1 (build abc1234)
+# 開発中: localllm v0.4.1 (build abc1234-dirty)
+
+# 最新release・tag・配布assetを明示確認（設定やsessionは作成しない）
+localllm --check-update
+localllm --check-update --json
+```
+
+`--check-update`は、ネットワーク不通、release tag不正、新版に配布assetが無い状態を成功扱いせず、理由と対処を表示してexit 1にします。自動置換は未署名・配布方式差を隠すため行いません。
 
 ### 操作学習（明示記録）
 

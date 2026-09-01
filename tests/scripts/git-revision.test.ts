@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { getGitRevision, gitExecutableCandidates } from "../../scripts/git-revision.js";
+import { getGitBuildId, getGitRevision, gitExecutableCandidates } from "../../scripts/git-revision.js";
 
 describe("git revision discovery", () => {
   it("WindowsではPATH外の標準Git配置も候補にする", () => {
@@ -38,5 +38,21 @@ describe("git revision discovery", () => {
         },
       }),
     ).toBe("unknown");
+  });
+
+  it("tracked変更を含むbuildはcommitだけを名乗らずdirtyを付ける", () => {
+    const run = vi.fn().mockReturnValueOnce("abc1234\n").mockReturnValueOnce(" M src/version.ts\n");
+    expect(getGitBuildId({ candidates: ["git"], exists: () => true, run })).toBe("abc1234-dirty");
+    expect(run).toHaveBeenNthCalledWith(
+      2,
+      "git",
+      ["status", "--porcelain", "--untracked-files=no"],
+      expect.objectContaining({ encoding: "utf8" }),
+    );
+  });
+
+  it("clean buildはcommitをそのまま使う", () => {
+    const run = vi.fn().mockReturnValueOnce("abc1234\n").mockReturnValueOnce("");
+    expect(getGitBuildId({ candidates: ["git"], exists: () => true, run })).toBe("abc1234");
   });
 });

@@ -1,6 +1,6 @@
 {
   "name": "localllm-agents",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Multi-Agent System for Local LLMs (Ollama, LM Studio, llama.cpp, vLLM)",
   "type": "module",
   "main": "dist/index.js",
@@ -22,6 +22,7 @@
     "setup:git-hooks": "node scripts/install-git-hooks.mjs",
     "sync:skills": "node scripts/sync-skills.js --verbose",
     "validate:skills": "node scripts/validate-skill.mjs --root src/skills/builtin --root .localllm/skills --root .claude/skills",
+    "validate:version": "node scripts/validate-version.mjs",
     "validate:package": "node scripts/validate-npm-package.mjs",
     "validate:commits": "node scripts/validate-commit-messages.mjs",
     "start": "tsx src/index.ts",

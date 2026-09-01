@@ -515,7 +515,8 @@ export interface Config {
   /**
    * 起動時の更新チェック (docs/production-readiness.md PR-14)。
    * GitHub の最新リリースタグを非同期で確認し、新しければ1行通知する。
-   * 対話セッション (TTY) のみ実行、失敗は黙ってスキップ。enabled: false でオフ (既定 on)
+   * 対話セッション (TTY) のみ実行。通信不能は起動を妨げず、release不整合は通知する。
+   * 明示診断は --check-update。enabled: false でbackground確認をオフ (既定 on)
    */
   updateCheck?: { enabled?: boolean };
   /**

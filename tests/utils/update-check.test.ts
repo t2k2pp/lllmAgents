@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { parseSemver, isNewerVersion, checkForUpdate } from "../../src/utils/update-check.js";
+import {
+  parseSemver,
+  isNewerVersion,
+  inspectUpdate,
+  checkForUpdate,
+  formatUpdateInspection,
+} from "../../src/utils/update-check.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -24,12 +30,16 @@ describe("parseSemver / isNewerVersion", () => {
 });
 
 describe("checkForUpdate", () => {
-  it("新しいリリースがあれば通知文を返す", async () => {
+  it("新しいリリースと配布物があれば通知文を返す", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ tag_name: "v9.9.9" }),
+        json: async () => ({
+          tag_name: "v9.9.9",
+          html_url: "https://example.invalid/releases/v9.9.9",
+          assets: [{ name: "localllm-win32-x64.zip", browser_download_url: "https://example.invalid/app.zip" }],
+        }),
       }),
     );
     const notice = await checkForUpdate("0.4.0");
@@ -42,17 +52,50 @@ describe("checkForUpdate", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ tag_name: "v0.4.0" }),
+        json: async () => ({
+          tag_name: "v0.4.0",
+          assets: [{ name: "localllm.zip", browser_download_url: "https://example.invalid/app.zip" }],
+        }),
       }),
     );
     expect(await checkForUpdate("0.4.0")).toBeNull();
   });
 
-  it("API エラー・ネットワーク失敗は黙って null", async () => {
+  it("background通知ではAPIエラー・ネットワーク失敗を通知に偽装しない", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }));
     expect(await checkForUpdate("0.4.0")).toBeNull();
 
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     expect(await checkForUpdate("0.4.0")).toBeNull();
+  });
+
+  it("公開版が新しくても配布物が無ければ明示診断で blocked にする", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          tag_name: "v0.4.1",
+          html_url: "https://example.invalid/releases/v0.4.1",
+          assets: [],
+        }),
+      }),
+    );
+
+    const result = await inspectUpdate("0.4.0");
+    expect(result.status).toBe("blocked");
+    expect(formatUpdateInspection(result)).toContain("配布物がありません");
+    expect(await checkForUpdate("0.4.0")).toContain("配布物がありません");
+  });
+
+  it("明示診断では到達不能を unavailable と理由付きで返す", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    const result = await inspectUpdate("0.4.1");
+    expect(result.status).toBe("unavailable");
+    expect(result.detail).toContain("offline");
+    expect(JSON.parse(formatUpdateInspection(result, { json: true }))).toMatchObject({
+      status: "unavailable",
+      currentVersion: "0.4.1",
+    });
   });
 });

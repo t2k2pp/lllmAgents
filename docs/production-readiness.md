@@ -161,13 +161,13 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 
 ### [PR-12] バージョン管理・変更履歴が無い 【優先度: 中】 — ✅ 実装済み (2026-07-04)
 
-> 実装: CHANGELOG.md 導入 (v0.3.0 以降の主要変更を初回ロールアップエントリで開始、以後 Unreleased に追記)。バージョンを 0.4.0 へ bump し `v0.4.0` タグを付与。コミットハッシュは `src/version.ts` の `getAppCommit()` で解決 (優先順: build-exe.js の esbuild define 埋め込み → git rev-parse (dev) → "unknown") し、起動バナー・新設の `--version` フラグ・クラッシュログ (PR-01) に表示。リリース手順: package.json / src/version.ts / CHANGELOG.md を更新 → コミット → `v<version>` タグ → push --tags。
+> 実装: CHANGELOG.md 導入。2026-09-01の再監査で公開`v0.4.1` tag/releaseに対しtag先manifestとアプリ表示が`0.4.0`、CHANGELOG項目なしと判明した。履歴は書き換えず現行manifestを`0.4.1`へ整合し、`package.json`を公開3桁SemVerの単一ソース、Git commitをbuild identityとして分離した。tracked変更を含む開発buildには`-dirty`を付ける。SEA buildは両方を埋め込み、`npm run validate:version`がmanifest/lock/CHANGELOGと指定tagをCIで検査する。
 
 **現状**: version は 0.3.0 のまま大量の機能が積まれている。CHANGELOG が無く、git タグも作業用 (pre-goal-seek-mode 等) のみでリリースタグが無い。配布した exe のバージョンから中身を特定できない。
 
 **改善方針**:
 1. CHANGELOG.md を導入し、以後の機能追加・修正を記録する (過去分は v0.3.0 時点からの主要変更をまとめて1エントリで開始)
-2. リリース時に semver でバージョンを上げ、`v0.x.y` タグを打つ。deploy ビルドの起動バナー・`--version` にコミットハッシュも埋め込む (build-exe.js で注入)
+2. リリース時に3桁SemVerで`package.json`を上げ、`npm run validate:version -- --tag v0.x.y`後にtagを打つ。表示は`v<version> (build <commit>[-dirty])`、deploy metadataにも両者を分離記録する
 3. 不具合報告に「バージョン+コミット」が必ず載る状態を作る (PR-01 のクラッシュログにも同情報を含める)
 
 ---
@@ -184,10 +184,10 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 
 ### [PR-14] 更新の仕組み・通知が無い 【優先度: 低】 — ✅ 実装済み (2026-07-04)
 
-> 実装: `src/utils/update-check.ts` (checkForUpdate)。起動時に GitHub releases/latest を非同期チェック (3秒タイムアウト・await しない) し、semver で新しければ1行通知。オフライン/API失敗/レート制限は黙ってスキップ。**TTY 対話セッションのみ実行** (パイプモード・CI・E2E では走らせない — 出力の決定性とテストごとの API 呼び出しを避ける)。`updateCheck.enabled: false` でオフ (既定 on)。テスト: `tests/utils/update-check.test.ts`。
+> 実装: `src/utils/update-check.ts`。TTY起動時の非同期通知に加え、副作用なしの`--check-update [--json]`を追加。明示診断は通信/API失敗、tag不正、新版releaseのasset 0件を理由・復旧手順つきでexit 1にする。background確認では通信不能を起動障害にしない一方、更新先に配布物が無い状態は隠さない。`updateCheck.enabled: false`はbackground確認だけを無効化する。
 >
 > **リリース手順 (GitHub Releases)**: exe ビルドはユーザーが行う ([[feedback_user_does_deploy_build]])。
-> 1. package.json / src/version.ts / CHANGELOG.md のバージョンを揃えて更新しコミット
+> 1. package.json / package-lock.json / CHANGELOG.md を更新し、`npm run validate:version -- --tag v<version>`を通してコミット
 > 2. `git tag v<version> && git push --tags`
 > 3. `npm run build:deploy` で deploy/ を組み立て
 > 4. `gh release create v<version> deploy/localllm.exe --title "v<version>" --notes "CHANGELOG.md の該当セクション"`
@@ -195,7 +195,7 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 
 **現状**: deploy フォルダの exe は手動ビルド・手動差し替え。利用者が古いバージョンを使い続けても気づけない。
 
-**改善方針**: 自動更新は過剰。まずは (1) GitHub Releases にビルド成果物を載せる、(2) 起動時に GitHub API で最新リリースタグを非同期チェックし、新しければ1行通知する (オフライン/失敗は黙ってスキップ、チェック自体は設定でオフ可能) の2段で十分。
+**改善方針**: 未署名binary・install方式差・asset checksum未整備のまま自動置換しない。(1) GitHub Releasesへ検証済み成果物を載せる、(2) background通知、(3) 明示診断で更新可否とrelease不整合を可視化する。自動更新は署名・atomic rollbackを設計できた時点で別途判断する。
 
 ---
 
