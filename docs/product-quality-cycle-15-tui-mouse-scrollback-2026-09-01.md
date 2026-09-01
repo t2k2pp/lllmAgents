@@ -39,7 +39,7 @@
 - E2E: non-TTY REPL 7/7成功
 - distribution: build、skill validation、version policy、npm package validation（540 files / 9.3 MiB）、production audit（0 vulnerabilities）成功
 - 実PTY: Windowsローカルには本リポジトリのPTY driverが無いため、Linux `script` / macOS `expect` のCIでwheel-up → scroll案内 → wheel-down → 後続入力を検証する
-- push / CI: 未実施。最新push SHAの全依存job完了後に本記録を閉じる
+- push / CI: 実装commit `99af760`を`origin/main`へpush。[CI run 33517216735](https://github.com/t2k2pp/lllmAgents/actions/runs/33517216735)でcommit policy、Ubuntu、macOS、Windows、依存するWindows deploy / exe smokeの全5 jobがsuccess。Linux/macOSの実PTY mouse scenarioも同runで成功した
 
 ## 境界
 
