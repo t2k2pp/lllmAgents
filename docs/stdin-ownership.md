@@ -129,7 +129,8 @@ stdinConsumers === 0                // 生 stdin の担い手がいない
 ### 3.5 型ずれ入力 (type-ahead) の扱い
 
 raw を保持し続けるので、 応答表示中に打った文字は **cooked バッファに溜まらず、
-そのままアプリに届く**。 既存の type-ahead キュー (`/queue`) がそれを受ける。
+そのままアプリに届く**。 通常メッセージはforeground steering FIFOが受け、次のLLM reply／tool完了境界で
+同じturnへ渡す。slash commandはturn後FIFOが受け、`/queue`で確認・一括破棄できる。
 
 つまりこの変更は「打鍵が消える / 遅れて出る」 のを直すだけでなく、
 **打鍵が正しく先読みキューに入るようになる**。 黙って捨てられる経路が減る。

@@ -4214,6 +4214,17 @@ export class REPL {
     } catch (e) {
       console.error(chalk.red(`\n  Error: ${e instanceof Error ? e.message : String(e)}\n`));
     } finally {
+      // abort/errorが安全な反映境界より先に終了した場合も、受理済み入力を失わない。
+      // 次の通常turn用FIFOへ移し、同一turnへ反映できなかった事実を明示する。
+      const unappliedSteering = this.agent.takePendingSteering();
+      if (unappliedSteering.length > 0) {
+        this.pendingInputs.push(...unappliedSteering);
+        console.log(
+          chalk.dim(
+            `  ⏳ 追加入力 ${unappliedSteering.length} 件は現在の処理が終了したため、次のturnで順次実行します。`,
+          ),
+        );
+      }
       stopTypeAhead();
       interruptWatcher.stop();
       progressIndicator.end();
@@ -4308,12 +4319,38 @@ export class REPL {
           const text = Buffer.from(bytes).toString("utf8").trim();
           bytes = [];
           if (text) {
-            this.pendingInputs.push(text);
-            process.stdout.write(
-              chalk.dim(
-                `\n  ⏳ キューに追加しました (待ち ${this.pendingInputs.length} 件)。 現在の処理完了後に順次実行します。\n`,
-              ),
-            );
+            if (text.startsWith("/")) {
+              // slash commandはモデル入力ではないため、従来どおりturn終了後に実行する。
+              this.pendingInputs.push(text);
+              process.stdout.write(
+                chalk.dim(
+                  `\n  ⏳ コマンドをキューに追加しました (待ち ${this.pendingInputs.length} 件)。 現在の処理完了後に実行します。\n`,
+                ),
+              );
+            } else {
+              const result = this.agent.queueSteering(text);
+              if (result.status === "queued") {
+                process.stdout.write(
+                  chalk.dim(
+                    `\n  ↪ 追加入力を受け付けました (反映待ち ${result.pending} 件)。 次の応答/tool完了境界で現在の処理へ反映します。\n`,
+                  ),
+                );
+              } else if (result.status === "not_running") {
+                this.pendingInputs.push(text);
+                process.stdout.write(
+                  chalk.dim(
+                    `\n  ⏳ キューに追加しました (待ち ${this.pendingInputs.length} 件)。 現在の処理完了後に順次実行します。\n`,
+                  ),
+                );
+              } else {
+                const reason = {
+                  invalid_message: "空の追加入力です",
+                  message_too_long: "追加入力が4000文字を超えています",
+                  queue_full: "追加入力キューが満杯です (最大20件)",
+                }[result.status];
+                process.stdout.write(chalk.red(`\n  追加入力を受け付けられません: ${reason}\n`));
+              }
+            }
           }
           continue;
         }

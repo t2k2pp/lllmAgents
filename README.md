@@ -20,6 +20,7 @@
 - **Native Computer Use**: 明示opt-inしたlocal CLIから、選択したOS windowだけをcapture・click・入力（毎回確認、remote操作は禁止）
 - **操作学習**: 成功したbrowser/computer操作を、秘密値を除いた手動起動skillとしてprojectへ保存
 - **マルチライン入力**: Shift+Enter / Ctrl+J で改行、@path でファイル参照
+- **処理中の追加入力**: 応答中に文字を入力して Enter すると、次の応答／tool完了境界で同じturnへ反映
 - **インタラクティブUI**: `/`コマンドと`@`ファイルパスの補完ドロップダウン
 - **スキルベースワークフロー**: 開発・レビュー・調査等のワークフローをスキルとして定義、LLMが必要に応じて選択
 - **ローカルplugin bundle**: 明示したbundleからskills・agents・hooks・MCPを一括ロード（Codex / Claude manifestの最小互換）
@@ -78,6 +79,7 @@ $ npm start
 | ` ``` ` | マルチライン入力モード開始/終了（明示的な代替入力） |
 | `@path` | ファイル/フォルダの内容をプロンプトに添付 |
 | `/command` | スラッシュコマンド（補完ドロップダウン付き） |
+| 応答中に文字 + `Enter` | 通常メッセージは次の応答／tool完了境界で現在のturnへ反映。`/command` はturn完了後に実行 |
 | マウスホイール | Alternate Screen TUIの過去ログを上下する（LLM・ツール実行中も有効） |
 | `PgUp` / `PgDn` | Alternate Screen TUIの過去ログをページ移動する（LLM・ツール実行中も有効） |
 | `Ctrl+C` | 現在の操作をキャンセル |
@@ -153,7 +155,7 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/quit` `/exit` | 終了 |
 | `/clear` | 会話履歴クリア（現在の Room） |
 | `/room` | 会話 Room (A/B/C) の表示・移動・再開。`/room A\|B\|C` で移動、`/room resume [A\|B\|C]` で再開、`/room autoresume <on\|off> [A\|B\|C]`。既定 REPL=A / Discord=B / Slack=C（docs/room-model-design.md） |
-| `/queue` | 受信順キューの待ち状況を表示（`/queue clear` で REPL の type-ahead 待機入力を破棄） |
+| `/queue` | 受信順キューの待ち状況を表示（`/queue clear` でturn後に実行するtype-ahead command等を破棄） |
 | `/context` | コンテキスト使用状況の内訳（トークン数・進捗バー）。`/context <system\|memory\|skills\|tools\|messages>` で各カテゴリの中身をダンプ。`/context strategy [off\|auto\|aggressive]` で区切り整理のモード表示・切替（既定 auto、詳細: docs/context-strategy.md） |
 | `/compact` | コンテキストを手動圧縮 |
 | `/forget` | コンテキストを忘却で整理（要約せず捨てる）。`/forget dry` で何が消えるか事前確認、`/forget mode <compress\|forget\|hybrid>` で自動縮約の手段を切替（既定 hybrid）、`/forget status` で実績確認。詳細: docs/context-forgetting.md |

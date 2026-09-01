@@ -3,8 +3,10 @@ const EXPECT_SCROLL_MARKER = "__PTY_SCROLL_SEEN__";
 const EXPECT_IME_MARKER = "__PTY_IME_SEEN__";
 const EXPECT_PREVIEW_MARKER = "__PTY_PREVIEW_SEEN__";
 const EXPECT_PREVIEW_SUBMITTED_MARKER = "__PTY_PREVIEW_SUBMITTED__";
+const EXPECT_STEER_MARKER = "__PTY_STEER_SENT__";
 const RESPONSE_PREVIEW_TEXT = "PV42";
 const RESPONSE_FINAL_TEXT = "FINAL99";
+const RESPONSE_STEER_TEXT = "STEER_OK";
 const SCROLL_CAPABLE_TERM = "xterm-256color";
 
 /**
@@ -53,10 +55,13 @@ expect {
     exit 125
   }
 }
-puts "${EXPECT_QUIT_MARKER}"
-send -- "/quit\\r"
+send -- "STEER_REQUEST\\r"
+puts "${EXPECT_STEER_MARKER}"
 set timeout 30
 expect -re {${RESPONSE_FINAL_TEXT}}
+expect -re {${RESPONSE_STEER_TEXT}}
+puts "${EXPECT_QUIT_MARKER}"
+send -- "/quit\\r"
 expect {
   timeout {
     puts stderr "__PTY_TIMEOUT__"
@@ -83,6 +88,8 @@ export function ptyDriver(platform, { node, tsx, entry }) {
       previewSeenMarker: EXPECT_PREVIEW_MARKER,
       previewSubmittedMarker: EXPECT_PREVIEW_SUBMITTED_MARKER,
       finalMarker: RESPONSE_FINAL_TEXT,
+      steerMarker: RESPONSE_STEER_TEXT,
+      steerSentMarker: EXPECT_STEER_MARKER,
     };
   }
 
@@ -101,5 +108,7 @@ export function ptyDriver(platform, { node, tsx, entry }) {
     previewSeenMarker: EXPECT_PREVIEW_MARKER,
     previewSubmittedMarker: EXPECT_PREVIEW_SUBMITTED_MARKER,
     finalMarker: RESPONSE_FINAL_TEXT,
+    steerMarker: RESPONSE_STEER_TEXT,
+    steerSentMarker: EXPECT_STEER_MARKER,
   };
 }

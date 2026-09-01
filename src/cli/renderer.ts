@@ -99,7 +99,7 @@ export function displayHelp(skills?: SkillSummary[], registryEntries?: RegistryH
     ${chalk.cyan("/fork [id]")}      会話を新しいセッションへ分岐 (元セッションは不変)
     ${chalk.cyan("/continue")}       最新セッションを復元
     ${chalk.cyan("/room")}           会話 Room (A/B/C) の表示・移動・再開 (REPL=A/Discord=B/Slack=C)
-    ${chalk.cyan("/queue")}          受信順キューの待ち状況 (/queue clear で type-ahead 破棄)
+    ${chalk.cyan("/queue")}          待ち状況 (処理中に文字+Enterで同じturnへ追加入力、commandはturn後)
     ${chalk.cyan("/memory")}         自動メモリ表示
     ${chalk.cyan("/remember <text>")} メモリに追記
     ${chalk.cyan("/plan")}           プランモードに入る

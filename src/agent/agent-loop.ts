@@ -170,6 +170,14 @@ function truncateLargeToolResult(toolName: string, content: string, threshold: n
   );
 }
 
+export const MAX_STEERING_MESSAGE_CHARS = 4000;
+export const MAX_PENDING_STEERING_MESSAGES = 20;
+
+export type QueueSteeringResult = {
+  status: "queued" | "not_running" | "invalid_message" | "message_too_long" | "queue_full";
+  pending: number;
+};
+
 export class AgentLoop {
   private history: MessageHistory;
   private contextManager: ContextManager;
@@ -178,6 +186,8 @@ export class AgentLoop {
   private planManager: PlanManager | null = null;
   /** Discord Interaction Server などから並行処理を避けるためのフラグ */
   public isProcessing = false;
+  /** CLIで現在のrunへ反映する追加入力。LLM reply/tool完了の安全な境界でFIFO注入する。 */
+  private pendingSteeringMessages: string[] = [];
   /**
    * イベント境界 (docs/agent-events-design.md)。 Slack/Discord 等のチャネルアダプタが
    * 購読する。 Phase 1 では CLI 表示は従来どおりインラインで行い、 同じ地点から併発する。
@@ -521,6 +531,37 @@ export class AgentLoop {
     return this._aborted;
   }
 
+  /**
+   * 実行中の通常turnへ追加入力を予約する。生成やtoolを強制中断せず、次の安全な境界で反映する。
+   * queue上限を超えた入力を別モードへ黙って落とさないため、呼出元が表示できる状態を返す。
+   */
+  queueSteering(message: string): QueueSteeringResult {
+    // 同じAgentLoopをDiscord/Slackの別Roomも共有する。REPLが自分のRoomRunQueue順番を
+    // 待っている間に別surfaceへ誤注入しないよう、active CLI runだけを対象にする。
+    if (!this.isProcessing || this.currentSource !== "cli") {
+      return { status: "not_running", pending: this.pendingSteeringMessages.length };
+    }
+    const normalized = message.trim();
+    if (!normalized) return { status: "invalid_message", pending: this.pendingSteeringMessages.length };
+    if (normalized.length > MAX_STEERING_MESSAGE_CHARS) {
+      return { status: "message_too_long", pending: this.pendingSteeringMessages.length };
+    }
+    if (this.pendingSteeringMessages.length >= MAX_PENDING_STEERING_MESSAGES) {
+      return { status: "queue_full", pending: this.pendingSteeringMessages.length };
+    }
+    this.pendingSteeringMessages.push(normalized);
+    return { status: "queued", pending: this.pendingSteeringMessages.length };
+  }
+
+  getPendingSteeringCount(): number {
+    return this.pendingSteeringMessages.length;
+  }
+
+  /** abort/errorで境界へ届かなかった入力を、REPLが次turn用FIFOへ救出する。 */
+  takePendingSteering(): string[] {
+    return this.pendingSteeringMessages.splice(0);
+  }
+
   async run(userMessage: string | ContentPart[], options?: { source?: RequestSource }): Promise<void> {
     this.currentSource = options?.source ?? "cli";
     this.isProcessing = true;
@@ -574,13 +615,26 @@ export class AgentLoop {
         this.chatLogger.logUser(userText);
       }
       // ユーザーメッセージのテキスト部分を抽出（タスク判定用）
-      const userMessageText =
+      let userMessageText =
         typeof userMessage === "string"
           ? userMessage
           : (userMessage as ContentPart[])
               .filter((p): p is { type: "text"; text: string } => p.type === "text")
               .map((p) => p.text)
               .join(" ");
+      const applyPendingSteering = (boundary: "reply" | "tool"): number => {
+        const messages = this.takePendingSteering();
+        if (messages.length === 0) return 0;
+        for (const message of messages) {
+          this.history.addUserMessage(message);
+          this.chatLogger?.logUser(message);
+        }
+        userMessageText = [userMessageText, ...messages].join("\n");
+        const boundaryLabel = boundary === "tool" ? "tool完了" : "応答";
+        console.log(chalk.dim(`  ▶ 追加入力 ${messages.length} 件を${boundaryLabel}境界で現在の処理へ反映します。`));
+        this.notice("info", `追加入力 ${messages.length} 件を${boundaryLabel}境界で反映`);
+        return messages.length;
+      };
       // Phase E-3: タスク複雑度を分類して、 不一致なら model 推奨を 1 行ログ。
       // 自動切替はしない (ユーザの明示操作 = /model を尊重)。
       try {
@@ -1262,12 +1316,29 @@ export class AgentLoop {
           }
         }
 
+        // 通常replyが終わった時点で追加入力があれば、別turnへ送らず現在のrunを継続する。
+        // 途中応答はユーザーが既に見ている可能性があるためdisplayedとして保全する。
+        if (toolCalls.length === 0 && this.getPendingSteeringCount() > 0) {
+          flushAssistantText(false);
+          if (textContent.trim() || thinkingContent.trim()) {
+            this.history.addAssistantMessage(textContent, undefined, {
+              ephemeral: true,
+              thinking: thinkingContent,
+              displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
+            });
+          }
+          applyPendingSteering("reply");
+          continue;
+        }
+
         // ツール呼び出しを伴うテキストもユーザーへの言葉として白で表示する (v2: 構造ベース)。
         // final は構造で決める: response_complete を含む = この応答で span が終わる予定 = 最終応答。
         // ツールを伴わないテキストはここでは出さず、 下流のディスポジション地点で flush する
         // (span 継続=final:false / span 終了=final:true の判定がそこで確定するため)。
         if (toolCalls.length > 0) {
-          flushAssistantText(toolCalls.some((tc) => tc.function.name === "response_complete"));
+          flushAssistantText(
+            toolCalls.some((tc) => tc.function.name === "response_complete") && this.getPendingSteeringCount() === 0,
+          );
         }
 
         // 2026-05-16: Axis (2a) thinking-text コヒーレンス検査。
@@ -1403,6 +1474,10 @@ export class AgentLoop {
             }
           }
 
+          // Claude Codeと同じく、実行中に届いた通常メッセージは現在のtool群が完了して
+          // tool resultが履歴へ入った直後に同じrunへ渡す。古いresponse_completeより優先する。
+          if (applyPendingSteering("tool") > 0) continue;
+
           // response_complete が呼ばれたらターン終了（自己点検ループから明示的に抜ける）
           const rcCall = toolCalls.find((tc) => tc.function.name === "response_complete");
           if (rcCall) {
@@ -1486,6 +1561,8 @@ export class AgentLoop {
 
             // span 境界: in-turn の harness 注入 (self-check / nudge / 空応答 placeholder 等) を破棄。
             // 過去 span のノイズを次 span に持ち込まない。 docs/ephemeral-context-design.md 参照。
+            // progress judge中に追加入力が届いた場合も完了で取りこぼさず、同じrunを継続する。
+            if (applyPendingSteering("reply") > 0) continue;
             this.purgeEphemeralAtSpanEnd("response_complete");
             return;
           }
@@ -1868,6 +1945,17 @@ export class AgentLoop {
         }
 
         // ここに到達 = ツールも自己点検も無く turn が終わる = span 終了 = final。
+        // intent/evaluator等の非同期gate中に届いた入力も、final確定の直前に拾う。
+        if (this.getPendingSteeringCount() > 0) {
+          flushAssistantText(false);
+          this.history.addAssistantMessage(textContent, undefined, {
+            ephemeral: true,
+            thinking: thinkingContent,
+            displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
+          });
+          applyPendingSteering("reply");
+          continue;
+        }
         flushAssistantText(true);
         this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
         this.purgeEphemeralAtSpanEnd("final_text_response");

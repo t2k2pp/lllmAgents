@@ -1,7 +1,7 @@
 # Room モデル設計書
 
 ## 0. ステータス
-- 状態: **Phase 1 / 1.5 / 2 実装済み + レビュー指摘修正済み（TTY 手動検証は残）**
+- 状態: **Phase 1 / 1.5 / 2 実装済み + レビュー指摘修正済み + foreground同一turn steering実装済み**
 - 起票: 2026-06-13 / 実装: 2026-06-14 / レビュー反映: 2026-06-14（`docs/room-model-review.md`）
 - 主な実装: `src/agent/room-types.ts` `room-manager.ts` `room-run-queue.ts` `channel-commands.ts`、
   `session-manager.ts`(room/mode タグ)、`config/types.ts`(roomConfig)、Discord/Slack/REPL 配線
@@ -99,8 +99,9 @@ interface RoomConfig {
 - **受信順グローバル FIFO**: 全サーフェス（REPL/Discord/Slack）の入力を、受信（イベント受付）タイミングの順で 1 本のキューに積む。各エントリは `{ surface, roomId, message, replyHandle }`。単一ワーカーが FIFO で取り出し、`roomId` の `ConversationState` をアクティブ化 → run → 保存 → 応答。ロック不要。既存 `ChannelRunQueue`/`waitForAgentIdle` はこのキューへ統合。
 - **処理中の追加入力**:
   - Discord/Slack: 既にイベント駆動でキューに積まれる（現状動作を統一キューへ移行するだけ）。
-  - REPL: 現状は run 中に入力できない（入力ループが processInput を await）。**run と入力受付を分離**し、run 中に打ったテキストはキューへ積む（Claude Code 同様）。表示は「キュー投入」をフィードバック。ESC/Ctrl+C の既存挙動は維持。
-  - キュー投入時のフィードバック（「N 番目に追加」）と、キュー内容の確認/取消は段階的に（最小は投入のみ）。
+  - REPL: `processInput` のawait中もraw stdinを捕捉する。通常メッセージは最大20件・各4000文字のFIFOへ積み、LLM reply完了または現在のtool群完了直後に**同じ `AgentLoop.run()`** のuser messageとして注入する。slash commandはモデル入力にせずturn完了後に実行する。
+  - 受理時に反映待ち件数、反映時に境界種別を表示する。queue満杯・長過ぎる入力は理由を表示して拒否し、別モードへ黙って落とさない。abort/errorで境界へ届かなかった受理済み入力はturn後FIFOへ救出する。
+  - ESC/Ctrl+Cのhard interruptは維持する。入力欄での待機項目一覧・個別編集は将来拡張であり、`/queue clear`はturn後FIFOの一括破棄だけを提供する。
 
 ## 12. 段階実装計画（初回スコープ = コア）
 - **Phase 1（今回・コア）**: RoomManager + 3 Room 固定 + サーフェス既定バインド + ディスク永続化（ターン毎保存）+ 受信順グローバル FIFO キュー（§13、既存 ChannelRunQueue を統合）+ `/room`（表示・移動・手動 resume）+ B/C 自動 Resume + セッションへの Room タグ。`/clear`/`/status` の Room 対応。

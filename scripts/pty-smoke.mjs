@@ -45,38 +45,68 @@ const mockServer = http.createServer((req, res) => {
     res.flushHeaders();
     res.socket?.setNoDelay(true);
     const send = (body) => res.write(`data: ${JSON.stringify(body)}\n\n`);
-    // previewを先に送り、最終本文を意図的に遅らせる。buffered modeが先頭本文を
-    // live表示できなければ、PTY側の2秒timeoutがfinal到着前に失敗する。
-    send({ choices: [{ index: 0, delta: { content: "PV42 応答を準備中" }, finish_reason: null }] });
-    firstChunkWrittenAt = Date.now();
-    setTimeout(() => {
-      finalChunkSentAt = Date.now();
-      send({ choices: [{ index: 0, delta: { content: " FINAL99" }, finish_reason: null }] });
-      send({
-        choices: [
-          {
-            index: 0,
-            delta: {
-              tool_calls: [
-                {
-                  index: 0,
-                  id: "call_pty_preview",
-                  type: "function",
-                  function: { name: "response_complete", arguments: '{"summary":"PTY preview complete"}' },
-                },
-              ],
+    if (postRequestCount === 1) {
+      // previewを先に送り、最終本文を意図的に遅らせる。buffered modeが先頭本文を
+      // live表示できなければ、PTY側の2秒timeoutがfinal到着前に失敗する。
+      send({ choices: [{ index: 0, delta: { content: "PV42 応答を準備中" }, finish_reason: null }] });
+      firstChunkWrittenAt = Date.now();
+      setTimeout(() => {
+        finalChunkSentAt = Date.now();
+        send({ choices: [{ index: 0, delta: { content: " FINAL99" }, finish_reason: null }] });
+        send({
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_pty_preview",
+                    type: "function",
+                    function: { name: "response_complete", arguments: '{"summary":"PTY preview complete"}' },
+                  },
+                ],
+              },
+              finish_reason: null,
             },
-            finish_reason: null,
+          ],
+        });
+        send({
+          choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        });
+        res.write("data: [DONE]\n\n");
+        res.end();
+      }, previewHoldMs).unref?.();
+      return;
+    }
+
+    // 通常type-aheadが同一runへsteerされなければ、この2回目の要求には到達しない。
+    send({ choices: [{ index: 0, delta: { content: "STEER_OK 同一ターンの追加入力を反映" }, finish_reason: null }] });
+    send({
+      choices: [
+        {
+          index: 0,
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: "call_pty_steer",
+                type: "function",
+                function: { name: "response_complete", arguments: '{"summary":"PTY steer complete"}' },
+              },
+            ],
           },
-        ],
-      });
-      send({
-        choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
-        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-      });
-      res.write("data: [DONE]\n\n");
-      res.end();
-    }, previewHoldMs).unref?.();
+          finish_reason: null,
+        },
+      ],
+    });
+    send({
+      choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+      usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 },
+    });
+    res.write("data: [DONE]\n\n");
+    res.end();
   });
   // listenerを先に登録する。短いbodyではresume直後にendへ到達し得るため、逆順だと
   // mockがrequestを受けてもSSEを1byteも返さないraceになる。
@@ -142,6 +172,10 @@ try {
     let thinkingSpinnerStopped = false;
     let previewFilteredChars = null;
     let sentQuit = false;
+    let sentSteer = false;
+    let steerAcceptedSeen = false;
+    let steerAppliedSeen = false;
+    let steerResponseSeen = false;
     let finalSeen = false;
     let quitQueuedSeen = false;
     let pendingQuitSeen = false;
@@ -184,7 +218,11 @@ try {
       if (!sentQuit && output.includes(driver.quitMarker)) {
         sentQuit = true;
       }
+      if (!sentSteer && output.includes(driver.steerSentMarker)) sentSteer = true;
       if (!finalSeen && output.includes(driver.finalMarker)) finalSeen = true;
+      if (!steerAcceptedSeen && output.includes("追加入力を受け付けました")) steerAcceptedSeen = true;
+      if (!steerAppliedSeen && output.includes("現在の処理へ反映します")) steerAppliedSeen = true;
+      if (!steerResponseSeen && output.includes(driver.steerMarker)) steerResponseSeen = true;
       if (!quitQueuedSeen && output.includes("キューに追加しました")) quitQueuedSeen = true;
       if (!pendingQuitSeen && output.includes("追加入力を処理")) pendingQuitSeen = true;
       if (!goodbyeSeen && /Goodbye!/i.test(output)) goodbyeSeen = true;
@@ -221,11 +259,15 @@ try {
         sentPreview = true;
         child.stdin.write(submitPtyLine("PREVIEW_REQUEST"));
       }
-      if (driver.parentSubmits && sentPreview && previewSeen && !sentQuit) {
-        sentQuit = true;
+      if (driver.parentSubmits && sentPreview && previewSeen && !sentSteer) {
+        sentSteer = true;
         // preview表示時点ならrun中のtype-aheadが所有権を持っている。
-        // 終了要求をキューへ積み、最終本文が届いてから安全に処理されることまで検証する。
+        // 通常メッセージを送り、最初のresponse_completeより優先して同じrunへ反映させる。
         // PTYのLFはinteractive-inputでCtrl+J（改行挿入）になる。CRでEnter確定する。
+        child.stdin.write(submitPtyLine("STEER_REQUEST"));
+      }
+      if (driver.parentSubmits && steerResponseSeen && !sentQuit) {
+        sentQuit = true;
         child.stdin.write(submitPtyLine("/quit"));
       }
     };
@@ -246,6 +288,10 @@ try {
         signal,
         output,
         sentQuit,
+        sentSteer,
+        steerAcceptedSeen,
+        steerAppliedSeen,
+        steerResponseSeen,
         finalSeen,
         quitQueuedSeen,
         pendingQuitSeen,
@@ -275,6 +321,11 @@ try {
     result.code !== 0 ||
     result.timedOut ||
     !result.sentQuit ||
+    !result.sentSteer ||
+    !result.steerAcceptedSeen ||
+    !result.steerAppliedSeen ||
+    !result.steerResponseSeen ||
+    result.postRequestCount < 2 ||
     !result.scrollSeen ||
     !result.japaneseSeen ||
     !result.previewSeen ||
@@ -285,6 +336,8 @@ try {
     const failure =
       `PTY smoke failed (exit ${result.code}, signal ${result.signal ?? "none"}, ` +
       `quitSent ${result.sentQuit}, scrollSeen ${result.scrollSeen}, ` +
+      `steerSent ${result.sentSteer}, steerAccepted ${result.steerAcceptedSeen}, ` +
+      `steerApplied ${result.steerAppliedSeen}, steerResponse ${result.steerResponseSeen}, ` +
       `japaneseSeen ${result.japaneseSeen}, previewSubmitted ${result.previewSubmitted}, ` +
       `previewSeen ${result.previewSeen}, ` +
       `previewBeforeFinal ${result.previewSeenBeforeFinal}, requestSeen ${result.requestSeen}, ` +

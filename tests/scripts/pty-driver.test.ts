@@ -20,6 +20,7 @@ describe("PTY smoke driver", () => {
     expect(driver.previewMarker).toBe("PV42");
     expect(driver.previewSubmittedMarker).toBe("__PTY_PREVIEW_SUBMITTED__");
     expect(driver.finalMarker).toBe("FINAL99");
+    expect(driver.steerMarker).toBe("STEER_OK");
     expect(driver.env.TERM).toBe("xterm-256color");
   });
 
@@ -40,12 +41,18 @@ describe("PTY smoke driver", () => {
     expect(driver.args.join("\n")).toContain("__PTY_PREVIEW_TIMEOUT__");
     expect(driver.args.join("\n")).toContain("PV42");
     expect(driver.args.join("\n")).toContain("FINAL99");
+    expect(driver.args.join("\n")).toContain('send -- "STEER_REQUEST\\r"');
+    expect(driver.args.join("\n")).toContain("STEER_OK");
     expect(driver.args.join("\n")).toContain('send -- "/quit\\r"');
     const previewAt = driver.args.join("\n").lastIndexOf("expect -re {PV42}");
     const finalAt = driver.args.join("\n").lastIndexOf("expect -re {FINAL99}");
+    const steerAt = driver.args.join("\n").lastIndexOf('send -- "STEER_REQUEST\\r"');
+    const steerResponseAt = driver.args.join("\n").lastIndexOf("expect -re {STEER_OK}");
     const quitAt = driver.args.join("\n").lastIndexOf('send -- "/quit\\r"');
-    expect(quitAt).toBeGreaterThan(previewAt);
-    expect(finalAt).toBeGreaterThan(quitAt);
+    expect(steerAt).toBeGreaterThan(previewAt);
+    expect(finalAt).toBeGreaterThan(steerAt);
+    expect(steerResponseAt).toBeGreaterThan(finalAt);
+    expect(quitAt).toBeGreaterThan(steerResponseAt);
     expect(driver.env).toEqual({
       PTY_NODE: command.node,
       PTY_TSX: command.tsx,
