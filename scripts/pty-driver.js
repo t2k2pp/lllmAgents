@@ -55,6 +55,7 @@ expect {
 }
 set timeout 30
 expect -re {${RESPONSE_FINAL_TEXT}}
+expect -re {> }
 puts "${EXPECT_QUIT_MARKER}"
 send -- "/quit\\r"
 expect {

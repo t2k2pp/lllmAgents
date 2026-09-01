@@ -207,10 +207,17 @@ try {
         sentPreview = true;
         child.stdin.write(submitPtyLine("PREVIEW_REQUEST"));
       }
-      if (driver.parentSubmits && sentPreview && previewSeen && !sentQuit && output.includes(driver.finalMarker)) {
-        sentQuit = true;
-        // PTYのLFはinteractive-inputでCtrl+J（改行挿入）になる。CRでEnter確定する。
-        child.stdin.write(submitPtyLine("/quit"));
+      if (driver.parentSubmits && sentPreview && previewSeen && !sentQuit) {
+        const finalMarkerAt = output.lastIndexOf(driver.finalMarker);
+        const promptReturned =
+          finalMarkerAt >= 0 && output.slice(finalMarkerAt + driver.finalMarker.length).includes("> ");
+        if (promptReturned) {
+          sentQuit = true;
+          // 最終本文の表示直後には、run中のtype-aheadが閉じてから次の入力欄が
+          // 所有権を取るまで短い隙間がある。実ユーザーと同じく入力欄復帰後に送る。
+          // PTYのLFはinteractive-inputでCtrl+J（改行挿入）になる。CRでEnter確定する。
+          child.stdin.write(submitPtyLine("/quit"));
+        }
       }
     };
     const timer = setTimeout(() => {
