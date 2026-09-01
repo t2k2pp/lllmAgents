@@ -853,6 +853,12 @@ export class AgentLoop {
             };
 
             for await (const chunk of abortableIterator(gen, () => this._aborted)) {
+              if (process.env.LLM_DEBUG_HTTP && chunk.type === "text") {
+                console.error(
+                  `[LLM_DEBUG_UI] agent-loop text-chunk chars=${chunk.text?.length ?? 0} ` +
+                    `streamingDisplay=${this.streamingDisplay}`,
+                );
+              }
               if (this._aborted) {
                 stopWaitingSpinner();
                 stopThinkingSpinner();

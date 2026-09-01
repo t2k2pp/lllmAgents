@@ -69,6 +69,9 @@ export class VLLMProvider extends OpenAICompatProvider {
           if (!chunk.text.trimStart().startsWith("<")) {
             thinkFilterDone = true;
             recentText += chunk.text;
+            if (process.env.LLM_DEBUG_HTTP) {
+              console.error(`[LLM_DEBUG_HTTP] VLLM think-filter text chars=${chunk.text.length}`);
+            }
             yield chunk;
             continue;
           }

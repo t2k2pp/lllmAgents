@@ -135,6 +135,9 @@ try {
     let previewSeenBeforeFinal = false;
     let previewChunkSeen = false;
     let providerTextChunkSeen = false;
+    let providerFilteredChunkSeen = false;
+    let agentTextChunkSeen = false;
+    let agentStreamingDisplay = null;
     let sentQuit = false;
     let timedOut = false;
     const capture = (chunk) => {
@@ -153,6 +156,13 @@ try {
       }
       if (!providerTextChunkSeen && output.includes("[LLM_DEBUG_HTTP] SSE text delta")) {
         providerTextChunkSeen = true;
+      }
+      if (!providerFilteredChunkSeen && output.includes("[LLM_DEBUG_HTTP] VLLM think-filter text")) {
+        providerFilteredChunkSeen = true;
+      }
+      if (!agentTextChunkSeen && output.includes("[LLM_DEBUG_UI] agent-loop text-chunk")) {
+        agentTextChunkSeen = true;
+        agentStreamingDisplay = output.includes("streamingDisplay=true");
       }
       if (!sentQuit && output.includes(driver.quitMarker)) {
         sentQuit = true;
@@ -214,6 +224,9 @@ try {
         previewSeenBeforeFinal,
         previewChunkSeen,
         providerTextChunkSeen,
+        providerFilteredChunkSeen,
+        agentTextChunkSeen,
+        agentStreamingDisplay,
         requestSeen: Number.isFinite(requestReceivedAt),
         responseStarted: Number.isFinite(responseStartedAt),
         firstChunkWritten: Number.isFinite(firstChunkWrittenAt),
@@ -241,7 +254,8 @@ try {
       `previewBeforeFinal ${result.previewSeenBeforeFinal}, requestSeen ${result.requestSeen}, ` +
       `responseStarted ${result.responseStarted}, firstChunkWritten ${result.firstChunkWritten}, ` +
       `postRequests ${result.postRequestCount}, providerTextChunkSeen ${result.providerTextChunkSeen}, ` +
-      `previewChunkSeen ${result.previewChunkSeen}, ` +
+      `providerFilteredChunkSeen ${result.providerFilteredChunkSeen}, agentTextChunkSeen ${result.agentTextChunkSeen}, ` +
+      `agentStreamingDisplay ${result.agentStreamingDisplay}, previewChunkSeen ${result.previewChunkSeen}, ` +
       `timedOut ${result.timedOut})`;
     // Actionsの匿名APIでも原因flagをannotationから取得できるようにする。
     console.error(`::error title=Real PTY smoke failed::${failure}`);
