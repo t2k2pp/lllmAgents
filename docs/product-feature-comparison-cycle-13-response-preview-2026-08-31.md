@@ -61,6 +61,7 @@
 | UX-16 | P1 | Linux/macOS実PTYだけでOraの待機spinner停止が戻らず、受信済みtextのpreview処理を塞ぐ。疑似TTY単体では再現せず端末実装依存 | alternate screenの待機・thinking・preview状態をScreenManager直接管理へ統一し、Oraは通常画面だけで使用 | ScreenManager unit、次runのLinux/macOS delayed SSE実PTY | 修正済み・CI再検証待ち |
 | UX-17 | P1 | run `33466220944`のUbuntuは`previewSeen=true` / `previewBeforeFinal=true`で本機能は合格したが、最終本文表示と次の入力欄復帰の間にPTY試験が`/quit`を送りtimeout | Linux/macOSとも次の`> `プロンプト復帰を観測してから`/quit`を送る案を検証 | run `33466602563`で両OSともalternate-screenの復帰promptを生byte列では安定観測できないと判明 | UX-18へ再設計 |
 | UX-18 | P1 | run `33466602563`は両OSともpreview先行表示に合格したが、alternate-screenの復帰promptを生byte列`> `で観測できず試験が終了操作を送れなかった | preview表示直後のrun中type-aheadへ`/quit`を送り、最終本文後にキューから安全に終了する実ユーザー経路を検証 | PTY driver unit、次runのLinux/macOS delayed SSE実PTY | 修正済み・CI再検証待ち |
+| UX-19 | P1 | run `33466869961`は両OSとも`quitSent=true`でもtimeout。応答ループ、type-ahead受理、終了cleanupのどこで停止したか未確定 | 最終本文・キュー追加・追加入力処理・Goodbyeの既存表示を本文非記録flagとしてannotationへ追加 | 次runのLinux/macOS delayed SSE実PTY | 診断中 |
 
 ## 5. 評価
 

@@ -142,6 +142,10 @@ try {
     let thinkingSpinnerStopped = false;
     let previewFilteredChars = null;
     let sentQuit = false;
+    let finalSeen = false;
+    let quitQueuedSeen = false;
+    let pendingQuitSeen = false;
+    let goodbyeSeen = false;
     let timedOut = false;
     const capture = (chunk) => {
       output += chunk.toString();
@@ -180,6 +184,10 @@ try {
       if (!sentQuit && output.includes(driver.quitMarker)) {
         sentQuit = true;
       }
+      if (!finalSeen && output.includes(driver.finalMarker)) finalSeen = true;
+      if (!quitQueuedSeen && output.includes("キューに追加しました")) quitQueuedSeen = true;
+      if (!pendingQuitSeen && output.includes("追加入力を処理")) pendingQuitSeen = true;
+      if (!goodbyeSeen && /Goodbye!/i.test(output)) goodbyeSeen = true;
       if (driver.parentSubmits && !sentJapanese && /LocalLLM Agent/i.test(output)) {
         sentJapanese = true;
         child.stdin.write("日本語入力の右端折返し確認");
@@ -232,6 +240,10 @@ try {
         signal,
         output,
         sentQuit,
+        finalSeen,
+        quitQueuedSeen,
+        pendingQuitSeen,
+        goodbyeSeen,
         scrollSeen,
         japaneseSeen,
         previewSubmitted: sentPreview,
@@ -276,6 +288,8 @@ try {
       `agentStreamingDisplay ${result.agentStreamingDisplay}, waitingSpinnerStopped ${result.waitingSpinnerStopped}, ` +
       `thinkingSpinnerStopped ${result.thinkingSpinnerStopped}, previewFilteredChars ${result.previewFilteredChars}, ` +
       `previewChunkSeen ${result.previewChunkSeen}, ` +
+      `finalSeen ${result.finalSeen}, quitQueuedSeen ${result.quitQueuedSeen}, ` +
+      `pendingQuitSeen ${result.pendingQuitSeen}, goodbyeSeen ${result.goodbyeSeen}, ` +
       `timedOut ${result.timedOut})`;
     // Actionsの匿名APIでも原因flagをannotationから取得できるようにする。
     console.error(`::error title=Real PTY smoke failed::${failure}`);
