@@ -61,11 +61,12 @@ describe("PTY smoke driver", () => {
     expect(steerAt).toBeGreaterThan(previewAt);
     expect(pauseAt).toBeGreaterThan(previewAt);
     expect(steerAt).toBeGreaterThan(pauseAt);
-    expect(finalAt).toBeGreaterThan(steerAt);
-    expect(pausedAt).toBeGreaterThan(finalAt);
+    expect(pausedAt).toBeGreaterThan(steerAt);
     expect(resumeAt).toBeGreaterThan(pausedAt);
-    expect(steerResponseAt).toBeGreaterThan(finalAt);
+    // buffered responseはAPI完了時にpauseへ到達し、resume後にfinalを確定表示する。
+    expect(finalAt).toBeGreaterThan(resumeAt);
     expect(steerResponseAt).toBeGreaterThan(resumeAt);
+    expect(steerResponseAt).toBeGreaterThan(finalAt);
     expect(quitAt).toBeGreaterThan(steerResponseAt);
     expect(driver.env).toEqual({
       PTY_NODE: command.node,

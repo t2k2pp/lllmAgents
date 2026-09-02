@@ -4,7 +4,7 @@
 - 基準commit: `87274f0`
 - 対象gap: `GAP-PAUSE-01`
 - 観点: local LLMを運用中に再起動・並列数変更できる、安全で可視なforeground run停止境界
-- 状態: **実装・全ローカル評価完了、最新SHA CI確認中**
+- 状態: **実装・全ローカル評価完了、macOS実PTY修正後の最新SHA CI確認中**
 
 ## 1. 比較根拠
 
@@ -58,6 +58,7 @@
 - E2E: 1 file・7 tests成功。
 - 配布・静的gate: `validate:package`（544 files、9.4 MiB）、`validate:version`、`validate:skills`、production audit（脆弱性0）成功。
 - Windows配布: `build:deploy`でSEA、skills 19件、agents 5件を生成し、`deploy/localllm.exe --version`が`v0.4.1 (build 87274f0-dirty)`でexit 0。
+- 初回push CI `33642671572`: UbuntuとWindowsは成功。macOSの実PTYだけが失敗した。製品側はpause到達済みだったが、`expect` driverがbuffered final表示をpause到達前に待ってresumeを送れない順序誤りが原因。`pause到達 → resume → final表示`へ期待順を修正し、対象4 files・21 testsとbuild / formatを再確認した。
 - Linux/macOS実PTYと最新push SHA CIは後続gateで確定する。
 
 ## 6. 完了gate

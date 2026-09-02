@@ -64,12 +64,12 @@ expect -re {pause予約を受理}
 send -- "STEER_REQUEST\\r"
 puts "${EXPECT_STEER_MARKER}"
 set timeout 30
-expect -re {${RESPONSE_FINAL_TEXT}}
 expect -re {LLM API境界で一時停止}
 puts "${EXPECT_PAUSED_MARKER}"
 send -- "/run resume\\r"
 puts "${EXPECT_RESUME_MARKER}"
 expect -re {foreground runを再開}
+expect -re {${RESPONSE_FINAL_TEXT}}
 expect -re {${RESPONSE_STEER_TEXT}}
 puts "${EXPECT_QUIT_MARKER}"
 send -- "/quit\\r"
