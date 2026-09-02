@@ -64,7 +64,8 @@ expect -re {pause予約を受理}
 send -- "STEER_REQUEST\\r"
 puts "${EXPECT_STEER_MARKER}"
 set timeout 30
-expect -re {LLM API境界で一時停止}
+# /help の「LLM API境界で一時停止・再開」へ誤一致させず、実到達だけを待つ。
+expect -re {runをLLM API境界で一時停止しました}
 puts "${EXPECT_PAUSED_MARKER}"
 send -- "/run resume\\r"
 puts "${EXPECT_RESUME_MARKER}"

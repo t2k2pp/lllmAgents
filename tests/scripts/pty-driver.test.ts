@@ -46,7 +46,7 @@ describe("PTY smoke driver", () => {
     expect(driver.args.join("\n")).toContain("FINAL99");
     expect(driver.args.join("\n")).toContain('send -- "/run pause\\r"');
     expect(driver.args.join("\n")).toContain('send -- "STEER_REQUEST\\r"');
-    expect(driver.args.join("\n")).toContain("LLM API境界で一時停止");
+    expect(driver.args.join("\n")).toContain("runをLLM API境界で一時停止しました");
     expect(driver.args.join("\n")).toContain('send -- "/run resume\\r"');
     expect(driver.args.join("\n")).toContain("STEER_OK");
     expect(driver.args.join("\n")).toContain('send -- "/quit\\r"');
@@ -55,7 +55,7 @@ describe("PTY smoke driver", () => {
     const steerAt = driver.args.join("\n").lastIndexOf('send -- "STEER_REQUEST\\r"');
     const steerResponseAt = driver.args.join("\n").lastIndexOf("expect -re {STEER_OK}");
     const pauseAt = driver.args.join("\n").lastIndexOf('send -- "/run pause\\r"');
-    const pausedAt = driver.args.join("\n").lastIndexOf("expect -re {LLM API境界で一時停止}");
+    const pausedAt = driver.args.join("\n").lastIndexOf("expect -re {runをLLM API境界で一時停止しました}");
     const resumeAt = driver.args.join("\n").lastIndexOf('send -- "/run resume\\r"');
     const quitAt = driver.args.join("\n").lastIndexOf('send -- "/quit\\r"');
     expect(steerAt).toBeGreaterThan(previewAt);

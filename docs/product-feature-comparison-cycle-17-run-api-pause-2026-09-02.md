@@ -59,6 +59,7 @@
 - 配布・静的gate: `validate:package`（544 files、9.4 MiB）、`validate:version`、`validate:skills`、production audit（脆弱性0）成功。
 - Windows配布: `build:deploy`でSEA、skills 19件、agents 5件を生成し、`deploy/localllm.exe --version`が`v0.4.1 (build 87274f0-dirty)`でexit 0。
 - 初回push CI `33642671572`: UbuntuとWindowsは成功。macOSの実PTYだけが失敗した。製品側はpause到達済みだったが、`expect` driverがbuffered final表示をpause到達前に待ってresumeを送れない順序誤りが原因。`pause到達 → resume → final表示`へ期待順を修正し、対象4 files・21 testsとbuild / formatを再確認した。
+- 訂正後CI `33643363220`: macOS実PTYが再失敗。`expect`のpause正規表現がヘルプ欄の説明へ誤一致し、実到達前の`pause_requested`をresumeしていた。実到達メッセージ`runをLLM API境界で一時停止しました`との一致を必須化した。
 - Linux/macOS実PTYと最新push SHA CIは後続gateで確定する。
 
 ## 6. 完了gate
