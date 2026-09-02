@@ -4,7 +4,7 @@
 - 基準commit: `87274f0`
 - 対象gap: `GAP-PAUSE-01`
 - 観点: local LLMを運用中に再起動・並列数変更できる、安全で可視なforeground run停止境界
-- 状態: **実装・全ローカル評価完了、macOS実PTY修正後の最新SHA CI確認中**
+- 状態: **完了（実装・全ローカル評価・最新実装SHA CI成功）**
 
 ## 1. 比較根拠
 
@@ -60,7 +60,7 @@
 - Windows配布: `build:deploy`でSEA、skills 19件、agents 5件を生成し、`deploy/localllm.exe --version`が`v0.4.1 (build 87274f0-dirty)`でexit 0。
 - 初回push CI `33642671572`: UbuntuとWindowsは成功。macOSの実PTYだけが失敗した。製品側はpause到達済みだったが、`expect` driverがbuffered final表示をpause到達前に待ってresumeを送れない順序誤りが原因。`pause到達 → resume → final表示`へ期待順を修正し、対象4 files・21 testsとbuild / formatを再確認した。
 - 訂正後CI `33643363220`: macOS実PTYが再失敗。`expect`のpause正規表現がヘルプ欄の説明へ誤一致し、実到達前の`pause_requested`をresumeしていた。実到達メッセージ`runをLLM API境界で一時停止しました`との一致を必須化した。
-- Linux/macOS実PTYと最新push SHA CIは後続gateで確定する。
+- 最新実装SHA `da669e5` / CI `33643890486`: commit policy、Ubuntu / macOS / Windows tests、Linux / macOS実PTY、Windows deploy / exe smokeの全5 job成功。
 
 ## 6. 完了gate
 
@@ -69,6 +69,6 @@
 - [x] main provider全chat経路のgateとcommand名前分離
 - [x] 対象unit / integration / PTY driver回帰
 - [x] 全ローカル品質gate
-- [ ] Linux/macOS実PTYでpause中に2回目APIが始まらないことを確認
-- [ ] task差分だけをcommit/push
-- [ ] 最新push SHAの全依存CI job成功
+- [x] Linux/macOS実PTYでpause中に2回目APIが始まらないことを確認
+- [x] task差分だけをcommit/push
+- [x] 最新実装SHAの全依存CI job成功
