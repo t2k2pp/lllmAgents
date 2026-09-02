@@ -4,7 +4,7 @@
 - 基準commit: `87274f0`
 - 対象gap: `GAP-PAUSE-01`
 - 観点: local LLMを運用中に再起動・並列数変更できる、安全で可視なforeground run停止境界
-- 状態: **プロセス境界の明示・次cycle設計追加後の最新SHA CI確認中**
+- 状態: **完了（プロセス内pause実装・scope明示・次cycle durable設計・最新SHA CI成功）**
 
 ## 1. 比較根拠
 
@@ -64,6 +64,7 @@
 - 訂正後CI `33643363220`: macOS実PTYが再失敗。`expect`のpause正規表現がヘルプ欄の説明へ誤一致し、実到達前の`pause_requested`をresumeしていた。実到達メッセージ`runをLLM API境界で一時停止しました`との一致を必須化した。
 - 最新実装SHA `da669e5` / CI `33643890486`: commit policy、Ubuntu / macOS / Windows tests、Linux / macOS実PTY、Windows deploy / exe smokeの全5 job成功。
 - 記録SHA `26baa52` / CI `33644417631`: 同じ全5 job成功。その後、PC再起動も跨げるという利用者の合理的な誤解を受け、プロセス内限定のUI明示と次cycle設計を追加したため最新SHA gateを再度開いた。
+- scope明示・次cycle設計SHA `787d639` / CI `33645512962`: 対象4 files・22 tests、build、lintをローカル成功。commit policy、Ubuntu / macOS / Windows tests、Linux / macOS実PTY、Windows deploy / exe smokeの全5 job成功。
 
 ## 6. 完了gate
 
@@ -75,6 +76,8 @@
 - [x] Linux/macOS実PTYでpause中に2回目APIが始まらないことを確認
 - [x] task差分だけをcommit/push
 - [x] 最新実装SHAの全依存CI job成功
+- [x] プロセス内限定をUI・README・回帰で明示
+- [x] PC再起動を跨ぐP1 gapの次cycle実装契約と受け入れ条件を記録
 
 ## 7. 次cycle候補
 
