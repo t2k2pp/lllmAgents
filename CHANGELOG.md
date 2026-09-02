@@ -10,6 +10,7 @@
 - 主応答だけでなくcontext整理・意図判定・main evaluator fallbackを含む全main provider chat経路へ共通gateを適用し、pause中の新規API・tool実行を抑止
 - 処理中type-aheadの`/run`だけを即時制御し、保存session復元の既存`/resume`・`/continue`とは名前空間を分離
 - pause到達、API実行数、対象外のbackground task / second LLMを明示し、Esc/Ctrl+Cによるhard interruptもpause中に維持
+- pauseはアプリを起動したままlocal LLMサーバーを再起動するプロセス内機能であり、PC再起動を跨ぐdurable run復元は次cycleの設計候補として分離
 
 ### リリース・バージョン整合 cycle 14 (2026-09-01)
 

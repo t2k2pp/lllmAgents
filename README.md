@@ -21,7 +21,7 @@
 - **操作学習**: 成功したbrowser/computer操作を、秘密値を除いた手動起動skillとしてprojectへ保存
 - **マルチライン入力**: Shift+Enter / Ctrl+J で改行、@path でファイル参照
 - **処理中の追加入力**: 応答中に文字を入力して Enter すると、次の応答／tool完了境界で同じturnへ反映
-- **LLM API境界pause**: 処理中に`/run pause`を予約し、進行中API完了後にrun全体を止めて、local LLMの再起動・並列数変更後に`/run resume`で継続
+- **LLM API境界pause**: アプリを起動したまま`/run pause`を予約し、進行中API完了後にrun全体を止めて、local LLMサーバーの再起動・並列数変更後に`/run resume`で継続
 - **インタラクティブUI**: `/`コマンドと`@`ファイルパスの補完ドロップダウン
 - **スキルベースワークフロー**: 開発・レビュー・調査等のワークフローをスキルとして定義、LLMが必要に応じて選択
 - **ローカルplugin bundle**: 明示したbundleからskills・agents・hooks・MCPを一括ロード（Codex / Claude manifestの最小互換）
@@ -81,7 +81,7 @@ $ npm start
 | `@path` | ファイル/フォルダの内容をプロンプトに添付 |
 | `/command` | スラッシュコマンド（補完ドロップダウン付き） |
 | 応答中に文字 + `Enter` | 通常メッセージは次の応答／tool完了境界で現在のturnへ反映。`/run pause\|resume\|status`は即時、その他の`/command`はturn完了後に実行 |
-| `/run pause` / `/run resume` | foreground runを進行中LLM APIの完了直後に一時停止 / 同じrunを再開（保存session復元の`/resume`とは別） |
+| `/run pause` / `/run resume` | foreground runを進行中LLM APIの完了直後にプロセス内で一時停止 / 同じrunを再開。アプリ・PC再起動は跨がない（保存session復元の`/resume`とは別） |
 | マウスホイール | Alternate Screen TUIの過去ログを上下する（LLM・ツール実行中も有効） |
 | `PgUp` / `PgDn` | Alternate Screen TUIの過去ログをページ移動する（LLM・ツール実行中も有効） |
 | `Ctrl+C` | 現在の操作をキャンセル |
@@ -158,7 +158,7 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/clear` | 会話履歴クリア（現在の Room） |
 | `/room` | 会話 Room (A/B/C) の表示・移動・再開。`/room A\|B\|C` で移動、`/room resume [A\|B\|C]` で再開、`/room autoresume <on\|off> [A\|B\|C]`。既定 REPL=A / Discord=B / Slack=C（docs/room-model-design.md） |
 | `/queue` | 受信順キューの待ち状況を表示（`/queue clear` でturn後に実行するtype-ahead command等を破棄） |
-| `/run [status\|pause\|resume]` | foreground runの状態表示 / 次のLLM API境界で一時停止 / 再開。停止到達後は新しいmain LLM API・toolを開始しない（開始済みtool群は完了する場合あり）。background task・second LLMは対象外 |
+| `/run [status\|pause\|resume]` | foreground runの状態表示 / 次のLLM API境界でプロセス内一時停止 / 再開。停止到達後は新しいmain LLM API・toolを開始しない（開始済みtool群は完了する場合あり）。アプリ・PC再起動、background task、second LLMは対象外 |
 | `/context` | コンテキスト使用状況の内訳（トークン数・進捗バー）。`/context <system\|memory\|skills\|tools\|messages>` で各カテゴリの中身をダンプ。`/context strategy [off\|auto\|aggressive]` で区切り整理のモード表示・切替（既定 auto、詳細: docs/context-strategy.md） |
 | `/compact` | コンテキストを手動圧縮 |
 | `/forget` | コンテキストを忘却で整理（要約せず捨てる）。`/forget dry` で何が消えるか事前確認、`/forget mode <compress\|forget\|hybrid>` で自動縮約の手段を切替（既定 hybrid）、`/forget status` で実績確認。詳細: docs/context-forgetting.md |

@@ -389,7 +389,7 @@ export class AgentLoop {
       screen.clearTransientStatus();
       console.log(
         chalk.cyan(
-          "\n  ⏸ runをLLM API境界で一時停止しました。ローカルLLMの再起動・並列数変更後に /run resume で再開してください。",
+          "\n  ⏸ runをLLM API境界で一時停止しました。アプリは終了せず、ローカルLLMの再起動・並列数変更後に /run resume で再開してください。",
         ),
       );
       console.log(

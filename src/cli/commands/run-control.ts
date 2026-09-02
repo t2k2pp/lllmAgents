@@ -11,7 +11,7 @@ function stateLabel(snapshot: RunPauseSnapshot): string {
     idle: "idle (runなし)",
     running: "running",
     pause_requested: "pause予約済み",
-    paused: "paused (API停止中)",
+    paused: "paused (プロセス内・API停止中)",
   }[snapshot.state];
   return `${state} / source=${snapshot.source ?? "none"} / API実行中=${snapshot.inFlight}`;
 }
@@ -29,7 +29,7 @@ export function executeRunControl(agent: AgentLoop, args: string[]): Feedback {
           ? { level: "success", message: "foreground runはLLM API境界で停止中です。再開: /run resume" }
           : {
               level: "info",
-              message: `pause予約を受理しました。現在のLLM API ${result.snapshot.inFlight}件の完了後に停止します。`,
+              message: `pause予約を受理しました。アプリは終了せず、現在のLLM API ${result.snapshot.inFlight}件の完了後に停止します。`,
             };
       case "already_requested":
         return { level: "info", message: "pauseは予約済みです。現在のLLM API完了を待っています。" };
@@ -59,7 +59,11 @@ export function executeRunControl(agent: AgentLoop, args: string[]): Feedback {
           message: "現在の実行元はCLIではありません。background taskは /tasks で管理してください。",
         };
       case "not_running":
-        return { level: "warn", message: "再開できるforeground runはありません。保存sessionの復元は /resume です。" };
+        return {
+          level: "warn",
+          message:
+            "再開できるforeground runはありません。保存sessionの復元は /resume ですが、終了したrun自体は復元されません。",
+        };
     }
   }
   return { level: "warn", message: "使い方: /run [status|pause|resume]" };

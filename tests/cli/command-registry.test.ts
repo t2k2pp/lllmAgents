@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { getCommandRegistry, getRegistryCompletions, getRegistryHelpEntries } from "../../src/cli/commands/registry.js";
+import { executeRunControl } from "../../src/cli/commands/run-control.js";
 import type { ReplCommandContext } from "../../src/cli/commands/types.js";
 import { getDefaultConfig } from "../../src/config/types.js";
 import type { Config } from "../../src/config/types.js";
@@ -144,5 +145,26 @@ describe("コマンドレジストリ (PR-10)", () => {
     expect(resumeRun).toHaveBeenCalledOnce();
     expect(getCommandRegistry().get("/resume")).toBeUndefined();
     expect(getCommandRegistry().get("/continue")).toBeUndefined();
+  });
+
+  it("/runはプロセス内pauseであり、終了後のsession復元をrun再開と誤案内しない", () => {
+    const pauseAgent = {
+      requestRunPause: () => ({
+        status: "requested",
+        snapshot: { state: "pause_requested", source: "cli", inFlight: 1 },
+      }),
+    } as unknown as ReplCommandContext["agent"];
+    const pause = executeRunControl(pauseAgent, ["pause"]);
+    expect(pause.message).toContain("アプリは終了せず");
+
+    const idleAgent = {
+      resumeRun: () => ({
+        status: "not_running",
+        snapshot: { state: "idle", source: null, inFlight: 0 },
+      }),
+    } as unknown as ReplCommandContext["agent"];
+    const resume = executeRunControl(idleAgent, ["resume"]);
+    expect(resume.message).toContain("保存sessionの復元は /resume");
+    expect(resume.message).toContain("終了したrun自体は復元されません");
   });
 });

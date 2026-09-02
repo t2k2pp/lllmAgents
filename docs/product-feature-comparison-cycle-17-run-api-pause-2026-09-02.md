@@ -4,7 +4,7 @@
 - 基準commit: `87274f0`
 - 対象gap: `GAP-PAUSE-01`
 - 観点: local LLMを運用中に再起動・並列数変更できる、安全で可視なforeground run停止境界
-- 状態: **完了（実装・全ローカル評価・最新実装SHA CI成功）**
+- 状態: **プロセス境界の明示・次cycle設計追加後の最新SHA CI確認中**
 
 ## 1. 比較根拠
 
@@ -26,6 +26,7 @@
 | 停止中の同じrunを再開 | — | △ background `respawn` | — | ◎ `/run resume` |
 | pause予約・到達・API実行数の可視性 | — | △ stopped表示 | — | ◎ statusと到達表示 |
 | session resumeとの名前衝突回避 | n/a | n/a | `/resume`使用済み | ◎ `/run`名前空間 |
+| アプリ・PC再起動を跨ぐrun継続 | — | △ background `respawn` | — | — `GAP-DURABLE-RUN-01`として次cycle設計 |
 
 比較上の抜けは、competitorのinterrupt・background lifecycleに隣接しつつ、local LLMの運用に必要な`GAP-PAUSE-01`である。強制cancelは生成途中を捨て、通常turn完了待ちは次のAPIを自動発行するため、どちらも再起動窓の要求を満たさない。
 
@@ -48,6 +49,7 @@
 4. `/run resume`は同じrunを続ける。境界到達前ならpause予約の取消として扱う。
 5. `Esc`/`Ctrl+C`はpause中もhard interruptとして働く。run終了時はgateを必ず`idle`へ戻す。
 6. background taskとsecond LLMは独立した実行であり、自動停止しない。globalに安全な再起動が必要なら`/tasks`で停止状態も確認する。
+7. pause stateはメモリ内にあり、アプリ・PC再起動で失われる。`/resume`はconversationを戻すが、終了したrunのcontinuationは復元しない。
 
 ## 5. 評価
 
@@ -61,6 +63,7 @@
 - 初回push CI `33642671572`: UbuntuとWindowsは成功。macOSの実PTYだけが失敗した。製品側はpause到達済みだったが、`expect` driverがbuffered final表示をpause到達前に待ってresumeを送れない順序誤りが原因。`pause到達 → resume → final表示`へ期待順を修正し、対象4 files・21 testsとbuild / formatを再確認した。
 - 訂正後CI `33643363220`: macOS実PTYが再失敗。`expect`のpause正規表現がヘルプ欄の説明へ誤一致し、実到達前の`pause_requested`をresumeしていた。実到達メッセージ`runをLLM API境界で一時停止しました`との一致を必須化した。
 - 最新実装SHA `da669e5` / CI `33643890486`: commit policy、Ubuntu / macOS / Windows tests、Linux / macOS実PTY、Windows deploy / exe smokeの全5 job成功。
+- 記録SHA `26baa52` / CI `33644417631`: 同じ全5 job成功。その後、PC再起動も跨げるという利用者の合理的な誤解を受け、プロセス内限定のUI明示と次cycle設計を追加したため最新SHA gateを再度開いた。
 
 ## 6. 完了gate
 
@@ -72,3 +75,7 @@
 - [x] Linux/macOS実PTYでpause中に2回目APIが始まらないことを確認
 - [x] task差分だけをcommit/push
 - [x] 最新実装SHAの全依存CI job成功
+
+## 7. 次cycle候補
+
+利用者が期待したPC再起動後の`/resume`→`/run resume`はcycle 17の契約外である。会話、pending response/tool、追加入力、実行journalを安全境界でatomic保存する`GAP-DURABLE-RUN-01`をP1候補として分離した。実装条件とcross-process受け入れ試験は[durable run resume設計](durable-run-resume-design.md)を正本とする。
