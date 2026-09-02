@@ -63,6 +63,13 @@ import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";
 import type { ChatLogger } from "./chat-logger.js";
 import { renderEditDiff, renderWriteDiff } from "../cli/diff-display.js";
 import {
+  gateLLMProvider,
+  RunApiGate,
+  type RequestRunPauseResult,
+  type ResumeRunResult,
+  type RunPauseSnapshot,
+} from "./run-api-gate.js";
+import {
   type GoalDefinition,
   type EvaluationRecord,
   setGoal as setGoalSlot,
@@ -352,9 +359,14 @@ export class AgentLoop {
   private liveBinding: LiveModelBinding | null = null;
   /** liveBinding を model 単体切替時にも正しく再生成するための元 endpoint。 */
   private liveEndpoint: LLMEndpoint | null = null;
+  /** run pauseをmain AgentLoopのAPIだけへ適用し、sub-agentへ伝播させないためraw providerも保持する。 */
+  private rawProvider: LLMProvider;
+  /** context整理・分類器を含む全main LLM chat経路をrun gateで包んだprovider。 */
+  private provider: LLMProvider;
+  private runApiGate: RunApiGate;
 
   constructor(
-    private provider: LLMProvider,
+    provider: LLMProvider,
     private model: string,
     private toolRegistry: ToolRegistry,
     private permissions: PermissionManager,
@@ -373,6 +385,22 @@ export class AgentLoop {
     llmProfiles?: LLMProfiles,
     private readonly safeMode: boolean = false,
   ) {
+    this.runApiGate = new RunApiGate(() => {
+      screen.clearTransientStatus();
+      console.log(
+        chalk.cyan(
+          "\n  ⏸ runをLLM API境界で一時停止しました。ローカルLLMの再起動・並列数変更後に /run resume で再開してください。",
+        ),
+      );
+      console.log(
+        chalk.dim(
+          "  ※ 開始済みtool群は完了する場合があります。background task / second LLMは対象外です。必要なら /tasks で個別に停止してください。",
+        ),
+      );
+      this.notice("info", "foreground runがLLM API境界で一時停止");
+    });
+    this.rawProvider = provider;
+    this.provider = gateLLMProvider(provider, this.runApiGate);
     this.streamingDisplay = streamingDisplay;
     this.maxParallelTools = maxParallelTools;
     this.contextWindow = contextWindow;
@@ -411,7 +439,7 @@ export class AgentLoop {
     // (docs/context-forgetting.md §6 — 忘却が失敗しても圧縮に落ちるので後退しない)。
     const ctxCfg = loadConfig().context;
     this.contextManager = new ContextManager(
-      provider,
+      this.provider,
       model,
       contextWindow,
       this.capability.compressionThreshold,
@@ -446,7 +474,7 @@ export class AgentLoop {
     // claude-agent-sdk プロバイダの場合、 lllmAgent ツールを in-process MCP として
     // SDK に公開する (docs/claude-agent-sdk-provider-design.md §3.3)。
     // duck typing で attach メソッドを持つプロバイダのみに適用。
-    const bridgeable = provider as unknown as {
+    const bridgeable = this.rawProvider as unknown as {
       attachToolBridge?: (r: ToolRegistry, e: ToolExecutor) => void;
     };
     if (typeof bridgeable.attachToolBridge === "function") {
@@ -463,8 +491,8 @@ export class AgentLoop {
       roomId: this.session.meta.room,
       surface: this.currentSource,
     }));
-    this.intentClassifier = new IntentClassifier(provider, model);
-    this.evaluator = new Evaluator(secondLLMManager, provider, model);
+    this.intentClassifier = new IntentClassifier(this.provider, model);
+    this.evaluator = new Evaluator(secondLLMManager, this.provider, model);
     // セカンドLLMにもセッションIDを共有（ログファイル名の統一用）
     if (secondLLMManager && sessionId) {
       secondLLMManager.setSessionId(sessionId);
@@ -517,6 +545,7 @@ export class AgentLoop {
   /** 実行中の処理を中断する（Esc / Ctrl+C など）。進行中の LLM 接続も即座に切断する */
   abort(): void {
     this._aborted = true;
+    this.runApiGate.abortRun();
     // HTTP 接続を切断してサーバ側の生成も止める。 これが無いと llama.cpp が
     // 中断済み生成を完走するまで後続リクエストが待たされ「固まった」 ように見える。
     this.llmAbortController?.abort();
@@ -529,6 +558,20 @@ export class AgentLoop {
 
   isAborted(): boolean {
     return this._aborted;
+  }
+
+  /** 現在のCLI foreground runを、進行中APIの完了後に協調停止する。 */
+  requestRunPause(): RequestRunPauseResult {
+    return this.runApiGate.requestPause();
+  }
+
+  /** pause予約を取り消す、またはAPI境界で停止中のrunを再開する。 */
+  resumeRun(): ResumeRunResult {
+    return this.runApiGate.resume();
+  }
+
+  getRunPauseSnapshot(): RunPauseSnapshot {
+    return this.runApiGate.snapshot();
   }
 
   /**
@@ -564,6 +607,7 @@ export class AgentLoop {
 
   async run(userMessage: string | ContentPart[], options?: { source?: RequestSource }): Promise<void> {
     this.currentSource = options?.source ?? "cli";
+    this.runApiGate.beginRun(this.currentSource);
     this.isProcessing = true;
     this._aborted = false;
     this._circuitBreak = null;
@@ -1195,6 +1239,13 @@ export class AgentLoop {
 
         if (!success) {
           this.purgeEphemeralAtSpanEnd("llm_call_unsuccessful");
+          return;
+        }
+        // API境界pause中のESC/Ctrl+Cはresume待ちを解放する。応答に含まれたtoolを
+        // 中断後に実行しないよう、provider streamを抜けた直後に再確認する。
+        if (this._aborted) {
+          this.appendAbortMarker(textContent);
+          this.purgeEphemeralAtSpanEnd("user_abort");
           return;
         }
 
@@ -1966,6 +2017,12 @@ export class AgentLoop {
       this.events.emit("harness_notice", { level: "warn", message: "反復上限に到達しました" });
       this.purgeEphemeralAtSpanEnd("max_iterations");
     } finally {
+      const pauseBeforeFinish = this.runApiGate.finishRun();
+      if (pauseBeforeFinish.state === "pause_requested") {
+        console.log(
+          chalk.dim("  ✓ runが完了したためpause予約を終了しました。現在、foreground LLM APIは実行されていません。"),
+        );
+      }
       this.isProcessing = false;
       // task_complete は finally で必ず発火する (例外・全 return 経路を含む)。
       // outcome は purgeEphemeralAtSpanEnd() の reason マッピングで設定済み。
@@ -2703,6 +2760,7 @@ export class AgentLoop {
 
   /** Execute a single tool call, returning whether to abort the rest of the run loop */
   private async executeSingleTool(toolCall: ToolCall): Promise<boolean> {
+    if (!(await this.runApiGate.waitUntilRunning()) || this._aborted) return true;
     const summary = formatToolCall(toolCall);
     this.events.emit("tool_start", { callId: toolCall.id, name: toolCall.function.name, summary });
     const spinner = createSpinner(chalk.dim(`  ${summary}...`)).start();
@@ -2828,6 +2886,7 @@ export class AgentLoop {
 
   /** Execute multiple tool calls with concurrency limit, returning whether to abort the run loop */
   private async executeToolsParallel(toolCalls: ToolCall[]): Promise<boolean> {
+    if (!(await this.runApiGate.waitUntilRunning()) || this._aborted) return true;
     const limit = this.maxParallelTools;
     console.log(chalk.dim(`\n  ⟹ ${toolCalls.length} tools (max ${limit} parallel)...`));
 
@@ -3342,7 +3401,9 @@ export class AgentLoop {
   }
 
   getProvider(): LLMProvider {
-    return this.provider;
+    // run gateはmain AgentLoop専用。sub-agent/vision serviceへ渡すとforeground pauseが
+    // 無関係な実行まで止めるため、共有用にはraw providerを返す。
+    return this.rawProvider;
   }
 
   getModel(): string {
@@ -3501,7 +3562,8 @@ export class AgentLoop {
    * 接続先を実行時に変更する際に呼ぶ。modelも同時に渡せば一括反映される。
    */
   setProvider(provider: LLMProvider, model?: string, endpoint?: LLMEndpoint): void {
-    this.provider = provider;
+    this.rawProvider = provider;
+    this.provider = gateLLMProvider(provider, this.runApiGate);
     if (model) this.model = model;
     // 実行中バインディングを更新 (docs/model-apply-immediacy.md §3.1)。
     // endpoint を渡さない旧来の呼び出しでは前の記録を残す (= 誤警告より検出漏れを取る)。
@@ -3509,13 +3571,13 @@ export class AgentLoop {
       this.liveEndpoint = { ...endpoint, model: this.model };
       this.liveBinding = makeLiveBinding(this.liveEndpoint, this.model);
     }
-    this.contextManager.setProvider(provider, this.model);
-    this.intentClassifier.setProvider(provider, this.model);
-    this.evaluator.setMainProvider(provider, this.model);
+    this.contextManager.setProvider(this.provider, this.model);
+    this.intentClassifier.setProvider(this.provider, this.model);
+    this.evaluator.setMainProvider(this.provider, this.model);
     // 新 provider が attachToolBridge を持つなら (例: claude-agent-sdk) ToolRegistry を注入する。
     // ランタイム切替時に MCP bridge を再 attach しないと、 SDK に lllmAgent ツールが届かず
     // Claude が XML 形式の擬似 tool_use を text として吐き続ける状態になる。
-    const bridgeable = provider as unknown as {
+    const bridgeable = this.rawProvider as unknown as {
       attachToolBridge?: (r: ToolRegistry, e: ToolExecutor) => void;
     };
     if (typeof bridgeable.attachToolBridge === "function") {

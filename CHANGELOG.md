@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### LLM API境界pause・機能比較 cycle 17 (2026-09-02)
+
+- `/run pause|resume|status`を追加し、foreground runを進行中のmain LLM API完了直後に協調停止して、ローカルLLMの再起動・並列数変更後に同じrunを継続可能にした
+- 主応答だけでなくcontext整理・意図判定・main evaluator fallbackを含む全main provider chat経路へ共通gateを適用し、pause中の新規API・tool実行を抑止
+- 処理中type-aheadの`/run`だけを即時制御し、保存session復元の既存`/resume`・`/continue`とは名前空間を分離
+- pause到達、API実行数、対象外のbackground task / second LLMを明示し、Esc/Ctrl+Cによるhard interruptもpause中に維持
+
 ### リリース・バージョン整合 cycle 14 (2026-09-01)
 
 - 公開版を3桁SemVer、実体識別をcommit由来buildとして分離し、tracked変更を含むbuildへ`-dirty`を付け、`package.json`を単一ソース化

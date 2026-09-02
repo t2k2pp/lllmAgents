@@ -10,6 +10,11 @@ function makeContext(): { ctx: ReplCommandContext; config: Config; saveConfig: R
   const saveConfig = vi.fn();
   let maxParallel = 3;
   let autorun = false;
+  let runState: { state: string; source: string | null; inFlight: number } = {
+    state: "idle",
+    source: null,
+    inFlight: 0,
+  };
   const agent = {
     getMaxParallelTools: () => maxParallel,
     setMaxParallelTools: (n: number) => {
@@ -21,6 +26,15 @@ function makeContext(): { ctx: ReplCommandContext; config: Config; saveConfig: R
         autorun = on;
       },
     }),
+    getRunPauseSnapshot: () => runState,
+    requestRunPause: () => {
+      runState = { state: "pause_requested", source: "cli", inFlight: 1 };
+      return { status: "requested", snapshot: runState };
+    },
+    resumeRun: () => {
+      runState = { state: "running", source: "cli", inFlight: 1 };
+      return { status: "request_cancelled", snapshot: runState };
+    },
   };
   const ctx = { agent, config, saveConfig } as unknown as ReplCommandContext;
   return { ctx, config, saveConfig };
@@ -46,7 +60,17 @@ describe("コマンドレジストリ (PR-10)", () => {
   it("補完候補とヘルプ項目が全登録コマンド分自動生成される", () => {
     const completions = getRegistryCompletions();
     const helpEntries = getRegistryHelpEntries();
-    for (const name of ["/parallel", "/autorun", "/loglevel", "/doctor", "/diff", "/rename", "/tasks", "/learn"]) {
+    for (const name of [
+      "/parallel",
+      "/autorun",
+      "/loglevel",
+      "/doctor",
+      "/diff",
+      "/rename",
+      "/tasks",
+      "/learn",
+      "/run",
+    ]) {
       expect(completions.some((c) => c.command === name)).toBe(true);
       expect(helpEntries.some((e) => e.name === name)).toBe(true);
     }
@@ -105,5 +129,20 @@ describe("コマンドレジストリ (PR-10)", () => {
 
     await mustGet("/rename").handler(ctx, ["release", "readiness"]);
     expect(renameCurrentSession).toHaveBeenCalledWith("release readiness");
+  });
+
+  it("/run pause と /run resume はsession復元コマンドと分離してrun gateだけを操作する", async () => {
+    const { ctx } = makeContext();
+    const requestRunPause = vi.spyOn(ctx.agent, "requestRunPause");
+    const resumeRun = vi.spyOn(ctx.agent, "resumeRun");
+    const def = mustGet("/run");
+
+    await def.handler(ctx, ["pause"]);
+    expect(requestRunPause).toHaveBeenCalledOnce();
+    expect(resumeRun).not.toHaveBeenCalled();
+    await def.handler(ctx, ["resume"]);
+    expect(resumeRun).toHaveBeenCalledOnce();
+    expect(getCommandRegistry().get("/resume")).toBeUndefined();
+    expect(getCommandRegistry().get("/continue")).toBeUndefined();
   });
 });

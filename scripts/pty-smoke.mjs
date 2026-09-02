@@ -24,6 +24,7 @@ let requestReceivedAt = Number.POSITIVE_INFINITY;
 let responseStartedAt = Number.POSITIVE_INFINITY;
 let firstChunkWrittenAt = Number.POSITIVE_INFINITY;
 let postRequestCount = 0;
+let secondRequestReceivedAt = Number.POSITIVE_INFINITY;
 const mockServer = http.createServer((req, res) => {
   if (req.method === "GET" && req.url?.startsWith("/v1/models")) {
     res.writeHead(200, { "content-type": "application/json" });
@@ -37,6 +38,7 @@ const mockServer = http.createServer((req, res) => {
   }
   requestReceivedAt = Date.now();
   postRequestCount++;
+  if (postRequestCount === 2) secondRequestReceivedAt = Date.now();
   req.on("end", () => {
     responseStartedAt = Date.now();
     res.writeHead(200, { "content-type": "text/event-stream" });
@@ -173,6 +175,12 @@ try {
     let previewFilteredChars = null;
     let sentQuit = false;
     let sentSteer = false;
+    let sentPause = false;
+    let pauseAcceptedSeen = false;
+    let pauseReachedSeen = false;
+    let sentResume = false;
+    let resumeConfirmedSeen = false;
+    let resumeSentAt = Number.POSITIVE_INFINITY;
     let steerAcceptedSeen = false;
     let steerAppliedSeen = false;
     let steerResponseSeen = false;
@@ -219,6 +227,14 @@ try {
         sentQuit = true;
       }
       if (!sentSteer && output.includes(driver.steerSentMarker)) sentSteer = true;
+      if (!sentPause && output.includes(driver.pauseSentMarker)) sentPause = true;
+      if (!pauseAcceptedSeen && output.includes("pause予約を受理しました")) pauseAcceptedSeen = true;
+      if (!pauseReachedSeen && output.includes("runをLLM API境界で一時停止しました")) pauseReachedSeen = true;
+      if (!sentResume && output.includes(driver.resumeSentMarker)) {
+        sentResume = true;
+        resumeSentAt = Date.now();
+      }
+      if (!resumeConfirmedSeen && output.includes("foreground runを再開しました")) resumeConfirmedSeen = true;
       if (!finalSeen && output.includes(driver.finalMarker)) finalSeen = true;
       if (!steerAcceptedSeen && output.includes("追加入力を受け付けました")) steerAcceptedSeen = true;
       if (!steerAppliedSeen && output.includes("現在の処理へ反映します")) steerAppliedSeen = true;
@@ -259,12 +275,21 @@ try {
         sentPreview = true;
         child.stdin.write(submitPtyLine("PREVIEW_REQUEST"));
       }
-      if (driver.parentSubmits && sentPreview && previewSeen && !sentSteer) {
+      if (driver.parentSubmits && sentPreview && previewSeen && !sentPause) {
+        sentPause = true;
+        child.stdin.write(submitPtyLine("/run pause"));
+      }
+      if (driver.parentSubmits && pauseAcceptedSeen && !sentSteer) {
         sentSteer = true;
         // preview表示時点ならrun中のtype-aheadが所有権を持っている。
         // 通常メッセージを送り、最初のresponse_completeより優先して同じrunへ反映させる。
         // PTYのLFはinteractive-inputでCtrl+J（改行挿入）になる。CRでEnter確定する。
         child.stdin.write(submitPtyLine("STEER_REQUEST"));
+      }
+      if (driver.parentSubmits && pauseReachedSeen && !sentResume) {
+        sentResume = true;
+        resumeSentAt = Date.now();
+        child.stdin.write(submitPtyLine("/run resume"));
       }
       if (driver.parentSubmits && steerResponseSeen && !sentQuit) {
         sentQuit = true;
@@ -289,6 +314,12 @@ try {
         output,
         sentQuit,
         sentSteer,
+        sentPause,
+        pauseAcceptedSeen,
+        pauseReachedSeen,
+        sentResume,
+        resumeConfirmedSeen,
+        resumeSentAt,
         steerAcceptedSeen,
         steerAppliedSeen,
         steerResponseSeen,
@@ -313,6 +344,7 @@ try {
         responseStarted: Number.isFinite(responseStartedAt),
         firstChunkWritten: Number.isFinite(firstChunkWrittenAt),
         postRequestCount,
+        secondRequestReceivedAt,
         timedOut,
       });
     });
@@ -322,10 +354,16 @@ try {
     result.timedOut ||
     !result.sentQuit ||
     !result.sentSteer ||
+    !result.sentPause ||
+    !result.pauseAcceptedSeen ||
+    !result.pauseReachedSeen ||
+    !result.sentResume ||
+    !result.resumeConfirmedSeen ||
     !result.steerAcceptedSeen ||
     !result.steerAppliedSeen ||
     !result.steerResponseSeen ||
     result.postRequestCount < 2 ||
+    result.secondRequestReceivedAt < result.resumeSentAt ||
     !result.scrollSeen ||
     !result.japaneseSeen ||
     !result.previewSeen ||
@@ -337,6 +375,11 @@ try {
       `PTY smoke failed (exit ${result.code}, signal ${result.signal ?? "none"}, ` +
       `quitSent ${result.sentQuit}, scrollSeen ${result.scrollSeen}, ` +
       `steerSent ${result.sentSteer}, steerAccepted ${result.steerAcceptedSeen}, ` +
+      `pauseSent ${result.sentPause}, pauseAccepted ${result.pauseAcceptedSeen}, ` +
+      `pauseReached ${result.pauseReachedSeen}, resumeSent ${result.sentResume}, ` +
+      `resumeConfirmed ${result.resumeConfirmedSeen}, secondRequestAfterResume ${
+        result.secondRequestReceivedAt >= result.resumeSentAt
+      }, ` +
       `steerApplied ${result.steerAppliedSeen}, steerResponse ${result.steerResponseSeen}, ` +
       `japaneseSeen ${result.japaneseSeen}, previewSubmitted ${result.previewSubmitted}, ` +
       `previewSeen ${result.previewSeen}, ` +

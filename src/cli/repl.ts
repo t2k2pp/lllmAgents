@@ -30,6 +30,7 @@ import { interruptWatcher } from "./interrupt-watcher.js";
 import { progressIndicator } from "./progress-indicator.js";
 import { createCommandMenuProvider, createFileMenuProvider } from "./completer.js";
 import { getCommandRegistry, getRegistryHelpEntries } from "./commands/registry.js";
+import { executeRunControl, printRunControlFeedback } from "./commands/run-control.js";
 import { parseTokenCount } from "../config/types.js";
 import type { Config, LLMEndpoint, SecondLLMEndpoint, SecondLLMProviderType } from "../config/types.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
@@ -4320,13 +4321,19 @@ export class REPL {
           bytes = [];
           if (text) {
             if (text.startsWith("/")) {
-              // slash commandはモデル入力ではないため、従来どおりturn終了後に実行する。
-              this.pendingInputs.push(text);
-              process.stdout.write(
-                chalk.dim(
-                  `\n  ⏳ コマンドをキューに追加しました (待ち ${this.pendingInputs.length} 件)。 現在の処理完了後に実行します。\n`,
-                ),
-              );
+              if (/^\/run(?:\s|$)/i.test(text)) {
+                // run制御だけは「turn完了後」へ積むとpauseの意味が失われるため即時処理する。
+                // session復元の /resume・/continue とは名前空間を分離している。
+                printRunControlFeedback(executeRunControl(this.agent, text.split(/\s+/).slice(1)));
+              } else {
+                // その他のslash commandはモデル入力ではないため、従来どおりturn終了後に実行する。
+                this.pendingInputs.push(text);
+                process.stdout.write(
+                  chalk.dim(
+                    `\n  ⏳ コマンドをキューに追加しました (待ち ${this.pendingInputs.length} 件)。 現在の処理完了後に実行します。\n`,
+                  ),
+                );
+              }
             } else {
               const result = this.agent.queueSteering(text);
               if (result.status === "queued") {

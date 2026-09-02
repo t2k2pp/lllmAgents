@@ -4,6 +4,9 @@ const EXPECT_IME_MARKER = "__PTY_IME_SEEN__";
 const EXPECT_PREVIEW_MARKER = "__PTY_PREVIEW_SEEN__";
 const EXPECT_PREVIEW_SUBMITTED_MARKER = "__PTY_PREVIEW_SUBMITTED__";
 const EXPECT_STEER_MARKER = "__PTY_STEER_SENT__";
+const EXPECT_PAUSE_MARKER = "__PTY_PAUSE_SENT__";
+const EXPECT_PAUSED_MARKER = "__PTY_PAUSE_REACHED__";
+const EXPECT_RESUME_MARKER = "__PTY_RESUME_SENT__";
 const RESPONSE_PREVIEW_TEXT = "PV42";
 const RESPONSE_FINAL_TEXT = "FINAL99";
 const RESPONSE_STEER_TEXT = "STEER_OK";
@@ -55,10 +58,18 @@ expect {
     exit 125
   }
 }
+send -- "/run pause\\r"
+puts "${EXPECT_PAUSE_MARKER}"
+expect -re {pause予約を受理}
 send -- "STEER_REQUEST\\r"
 puts "${EXPECT_STEER_MARKER}"
 set timeout 30
 expect -re {${RESPONSE_FINAL_TEXT}}
+expect -re {LLM API境界で一時停止}
+puts "${EXPECT_PAUSED_MARKER}"
+send -- "/run resume\\r"
+puts "${EXPECT_RESUME_MARKER}"
+expect -re {foreground runを再開}
 expect -re {${RESPONSE_STEER_TEXT}}
 puts "${EXPECT_QUIT_MARKER}"
 send -- "/quit\\r"
@@ -90,6 +101,9 @@ export function ptyDriver(platform, { node, tsx, entry }) {
       finalMarker: RESPONSE_FINAL_TEXT,
       steerMarker: RESPONSE_STEER_TEXT,
       steerSentMarker: EXPECT_STEER_MARKER,
+      pauseSentMarker: EXPECT_PAUSE_MARKER,
+      pauseReachedMarker: EXPECT_PAUSED_MARKER,
+      resumeSentMarker: EXPECT_RESUME_MARKER,
     };
   }
 
@@ -110,5 +124,8 @@ export function ptyDriver(platform, { node, tsx, entry }) {
     finalMarker: RESPONSE_FINAL_TEXT,
     steerMarker: RESPONSE_STEER_TEXT,
     steerSentMarker: EXPECT_STEER_MARKER,
+    pauseSentMarker: EXPECT_PAUSE_MARKER,
+    pauseReachedMarker: EXPECT_PAUSED_MARKER,
+    resumeSentMarker: EXPECT_RESUME_MARKER,
   };
 }

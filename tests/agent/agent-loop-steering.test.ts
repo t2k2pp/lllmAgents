@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AgentLoop } from "../../src/agent/agent-loop.js";
 import type { ChatChunk, ChatWithToolsParams, LLMProvider } from "../../src/providers/base-provider.js";
 import { PermissionManager } from "../../src/security/permission-manager.js";
@@ -62,6 +62,101 @@ function makeLoop(provider: LLMProvider, registry = new ToolRegistry()): AgentLo
 }
 
 describe("AgentLoop foreground steering", () => {
+  it("進行中APIの完了後にpauseし、resumeまで次のAPI要求を開始しない", async () => {
+    const requests: ChatWithToolsParams[] = [];
+    let releaseFirst!: () => void;
+    const firstHold = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const registry = new ToolRegistry();
+    let toolExecuted = false;
+    registry.register({
+      name: "pause_probe",
+      definition: {
+        type: "function",
+        function: { name: "pause_probe", description: "pause test", parameters: { type: "object", properties: {} } },
+      },
+      execute: async () => {
+        toolExecuted = true;
+        return { success: true, output: "probe completed" };
+      },
+    });
+    let call = 0;
+    const chatWithTools = async function* (request: ChatWithToolsParams): AsyncGenerator<ChatChunk> {
+      requests.push(request);
+      if (call++ === 0) {
+        await firstHold;
+        yield {
+          type: "tool_call",
+          toolCall: { id: "call_pause", type: "function", function: { name: "pause_probe", arguments: "{}" } },
+        };
+        yield { type: "done", finishReason: "tool_calls" };
+        return;
+      }
+      yield* textReply("再開後の応答です。");
+    };
+    const provider = {
+      ...scriptedProvider([], []),
+      chat: chatWithTools,
+      chatWithTools,
+      chatWithVision: chatWithTools,
+    } as unknown as LLMProvider;
+    const loop = makeLoop(provider, registry);
+
+    const running = loop.run("pauseしてください");
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(loop.requestRunPause().status).toBe("requested");
+    expect(loop.getRunPauseSnapshot().state).toBe("pause_requested");
+    releaseFirst();
+    await vi.waitFor(() => expect(loop.getRunPauseSnapshot().state).toBe("paused"));
+    expect(requests).toHaveLength(1);
+    expect(toolExecuted).toBe(false);
+
+    expect(loop.resumeRun().status).toBe("resumed");
+    await running;
+    expect(toolExecuted).toBe(true);
+    expect(requests).toHaveLength(2);
+    expect(loop.getRunPauseSnapshot().state).toBe("idle");
+  });
+
+  it("pause中のhard interruptは待機を解除し、応答内toolや次APIを実行しない", async () => {
+    const requests: ChatWithToolsParams[] = [];
+    let releaseFirst!: () => void;
+    const firstHold = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let call = 0;
+    const chatWithTools = async function* (request: ChatWithToolsParams): AsyncGenerator<ChatChunk> {
+      requests.push(request);
+      if (call++ === 0) {
+        await firstHold;
+        yield { type: "text", text: "境界到達前の応答" };
+        yield { type: "done", finishReason: "stop" };
+        return;
+      }
+      yield* textReply("開始してはいけない応答");
+    };
+    const provider = {
+      ...scriptedProvider([], []),
+      chat: chatWithTools,
+      chatWithTools,
+      chatWithVision: chatWithTools,
+    } as unknown as LLMProvider;
+    const loop = makeLoop(provider);
+
+    const running = loop.run("pause後に中断");
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    loop.requestRunPause();
+    releaseFirst();
+    await vi.waitFor(() => expect(loop.getRunPauseSnapshot().state).toBe("paused"));
+    loop.abort();
+    await running;
+
+    expect(requests).toHaveLength(1);
+    expect(loop.getRunPauseSnapshot().state).toBe("idle");
+    expect(loop.isAborted()).toBe(true);
+  });
+
   it("LLM応答中の追加入力を別turnにせず、reply境界で同じrunへ注入する", async () => {
     const requests: ChatWithToolsParams[] = [];
     const ref: { loop?: AgentLoop } = {};
