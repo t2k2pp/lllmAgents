@@ -65,10 +65,17 @@ import { renderEditDiff, renderWriteDiff } from "../cli/diff-display.js";
 import {
   gateLLMProvider,
   RunApiGate,
+  type RunPauseMode,
   type RequestRunPauseResult,
   type ResumeRunResult,
   type RunPauseSnapshot,
 } from "./run-api-gate.js";
+import {
+  createDurableRunCheckpoint,
+  parseDurableRunCheckpoint,
+  validateDurableResume,
+  type DurableRunCheckpoint,
+} from "./durable-run-checkpoint.js";
 import {
   type GoalDefinition,
   type EvaluationRecord,
@@ -364,6 +371,8 @@ export class AgentLoop {
   /** context整理・分類器を含む全main LLM chat経路をrun gateで包んだprovider。 */
   private provider: LLMProvider;
   private runApiGate: RunApiGate;
+  /** resume開始直前のpairing済み履歴。例外時に未確定tool callをmemoryへ残さないためのrollback元。 */
+  private durableResumeBaseline: SessionData | null = null;
 
   constructor(
     provider: LLMProvider,
@@ -385,8 +394,18 @@ export class AgentLoop {
     llmProfiles?: LLMProfiles,
     private readonly safeMode: boolean = false,
   ) {
-    this.runApiGate = new RunApiGate(() => {
+    this.runApiGate = new RunApiGate((snapshot) => {
       screen.clearTransientStatus();
+      if (snapshot.mode === "durable") {
+        console.log(
+          chalk.cyan(
+            `\n  ⏸ durable_paused: session ${this.session.meta.id} を次のLLM API直前で保存しました。アプリ・PCを停止できます。`,
+          ),
+        );
+        console.log(chalk.dim(`  再起動後: /resume ${this.session.meta.id} → /run inspect → /run resume`));
+        this.notice("info", "foreground runをdurable checkpointで一時停止");
+        return;
+      }
       console.log(
         chalk.cyan(
           "\n  ⏸ runをLLM API境界で一時停止しました。アプリは終了せず、ローカルLLMの再起動・並列数変更後に /run resume で再開してください。",
@@ -561,17 +580,110 @@ export class AgentLoop {
   }
 
   /** 現在のCLI foreground runを、進行中APIの完了後に協調停止する。 */
-  requestRunPause(): RequestRunPauseResult {
-    return this.runApiGate.requestPause();
+  requestRunPause(
+    mode: RunPauseMode = "process",
+  ): RequestRunPauseResult | { status: "durable_unavailable"; snapshot: RunPauseSnapshot; reason: string } {
+    if (mode === "durable" && !this.liveBinding) {
+      return {
+        status: "durable_unavailable",
+        snapshot: this.runApiGate.snapshot(),
+        reason: "model/provider bindingが未確定です。/model apply後に再試行してください",
+      };
+    }
+    return this.runApiGate.requestPause(mode);
   }
 
   /** pause予約を取り消す、またはAPI境界で停止中のrunを再開する。 */
-  resumeRun(): ResumeRunResult {
+  resumeRun(): ResumeRunResult | { status: "checkpoint_save_failed"; snapshot: RunPauseSnapshot; reason: string } {
+    const snapshot = this.runApiGate.snapshot();
+    if (snapshot.state === "paused" && snapshot.mode === "durable") {
+      const parsed = parseDurableRunCheckpoint(this.session.runCheckpoint);
+      if (!parsed.ok) {
+        return { status: "checkpoint_save_failed", snapshot, reason: parsed.reason };
+      }
+      parsed.checkpoint.state = "resuming";
+      parsed.checkpoint.savedAt = new Date().toISOString();
+      this.session.runCheckpoint = parsed.checkpoint;
+      try {
+        this.saveCurrentSession();
+        this.durableResumeBaseline = structuredClone(this.session);
+      } catch (error) {
+        return {
+          status: "checkpoint_save_failed",
+          snapshot,
+          reason: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
     return this.runApiGate.resume();
   }
 
   getRunPauseSnapshot(): RunPauseSnapshot {
     return this.runApiGate.snapshot();
+  }
+
+  getDurableRunCheckpoint():
+    | { status: "none" }
+    | { status: "invalid"; reason: string }
+    | { status: "durable_paused" | "resuming"; checkpoint: DurableRunCheckpoint; differences: string[] } {
+    if (this.session.runCheckpoint === undefined) return { status: "none" };
+    const parsed = parseDurableRunCheckpoint(this.session.runCheckpoint);
+    if (!parsed.ok) return { status: "invalid", reason: parsed.reason };
+    return {
+      status: parsed.checkpoint.state,
+      checkpoint: structuredClone(parsed.checkpoint),
+      differences: validateDurableResume(parsed.checkpoint, {
+        sessionId: this.session.meta.id,
+        liveBinding: this.liveBinding,
+      }),
+    };
+  }
+
+  beginDurableRunResume():
+    | { status: "started"; continuation: Promise<void> }
+    | { status: "not_found" | "invalid" | "blocked_unknown_progress" | "incompatible" | "busy"; reason: string } {
+    if (this.isProcessing || this.runApiGate.snapshot().state !== "idle") {
+      return { status: "busy", reason: "foreground runがすでに実行中です" };
+    }
+    const current = this.getDurableRunCheckpoint();
+    if (current.status === "none")
+      return { status: "not_found", reason: "復元済みsessionにdurable checkpointがありません" };
+    if (current.status === "invalid") return { status: "invalid", reason: current.reason };
+    if (current.status === "resuming") {
+      return {
+        status: "blocked_unknown_progress",
+        reason:
+          "前回はresume開始後に終了しました。API/toolの到達点を確定できないため自動再実行しません。/run inspect後、/run discardして新しい依頼として続けてください",
+      };
+    }
+    if (current.differences.length > 0) return { status: "incompatible", reason: current.differences.join(" / ") };
+
+    const checkpoint = current.checkpoint;
+    checkpoint.state = "resuming";
+    checkpoint.savedAt = new Date().toISOString();
+    this.session.runCheckpoint = checkpoint;
+    try {
+      this.saveCurrentSession();
+      this.durableResumeBaseline = structuredClone(this.session);
+    } catch (error) {
+      return {
+        status: "invalid",
+        reason: `resume開始状態を保存できません: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    return {
+      status: "started",
+      continuation: this.run("", { source: "cli", durableResume: checkpoint }),
+    };
+  }
+
+  discardDurableRunCheckpoint(): { status: "discarded" | "not_found" | "busy"; reason?: string } {
+    if (this.isProcessing) return { status: "busy", reason: "foreground run実行中はdiscardできません" };
+    if (this.session.runCheckpoint === undefined)
+      return { status: "not_found", reason: "durable checkpointがありません" };
+    delete this.session.runCheckpoint;
+    this.saveCurrentSession();
+    return { status: "discarded" };
   }
 
   /**
@@ -605,7 +717,11 @@ export class AgentLoop {
     return this.pendingSteeringMessages.splice(0);
   }
 
-  async run(userMessage: string | ContentPart[], options?: { source?: RequestSource }): Promise<void> {
+  async run(
+    userMessage: string | ContentPart[],
+    options?: { source?: RequestSource; durableResume?: DurableRunCheckpoint },
+  ): Promise<void> {
+    const durableResume = options?.durableResume;
     this.currentSource = options?.source ?? "cli";
     this.runApiGate.beginRun(this.currentSource);
     this.isProcessing = true;
@@ -624,8 +740,9 @@ export class AgentLoop {
     };
     this.events.emit("task_start", {
       source: this.currentSource,
-      prompt:
-        typeof userMessage === "string"
+      prompt: durableResume
+        ? durableResume.run.userMessageText
+        : typeof userMessage === "string"
           ? userMessage
           : userMessage
               .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -646,9 +763,9 @@ export class AgentLoop {
     this.currentRegister = "unknown";
     this.softCapWarned = false;
     try {
-      this.history.addUserMessage(userMessage);
+      if (!durableResume) this.history.addUserMessage(userMessage);
       // チャットログ記録
-      if (this.chatLogger) {
+      if (this.chatLogger && !durableResume) {
         const userText =
           typeof userMessage === "string"
             ? userMessage
@@ -659,8 +776,9 @@ export class AgentLoop {
         this.chatLogger.logUser(userText);
       }
       // ユーザーメッセージのテキスト部分を抽出（タスク判定用）
-      let userMessageText =
-        typeof userMessage === "string"
+      let userMessageText = durableResume
+        ? durableResume.run.userMessageText
+        : typeof userMessage === "string"
           ? userMessage
           : (userMessage as ContentPart[])
               .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -681,18 +799,22 @@ export class AgentLoop {
       };
       // Phase E-3: タスク複雑度を分類して、 不一致なら model 推奨を 1 行ログ。
       // 自動切替はしない (ユーザの明示操作 = /model を尊重)。
-      try {
-        const complexity = classifyTaskComplexity(userMessageText);
-        const recommended = recommendTier(complexity, this.capability.tier);
-        if (recommended) {
-          const reason = explainRecommendation(complexity, this.capability.tier, recommended);
-          console.log(
-            chalk.dim(`  [model 推奨] ${this.capability.tier} → ${recommended} (complexity=${complexity}). ${reason}`),
-          );
-          console.log(chalk.dim(`  → 切替する場合: /model <name> または /second swap`));
+      if (!durableResume) {
+        try {
+          const complexity = classifyTaskComplexity(userMessageText);
+          const recommended = recommendTier(complexity, this.capability.tier);
+          if (recommended) {
+            const reason = explainRecommendation(complexity, this.capability.tier, recommended);
+            console.log(
+              chalk.dim(
+                `  [model 推奨] ${this.capability.tier} → ${recommended} (complexity=${complexity}). ${reason}`,
+              ),
+            );
+            console.log(chalk.dim(`  → 切替する場合: /model <name> または /second swap`));
+          }
+        } catch {
+          /* 推奨は best-effort、 失敗しても続行 */
         }
-      } catch {
-        /* 推奨は best-effort、 失敗しても続行 */
       }
       // 区切り / 山場シグナル B6・P3 (docs/context-strategy.md §3.3)。
       // ユーザー発話を受けた時点で判定する。 山場の直前に先回りして枠を空けるのが狙い。
@@ -710,23 +832,23 @@ export class AgentLoop {
       }
       // <think>タグフィルター（古いOllama向け、ストリーム跨ぎ対応）
       const filterThinkingTags = createThinkingFilter();
-      let emptyResponseRetries = 0;
+      let emptyResponseRetries = durableResume?.run.emptyResponseRetries ?? 0;
       const MAX_EMPTY_RETRIES = 3;
-      let codeBlockRetried = false;
-      let hasExecutedTools = false; // この run() 内でツールを1回でも実行したか
+      let codeBlockRetried = durableResume?.run.codeBlockRetried ?? false;
+      let hasExecutedTools = durableResume?.run.hasExecutedTools ?? false; // この run() 内でツールを1回でも実行したか
       /** 直前のツール呼び出しシグネチャ（反復検出用） */
-      let lastToolSignature = "";
-      let repeatToolCount = 0;
+      let lastToolSignature = durableResume?.run.lastToolSignature ?? "";
+      let repeatToolCount = durableResume?.run.repeatToolCount ?? 0;
       /** 検証待ちコードファイルのリスト（file_write/file_edit後、bash未実行ならここに溜まる） */
-      let pendingVerification: string[] = [];
+      let pendingVerification: string[] = [...(durableResume?.run.pendingVerification ?? [])];
       /** Evaluatorレビュー待ちファイルのリスト（コード+ドキュメント両方） */
-      let pendingEvalFiles: string[] = [];
+      let pendingEvalFiles: string[] = [...(durableResume?.run.pendingEvalFiles ?? [])];
       /**
        * 自己点検の累積回数（統合カウンタ）。
        * verification, evaluator, text-only, code-block の4種類の懸念すべてで共有する。
        * 上限到達で追加の自己点検注入は停止しターン終了。
        */
-      let selfCheckRounds = 0;
+      let selfCheckRounds = durableResume?.run.selfCheckRounds ?? 0;
       // Phase C-2: tier 別に自己点検回数を変える。 T1=3 / T2=2 / T3=1。
       // T3 は scaffolding を増やしても改善しないため早めにユーザに戻す。
       const MAX_SELF_CHECK_ROUNDS = this.capability.maxSelfCheckRounds;
@@ -734,14 +856,52 @@ export class AgentLoop {
 
       // 2026-05-16 (docs/strategic-todo-design.md 議論): base harness の persistence 機構。
       // 既存 self-check と独立した並列カウンタ。 standard 以上のレジスターでのみ発火。
-      let progressGateRetries = 0; // Axis (1) Q→A 進捗 gate (response_complete 時)
-      let coherenceGateRetries = 0; // Axis (2a) thinking-text コヒーレンス
+      let progressGateRetries = durableResume?.run.progressGateRetries ?? 0; // Axis (1) Q→A 進捗 gate (response_complete 時)
+      let coherenceGateRetries = durableResume?.run.coherenceGateRetries ?? 0; // Axis (2a) thinking-text コヒーレンス
       const MAX_NEW_GATE_RETRIES = 2; // 各 gate の上限 (自己点検と独立)
 
       // Phase C-2: hard cap を tier 別に。 T1=100, T2=80, T3=50。
       // ユーザー override (config.json modelCapabilities) で上書きも可能。
       const hardCap = this.capability.maxIterations;
-      for (let iteration = 0; iteration < hardCap; iteration++) {
+      const pauseDurablyIfRequested = async (nextIteration: number): Promise<boolean> => {
+        if (!this.runApiGate.isDurablePauseRequested()) return true;
+        applyPendingSteering("tool");
+        const liveBinding = this.liveBinding;
+        if (!liveBinding) {
+          this.runApiGate.resume();
+          throw new Error(
+            "durable pauseに必要なmodel/provider bindingが未確定です。/model apply後に再試行してください",
+          );
+        }
+        this.session.runCheckpoint = createDurableRunCheckpoint({
+          sessionId: this.session.meta.id,
+          liveBinding,
+          run: {
+            userMessageText,
+            nextIteration,
+            emptyResponseRetries,
+            codeBlockRetried,
+            hasExecutedTools,
+            lastToolSignature,
+            repeatToolCount,
+            pendingVerification,
+            pendingEvalFiles,
+            selfCheckRounds,
+            progressGateRetries,
+            coherenceGateRetries,
+          },
+        });
+        try {
+          this.saveCurrentSession();
+        } catch (error) {
+          this.runApiGate.resume();
+          throw new Error(
+            `durable checkpointを保存できません: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        return await this.runApiGate.pauseAtDurableBoundary();
+      };
+      for (let iteration = durableResume?.run.nextIteration ?? 0; iteration < hardCap; iteration++) {
         this.currentIteration = iteration;
         this.runStats.iterations = iteration + 1;
         // P3-A: レジスター別ソフトキャップ。 hard cap (= capability.maxIterations) 内で、
@@ -789,6 +949,9 @@ export class AgentLoop {
           this.purgeEphemeralAtSpanEnd("user_abort");
           return;
         }
+        // durable pauseは、前のAPI応答と開始済みtool resultが履歴へ確定した後、
+        // 次のmain LLM APIを開始する直前だけでcheckpointする。
+        if (!(await pauseDurablyIfRequested(iteration))) return;
         // Context reduction check — mode に応じて忘却 / 圧縮を選ぶ (docs/context-forgetting.md §6)
         this.contextManager.noteTurn();
         this.contextStrategy.noteTurn();
@@ -842,6 +1005,8 @@ export class AgentLoop {
         let connectionRetries = 0;
 
         while (!success) {
+          // context整理中やconnection retry待ちにpause要求が届いた場合も、次のmain APIを出す前に保存する。
+          if (!(await pauseDurablyIfRequested(iteration))) return;
           try {
             const toolDefs = this.getFilteredToolDefs();
             // LLM I/O ログ: リクエスト記録
@@ -2020,7 +2185,11 @@ export class AgentLoop {
       const pauseBeforeFinish = this.runApiGate.finishRun();
       if (pauseBeforeFinish.state === "pause_requested") {
         console.log(
-          chalk.dim("  ✓ runが完了したためpause予約を終了しました。現在、foreground LLM APIは実行されていません。"),
+          chalk.dim(
+            pauseBeforeFinish.mode === "durable"
+              ? "  ✓ runが次のAPIを必要とせず完了したためdurable pause予約を終了しました。"
+              : "  ✓ runが完了したためpause予約を終了しました。現在、foreground LLM APIは実行されていません。",
+          ),
         );
       }
       this.isProcessing = false;
@@ -2029,6 +2198,24 @@ export class AgentLoop {
       // 未設定 (incomplete) のまま中断フラグが立っていれば aborted に倒す。
       if (this.runStats.outcome === "incomplete" && this._aborted) {
         this.runStats.outcome = "aborted";
+      }
+      // resumingは「再開後の到達点が不明になり得る」印。runが正常な終端へ到達した時だけ消す。
+      // 例外・強制終了では残し、次回起動時に自動再実行をfail-fastで拒否する。
+      const durableState = parseDurableRunCheckpoint(this.session.runCheckpoint);
+      if (durableState.ok && durableState.checkpoint.state === "resuming" && this.runStats.outcome !== "incomplete") {
+        delete this.session.runCheckpoint;
+        this.saveCurrentSession();
+        this.durableResumeBaseline = null;
+      } else if (
+        durableState.ok &&
+        durableState.checkpoint.state === "resuming" &&
+        this.runStats.outcome === "incomplete" &&
+        this.durableResumeBaseline
+      ) {
+        // API/tool例外後のhistoryには、assistant tool_callだけが追加されresultが無い可能性がある。
+        // 再開前のatomic状態へ戻し、次回起動でもresuming=不明状態として自動再実行を拒否する。
+        this.restoreSession(structuredClone(this.durableResumeBaseline));
+        this.durableResumeBaseline = null;
       }
       this.events.emit("task_complete", {
         source: this.currentSource,

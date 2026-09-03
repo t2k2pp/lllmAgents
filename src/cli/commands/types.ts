@@ -24,6 +24,8 @@ export interface ReplCommandContext {
   config: Config;
   /** ctx.config の現在の内容を config.json に保存する */
   saveConfig(): void;
+  /** slash commandが開始した長時間runへ、通常turnと同じEsc/type-ahead所有権を付けて待つ。 */
+  awaitRunContinuation?(continuation: Promise<void>): Promise<void>;
   skillRegistry?: SkillRegistry;
   workflowLearner?: WorkflowLearner;
 }

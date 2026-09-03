@@ -2,11 +2,13 @@ import type { ChatParams, ChatWithToolsParams, LLMProvider, VisionChatParams } f
 import type { RequestSource } from "../security/permission-manager.js";
 
 export type RunPauseState = "idle" | "running" | "pause_requested" | "paused";
+export type RunPauseMode = "process" | "durable";
 
 export type RunPauseSnapshot = {
   state: RunPauseState;
   source: RequestSource | null;
   inFlight: number;
+  mode: RunPauseMode | null;
 };
 
 export type RequestRunPauseResult =
@@ -27,6 +29,7 @@ export class RunApiGate {
   private state: RunPauseState = "idle";
   private source: RequestSource | null = null;
   private inFlight = 0;
+  private mode: RunPauseMode | null = null;
   private epoch = 0;
   private pausePromise: Promise<void> | null = null;
   private releasePause: (() => void) | null = null;
@@ -39,6 +42,7 @@ export class RunApiGate {
     this.state = "running";
     this.source = source;
     this.inFlight = 0;
+    this.mode = null;
   }
 
   finishRun(): RunPauseSnapshot {
@@ -48,23 +52,26 @@ export class RunApiGate {
     this.state = "idle";
     this.source = null;
     this.inFlight = 0;
+    this.mode = null;
     return previous;
   }
 
   abortRun(): void {
     if (this.state === "pause_requested" || this.state === "paused") {
       this.state = "running";
+      this.mode = null;
       this.releaseWaiters();
     }
   }
 
-  requestPause(): RequestRunPauseResult {
+  requestPause(mode: RunPauseMode = "process"): RequestRunPauseResult {
     if (this.state === "idle") return { status: "not_running", snapshot: this.snapshot() };
     if (this.source !== "cli") return { status: "not_cli", snapshot: this.snapshot() };
     if (this.state === "paused") return { status: "already_paused", snapshot: this.snapshot() };
     if (this.state === "pause_requested") return { status: "already_requested", snapshot: this.snapshot() };
 
-    if (this.inFlight === 0) {
+    this.mode = mode;
+    if (mode === "process" && this.inFlight === 0) {
       this.reachPause();
     } else {
       this.state = "pause_requested";
@@ -80,19 +87,20 @@ export class RunApiGate {
 
     const status = this.state === "paused" ? "resumed" : "request_cancelled";
     this.state = "running";
+    this.mode = null;
     this.releaseWaiters();
     return { status, snapshot: this.snapshot() };
   }
 
   snapshot(): RunPauseSnapshot {
-    return { state: this.state, source: this.source, inFlight: this.inFlight };
+    return { state: this.state, source: this.source, inFlight: this.inFlight, mode: this.mode };
   }
 
   async enterRequest(signal?: AbortSignal): Promise<RequestToken | null> {
     if (this.state === "idle") return { tracked: false, epoch: this.epoch };
 
     const requestEpoch = this.epoch;
-    if (this.state === "pause_requested" || this.state === "paused") {
+    if (this.state === "paused" || (this.state === "pause_requested" && this.mode === "process")) {
       const pause = this.ensurePausePromise();
       const resumed = await this.waitForResume(pause, signal);
       if (!resumed || !this.isActiveEpoch(requestEpoch)) return null;
@@ -106,20 +114,36 @@ export class RunApiGate {
   leaveRequest(token: RequestToken): void {
     if (!token.tracked || token.epoch !== this.epoch) return;
     this.inFlight = Math.max(0, this.inFlight - 1);
-    if (this.inFlight === 0 && this.state === "pause_requested") this.reachPause();
+    if (this.inFlight === 0 && this.state === "pause_requested" && this.mode === "process") this.reachPause();
   }
 
   /** API完了後の制御を境界上で止め、tool実行などrunの後続処理もresumeまで進めない。 */
   async waitAfterRequest(token: RequestToken, signal?: AbortSignal): Promise<boolean> {
     if (!token.tracked || token.epoch !== this.epoch) return false;
-    if (this.state !== "pause_requested" && this.state !== "paused") return true;
+    if (this.state === "running" || (this.state === "pause_requested" && this.mode === "durable")) return true;
     return await this.waitForResume(this.ensurePausePromise(), signal);
+  }
+
+  /**
+   * durable pause はAgentLoopが会話とtool resultを確定した境界でだけ到達させる。
+   * provider完了直後には止めず、次のLLM APIを開始する直前で呼ぶ。
+   */
+  async pauseAtDurableBoundary(): Promise<boolean> {
+    if (this.state !== "pause_requested" || this.mode !== "durable" || this.inFlight !== 0) return true;
+    const waitEpoch = this.epoch;
+    this.reachPause();
+    await this.ensurePausePromise();
+    return this.isActiveEpoch(waitEpoch);
+  }
+
+  isDurablePauseRequested(): boolean {
+    return this.mode === "durable" && this.state === "pause_requested";
   }
 
   /** API以外のrun後続処理もpause中に新規開始しないための共通checkpoint。 */
   async waitUntilRunning(): Promise<boolean> {
     if (this.state === "idle") return false;
-    if (this.state !== "pause_requested" && this.state !== "paused") return true;
+    if (this.state === "running" || (this.state === "pause_requested" && this.mode === "durable")) return true;
     const waitEpoch = this.epoch;
     await this.ensurePausePromise();
     return this.isActiveEpoch(waitEpoch);

@@ -105,4 +105,28 @@ describe("RunApiGate", () => {
     expect(gate.snapshot().state).toBe("running");
     gate.finishRun();
   });
+
+  it("durable pauseはAPI完了だけでは停止せず、AgentLoopが宣言した安全境界で停止する", async () => {
+    const gate = new RunApiGate();
+    const provider = gateLLMProvider(
+      makeProvider(() => undefined),
+      gate,
+    );
+    gate.beginRun("cli");
+
+    expect(gate.requestPause("durable").snapshot.state).toBe("pause_requested");
+    await collectResponse(provider.chat(params));
+    expect(gate.snapshot()).toMatchObject({ state: "pause_requested", inFlight: 0, mode: "durable" });
+
+    let passed = false;
+    const boundary = gate.pauseAtDurableBoundary().then(() => {
+      passed = true;
+    });
+    await vi.waitFor(() => expect(gate.snapshot().state).toBe("paused"));
+    expect(passed).toBe(false);
+    expect(gate.resume().status).toBe("resumed");
+    await boundary;
+    expect(passed).toBe(true);
+    gate.finishRun();
+  });
 });

@@ -178,6 +178,8 @@ try {
     let sentPause = false;
     let pauseAcceptedSeen = false;
     let pauseReachedSeen = false;
+    let sentParallel = false;
+    let parallelAppliedSeen = false;
     let sentResume = false;
     let resumeConfirmedSeen = false;
     let resumeSentAt = Number.POSITIVE_INFINITY;
@@ -230,6 +232,7 @@ try {
       if (!sentPause && output.includes(driver.pauseSentMarker)) sentPause = true;
       if (!pauseAcceptedSeen && output.includes("pause予約を受理しました")) pauseAcceptedSeen = true;
       if (!pauseReachedSeen && output.includes("runをLLM API境界で一時停止しました")) pauseReachedSeen = true;
+      if (!parallelAppliedSeen && output.includes("並列実行上限を 4 に設定しました")) parallelAppliedSeen = true;
       if (!sentResume && output.includes(driver.resumeSentMarker)) {
         sentResume = true;
         resumeSentAt = Date.now();
@@ -286,7 +289,11 @@ try {
         // PTYのLFはinteractive-inputでCtrl+J（改行挿入）になる。CRでEnter確定する。
         child.stdin.write(submitPtyLine("STEER_REQUEST"));
       }
-      if (driver.parentSubmits && pauseReachedSeen && !sentResume) {
+      if (driver.parentSubmits && pauseReachedSeen && !sentParallel) {
+        sentParallel = true;
+        child.stdin.write(submitPtyLine("/parallel 4"));
+      }
+      if (driver.parentSubmits && parallelAppliedSeen && !sentResume) {
         sentResume = true;
         resumeSentAt = Date.now();
         child.stdin.write(submitPtyLine("/run resume"));
@@ -317,6 +324,8 @@ try {
         sentPause,
         pauseAcceptedSeen,
         pauseReachedSeen,
+        sentParallel,
+        parallelAppliedSeen,
         sentResume,
         resumeConfirmedSeen,
         resumeSentAt,
@@ -357,6 +366,8 @@ try {
     !result.sentPause ||
     !result.pauseAcceptedSeen ||
     !result.pauseReachedSeen ||
+    !result.sentParallel ||
+    !result.parallelAppliedSeen ||
     !result.sentResume ||
     !result.resumeConfirmedSeen ||
     !result.steerAcceptedSeen ||
@@ -376,7 +387,8 @@ try {
       `quitSent ${result.sentQuit}, scrollSeen ${result.scrollSeen}, ` +
       `steerSent ${result.sentSteer}, steerAccepted ${result.steerAcceptedSeen}, ` +
       `pauseSent ${result.sentPause}, pauseAccepted ${result.pauseAcceptedSeen}, ` +
-      `pauseReached ${result.pauseReachedSeen}, resumeSent ${result.sentResume}, ` +
+      `pauseReached ${result.pauseReachedSeen}, parallelSent ${result.sentParallel}, ` +
+      `parallelApplied ${result.parallelAppliedSeen}, resumeSent ${result.sentResume}, ` +
       `resumeConfirmed ${result.resumeConfirmedSeen}, secondRequestAfterResume ${
         result.secondRequestReceivedAt >= result.resumeSentAt
       }, ` +

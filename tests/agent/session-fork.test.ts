@@ -19,6 +19,7 @@ describe("forkSession", () => {
       ],
       todos: [{ id: "todo-1", content: "続き", status: "pending", createdAt: "2026-01-01T00:00:00.000Z" }],
       goal: null,
+      runCheckpoint: { schemaVersion: 1, state: "durable_paused" },
     };
 
     const forked = forkSession(source);
@@ -31,6 +32,7 @@ describe("forkSession", () => {
     expect(forked.messages).toEqual(source.messages);
     expect(forked.messages).not.toBe(source.messages);
     expect(forked.todos).not.toBe(source.todos);
+    expect(forked.runCheckpoint).toBeUndefined();
 
     forked.messages.push({ role: "user", content: "分岐後だけの依頼" });
     if (forked.todos) forked.todos[0].content = "分岐後に変更";

@@ -87,7 +87,8 @@
 | [repl-io-robustness.md](repl-io-robustness.md) | implemented | REPL I/O 堅牢化 (raw mode 自己修復・Esc 中断) |
 | [interrupt-and-progress-design.md](interrupt-and-progress-design.md) | implemented | 中断手段と進捗表示 |
 | [product-feature-comparison-cycle-17-run-api-pause-2026-09-02.md](product-feature-comparison-cycle-17-run-api-pause-2026-09-02.md) | implemented | Codex / Claude比較とforeground runのLLM API境界pause |
-| [durable-run-resume-design.md](durable-run-resume-design.md) | planned | PC・アプリ再起動を跨ぐdurable run checkpoint（cycle 18候補） |
+| [product-feature-comparison-cycle-18-durable-run-resume-2026-09-03.md](product-feature-comparison-cycle-18-durable-run-resume-2026-09-03.md) | implemented | Codex / Claude比較とPC・アプリ再起動を跨ぐdurable run resume |
+| [durable-run-resume-design.md](durable-run-resume-design.md) | implemented | PC・アプリ再起動を跨ぐdurable run checkpoint（cycle 18） |
 | [spinner-mode-response-coloring-design.md](spinner-mode-response-coloring-design.md) | implemented | 応答テキストの色分け (構造ベース) |
 | [ux-transparency.md](ux-transparency.md) | implemented | UX 透明性+サンプリングパラメータ |
 | [context-inspector.md](context-inspector.md) | implemented | /context ドリルダウン |

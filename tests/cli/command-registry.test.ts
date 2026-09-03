@@ -36,6 +36,9 @@ function makeContext(): { ctx: ReplCommandContext; config: Config; saveConfig: R
       runState = { state: "running", source: "cli", inFlight: 1 };
       return { status: "request_cancelled", snapshot: runState };
     },
+    getDurableRunCheckpoint: () => ({ status: "none" }),
+    beginDurableRunResume: () => ({ status: "not_found", reason: "checkpointなし" }),
+    discardDurableRunCheckpoint: () => ({ status: "not_found", reason: "checkpointなし" }),
   };
   const ctx = { agent, config, saveConfig } as unknown as ReplCommandContext;
   return { ctx, config, saveConfig };
@@ -147,7 +150,7 @@ describe("コマンドレジストリ (PR-10)", () => {
     expect(getCommandRegistry().get("/continue")).toBeUndefined();
   });
 
-  it("/runはプロセス内pauseであり、終了後のsession復元をrun再開と誤案内しない", () => {
+  it("/runは通常pauseとdurable pauseを分離し、再起動後はsession復元を先に案内する", () => {
     const pauseAgent = {
       requestRunPause: () => ({
         status: "requested",
@@ -162,9 +165,41 @@ describe("コマンドレジストリ (PR-10)", () => {
         status: "not_running",
         snapshot: { state: "idle", source: null, inFlight: 0 },
       }),
+      beginDurableRunResume: () => ({ status: "not_found", reason: "checkpointなし" }),
     } as unknown as ReplCommandContext["agent"];
     const resume = executeRunControl(idleAgent, ["resume"]);
-    expect(resume.message).toContain("保存sessionの復元は /resume");
-    expect(resume.message).toContain("終了したrun自体は復元されません");
+    expect(resume.message).toContain("/resume <session-id>");
+
+    const durableAgent = {
+      requestRunPause: vi.fn(() => ({
+        status: "requested",
+        snapshot: { state: "pause_requested", source: "cli", inFlight: 1, mode: "durable" },
+      })),
+    } as unknown as ReplCommandContext["agent"];
+    const durable = executeRunControl(durableAgent, ["pause", "--durable"]);
+    expect(durableAgent.requestRunPause).toHaveBeenCalledWith("durable");
+    expect(durable.message).toContain("durable_paused表示後");
+  });
+
+  it("再起動後の/run resumeは通常turnと同じ入力captureでcontinuationを待つ", async () => {
+    const continuation = Promise.resolve();
+    const awaitRunContinuation = vi.fn(async (running: Promise<void>) => await running);
+    const agent = {
+      resumeRun: () => ({
+        status: "not_running",
+        snapshot: { state: "idle", source: null, inFlight: 0, mode: null },
+      }),
+      beginDurableRunResume: () => ({ status: "started", continuation }),
+    } as unknown as ReplCommandContext["agent"];
+    const ctx = {
+      agent,
+      config: getDefaultConfig(),
+      saveConfig: vi.fn(),
+      awaitRunContinuation,
+    } satisfies ReplCommandContext;
+
+    await mustGet("/run").handler(ctx, ["resume"]);
+
+    expect(awaitRunContinuation).toHaveBeenCalledWith(continuation);
   });
 });

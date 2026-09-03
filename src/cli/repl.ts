@@ -4237,6 +4237,41 @@ export class REPL {
   }
 
   /**
+   * `/run resume`が再起動後に開始したrunにも、通常入力と同じEsc・type-ahead・busy管理を付ける。
+   * これが無いとresume後のrunだけ再pauseやsteeringができず、操作契約が非対称になる。
+   */
+  private async awaitRunContinuation(continuation: Promise<void>): Promise<void> {
+    this.agentBusy = true;
+    let interruptedByEsc = false;
+    interruptWatcher.start(() => {
+      interruptedByEsc = true;
+      progressIndicator.end();
+      console.log(chalk.yellow("\n  (ESC) 処理を中断します..."));
+      this.agent.abort();
+      bashTool.killRunningProcess();
+    });
+    const stopTypeAhead = this.startTypeAhead();
+    try {
+      await continuation;
+    } finally {
+      const unappliedSteering = this.agent.takePendingSteering();
+      if (unappliedSteering.length > 0) {
+        this.pendingInputs.push(...unappliedSteering);
+        console.log(
+          chalk.dim(
+            `  ⏳ 追加入力 ${unappliedSteering.length} 件は現在の処理が終了したため、次のturnで順次実行します。`,
+          ),
+        );
+      }
+      stopTypeAhead();
+      interruptWatcher.stop();
+      progressIndicator.end();
+      this.agentBusy = false;
+      if (interruptedByEsc) console.log(chalk.dim("  プロンプトに戻ります"));
+    }
+  }
+
+  /**
    * H-1: Room 状態 (履歴/goal/todos の差し替え = アクティブ Room の切り替え/clear) に触れる
    * REPL コマンドを、 メッセージ run と同じ受信順グローバル FIFO キューに乗せて直列化する。
    *
@@ -4324,7 +4359,25 @@ export class REPL {
               if (/^\/run(?:\s|$)/i.test(text)) {
                 // run制御だけは「turn完了後」へ積むとpauseの意味が失われるため即時処理する。
                 // session復元の /resume・/continue とは名前空間を分離している。
-                printRunControlFeedback(executeRunControl(this.agent, text.split(/\s+/).slice(1)));
+                const feedback = executeRunControl(this.agent, text.split(/\s+/).slice(1));
+                printRunControlFeedback(feedback);
+                void feedback.continuation?.catch((error: unknown) => {
+                  console.error(
+                    chalk.red(
+                      `  durable run再開に失敗しました: ${error instanceof Error ? error.message : String(error)}`,
+                    ),
+                  );
+                });
+              } else if (/^\/parallel(?:\s|$)/i.test(text) && this.agent.getRunPauseSnapshot().state === "paused") {
+                // local LLM保守中に同時実行数を変えるのがpauseの主要用途。
+                // turn後FIFOへ積むとresumeするまで反映できないため、paused中だけ即時適用する。
+                void this.handleCommand(text).catch((error: unknown) => {
+                  console.error(
+                    chalk.red(
+                      `  並列実行数の変更に失敗しました: ${error instanceof Error ? error.message : String(error)}`,
+                    ),
+                  );
+                });
               } else {
                 // その他のslash commandはモデル入力ではないため、従来どおりturn終了後に実行する。
                 this.pendingInputs.push(text);
@@ -4406,6 +4459,7 @@ export class REPL {
           agent: this.agent,
           config: this.config,
           saveConfig: () => saveConfig(this.config),
+          awaitRunContinuation: (continuation) => this.awaitRunContinuation(continuation),
           skillRegistry: this.skillRegistry,
           workflowLearner: this.workflowLearner,
         },

@@ -65,6 +65,8 @@ jobs:
       # CPU 競合 flake を避けるためユニットテストと分離して直列実行する。
       - name: E2E smoke test
         run: npm run test:e2e
+      - name: Durable run cross-process restart smoke
+        run: npm run test:durable-restart
       - name: Real PTY startup / quit smoke (Linux and macOS)
         if: runner.os != 'Windows'
         run: npm run test:pty

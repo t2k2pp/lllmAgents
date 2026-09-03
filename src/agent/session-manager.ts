@@ -57,6 +57,8 @@ export interface SessionData {
   messages: Message[];
   todos?: TodoItem[];
   goal?: SessionGoalSnapshot | null;
+  /** PC再起動を跨ぐforeground run checkpoint。旧sessionとの互換性のためoptional。 */
+  runCheckpoint?: unknown;
   // 注: paradigm モード (forward / goal-seek) は永続化しない。 goal-seek は必ず goal slot を
   // 伴うため、 restoreSession() が goal の有無からモードを一意に導出する (単一情報源)。
   // docs/room-model-design.md §10-3。
@@ -101,6 +103,7 @@ export function forkSession(source: SessionData): SessionData {
   fork.messages = structuredClone(source.messages);
   fork.todos = source.todos === undefined ? undefined : structuredClone(source.todos);
   fork.goal = source.goal === undefined ? undefined : structuredClone(source.goal);
+  // 実行制御状態を別sessionへ複製すると、同じtool/APIを二重再開しうるためforkへは引き継がない。
   fork.meta.messageCount = fork.messages.length;
   return fork;
 }

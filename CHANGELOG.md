@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Durable run resume・機能比較 cycle 18 (2026-09-03)
+
+- `/run pause --durable`を追加し、進行中main APIと開始済みtool結果の確定後、次API直前のrun stateをsession JSONへatomic保存
+- アプリ・PC再起動後に`/resume <session-id>`→`/run inspect`→`/run resume`で、pause前toolを再実行せず次APIから継続可能にした
+- cwd、session、model、provider、endpoint fingerprint、schema差分をfail-fastし、prompt/tool引数を診断表示しない
+- resume開始を`resuming`として先に保存し、その後の異常終了は到達点不明として自動再実行を拒否。`/run discard`はconversationを残してcheckpointだけを破棄
+- 通常のプロセス内`/run pause`とsession復元の`/resume`は既存意味を維持し、forkにはrun checkpointを引き継がない
+- pause中の`/parallel <n>`をturn後FIFOへ送らず即時適用し、同時実行数を変更してからresumeできるようにした
+- cycle中に公開された監査情報へ追随し、推移依存`fast-uri`と`qs`を互換修正版へlockfile更新してproduction脆弱性を0件へ戻した
+
 ### LLM API境界pause・機能比較 cycle 17 (2026-09-02)
 
 - `/run pause|resume|status`を追加し、foreground runを進行中のmain LLM API完了直後に協調停止して、ローカルLLMの再起動・並列数変更後に同じrunを継続可能にした
