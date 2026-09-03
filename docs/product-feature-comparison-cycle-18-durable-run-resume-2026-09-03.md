@@ -53,4 +53,5 @@
 - Windowsローカルのcross-process smokeで、別processへのsession JSON引継ぎ、API 1回、tool非再実行、checkpoint削除を確認。
 - 配布: `build:deploy`成功。SEA / deployの`localllm.exe --version`はいずれも`v0.4.1 (build c72872d-dirty)`でexit 0。
 - 監査: cycle中に新規検出した`fast-uri 3.1.5` High 5件と`qs 6.15.3` Moderate 5件を、それぞれ互換修正版`3.1.7` / `6.16.0`へlockfile更新。production auditは0 vulnerabilities。
-- Windowsローカルの実PTYは対話console hostがないため明示skip。Linux/macOS実PTY、package smoke、最新SHA CIはclosureで追記する。
+- 初回push CI `33738112466`: Commit policy、Ubuntu test（Linux実PTY含む）、Windows testは成功。macOS実PTY smokeだけが失敗した。macOSの`expect`プログラムに`/parallel 4`の送信手順が抜けており`parallelSent false`となったことが原因。`EXPECT_PROGRAM`へ`/parallel 4`送信と`driver.parallelSentMarker`の検出を追加し、期待順（`pause到達 → /parallel 4適用 → resume`）を修正した。
+- 最新push SHA CIは後続gateで確定する。

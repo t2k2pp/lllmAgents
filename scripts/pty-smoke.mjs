@@ -232,6 +232,9 @@ try {
       if (!sentPause && output.includes(driver.pauseSentMarker)) sentPause = true;
       if (!pauseAcceptedSeen && output.includes("pause予約を受理しました")) pauseAcceptedSeen = true;
       if (!pauseReachedSeen && output.includes("runをLLM API境界で一時停止しました")) pauseReachedSeen = true;
+      if (!sentParallel && driver.parallelSentMarker && output.includes(driver.parallelSentMarker)) {
+        sentParallel = true;
+      }
       if (!parallelAppliedSeen && output.includes("並列実行上限を 4 に設定しました")) parallelAppliedSeen = true;
       if (!sentResume && output.includes(driver.resumeSentMarker)) {
         sentResume = true;

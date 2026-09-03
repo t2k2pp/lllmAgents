@@ -23,6 +23,7 @@ describe("PTY smoke driver", () => {
     expect(driver.steerMarker).toBe("STEER_OK");
     expect(driver.pauseSentMarker).toBe("__PTY_PAUSE_SENT__");
     expect(driver.pauseReachedMarker).toBe("__PTY_PAUSE_REACHED__");
+    expect(driver.parallelSentMarker).toBe("__PTY_PARALLEL_SENT__");
     expect(driver.resumeSentMarker).toBe("__PTY_RESUME_SENT__");
     expect(driver.env.TERM).toBe("xterm-256color");
   });
@@ -47,6 +48,8 @@ describe("PTY smoke driver", () => {
     expect(driver.args.join("\n")).toContain('send -- "/run pause\\r"');
     expect(driver.args.join("\n")).toContain('send -- "STEER_REQUEST\\r"');
     expect(driver.args.join("\n")).toContain("runをLLM API境界で一時停止しました");
+    expect(driver.args.join("\n")).toContain('send -- "/parallel 4\\r"');
+    expect(driver.args.join("\n")).toContain("並列実行上限を 4 に設定しました");
     expect(driver.args.join("\n")).toContain('send -- "/run resume\\r"');
     expect(driver.args.join("\n")).toContain("STEER_OK");
     expect(driver.args.join("\n")).toContain('send -- "/quit\\r"');
@@ -56,13 +59,15 @@ describe("PTY smoke driver", () => {
     const steerResponseAt = driver.args.join("\n").lastIndexOf("expect -re {STEER_OK}");
     const pauseAt = driver.args.join("\n").lastIndexOf('send -- "/run pause\\r"');
     const pausedAt = driver.args.join("\n").lastIndexOf("expect -re {runをLLM API境界で一時停止しました}");
+    const parallelAt = driver.args.join("\n").lastIndexOf('send -- "/parallel 4\\r"');
     const resumeAt = driver.args.join("\n").lastIndexOf('send -- "/run resume\\r"');
     const quitAt = driver.args.join("\n").lastIndexOf('send -- "/quit\\r"');
     expect(steerAt).toBeGreaterThan(previewAt);
     expect(pauseAt).toBeGreaterThan(previewAt);
     expect(steerAt).toBeGreaterThan(pauseAt);
     expect(pausedAt).toBeGreaterThan(steerAt);
-    expect(resumeAt).toBeGreaterThan(pausedAt);
+    expect(parallelAt).toBeGreaterThan(pausedAt);
+    expect(resumeAt).toBeGreaterThan(parallelAt);
     // buffered responseはAPI完了時にpauseへ到達し、resume後にfinalを確定表示する。
     expect(finalAt).toBeGreaterThan(resumeAt);
     expect(steerResponseAt).toBeGreaterThan(resumeAt);

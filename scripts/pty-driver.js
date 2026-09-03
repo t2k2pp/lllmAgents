@@ -6,6 +6,7 @@ const EXPECT_PREVIEW_SUBMITTED_MARKER = "__PTY_PREVIEW_SUBMITTED__";
 const EXPECT_STEER_MARKER = "__PTY_STEER_SENT__";
 const EXPECT_PAUSE_MARKER = "__PTY_PAUSE_SENT__";
 const EXPECT_PAUSED_MARKER = "__PTY_PAUSE_REACHED__";
+const EXPECT_PARALLEL_MARKER = "__PTY_PARALLEL_SENT__";
 const EXPECT_RESUME_MARKER = "__PTY_RESUME_SENT__";
 const RESPONSE_PREVIEW_TEXT = "PV42";
 const RESPONSE_FINAL_TEXT = "FINAL99";
@@ -67,6 +68,9 @@ set timeout 30
 # /help の「LLM API境界で一時停止・再開」へ誤一致させず、実到達だけを待つ。
 expect -re {runをLLM API境界で一時停止しました}
 puts "${EXPECT_PAUSED_MARKER}"
+send -- "/parallel 4\\r"
+puts "${EXPECT_PARALLEL_MARKER}"
+expect -re {並列実行上限を 4 に設定しました}
 send -- "/run resume\\r"
 puts "${EXPECT_RESUME_MARKER}"
 expect -re {foreground runを再開}
@@ -104,6 +108,7 @@ export function ptyDriver(platform, { node, tsx, entry }) {
       steerSentMarker: EXPECT_STEER_MARKER,
       pauseSentMarker: EXPECT_PAUSE_MARKER,
       pauseReachedMarker: EXPECT_PAUSED_MARKER,
+      parallelSentMarker: EXPECT_PARALLEL_MARKER,
       resumeSentMarker: EXPECT_RESUME_MARKER,
     };
   }
@@ -127,6 +132,7 @@ export function ptyDriver(platform, { node, tsx, entry }) {
     steerSentMarker: EXPECT_STEER_MARKER,
     pauseSentMarker: EXPECT_PAUSE_MARKER,
     pauseReachedMarker: EXPECT_PAUSED_MARKER,
+    parallelSentMarker: EXPECT_PARALLEL_MARKER,
     resumeSentMarker: EXPECT_RESUME_MARKER,
   };
 }
