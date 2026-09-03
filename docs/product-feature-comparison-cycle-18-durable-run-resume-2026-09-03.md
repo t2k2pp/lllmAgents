@@ -3,7 +3,8 @@
 - 日付: 2026-09-03
 - 観点: Codex / Claude Code開発者、local LLM運用、再起動耐性、二重tool防止
 - 課題: `GAP-DURABLE-RUN-01`
-- 状態: 実装・ローカル評価完了、最新SHA CI待ち
+- 状態: **完了（実装・全ローカル評価・訂正後最新実装SHA CI全5ジョブ成功）**
+
 
 ## 機能比較マトリックス
 
@@ -54,4 +55,5 @@
 - 配布: `build:deploy`成功。SEA / deployの`localllm.exe --version`はいずれも`v0.4.1 (build c72872d-dirty)`でexit 0。
 - 監査: cycle中に新規検出した`fast-uri 3.1.5` High 5件と`qs 6.15.3` Moderate 5件を、それぞれ互換修正版`3.1.7` / `6.16.0`へlockfile更新。production auditは0 vulnerabilities。
 - 初回push CI `33738112466`: Commit policy、Ubuntu test（Linux実PTY含む）、Windows testは成功。macOS実PTY smokeだけが失敗した。macOSの`expect`プログラムに`/parallel 4`の送信手順が抜けており`parallelSent false`となったことが原因。`EXPECT_PROGRAM`へ`/parallel 4`送信と`driver.parallelSentMarker`の検出を追加し、期待順（`pause到達 → /parallel 4適用 → resume`）を修正した。
-- 最新push SHA CIは後続gateで確定する。
+- 訂正後最新実装SHA `bd5d1f9` / CI `33748152471`: Commit policy、Ubuntu / macOS / Windows tests、Linux / macOS実PTY、Windows deploy / exe smokeの全5 job成功。
+

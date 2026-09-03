@@ -22,11 +22,11 @@
   - [x] 2.10 Windows配布ビルド検証 (`npm run build:deploy` passed, `deploy/localllm.exe --version` passed)
 - [x] 3. ドキュメントおよび品質記録の更新
   - [x] テスト実測値・設計仕様の整合確認
-- [ ] 4. コミット作成
-  - [ ] 変更対象ファイルのみステージング（sandbox除外）
-  - [ ] AGENTS.md規約（背景 / 変更 / 検証）に準拠したコミットメッセージ
-- [ ] 5. リモートリポジトリへのPush
-  - [ ] `git push origin main`
-- [ ] 6. 最新SHAのCI完了監視
-  - [ ] GitHub Actions ワークフロー（Ubuntu, macOS, Windows tests, macOS real PTY, Windows deploy / exe smoke）の全ジョブ完了確認
-- [ ] 7. 完了確認と報告
+- [x] 4. コミット作成
+  - [x] 変更対象ファイルのみステージング（sandbox除外）
+  - [x] AGENTS.md規約（背景 / 変更 / 検証）に準拠したコミットメッセージ
+- [x] 5. リモートリポジトリへのPush
+  - [x] `git push origin main`
+- [x] 6. 最新SHAのCI完了監視
+  - [x] GitHub Actions ワークフロー（Ubuntu, macOS, Windows tests, macOS real PTY, Windows deploy / exe smoke）の全ジョブ完了確認 (CI 33748152471 passed)
+- [x] 7. 完了確認と報告
