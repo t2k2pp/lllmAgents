@@ -4,7 +4,7 @@
 - 基準commit: `d720c4f`
 - 対象gap: `GAP-INTERACTIVE-RESUME-01`
 - 観点: 長時間runの操作可能性、session再開時の視覚的連続性、モード切替、配布診断性
-- 状態: **実装・ローカル品質gate通過（最新SHA CI待ち）**
+- 状態: **実装・ローカル品質gate・実装SHA CI通過**
 
 ## 1. 比較根拠
 
@@ -69,7 +69,8 @@
 - lint: error 0（既存warning 279、info 97）。`test:durable-restart`、`validate:skills`、`validate:version`、`validate:package`も成功。
 - audit: package-lockのruntime high vulnerability 0件。
 - 配布: `build:exe`と生成した`dist/locallm.exe --version`は成功。ローカル`build:deploy`は使用中の`deploy/locallm.exe`（PID 25504）を上書きせず、意図したfail-fastを確認した。clean環境でのdeploy/package smokeは最新SHA CIで閉じる。
-- 最新SHA CI: 後続gateで記録する。
+- 実装commit: `f0b7648`（`feat(tui): 処理中入力と端末履歴を継続可能にする`）。
+- 実装SHA CI: [run 33894531553](https://github.com/t2k2pp/lllmAgents/actions/runs/33894531553)でCommit message policy、Ubuntu、macOS、Windows、Windows deploy / exe smokeの全5 jobが成功。Linux/macOSの実PTY回帰も各OS job内で通過した。
 
 ## 7. 完了gate
 
@@ -77,5 +78,5 @@
 - [x] P1 gapとd720c4fの補正点を設計・実装
 - [x] 対象unitと別process resume E2E
 - [x] 全ローカル品質gate
-- [ ] task差分だけをcommit/push
-- [ ] 最新push SHAの全依存CI job
+- [x] task差分だけをcommit/push
+- [x] 実装push SHAの全依存CI job
