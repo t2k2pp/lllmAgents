@@ -61,6 +61,12 @@
 ### 2.5 ビルドとデプロイの同期
 - `sandbox/run.sh` は `deploy/localllm` を実行するため、修正後は `npm run build` および `npm run build:deploy` を実行してバイナリを更新し、`sandbox/run.sh` が正常に起動することを確認する。
 
+### 2.6 cycle 20追補: SEA能力の実測と小型Qwen優先
+
+- `NODE_EXE`は存在確認だけで採用せず、そのbinary自身で`process.config.variables.single_executable_application === true`を確認する。実行中Nodeも同じ検査を通し、候補が無ければ生成後半で不明な失敗を起こさず、必要条件と復旧方法を示して停止する。
+- SEA configはshell文字列へpathを埋め込まず`execFileSync(binary, args)`で実行する。
+- `Qwen3-4B-Flash`のようにsizeとFlash suffixが併記された名前は、marketing suffixより明示sizeを優先する。14B以下はT3、size無しのFlash/Next/TurboだけをT2候補とする。
+
 ---
 
 ## 3. 影響範囲

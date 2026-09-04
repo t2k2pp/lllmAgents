@@ -3,6 +3,10 @@ const EXPECT_SCROLL_MARKER = "__PTY_SCROLL_SEEN__";
 const EXPECT_IME_MARKER = "__PTY_IME_SEEN__";
 const EXPECT_PREVIEW_MARKER = "__PTY_PREVIEW_SEEN__";
 const EXPECT_PREVIEW_SUBMITTED_MARKER = "__PTY_PREVIEW_SUBMITTED__";
+const EXPECT_PROCESSING_INPUT_MARKER = "__PTY_PROCESSING_INPUT_SEEN__";
+const EXPECT_MODE_CYCLE_SENT_MARKER = "__PTY_MODE_CYCLE_SENT__";
+const EXPECT_MODE_CYCLE_SEEN_MARKER = "__PTY_MODE_CYCLE_SEEN__";
+const EXPECT_STEER_VISIBLE_MARKER = "__PTY_STEER_VISIBLE__";
 const EXPECT_STEER_MARKER = "__PTY_STEER_SENT__";
 const EXPECT_PAUSE_MARKER = "__PTY_PAUSE_SENT__";
 const EXPECT_PAUSED_MARKER = "__PTY_PAUSE_REACHED__";
@@ -59,10 +63,19 @@ expect {
     exit 125
   }
 }
+expect -re {処理中・追加入力}
+puts "${EXPECT_PROCESSING_INPUT_MARKER}"
 send -- "/run pause\\r"
 puts "${EXPECT_PAUSE_MARKER}"
 expect -re {pause予約を受理}
-send -- "STEER_REQUEST\\r"
+send -- "\\033\\[Z"
+puts "${EXPECT_MODE_CYCLE_SENT_MARKER}"
+expect -re {モード: Autorun}
+puts "${EXPECT_MODE_CYCLE_SEEN_MARKER}"
+send -- "STEER_REQUEST"
+expect -re {STEER_REQUEST}
+puts "${EXPECT_STEER_VISIBLE_MARKER}"
+send -- "\\r"
 puts "${EXPECT_STEER_MARKER}"
 set timeout 30
 # /help の「LLM API境界で一時停止・再開」へ誤一致させず、実到達だけを待つ。
@@ -103,6 +116,10 @@ export function ptyDriver(platform, { node, tsx, entry }) {
       previewMarker: RESPONSE_PREVIEW_TEXT,
       previewSeenMarker: EXPECT_PREVIEW_MARKER,
       previewSubmittedMarker: EXPECT_PREVIEW_SUBMITTED_MARKER,
+      processingInputMarker: EXPECT_PROCESSING_INPUT_MARKER,
+      modeCycleSentMarker: EXPECT_MODE_CYCLE_SENT_MARKER,
+      modeCycleSeenMarker: EXPECT_MODE_CYCLE_SEEN_MARKER,
+      steerVisibleMarker: EXPECT_STEER_VISIBLE_MARKER,
       finalMarker: RESPONSE_FINAL_TEXT,
       steerMarker: RESPONSE_STEER_TEXT,
       steerSentMarker: EXPECT_STEER_MARKER,
@@ -127,6 +144,10 @@ export function ptyDriver(platform, { node, tsx, entry }) {
     previewMarker: RESPONSE_PREVIEW_TEXT,
     previewSeenMarker: EXPECT_PREVIEW_MARKER,
     previewSubmittedMarker: EXPECT_PREVIEW_SUBMITTED_MARKER,
+    processingInputMarker: "処理中・追加入力",
+    modeCycleSentMarker: EXPECT_MODE_CYCLE_SENT_MARKER,
+    modeCycleSeenMarker: "モード: Autorun",
+    steerVisibleMarker: "STEER_REQUEST",
     finalMarker: RESPONSE_FINAL_TEXT,
     steerMarker: RESPONSE_STEER_TEXT,
     steerSentMarker: EXPECT_STEER_MARKER,

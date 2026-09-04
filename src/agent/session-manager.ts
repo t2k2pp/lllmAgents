@@ -52,6 +52,38 @@ export interface SessionGoalSnapshot {
   history: EvaluationRecord[];
 }
 
+/**
+ * resume時にTUIへ戻す確定済みstdout。live spinner/composerは含めない。
+ * versionedにして、将来の形式変更を黙って誤読しない。
+ */
+export interface SessionTerminalTranscript {
+  version: 1;
+  lines: string[];
+  truncated: boolean;
+}
+
+const MAX_TERMINAL_TRANSCRIPT_LINES = 10_000;
+
+/** ScreenManagerへ確定したstdoutだけをsession別に追記する。 */
+export function appendSessionTerminalOutput(
+  current: SessionTerminalTranscript | undefined,
+  text: string,
+): SessionTerminalTranscript {
+  const transcript: SessionTerminalTranscript = current
+    ? { version: 1, lines: [...current.lines], truncated: current.truncated }
+    : { version: 1, lines: [""], truncated: false };
+  if (!text) return transcript;
+  const parts = text.split("\n");
+  if (transcript.lines.length === 0) transcript.lines.push("");
+  transcript.lines[transcript.lines.length - 1] += parts[0];
+  for (let i = 1; i < parts.length; i++) transcript.lines.push(parts[i]);
+  if (transcript.lines.length > MAX_TERMINAL_TRANSCRIPT_LINES) {
+    transcript.lines.splice(0, transcript.lines.length - MAX_TERMINAL_TRANSCRIPT_LINES);
+    transcript.truncated = true;
+  }
+  return transcript;
+}
+
 export interface SessionData {
   meta: SessionMeta;
   messages: Message[];
@@ -59,6 +91,8 @@ export interface SessionData {
   goal?: SessionGoalSnapshot | null;
   /** PC再起動を跨ぐforeground run checkpoint。旧sessionとの互換性のためoptional。 */
   runCheckpoint?: unknown;
+  /** Codex/Claude Code同様、resume時に画面へ復元する過去の標準出力。 */
+  terminalTranscript?: SessionTerminalTranscript;
   // 注: paradigm モード (forward / goal-seek) は永続化しない。 goal-seek は必ず goal slot を
   // 伴うため、 restoreSession() が goal の有無からモードを一意に導出する (単一情報源)。
   // docs/room-model-design.md §10-3。
@@ -103,6 +137,8 @@ export function forkSession(source: SessionData): SessionData {
   fork.messages = structuredClone(source.messages);
   fork.todos = source.todos === undefined ? undefined : structuredClone(source.todos);
   fork.goal = source.goal === undefined ? undefined : structuredClone(source.goal);
+  fork.terminalTranscript =
+    source.terminalTranscript === undefined ? undefined : structuredClone(source.terminalTranscript);
   // 実行制御状態を別sessionへ複製すると、同じtool/APIを二重再開しうるためforkへは引き継がない。
   fork.meta.messageCount = fork.messages.length;
   return fork;

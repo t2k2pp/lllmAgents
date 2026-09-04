@@ -11,6 +11,7 @@
 | 利用者の操作 | OpenAI Codex | Claude Code | cycle 17 | cycle 18 |
 |---|---|---|---|---|
 | 保存conversationを選んで復元 | `codex resume` / `/resume` | `--resume` / `-r` | `/resume` / `/continue` | 維持 |
+| resume時に過去の端末表示を戻す | transcriptを再読込 | local transcriptを再読込 | message履歴のみ | cycle 20で確定stdoutも復元 |
 | foreground runをAPI境界でプロセス内pause | 公式資料で同等契約を確認できず | 公式資料で同等契約を確認できず | `/run pause` | 維持 |
 | background sessionのstop/restart | background terminal管理 | `stop` / `respawn` | `/tasks`等 | 対象外を明示 |
 | pause後にアプリ・PCを停止 | conversation復元とは別 | conversation復元とは別 | 不可 | `/run pause --durable`到達後に可 |
@@ -41,6 +42,7 @@
 - `RunApiGate`: process pauseとdurable requestを区別。durableはprovider完了だけでpausedにせず、AgentLoopが保存後に到達させる。
 - `AgentLoop`: 次API直前に履歴・Todo・Goal・run stateを保存。restoreはrehydrateだけで自動実行しない。
 - `SessionData`: optional `runCheckpoint`。unknown schemaをready扱いせず、forkへ複製しない。
+- cycle 20の`terminalTranscript`はconversation/run checkpointと別フィールド。durable resumeの内部rollbackではCLI画面を載せ替えず、ユーザーが明示したsession resume時だけ過去stdoutを復元する。
 - CLI: `/run pause --durable|status|inspect|resume|discard`。既存`/resume`を変更しない。
 - 安全性: endpointはSHA-256 fingerprintだけを保存。resume開始を先に保存し、異常終了時は自動再実行しない。
 
@@ -56,4 +58,3 @@
 - 監査: cycle中に新規検出した`fast-uri 3.1.5` High 5件と`qs 6.15.3` Moderate 5件を、それぞれ互換修正版`3.1.7` / `6.16.0`へlockfile更新。production auditは0 vulnerabilities。
 - 初回push CI `33738112466`: Commit policy、Ubuntu test（Linux実PTY含む）、Windows testは成功。macOS実PTY smokeだけが失敗した。macOSの`expect`プログラムに`/parallel 4`の送信手順が抜けており`parallelSent false`となったことが原因。`EXPECT_PROGRAM`へ`/parallel 4`送信と`driver.parallelSentMarker`の検出を追加し、期待順（`pause到達 → /parallel 4適用 → resume`）を修正した。
 - 訂正後最新実装SHA `bd5d1f9` / CI `33748152471`: Commit policy、Ubuntu / macOS / Windows tests、Linux / macOS実PTY、Windows deploy / exe smokeの全5 job成功。
-

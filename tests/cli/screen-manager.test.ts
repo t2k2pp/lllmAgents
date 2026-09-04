@@ -59,6 +59,25 @@ describe("ScreenManager: 行分割とスクロールバック", () => {
     expect(written).toEqual([]);
     expect(screen.snapshotLines()).toEqual([""]);
   });
+
+  it("確定stdoutだけをlistenerへ通知し、一過性statusはsession記録へ混ぜない", () => {
+    const { screen } = createAltHarness();
+    const committed: string[] = [];
+    screen.start();
+    const off = screen.onCommittedOutput((text) => committed.push(text));
+    screen.updateTransientStatus("LLM処理中...");
+    screen.write("確定出力\n");
+    expect(committed).toEqual(["確定出力\n"]);
+    off();
+    screen.stop();
+  });
+
+  it("保存済みscrollbackとtruncated状態を置き換えて復元する", () => {
+    const { screen } = createHarness();
+    screen.write("現在\n");
+    screen.restoreScrollback({ lines: ["過去1", "過去2", ""], truncated: true });
+    expect(screen.snapshotScrollback()).toEqual({ lines: ["過去1", "過去2", ""], truncated: true });
+  });
 });
 
 describe("ScreenManager: 所有権", () => {
@@ -104,6 +123,22 @@ describe("ScreenManager: 所有権", () => {
   it("start() していなければ代替画面ではない", () => {
     const { screen } = createHarness();
     expect(screen.isAlternate()).toBe(false);
+  });
+
+  it("pinned ownerはLLM statusの下に同時表示される", () => {
+    const { screen, all } = createAltHarness({ rows: 8, columns: 40 });
+    screen.start();
+    const release = screen.acquireLive({
+      name: "processing-input",
+      pinned: true,
+      redraw: () => screen.writeLive("VISIBLE_COMPOSER"),
+      height: () => 1,
+    });
+    screen.updateTransientStatus("LLM_STATUS");
+    expect(all()).toContain("LLM_STATUS");
+    expect(all()).toContain("VISIBLE_COMPOSER");
+    release();
+    screen.stop();
   });
 });
 

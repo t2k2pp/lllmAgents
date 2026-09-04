@@ -86,6 +86,13 @@ class InterruptWatcherImpl implements InterruptWatcher {
         process.emit("SIGINT");
         return;
       }
+      if (this.pendingTimer && chunk[0] !== ESC) {
+        // ESC sequenceはPTY/OS境界で `ESC` と `[Z` のように分割され得る。
+        // debounce中に後続byteが届いた時点で単独ESCではないため中断予約を取り消す。
+        clearTimeout(this.pendingTimer);
+        this.pendingTimer = null;
+        return;
+      }
       if (chunk[0] !== ESC) {
         return;
       }

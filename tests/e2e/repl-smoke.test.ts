@@ -14,6 +14,7 @@
  *      → ファイルが実際に書かれる → 完了報告 → /quit → exit 0
  *   3. /doctor 環境診断: モック LLM への疎通 ✔ と診断表の描画 → /quit → exit 0 (PR-16)
  *   4. --safe-mode: 壊れたplugin/MCPとproject/user customizationを読み込まず起動
+ *   5. resume: 別processで過去の確定stdoutを画面へ復元
  *
  * モデル応答は毎回 response_complete を添えてターンを決定的に終了させる
  * (テキストのみ応答だと自己点検ループ/intent classifier の追加 LLM 呼び出しが発生するため)。
@@ -340,6 +341,39 @@ describe("E2E smoke — 非TTYパイプモード起動", () => {
         expect(r.stdout, diag(r)).toContain("cycle 9 release");
       } finally {
         fs.rmSync(repo, { recursive: true, force: true });
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "シナリオ7: --resume は別processでも過去の標準出力を復元する",
+    async () => {
+      const resumeHome = fs.mkdtempSync(path.join(os.tmpdir(), "localllm-resume-output-e2e-"));
+      const resumeConfigDir = path.join(resumeHome, ".localllm");
+      try {
+        fs.mkdirSync(resumeConfigDir, { recursive: true });
+        fs.copyFileSync(path.join(tmpHome, ".localllm", "config.json"), path.join(resumeConfigDir, "config.json"));
+        const marker = "/resume-stdout-marker-7x";
+        const first = await runApp([marker, "/quit"], ["--no-mcp"], resumeHome);
+        expect(first.code, diag(first)).toBe(0);
+        expect(first.stdout, diag(first)).toContain(`Unknown command: ${marker}`);
+
+        const sessionsDir = path.join(resumeConfigDir, "sessions");
+        const sessions = fs.readdirSync(sessionsDir).filter((file) => file.endsWith(".json"));
+        expect(sessions, diag(first)).toHaveLength(1);
+        const sessionId = path.basename(sessions[0], ".json");
+        const saved = JSON.parse(fs.readFileSync(path.join(sessionsDir, sessions[0]), "utf8"));
+        expect(saved.terminalTranscript?.version).toBe(1);
+        expect(saved.terminalTranscript?.lines.join("\n")).toContain(`Unknown command: ${marker}`);
+
+        const resumed = await runApp(["/quit"], ["--no-mcp", "--resume", sessionId], resumeHome);
+        expect(resumed.timedOut, diag(resumed)).toBe(false);
+        expect(resumed.code, diag(resumed)).toBe(0);
+        expect(resumed.stdout, diag(resumed)).toContain(`Unknown command: ${marker}`);
+        expect(resumed.stdout, diag(resumed)).toContain(`Resumed session: ${sessionId}`);
+      } finally {
+        fs.rmSync(resumeHome, { recursive: true, force: true });
       }
     },
     TEST_TIMEOUT_MS,

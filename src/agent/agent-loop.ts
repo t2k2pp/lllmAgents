@@ -13,7 +13,7 @@ import { screen } from "../cli/screen-manager.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
-import type { LLMProvider, ToolCall, ToolDefinition, ContentPart } from "../providers/base-provider.js";
+import type { LLMProvider, ToolCall, ToolDefinition, ContentPart, Message } from "../providers/base-provider.js";
 import type { ToolRegistry, ToolResult } from "../tools/tool-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager, RequestSource } from "../security/permission-manager.js";
@@ -46,7 +46,14 @@ import { buildSystemPrompt, type SkillInfo, type LLMProfiles, type SystemPromptO
 import { compressText } from "./compress-text.js";
 import { loadMemory } from "./memory.js";
 import { loadProjectInstructions } from "./project-context.js";
-import { createSession, normalizeSessionTitle, saveSession, type SessionData } from "./session-manager.js";
+import {
+  createSession,
+  appendSessionTerminalOutput,
+  normalizeSessionTitle,
+  saveSession,
+  type SessionData,
+  type SessionTerminalTranscript,
+} from "./session-manager.js";
 import type { RoomId } from "./room-types.js";
 import { PlanManager } from "./plan-mode.js";
 import type { LLMEndpoint, SamplingParams } from "../config/types.js";
@@ -323,6 +330,12 @@ export class AgentLoop {
   private capability: CapabilityProfile;
   /** チャットログ（Obsidian Vault保存、null なら無効） */
   private chatLogger: ChatLogger | null = null;
+  private terminalTranscriptBridge: {
+    restore: (
+      saved: unknown,
+      messages: Message[],
+    ) => { mode: "exact" | "legacy" | "invalid"; transcript: SessionTerminalTranscript };
+  } | null = null;
   /** Evaluator（成果物の独立レビュー） */
   private evaluator: Evaluator;
   /** LLMプロファイル情報（システムプロンプト再構築用。/model description 等の更新時に差し替え可） */
@@ -545,6 +558,21 @@ export class AgentLoop {
           }
         : null,
     );
+  }
+
+  /** UI層が所有するstdout scrollbackをsession保存・復元へ接続する。 */
+  setTerminalTranscriptBridge(bridge: {
+    restore: (
+      saved: unknown,
+      messages: Message[],
+    ) => { mode: "exact" | "legacy" | "invalid"; transcript: SessionTerminalTranscript };
+  }): void {
+    this.terminalTranscriptBridge = bridge;
+  }
+
+  /** OutputRouterが確定stdoutを現在ロード中のsessionへ振り分ける。 */
+  recordTerminalOutput(text: string): void {
+    this.session.terminalTranscript = appendSessionTerminalOutput(this.session.terminalTranscript, text);
   }
 
   /** harness_notice イベントの発火ヘルパー (CLI 表示とは独立。 docs/agent-events-design.md §3) */
@@ -2219,7 +2247,7 @@ export class AgentLoop {
       ) {
         // API/tool例外後のhistoryには、assistant tool_callだけが追加されresultが無い可能性がある。
         // 再開前のatomic状態へ戻し、次回起動でもresuming=不明状態として自動再実行を拒否する。
-        this.restoreSession(structuredClone(this.durableResumeBaseline));
+        this.restoreSession(structuredClone(this.durableResumeBaseline), { restoreTerminalTranscript: false });
         this.durableResumeBaseline = null;
       }
       this.events.emit("task_complete", {
@@ -3486,8 +3514,22 @@ export class AgentLoop {
     return ov;
   }
 
-  restoreSession(sessionData: SessionData): void {
+  restoreSession(sessionData: SessionData, options: { restoreTerminalTranscript?: boolean } = {}): void {
     this.session = sessionData;
+    if (this.terminalTranscriptBridge && options.restoreTerminalTranscript !== false) {
+      const restored = this.terminalTranscriptBridge.restore(sessionData.terminalTranscript, sessionData.messages);
+      const mode = restored.mode;
+      this.session.terminalTranscript = restored.transcript;
+      if (mode === "legacy") {
+        console.log("  [resume] この旧セッションには標準出力記録がないため、会話履歴から画面を再構成しました。");
+      } else if (mode === "invalid") {
+        console.warn(
+          "  [resume] terminalTranscriptが不正なため、その記録は使用せず会話履歴から画面を再構成しました。session JSONを確認してください。",
+        );
+      } else if (restored.transcript.truncated) {
+        console.log("  [resume] 保存上限を超えた古い標準出力は省略され、保持されている末尾を復元しました。");
+      }
+    }
     // resume したセッションの安定 ID にチェックポイント名前空間を載せ替える (H1)。
     // これでプロセスを跨いで前回のチェックポイントを list/restore できる。
     this.checkpointManager.rebind(sessionData.meta.id);

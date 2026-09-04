@@ -48,8 +48,27 @@ export interface InteractiveInputOptions {
   filePathProvider?: MenuProvider;
 }
 
+export interface InteractiveQuestionOptions {
+  disableMenu?: boolean;
+  /** 外部run終了時に処理中composerを閉じる。 */
+  signal?: AbortSignal;
+  /** Shift+Tabでmodeを変更し、新しいprompt prefixを返す。 */
+  onModeCycle?: () => string;
+  /** ScreenManager診断用。 */
+  ownerName?: string;
+  /** status/progressの下へ固定する処理中composer。 */
+  pinned?: boolean;
+}
+
 /** Ctrl+C が押されたことを示す特殊値 */
 export const SIGINT_SIGNAL = "\x03";
+/** 外部AbortSignalで入力欄を閉じたことを示す（端末から入力できないNUL）。 */
+export const INPUT_CANCELLED_SIGNAL = "\x00";
+
+/** Node readlineがShift+TabをCSI Zとして正規化する契約を一箇所に閉じ込める。 */
+export function isModeCycleKey(key: readline.Key): boolean {
+  return (key.name === "tab" && key.shift === true) || key.sequence === "\x1b[Z";
+}
 
 // ─── メインクラス ───────────────────────────────────────
 
@@ -71,11 +90,11 @@ export class InteractiveInput {
    * @param prefix  プロンプト文字列 (例: "> ")
    * @param options.disableMenu  trueならドロップダウンを抑制
    */
-  async question(prefix: string, options?: { disableMenu?: boolean }): Promise<string> {
+  async question(prefix: string, options: InteractiveQuestionOptions = {}): Promise<string> {
     if (!process.stdin.isTTY) {
       return this.nonTTYQuestion(prefix);
     }
-    return this.interactiveQuestion(prefix, options?.disableMenu ?? false);
+    return this.interactiveQuestion(prefix, options);
   }
 
   // ─── 非TTY line-input mode ────────────────────────
@@ -89,9 +108,15 @@ export class InteractiveInput {
 
   // ─── インタラクティブ入力（メイン） ──────────────────
 
-  private interactiveQuestion(prefix: string, disableMenu: boolean): Promise<string> {
+  private interactiveQuestion(initialPrefix: string, options: InteractiveQuestionOptions): Promise<string> {
     return new Promise<string>((resolve) => {
+      if (options.signal?.aborted) {
+        resolve(INPUT_CANCELLED_SIGNAL);
+        return;
+      }
       const stdin = process.stdin;
+      const disableMenu = options.disableMenu ?? false;
+      let prefix = initialPrefix;
       /**
        * 入力欄の描画はすべてここを通す (docs/tui-alternate-screen.md §4.2)。
        *
@@ -134,13 +159,15 @@ export class InteractiveInput {
       let pasteAccumulated = "";
       /** ScreenManagerが処理したmouse reportをreadline分割後の入力文字列から除外する。 */
       const mouseKeypressFilter = new MouseKeypressFilter();
-      const prefixLen = getDisplayWidth(stripAnsi(prefix));
+      let prefixLen = getDisplayWidth(stripAnsi(prefix));
       // 継続行のプレフィックス（プロンプトと同じ幅のスペース）
-      const contPrefixStr = " ".repeat(prefixLen);
-      const contPrefixLen = prefixLen;
+      let contPrefixStr = " ".repeat(prefixLen);
+      let contPrefixLen = prefixLen;
 
       /** ライブ領域の解放関数 (acquireLive の戻り)。cleanup で必ず呼ぶ */
       let releaseLive: (() => void) | null = null;
+      let onAbort: (() => void) | null = null;
+      let settled = false;
       /** 直近に ScreenManager へ通知したライブ領域の高さ */
       let lastLiveHeight = 1;
 
@@ -455,10 +482,11 @@ export class InteractiveInput {
       };
 
       releaseLive = screen.acquireLive({
-        name: "interactive-input",
+        name: options.ownerName ?? "interactive-input",
         redraw: () => redrawLive(),
         height: () => Math.max(1, renderedInputLines + renderedMenuLines),
         clear: () => clearLive(),
+        pinned: options.pinned,
       });
 
       // ブラケット貼り付けモードを有効化（モダンターミナル: Windows Terminal/iTerm2/kitty/mintty等）
@@ -481,6 +509,7 @@ export class InteractiveInput {
         out("\x1b[?2004l");
         stdin.removeListener("keypress", onKeypress);
         stdin.removeListener("end", onEnd);
+        if (onAbort) options.signal?.removeEventListener("abort", onAbort);
         // ライブ領域を解放するだけで、cooked には戻さない (docs/stdin-ownership.md §3.2)。
         // raw mode は ScreenManager がセッション単位で保持しており、解除は stop() だけが行う。
         // ここで戻すと「入力確定からエージェント実行までの一瞬」 が cooked になり、
@@ -518,6 +547,8 @@ export class InteractiveInput {
       };
 
       const finish = (result: string): void => {
+        if (settled) return;
+        settled = true;
         cleanup();
         moveToEndAndNewline();
         echoToScrollback(result);
@@ -530,10 +561,20 @@ export class InteractiveInput {
 
       // stdin が閉じた場合（ターミナル終了等）
       const onEnd = (): void => {
+        if (settled) return;
+        settled = true;
         cleanup();
         resolve("");
       };
       stdin.once("end", onEnd);
+
+      onAbort = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(INPUT_CANCELLED_SIGNAL);
+      };
+      options.signal?.addEventListener("abort", onAbort, { once: true });
 
       // ─── キープレスハンドラ ────────────────────
 
@@ -571,6 +612,20 @@ export class InteractiveInput {
         }
 
         if (screen.isAlternate() && mouseKeypressFilter.shouldIgnore(key.sequence)) return;
+
+        // ── Shift+Tab → 通常 / autorun / plan modeを循環（編集中bufferは保持） ──
+        if (isModeCycleKey(key)) {
+          const nextPrefix = options.onModeCycle?.();
+          if (nextPrefix !== undefined) {
+            prefix = nextPrefix;
+            prefixLen = getDisplayWidth(stripAnsi(prefix));
+            contPrefixStr = " ".repeat(prefixLen);
+            contPrefixLen = prefixLen;
+            renderInput();
+            if (menuVisible) renderMenu();
+          }
+          return;
+        }
 
         // ── Ctrl+C ──
         if (key.ctrl && key.name === "c") {

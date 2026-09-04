@@ -12,7 +12,7 @@
 - **プランモード**: 読み取り専用の計画フェーズで設計を固めてから実装
 - **スキルシステム**: TDD、コミット、PRレビュー等のワークフローを `/commit` のように直接呼び出し
 - **コンテキスト管理**: 80%消費時に自動圧縮（LLM自身による要約）
-- **セッション管理**: 会話の保存・復元・継続・元を保持した分岐
+- **セッション管理**: 会話と確定済み端末出力の保存・復元・継続・元を保持した分岐
 - **永続メモリ**: セッションを跨いで知識を蓄積
 - **画像認識**: Vision非対応LLM向けにサブLLM委譲をサポート
 - **画像生成**: Azure GPT Images / Stable Diffusion WebUI / ComfyUI に対応（ON/OFF 可能、`/image` で設定・直接生成、`/cost` でコスト確認）
@@ -20,7 +20,8 @@
 - **Native Computer Use**: 明示opt-inしたlocal CLIから、選択したOS windowだけをcapture・click・入力（毎回確認、remote操作は禁止）
 - **操作学習**: 成功したbrowser/computer操作を、秘密値を除いた手動起動skillとしてprojectへ保存
 - **マルチライン入力**: Shift+Enter / Ctrl+J で改行、@path でファイル参照
-- **処理中の追加入力**: 応答中に文字を入力して Enter すると、次の応答／tool完了境界で同じturnへ反映
+- **処理中の追加入力**: 応答中も固定入力欄で文字を編集でき、Enterで次の応答／tool完了境界の同じturnへ反映
+- **キーボードmode切替**: `Shift+Tab`で通常→Autorun→Plan→通常を循環（編集中の文字は保持）
 - **LLM API境界pause**: `/run pause`はアプリを起動したままlocal LLMを保守でき、`/run pause --durable`は安全境界を保存してアプリ・PC再起動後も`/resume <id>`→`/run resume`で継続
 - **インタラクティブUI**: `/`コマンドと`@`ファイルパスの補完ドロップダウン
 - **スキルベースワークフロー**: 開発・レビュー・調査等のワークフローをスキルとして定義、LLMが必要に応じて選択
@@ -77,12 +78,13 @@ $ npm start
 |------|------|
 | `Shift+Enter` | 改行を挿入（マルチライン入力） |
 | `Ctrl+J` | 改行を挿入（Shift+Enter非対応ターミナル用） |
+| `Shift+Tab` | 通常→Autorun→Plan→通常を循環。入力途中でも本文を保持してprefixを更新 |
 | ` ``` ` | マルチライン入力モード開始/終了（明示的な代替入力） |
 | `@path` | ファイル/フォルダの内容をプロンプトに添付 |
 | `/command` | スラッシュコマンド（補完ドロップダウン付き） |
-| 応答中に文字 + `Enter` | 通常メッセージは次の応答／tool完了境界で現在のturnへ反映。`/run pause\|resume\|status`は即時、その他の`/command`はturn完了後に実行 |
+| 応答中に文字 + `Enter` | `[処理中・追加入力]`欄で編集し、通常メッセージは次の応答／tool完了境界で現在のturnへ反映。`/run pause\|resume\|status`は即時、その他の`/command`はturn完了後に実行 |
 | `/run pause` / `/run pause --durable` | 通常pauseはプロセス内で即時性を優先。durableは進行中APIと開始済みtool結果を確定し、次API直前をatomic保存。`durable_paused`表示後はアプリ・PCを停止可能 |
-| `/resume <id>` → `/run inspect` → `/run resume` | 再起動後にconversationを復元し、cwd/model/provider差分を確認して保存済みrunを明示再開。resume途中の異常終了は自動再実行せずblocked表示 |
+| `/resume <id>` → `/run inspect` → `/run resume` | 再起動後にconversationと過去の確定済み標準出力を復元し、cwd/model/provider差分を確認して保存済みrunを明示再開。旧sessionは会話履歴から画面を再構成し、resume途中の異常終了は自動再実行せずblocked表示 |
 | マウスホイール | Alternate Screen TUIの過去ログを上下する（LLM・ツール実行中も有効） |
 | `PgUp` / `PgDn` | Alternate Screen TUIの過去ログをページ移動する（LLM・ツール実行中も有効） |
 | `Ctrl+C` | 現在の操作をキャンセル |
@@ -169,7 +171,7 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/profiles` | LLM 接続プロファイル履歴 (`/profiles` で選択、`list` / `delete` / `help`)。 詳細: docs/llm-profiles.md |
 | `/todo` | タスクリスト表示 |
 | `/sessions` | 保存済みセッション一覧（直近10件） |
-| `/resume <id>` | セッション復元 |
+| `/resume <id>` | セッションの会話・確定済み標準出力を復元（旧sessionは会話から表示を再構成） |
 | `/continue` | 最新セッションを復元 |
 | `/fork [id\|latest]` | 現在または保存済み会話を新しいセッションへ分岐（元セッションは不変） |
 | `/rename <name>` | 現在のセッションへ名前を付け、`/resume list` と再開pickerへ保存 |

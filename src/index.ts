@@ -76,6 +76,7 @@ import { LoopManager } from "./loop/loop-manager.js";
 import { displayWelcome } from "./cli/renderer.js";
 import { REPL } from "./cli/repl.js";
 import { screen } from "./cli/screen-manager.js";
+import { restoreTerminalTranscript } from "./cli/session-transcript.js";
 import { installOutputRouter, uninstallOutputRouter } from "./cli/output-router.js";
 import { withPrompt } from "./cli/prompt-gate.js";
 import { PROVIDER_LABELS } from "./config/types.js";
@@ -680,6 +681,13 @@ async function main(): Promise<void> {
     llmProfiles,
     startupMode.safeMode,
   );
+
+  // conversationだけでなく、確定済みstdoutもsessionと同じ境界で保存・復元する。
+  // ScreenManagerのlive status/composerはsnapshotに含まれないため、途中spinnerを再生しない。
+  agent.setTerminalTranscriptBridge({
+    restore: (saved, messages) => restoreTerminalTranscript(screen, saved, messages),
+  });
+  screen.onCommittedOutput((text) => agent.recordTerminalOutput(text));
 
   // 起動時の provider は config.mainLLM から作っているので、実行中バインディングとして記録する
   // (docs/model-apply-immediacy.md §3.1)。これが無いと「設定したのに反映されていない」を検出できない。

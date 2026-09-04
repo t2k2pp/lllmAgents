@@ -165,6 +165,12 @@ try {
     let sentPreview = false;
     let previewSeen = false;
     let previewSeenBeforeFinal = false;
+    let processingInputSeen = false;
+    let sentModeCycle = false;
+    let modeCycleSeen = false;
+    let sentSteerText = false;
+    let steerTextOutputStart = 0;
+    let steerVisible = false;
     let previewChunkSeen = false;
     let providerTextChunkSeen = false;
     let providerFilteredChunkSeen = false;
@@ -201,6 +207,12 @@ try {
       if (!previewSeen && (output.includes(driver.previewMarker) || output.includes(driver.previewSeenMarker))) {
         previewSeen = true;
         previewSeenBeforeFinal = Date.now() < finalChunkSentAt;
+      }
+      if (!processingInputSeen && output.includes(driver.processingInputMarker)) processingInputSeen = true;
+      if (!sentModeCycle && output.includes(driver.modeCycleSentMarker)) sentModeCycle = true;
+      if (!modeCycleSeen && output.includes(driver.modeCycleSeenMarker)) modeCycleSeen = true;
+      if (!steerVisible && output.slice(steerTextOutputStart).includes(driver.steerVisibleMarker)) {
+        steerVisible = true;
       }
       if (!previewChunkSeen && output.includes("[LLM_DEBUG_UI] response-preview first-chunk")) {
         previewChunkSeen = true;
@@ -281,16 +293,24 @@ try {
         sentPreview = true;
         child.stdin.write(submitPtyLine("PREVIEW_REQUEST"));
       }
-      if (driver.parentSubmits && sentPreview && previewSeen && !sentPause) {
+      if (driver.parentSubmits && sentPreview && previewSeen && processingInputSeen && !sentPause) {
         sentPause = true;
         child.stdin.write(submitPtyLine("/run pause"));
       }
-      if (driver.parentSubmits && pauseAcceptedSeen && !sentSteer) {
+      if (driver.parentSubmits && pauseAcceptedSeen && !sentModeCycle) {
+        sentModeCycle = true;
+        child.stdin.write("\x1b[Z");
+      }
+      if (driver.parentSubmits && modeCycleSeen && !sentSteerText) {
+        sentSteerText = true;
+        steerTextOutputStart = output.length;
+        child.stdin.write("STEER_REQUEST");
+      }
+      if (driver.parentSubmits && steerVisible && !sentSteer) {
         sentSteer = true;
-        // preview表示時点ならrun中のtype-aheadが所有権を持っている。
-        // 通常メッセージを送り、最初のresponse_completeより優先して同じrunへ反映させる。
-        // PTYのLFはinteractive-inputでCtrl+J（改行挿入）になる。CRでEnter確定する。
-        child.stdin.write(submitPtyLine("STEER_REQUEST"));
+        // 表示済みの通常メッセージをEnterで確定し、最初のresponse_completeより優先して
+        // 同じrunへ反映させる。PTYではLFがCtrl+J（改行）なのでCRだけを送る。
+        child.stdin.write("\r");
       }
       if (driver.parentSubmits && pauseReachedSeen && !sentParallel) {
         sentParallel = true;
@@ -344,6 +364,10 @@ try {
         previewSubmitted: sentPreview,
         previewSeen,
         previewSeenBeforeFinal,
+        processingInputSeen,
+        sentModeCycle,
+        modeCycleSeen,
+        steerVisible,
         previewChunkSeen,
         providerTextChunkSeen,
         providerFilteredChunkSeen,
@@ -366,6 +390,10 @@ try {
     result.timedOut ||
     !result.sentQuit ||
     !result.sentSteer ||
+    !result.processingInputSeen ||
+    !result.sentModeCycle ||
+    !result.modeCycleSeen ||
+    !result.steerVisible ||
     !result.sentPause ||
     !result.pauseAcceptedSeen ||
     !result.pauseReachedSeen ||
@@ -388,6 +416,8 @@ try {
     const failure =
       `PTY smoke failed (exit ${result.code}, signal ${result.signal ?? "none"}, ` +
       `quitSent ${result.sentQuit}, scrollSeen ${result.scrollSeen}, ` +
+      `processingInput ${result.processingInputSeen}, modeCycleSent ${result.sentModeCycle}, ` +
+      `modeCycleSeen ${result.modeCycleSeen}, steerVisible ${result.steerVisible}, ` +
       `steerSent ${result.sentSteer}, steerAccepted ${result.steerAcceptedSeen}, ` +
       `pauseSent ${result.sentPause}, pauseAccepted ${result.pauseAcceptedSeen}, ` +
       `pauseReached ${result.pauseReachedSeen}, parallelSent ${result.sentParallel}, ` +

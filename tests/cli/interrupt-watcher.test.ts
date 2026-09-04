@@ -81,6 +81,19 @@ describe("interruptWatcher", () => {
     expect(onInterrupt).not.toHaveBeenCalled();
   });
 
+  it("Shift+TabがESCと後続chunkに分割されても単独ESC中断にしない", () => {
+    const onInterrupt = vi.fn();
+    interruptWatcher.start(onInterrupt);
+
+    fakeStdin.emit("data", Buffer.from([0x1b]));
+    vi.advanceTimersByTime(10);
+    fakeStdin.emit("data", Buffer.from("[Z"));
+    vi.advanceTimersByTime(100);
+
+    expect(onInterrupt).not.toHaveBeenCalled();
+    expect(interruptWatcher.isActive()).toBe(true);
+  });
+
   it("Ctrl+C (0x03) を受信したら SIGINT を合成する", () => {
     const onInterrupt = vi.fn();
     let sigintCount = 0;

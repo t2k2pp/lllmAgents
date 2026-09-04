@@ -1,8 +1,9 @@
 import * as esbuild from "esbuild";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { getGitBuildId } from "./scripts/git-revision.js";
+import { selectSeaNode } from "./scripts/sea-node.js";
 
 const DIST_DIR = "dist";
 const APP_NAME = "localllm";
@@ -85,35 +86,18 @@ async function build() {
     ),
   );
 
-  const seaNode = (() => {
-    if (process.env.NODE_EXE && fs.existsSync(process.env.NODE_EXE)) {
-      return process.env.NODE_EXE;
-    }
-    if (process.config?.variables?.single_executable_application !== false) {
-      return process.execPath;
-    }
-    const candidates = ["/usr/local/bin/node", "/opt/homebrew/bin/node"];
-    for (const cand of candidates) {
-      if (cand !== process.execPath && fs.existsSync(cand)) {
-        try {
-          const out = execSync(`"${cand}" -p "process.config.variables.single_executable_application"`, {
-            encoding: "utf8",
-          }).trim();
-          if (out === "true") {
-            console.log(`       (sea fallback) using SEA-capable node at: ${cand}`);
-            return cand;
-          }
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-    return process.execPath;
-  })();
+  const seaNode = selectSeaNode({
+    requested: process.env.NODE_EXE,
+    current: process.execPath,
+    fallbackCandidates: ["/usr/local/bin/node", "/opt/homebrew/bin/node"],
+  });
+  if (seaNode !== process.execPath) {
+    console.log(`       (sea fallback) using SEA-capable node at: ${seaNode}`);
+  }
 
   try {
     console.log("[3/5] Generating Node.js SEA blob...");
-    execSync(`"${seaNode}" --experimental-sea-config ${SEA_CONFIG}`, { stdio: "inherit" });
+    execFileSync(seaNode, ["--experimental-sea-config", SEA_CONFIG], { stdio: "inherit" });
 
     console.log("[4/5] Copying node executable...");
     // Node 本体は r-x 権限。copyFileSync が src の mode を継ぎ、

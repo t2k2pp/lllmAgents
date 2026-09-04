@@ -95,6 +95,8 @@ export interface LiveOwner {
   redraw?: () => void;
   /** ライブ領域が今何行あるか (排他所有では使わない) */
   height?: () => number;
+  /** status/progressより下端へ固定する処理中composer */
+  pinned?: boolean;
 }
 
 export interface ScreenManager {
@@ -108,6 +110,10 @@ export interface ScreenManager {
   acquireLive(owner: LiveOwner): () => void;
   /** 今ライブ領域を持っている所有者 (いなければ undefined) */
   currentOwner(): string | undefined;
+  /** session resume用の確定stdout取得・復元（spinner/composerは除外） */
+  snapshotScrollback(): ScrollbackSnapshot;
+  restoreScrollback(snapshot: ScrollbackSnapshot): void;
+  onCommittedOutput(listener: (text: string) => void): () => void;
   /** 代替画面が有効か */
   isAlternate(): boolean;
 }
@@ -163,6 +169,14 @@ private viewOffset = 0;           // 0 = 最下部に追従。 >0 で遡り中
 - 遡り中は案内表示に1行使うため、最大offsetも案内を除いたcontent heightで計算し、
   最古行まで到達できることをunit testで保証する
 
+### 3.4.1 session resume時の復元
+
+確定した`write()`だけをsession別の`terminalTranscript`へ最大10,000行保存する。
+spinner frame、進捗上書き、編集中composerはlive表示なので保存しない。`/resume`、
+`--resume`、`--continue`、明示的なRoom移動ではscrollbackを保存snapshotへ置換する。
+一方、Discord/Slack runのために内部でRoomを借りるだけの切替ではCLI画面を変更しない。
+旧sessionは空画面へ黙って落とさず、conversationのuser/assistant/tool履歴から可読表示を再構成する。
+
 ### 3.5 描画
 
 ```
@@ -201,6 +215,10 @@ private viewOffset = 0;           // 0 = 最下部に追従。 >0 で遡り中
 自身の入力行 + ドロップダウン描画関数を `redraw` として渡す。
 割り込み出力が来たら ScreenManager が「スクロールバック更新 → `redraw()`」
 の順で描き直すので、 **入力中の文字列が消えない**。
+
+cycle 20ではsoft ownerを二段にした。通常のspinner/status/progressを上段、
+`pinned: true`の処理中composerを最下段へ予約する。これによりLLM/tool出力が続いても
+入力欄が消えず、`[処理中・追加入力]`と編集中の文字を常に確認できる。
 
 ### 4.3 排他所有 (プロンプト表示中) — ここが不具合 1・2 の直接の修正
 

@@ -229,6 +229,12 @@ const PATTERN_RULES: Array<{
   { pattern: /^gpt-4o|^gpt-4-turbo|^gpt-4\.5/i, tier: "T2", reason: "GPT-4o / 4-turbo" },
   // T2: Kimi-K2 系
   { pattern: /^kimi-k2/i, tier: "T2", reason: "Kimi K2 系" },
+  // T3: Qwen3小型。Flash等の派生名が付いてもサイズ表記を優先し、過大評価しない。
+  {
+    pattern: /^qwen3.*(?:^|[-_.])(0\.5b|0\.6b|1\.5b|1\.7b|3b|4b|7b|8b|14b)(?:[-_.]|$)/i,
+    tier: "T3",
+    reason: "Qwen3 小型 (≤14B)",
+  },
   // T2: Qwen3 32B+ (3.x で 32B 以上)
   { pattern: /^qwen3.*-?(32b|35b|72b|110b|a3b)/i, tier: "T2", reason: "Qwen3 32B+ (中堅 MoE 含む)" },
   // T2: Qwen3 Flash / Next / Turbo 系 (中堅 MoE/推論モデル)

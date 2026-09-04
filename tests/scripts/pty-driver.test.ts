@@ -19,6 +19,9 @@ describe("PTY smoke driver", () => {
     expect(driver.imeMarker).toBe("__PTY_IME_SEEN__");
     expect(driver.previewMarker).toBe("PV42");
     expect(driver.previewSubmittedMarker).toBe("__PTY_PREVIEW_SUBMITTED__");
+    expect(driver.processingInputMarker).toBe("処理中・追加入力");
+    expect(driver.modeCycleSeenMarker).toBe("モード: Autorun");
+    expect(driver.steerVisibleMarker).toBe("STEER_REQUEST");
     expect(driver.finalMarker).toBe("FINAL99");
     expect(driver.steerMarker).toBe("STEER_OK");
     expect(driver.pauseSentMarker).toBe("__PTY_PAUSE_SENT__");
@@ -45,8 +48,13 @@ describe("PTY smoke driver", () => {
     expect(driver.args.join("\n")).toContain("__PTY_PREVIEW_TIMEOUT__");
     expect(driver.args.join("\n")).toContain("PV42");
     expect(driver.args.join("\n")).toContain("FINAL99");
+    expect(driver.args.join("\n")).toContain("expect -re {処理中・追加入力}");
     expect(driver.args.join("\n")).toContain('send -- "/run pause\\r"');
-    expect(driver.args.join("\n")).toContain('send -- "STEER_REQUEST\\r"');
+    expect(driver.args.join("\n")).toContain('send -- "\\033\\[Z"');
+    expect(driver.args.join("\n")).toContain("expect -re {モード: Autorun}");
+    expect(driver.args.join("\n")).toContain('send -- "STEER_REQUEST"');
+    expect(driver.args.join("\n")).toContain("expect -re {STEER_REQUEST}");
+    expect(driver.args.join("\n")).toContain('send -- "\\r"');
     expect(driver.args.join("\n")).toContain("runをLLM API境界で一時停止しました");
     expect(driver.args.join("\n")).toContain('send -- "/parallel 4\\r"');
     expect(driver.args.join("\n")).toContain("並列実行上限を 4 に設定しました");
@@ -55,7 +63,10 @@ describe("PTY smoke driver", () => {
     expect(driver.args.join("\n")).toContain('send -- "/quit\\r"');
     const previewAt = driver.args.join("\n").lastIndexOf("expect -re {PV42}");
     const finalAt = driver.args.join("\n").lastIndexOf("expect -re {FINAL99}");
-    const steerAt = driver.args.join("\n").lastIndexOf('send -- "STEER_REQUEST\\r"');
+    const modeCycleAt = driver.args.join("\n").lastIndexOf('send -- "\\033\\[Z"');
+    const modeSeenAt = driver.args.join("\n").lastIndexOf("expect -re {モード: Autorun}");
+    const steerAt = driver.args.join("\n").lastIndexOf('send -- "STEER_REQUEST"');
+    const steerVisibleAt = driver.args.join("\n").lastIndexOf("expect -re {STEER_REQUEST}");
     const steerResponseAt = driver.args.join("\n").lastIndexOf("expect -re {STEER_OK}");
     const pauseAt = driver.args.join("\n").lastIndexOf('send -- "/run pause\\r"');
     const pausedAt = driver.args.join("\n").lastIndexOf("expect -re {runをLLM API境界で一時停止しました}");
@@ -64,7 +75,10 @@ describe("PTY smoke driver", () => {
     const quitAt = driver.args.join("\n").lastIndexOf('send -- "/quit\\r"');
     expect(steerAt).toBeGreaterThan(previewAt);
     expect(pauseAt).toBeGreaterThan(previewAt);
-    expect(steerAt).toBeGreaterThan(pauseAt);
+    expect(modeCycleAt).toBeGreaterThan(pauseAt);
+    expect(modeSeenAt).toBeGreaterThan(modeCycleAt);
+    expect(steerAt).toBeGreaterThan(modeSeenAt);
+    expect(steerVisibleAt).toBeGreaterThan(steerAt);
     expect(pausedAt).toBeGreaterThan(steerAt);
     expect(parallelAt).toBeGreaterThan(pausedAt);
     expect(resumeAt).toBeGreaterThan(parallelAt);

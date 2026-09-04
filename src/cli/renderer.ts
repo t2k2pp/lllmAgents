@@ -28,7 +28,7 @@ export function displayWelcome(
   if (screen.isAlternate()) {
     console.log(chalk.dim(`  TUI履歴: マウスホイール / PgUp / PgDn（通常scrollback: 次回起動時 --no-alt-screen）`));
   }
-  console.log(chalk.dim(`  マルチライン: Shift+Enter / Ctrl+J (代替入力: \`\`\`)\n`));
+  console.log(chalk.dim(`  モード切替: Shift+Tab | マルチライン: Shift+Enter / Ctrl+J (代替入力: \`\`\`)\n`));
 }
 
 export interface SkillSummary {
@@ -95,11 +95,11 @@ export function displayHelp(skills?: SkillSummary[], registryEntries?: RegistryH
     ${chalk.cyan("/goal-seek <goal>")} Goal Seek mode 開始 — acceptance criteria を立て合格まで自律実行
     ${chalk.cyan("/exit-goal-seek")}  Goal Seek mode を抜ける (acceptance 未達成でも user 明示で中断)
     ${chalk.cyan("/sessions [N]")}   保存済みセッション一覧 (デフォルト 20 件)
-    ${chalk.cyan("/resume [id]")}    セッション復元 (引数なしで対話的選択)
+    ${chalk.cyan("/resume [id]")}    セッションの会話・過去の確定stdoutを復元 (引数なしで対話的選択)
     ${chalk.cyan("/fork [id]")}      会話を新しいセッションへ分岐 (元セッションは不変)
     ${chalk.cyan("/continue")}       最新セッションを復元
     ${chalk.cyan("/room")}           会話 Room (A/B/C) の表示・移動・再開 (REPL=A/Discord=B/Slack=C)
-    ${chalk.cyan("/queue")}          待ち状況 (処理中に文字+Enterで同じturnへ追加入力、commandはturn後)
+    ${chalk.cyan("/queue")}          待ち状況 ([処理中・追加入力]欄で文字+Enter、commandはturn後)
     ${chalk.cyan("/memory")}         自動メモリ表示
     ${chalk.cyan("/remember <text>")} メモリに追記
     ${chalk.cyan("/plan")}           プランモードに入る
@@ -121,6 +121,7 @@ ${skillSection}
   ${chalk.bold("入力:")}
     ホイール     TUIの過去ログを上下する（LLM・ツール実行中も有効）
     PgUp/PgDn   TUIの過去ログをページ移動する（LLM・ツール実行中も有効）
+    Shift+Tab    通常 → Autorun → Plan → 通常を循環（編集中の文字は保持）
     Shift+Enter  改行を挿入（マルチライン入力）
     Ctrl+J       改行を挿入（Shift+Enter非対応ターミナル用）
     \`\`\`          マルチライン入力モード（明示的な代替入力）

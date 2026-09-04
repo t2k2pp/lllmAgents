@@ -189,6 +189,16 @@ export interface LiveOwner {
    * 代替画面なしでも成立させるために必要 (代替画面では全画面再描画で足りる)。
    */
   clear?: () => void;
+  /**
+   * 通常のstatus/progress領域より下へ固定する入力欄。
+   * LLM/tool実行中もcomposerを表示し続ける用途だけで使う。
+   */
+  pinned?: boolean;
+}
+
+export interface ScrollbackSnapshot {
+  lines: string[];
+  truncated: boolean;
 }
 
 export interface ScreenManager {
@@ -210,6 +220,12 @@ export interface ScreenManager {
   acquireLive(owner: LiveOwner): () => void;
   /** 今ライブ領域を持っている所有者 (いなければ undefined) */
   currentOwner(): string | undefined;
+  /** session保存用の確定済みstdoutスナップショット。一過性status/live描画は含まない。 */
+  snapshotScrollback(): ScrollbackSnapshot;
+  /** resume時に保存済みstdoutを画面へ復元する。 */
+  restoreScrollback(snapshot: ScrollbackSnapshot): void;
+  /** 確定stdoutをsession recorderへ渡す。一過性status/live描画は通知しない。 */
+  onCommittedOutput(listener: (text: string) => void): () => void;
   /** 代替画面が有効か */
   isAlternate(): boolean;
   /** スクロールバックを遡る (代替画面のみ)。行数省略で 1 画面ぶん */
@@ -319,6 +335,8 @@ export class ScreenManagerImpl implements ScreenManager {
 
   /** 表示済みの全行 (ANSI 込み)。末尾要素は「改行待ちの書きかけ行」 */
   private lines: string[] = [""];
+  /** maxLines超過で古い行を落としたことをsessionへ明示する。 */
+  private scrollbackTruncated = false;
   /** 排他所有中に溜めた出力 (FIFO)。順序は絶対に入れ替えない */
   private queue: string[] = [];
   /** ライブ領域の所有者スタック。後ろほど新しい */
@@ -354,6 +372,7 @@ export class ScreenManagerImpl implements ScreenManager {
   /** 代替画面で表示するスピナーの最新フレーム (ライブ領域の所有者がいないときだけ描く) */
   private statusLine = "";
   private statusAtMs = 0;
+  private outputListeners = new Set<(text: string) => void>();
   /** 端末リサイズ購読 (stop で外す) */
   private resizeHandler: (() => void) | null = null;
 
@@ -473,6 +492,14 @@ export class ScreenManagerImpl implements ScreenManager {
     // 確定した出力が来たらスピナーの役目は終わり。状態行を消す
     this.statusLine = "";
 
+    for (const listener of this.outputListeners) {
+      try {
+        listener(text);
+      } catch {
+        /* session transcript保存の失敗で端末出力を止めない */
+      }
+    }
+
     // スクロールバックへ記録する。キューへ退避する場合も記録はここで 1 回だけ行い、順序を保つ。
     this.appendLines(text);
 
@@ -489,7 +516,7 @@ export class ScreenManagerImpl implements ScreenManager {
     // ── 素通しモード ──
     // ソフト所有者 (入力欄など) がいるなら、その描画を一度消してから割り込み出力を差し込み、
     // 描き直す。これで「入力中の文字列が消えない」 (§4.2) が代替画面なしでも成立する。
-    const soft = this.softOwner();
+    const soft = this.pinnedOwner() ?? this.softOwner();
     if (soft?.redraw) {
       soft.clear?.();
       this.sink(text);
@@ -620,6 +647,32 @@ export class ScreenManagerImpl implements ScreenManager {
     return this.owners.at(-1)?.owner.name;
   }
 
+  snapshotScrollback(): ScrollbackSnapshot {
+    return { lines: [...this.lines], truncated: this.scrollbackTruncated };
+  }
+
+  restoreScrollback(snapshot: ScrollbackSnapshot): void {
+    const incoming = snapshot.lines.filter((line): line is string => typeof line === "string");
+    const overflow = incoming.length > this.maxLines;
+    this.lines = (overflow ? incoming.slice(-this.maxLines) : incoming).slice();
+    if (this.lines.length === 0) this.lines = [""];
+    this.scrollbackTruncated = snapshot.truncated || overflow;
+    this.viewOffset = 0;
+    this.newLinesWhileScrolled = 0;
+    this.statusLine = "";
+    if (this.alternate) {
+      this.renderNow();
+    } else if (this.started) {
+      const body = this.lines.join("\n");
+      if (body) this.sink(body.endsWith("\n") ? body : `${body}\n`);
+    }
+  }
+
+  onCommittedOutput(listener: (text: string) => void): () => void {
+    this.outputListeners.add(listener);
+    return () => this.outputListeners.delete(listener);
+  }
+
   isAlternate(): boolean {
     return this.alternate;
   }
@@ -633,10 +686,24 @@ export class ScreenManagerImpl implements ScreenManager {
     return this.owners.some((entry) => !entry.owner.redraw);
   }
 
-  /** 一番上のソフト所有者 (排他所有者がいるときは undefined) */
+  /** 一番上の通常ソフト所有者 (固定footerを除く。排他所有者がいるときは undefined) */
   private softOwner(): LiveOwner | undefined {
     if (this.isExclusive()) return undefined;
-    return this.owners.at(-1)?.owner;
+    for (let index = this.owners.length - 1; index >= 0; index -= 1) {
+      const owner = this.owners[index]?.owner;
+      if (owner?.redraw && !owner.pinned) return owner;
+    }
+    return undefined;
+  }
+
+  /** LLM/tool実行中も最下部へ固定するcomposer。 */
+  private pinnedOwner(): LiveOwner | undefined {
+    if (this.isExclusive()) return undefined;
+    for (let index = this.owners.length - 1; index >= 0; index -= 1) {
+      const owner = this.owners[index]?.owner;
+      if (owner?.redraw && owner.pinned) return owner;
+    }
+    return undefined;
   }
 
   /** 退避中の出力の件数 (テスト・診断用) */
@@ -857,6 +924,7 @@ export class ScreenManagerImpl implements ScreenManager {
     }
     if (this.lines.length > this.maxLines) {
       this.lines.splice(0, this.lines.length - this.maxLines);
+      this.scrollbackTruncated = true;
     }
     // 遡り中は視点を動かさない (§3.4)。増えたぶんだけオフセットも押し上げる
     if (added > 0 && this.viewOffset > 0) {
@@ -912,15 +980,26 @@ export class ScreenManagerImpl implements ScreenManager {
    */
   private liveHeight(): number {
     const owner = this.softOwner();
+    const pinned = this.pinnedOwner();
+    let primaryHeight = 0;
     if (owner?.height) {
       try {
-        return Math.max(0, owner.height());
+        primaryHeight = Math.max(0, owner.height());
       } catch {
-        return 0;
+        primaryHeight = 0;
+      }
+    } else if (!owner && this.activeStatusLine()) {
+      primaryHeight = 1;
+    }
+    let pinnedHeight = 0;
+    if (pinned?.height) {
+      try {
+        pinnedHeight = Math.max(0, pinned.height());
+      } catch {
+        pinnedHeight = 0;
       }
     }
-    if (owner) return 0;
-    return this.activeStatusLine() ? 1 : 0;
+    return primaryHeight + pinnedHeight;
   }
 
   // ─── 描画 (§3.5) ─────────────────────────────────────
@@ -964,6 +1043,7 @@ export class ScreenManagerImpl implements ScreenManager {
     this.rendering = true;
     try {
       const owner = this.softOwner();
+      const pinned = this.pinnedOwner();
       const rows = Math.max(2, this.rowsOf());
       const columns = Math.max(1, this.columnsOf());
       const reserved = Math.min(Math.max(0, this.liveHeight()), rows - 1);
@@ -996,15 +1076,35 @@ export class ScreenManagerImpl implements ScreenManager {
       out += `\x1b[${reserved > 0 ? viewH + 1 : viewH};1H`;
       this.sink(out);
 
+      let primaryHeight = 0;
+      if (owner?.height) {
+        try {
+          primaryHeight = Math.max(0, owner.height());
+        } catch {
+          primaryHeight = 0;
+        }
+      } else if (!owner && this.activeStatusLine()) {
+        primaryHeight = 1;
+      }
+
       if (owner?.redraw) {
         try {
           owner.redraw();
         } catch {
           /* 所有者の描画失敗で画面全体を落とさない */
         }
-      } else if (reserved > 0) {
+      } else if (primaryHeight > 0) {
         // 所有者がいない = スピナーの状態行を描く枠
         this.sink(truncateAnsiToWidth(this.activeStatusLine(), columns));
+      }
+      if (pinned?.redraw) {
+        // primary status/progressの直下へcomposerの原点を固定する。
+        this.sink(`\x1b[${viewH + primaryHeight + 1};1H`);
+        try {
+          pinned.redraw();
+        } catch {
+          /* 固定composerの描画失敗で画面全体を落とさない */
+        }
       }
       this.sink("\x1b[?25h");
 

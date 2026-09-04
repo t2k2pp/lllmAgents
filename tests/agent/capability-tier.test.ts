@@ -303,6 +303,12 @@ describe("resolveCapability — パス付きモデル名および Qwen Flash/Nex
     expect(profile.reason).toContain("Qwen3 Flash/Next/Turbo 系");
   });
 
+  it("Qwen3小型はFlash派生名でもサイズを優先してT3とし、過大評価しない", () => {
+    const profile = resolveCapability("Qwen3-4B-Flash", 32_768);
+    expect(profile.tier).toBe("T3");
+    expect(profile.reason).toContain("Qwen3 小型");
+  });
+
   it("パス付きの小型モデル (/path/to/llama-3.2-7b.gguf) → T3", () => {
     const profile = resolveCapability("/path/to/llama-3.2-7b.gguf", 128_000);
     expect(profile.tier).toBe("T3");

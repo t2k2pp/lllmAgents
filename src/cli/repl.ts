@@ -25,7 +25,8 @@ import { normalizeRoomId } from "../agent/room-types.js";
 import { loadMemory, saveMemory } from "../agent/memory.js";
 import { resolveAtMentions, printMentionFeedback } from "./input-resolver.js";
 import { runGoalLoop } from "../goal-loop/goal-loop-runner.js";
-import { InteractiveInput, SIGINT_SIGNAL } from "./interactive-input.js";
+import { InteractiveInput, INPUT_CANCELLED_SIGNAL, SIGINT_SIGNAL } from "./interactive-input.js";
+import { currentInteractionMode, nextInteractionMode } from "./interaction-mode.js";
 import { interruptWatcher } from "./interrupt-watcher.js";
 import { progressIndicator } from "./progress-indicator.js";
 import { createCommandMenuProvider, createFileMenuProvider } from "./completer.js";
@@ -304,6 +305,7 @@ export class REPL {
         // マルチラインモード中はドロップダウンを抑制
         const raw = await this.input.question(prefix, {
           disableMenu: this.isMultiline,
+          onModeCycle: () => this.cycleInteractionMode(),
         });
 
         // ── Ctrl+C ──
@@ -4083,6 +4085,74 @@ export class REPL {
     return this.sandboxHudTag() + chalk.green("> ");
   }
 
+  /**
+   * Claude Codeと同じShift+Tabの一操作で、通常→autorun→plan→通常を循環する。
+   * 入力欄から呼ばれるため、モード変更後のprefixを返して編集中テキストを保持したまま再描画する。
+   */
+  private cycleInteractionMode(): string {
+    const permissions = this.agent.getPermissions();
+    const next = nextInteractionMode(
+      currentInteractionMode(this.planManager?.isInPlanMode() ?? false, permissions.isAutorunMode()),
+    );
+    if (next === "default") {
+      const previousAutorun = permissions.isAutorunMode();
+      this.planManager?.exitPlanMode();
+      permissions.setAutorunMode(false);
+      this.config.autorunMode = false;
+      try {
+        saveConfig(this.config);
+      } catch (error) {
+        if (this.planManager) this.planManager.enterPlanMode();
+        permissions.setAutorunMode(previousAutorun);
+        this.config.autorunMode = previousAutorun;
+        console.log(chalk.red(`  モード設定を保存できないため切替を中止しました: ${String(error)}`));
+        return this.getPromptPrefix();
+      }
+      console.log(chalk.green("  モード: 通常 (Shift+Tabで切替)"));
+      return this.getPromptPrefix();
+    }
+
+    if (next === "plan") {
+      if (!this.planManager) {
+        console.log(
+          chalk.red("  plan modeを管理できないため切り替えられません。PlanManagerの初期化を確認してください。"),
+        );
+        return this.getPromptPrefix();
+      }
+      permissions.setAutorunMode(false);
+      this.config.autorunMode = false;
+      try {
+        saveConfig(this.config);
+      } catch (error) {
+        permissions.setAutorunMode(true);
+        this.config.autorunMode = true;
+        console.log(chalk.red(`  モード設定を保存できないため切替を中止しました: ${String(error)}`));
+        return this.getPromptPrefix();
+      }
+      this.planManager.enterPlanMode();
+      console.log(chalk.yellow("  モード: Plan (読取・設計。Shift+Tabで通常へ)"));
+      return this.getPromptPrefix();
+    }
+
+    permissions.setAutorunMode(true);
+    this.config.autorunMode = true;
+    try {
+      saveConfig(this.config);
+    } catch (error) {
+      permissions.setAutorunMode(false);
+      this.config.autorunMode = false;
+      console.log(chalk.red(`  モード設定を保存できないため切替を中止しました: ${String(error)}`));
+      return this.getPromptPrefix();
+    }
+    console.log(chalk.magenta("  モード: Autorun (非破壊操作を自動承認。Shift+TabでPlanへ)"));
+    return this.getPromptPrefix();
+  }
+
+  private getProcessingPromptPrefix(): string {
+    const base = this.getPromptPrefix();
+    return `${chalk.cyan("[処理中・追加入力]")} ${base}`;
+  }
+
   /** /room の一覧表示。 各 Room の active / REPL バインド / 自動 Resume / メッセージ数を出す。 */
   private printRoomStatus(): void {
     if (!this.roomManager) return;
@@ -4226,7 +4296,7 @@ export class REPL {
           ),
         );
       }
-      stopTypeAhead();
+      await stopTypeAhead();
       interruptWatcher.stop();
       progressIndicator.end();
       this.agentBusy = false;
@@ -4263,7 +4333,7 @@ export class REPL {
           ),
         );
       }
-      stopTypeAhead();
+      await stopTypeAhead();
       interruptWatcher.stop();
       progressIndicator.end();
       this.agentBusy = false;
@@ -4327,108 +4397,87 @@ export class REPL {
     return false;
   }
 
-  /**
-   * Phase 1.5: run 実行中に stdin へ届く type-ahead 入力を捕捉する。
-   * 印字文字を蓄積し、 Enter で 1 行確定して pendingInputs に積む (現ターン完了後に処理)。
-   * ESC/Ctrl+C は interrupt-watcher が扱うため触らない。 非 TTY では no-op。
-   * 返り値は捕捉を止める cleanup 関数。
-   *
-   * 注: run 中は対話プロンプトを描画しないため echo はしない (確定時に確認だけ出す)。
-   * マルチバイトはバイト蓄積→Enter で UTF-8 デコード。 対話品質は手動 TTY 検証が必要。
-   */
-  private startTypeAhead(): () => void {
+  /** 処理中入力を通常composerと同じ編集品質で受け付け、Enter時にrun/steeringへ振り分ける。 */
+  private startTypeAhead(): () => Promise<void> {
     if (!process.stdin.isTTY)
-      return () => {
+      return async () => {
         /* no-op */
       };
-    const stdin = process.stdin;
-    let bytes: number[] = [];
-    const onData = (chunk: Buffer): void => {
-      for (let i = 0; i < chunk.length; i++) {
-        const b = chunk[i];
-        // ESC (0x1b) / Ctrl+C (0x03) は interrupt-watcher が扱う。 ここでは触らない。
-        // M-3: ESC は単独中断にも矢印キー等のエスケープシーケンス先頭にもなる。 どちらも
-        // この chunk の残りは type-ahead 対象外なので break で読み飛ばすが、 蓄積済みの bytes は
-        // 保持する (矢印キー 1 回で入力中の行が消える旧バグを防ぐ)。
-        if (b === 0x1b || b === 0x03) break;
-        if (b === 0x0d || b === 0x0a) {
-          const text = Buffer.from(bytes).toString("utf8").trim();
-          bytes = [];
-          if (text) {
-            if (text.startsWith("/")) {
-              if (/^\/run(?:\s|$)/i.test(text)) {
-                // run制御だけは「turn完了後」へ積むとpauseの意味が失われるため即時処理する。
-                // session復元の /resume・/continue とは名前空間を分離している。
-                const feedback = executeRunControl(this.agent, text.split(/\s+/).slice(1));
-                printRunControlFeedback(feedback);
-                void feedback.continuation?.catch((error: unknown) => {
-                  console.error(
-                    chalk.red(
-                      `  durable run再開に失敗しました: ${error instanceof Error ? error.message : String(error)}`,
-                    ),
-                  );
-                });
-              } else if (/^\/parallel(?:\s|$)/i.test(text) && this.agent.getRunPauseSnapshot().state === "paused") {
-                // local LLM保守中に同時実行数を変えるのがpauseの主要用途。
-                // turn後FIFOへ積むとresumeするまで反映できないため、paused中だけ即時適用する。
-                void this.handleCommand(text).catch((error: unknown) => {
-                  console.error(
-                    chalk.red(
-                      `  並列実行数の変更に失敗しました: ${error instanceof Error ? error.message : String(error)}`,
-                    ),
-                  );
-                });
-              } else {
-                // その他のslash commandはモデル入力ではないため、従来どおりturn終了後に実行する。
-                this.pendingInputs.push(text);
-                process.stdout.write(
-                  chalk.dim(
-                    `\n  ⏳ コマンドをキューに追加しました (待ち ${this.pendingInputs.length} 件)。 現在の処理完了後に実行します。\n`,
-                  ),
-                );
-              }
-            } else {
-              const result = this.agent.queueSteering(text);
-              if (result.status === "queued") {
-                process.stdout.write(
-                  chalk.dim(
-                    `\n  ↪ 追加入力を受け付けました (反映待ち ${result.pending} 件)。 次の応答/tool完了境界で現在の処理へ反映します。\n`,
-                  ),
-                );
-              } else if (result.status === "not_running") {
-                this.pendingInputs.push(text);
-                process.stdout.write(
-                  chalk.dim(
-                    `\n  ⏳ キューに追加しました (待ち ${this.pendingInputs.length} 件)。 現在の処理完了後に順次実行します。\n`,
-                  ),
-                );
-              } else {
-                const reason = {
-                  invalid_message: "空の追加入力です",
-                  message_too_long: "追加入力が4000文字を超えています",
-                  queue_full: "追加入力キューが満杯です (最大20件)",
-                }[result.status];
-                process.stdout.write(chalk.red(`\n  追加入力を受け付けられません: ${reason}\n`));
-              }
-            }
-          }
-          continue;
-        }
-        if (b === 0x7f || b === 0x08) {
-          // L-1: UTF-8 を考慮して 1 コードポイント分削る (マルチバイトを 1 バイトだけ
-          // 削ってバッファを壊さない)。 echo は無いが確定行が文字化けしないようにする。
-          const cps = [...Buffer.from(bytes).toString("utf8")];
-          cps.pop();
-          bytes = [...Buffer.from(cps.join(""), "utf8")];
-          continue;
-        }
-        if (b >= 0x20) bytes.push(b); // 印字 ASCII + マルチバイト先頭/継続 (>=0x80)
+    const controller = new AbortController();
+    const loop = (async (): Promise<void> => {
+      while (!controller.signal.aborted) {
+        const text = await this.input.question(this.getProcessingPromptPrefix(), {
+          signal: controller.signal,
+          ownerName: "processing-input",
+          pinned: true,
+          onModeCycle: () => this.cycleInteractionMode(),
+        });
+        if (text === INPUT_CANCELLED_SIGNAL || controller.signal.aborted) return;
+        if (text === SIGINT_SIGNAL || !text.trim()) continue;
+        this.routeTypeAhead(text.trim());
       }
+    })().catch((error: unknown) => {
+      if (!controller.signal.aborted) {
+        console.error(
+          chalk.red(`  処理中入力欄を維持できません: ${error instanceof Error ? error.message : String(error)}`),
+        );
+      }
+    });
+    return async () => {
+      controller.abort();
+      await loop;
     };
-    stdin.on("data", onData);
-    return () => {
-      stdin.removeListener("data", onData);
-    };
+  }
+
+  private routeTypeAhead(text: string): void {
+    if (text.startsWith("/")) {
+      if (/^\/run(?:\s|$)/i.test(text)) {
+        const feedback = executeRunControl(this.agent, text.split(/\s+/).slice(1));
+        printRunControlFeedback(feedback);
+        void feedback.continuation?.catch((error: unknown) => {
+          console.error(
+            chalk.red(`  durable run再開に失敗しました: ${error instanceof Error ? error.message : String(error)}`),
+          );
+        });
+      } else if (/^\/parallel(?:\s|$)/i.test(text) && this.agent.getRunPauseSnapshot().state === "paused") {
+        void this.handleCommand(text).catch((error: unknown) => {
+          console.error(
+            chalk.red(`  並列実行数の変更に失敗しました: ${error instanceof Error ? error.message : String(error)}`),
+          );
+        });
+      } else {
+        this.pendingInputs.push(text);
+        process.stdout.write(
+          chalk.dim(
+            `\n  ⏳ コマンドをキューに追加しました (待ち ${this.pendingInputs.length} 件)。 現在の処理完了後に実行します。\n`,
+          ),
+        );
+      }
+      return;
+    }
+
+    const result = this.agent.queueSteering(text);
+    if (result.status === "queued") {
+      process.stdout.write(
+        chalk.dim(
+          `\n  ↪ 追加入力を受け付けました (反映待ち ${result.pending} 件)。 次の応答/tool完了境界で現在の処理へ反映します。\n`,
+        ),
+      );
+    } else if (result.status === "not_running") {
+      this.pendingInputs.push(text);
+      process.stdout.write(
+        chalk.dim(
+          `\n  ⏳ キューに追加しました (待ち ${this.pendingInputs.length} 件)。 現在の処理完了後に順次実行します。\n`,
+        ),
+      );
+    } else {
+      const reason = {
+        invalid_message: "空の追加入力です",
+        message_too_long: "追加入力が4000文字を超えています",
+        queue_full: "追加入力キューが満杯です (最大20件)",
+      }[result.status];
+      process.stdout.write(chalk.red(`\n  追加入力を受け付けられません: ${reason}\n`));
+    }
   }
 
   // ─── コマンドハンドラ ──────────────────────────────

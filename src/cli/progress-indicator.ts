@@ -55,6 +55,11 @@ class ProgressIndicatorImpl implements ProgressIndicator {
     if (!process.stdout.isTTY) {
       return;
     }
+    // 処理中composerが常時表示されている間は、その下端をprogress描画で奪わない。
+    // toolの開始・完了は確定stdoutへ別途表示されるため、操作可能性を優先する。
+    if (screen.currentOwner() === "processing-input") {
+      return;
+    }
     this.active = true;
     this.startMs = Date.now();
     this.currentToolName = toolName;

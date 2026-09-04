@@ -82,7 +82,7 @@ export class RoomManager {
   moveSurface(surface: Surface, room: RoomId): void {
     this.config.roomConfig!.bindings[surface] = room;
     saveConfig(this.config);
-    if (surface === "repl") this.activateRoom(room);
+    if (surface === "repl") this.activateRoom(room, true);
   }
 
   // ─── startup ───
@@ -113,7 +113,7 @@ export class RoomManager {
       const meta = latestSessionMetaOfRoom(room);
       const data = meta ? loadSession(meta.id) : null;
       if (data) {
-        this.agent.restoreSession(data);
+        this.agent.restoreSession(data, { restoreTerminalTranscript: false });
         this.activeSessionId.set(room, data.meta.id);
         this.currentAgentRoom = room;
         return;
@@ -132,7 +132,7 @@ export class RoomManager {
    */
   async runInRoom<T>(room: RoomId, fn: () => Promise<T>): Promise<T> {
     const resting = this.currentAgentRoom ?? this.restingRoom();
-    this.activateRoom(room);
+    this.activateRoom(room, false);
     try {
       const result = await fn();
       // run 後の状態を保存(ターン毎永続化)。
@@ -140,7 +140,7 @@ export class RoomManager {
       this.activeSessionId.set(room, this.agent.getCurrentSessionId());
       return result;
     } finally {
-      if (resting !== room) this.activateRoom(resting);
+      if (resting !== room) this.activateRoom(resting, false);
     }
   }
 
@@ -153,7 +153,7 @@ export class RoomManager {
     this.activeSessionId.set(room, meta.id);
     if (this.currentAgentRoom === room) {
       const data = loadSession(meta.id);
-      if (data) this.agent.restoreSession(data);
+      if (data) this.agent.restoreSession(data, { restoreTerminalTranscript: true });
     }
     return true;
   }
@@ -189,14 +189,14 @@ export class RoomManager {
    * 指定 Room のセッションを agent にロードして「アクティブ Room」にする。 現 Room を保存して
    * から対象をロードする。 run 実行中に呼んではならない(キューで直列化されている前提)。
    */
-  private activateRoom(room: RoomId): void {
+  private activateRoom(room: RoomId, restoreTerminalTranscript: boolean): void {
     if (this.currentAgentRoom === room) return;
     if (this.currentAgentRoom !== null) {
       this.agent.saveCurrentSession();
       this.activeSessionId.set(this.currentAgentRoom, this.agent.getCurrentSessionId());
     }
     const data = this.resolveRoomSession(room);
-    this.agent.restoreSession(data);
+    this.agent.restoreSession(data, { restoreTerminalTranscript });
     this.activeSessionId.set(room, data.meta.id);
     this.currentAgentRoom = room;
   }

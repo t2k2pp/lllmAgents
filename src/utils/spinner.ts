@@ -42,7 +42,7 @@ export function createSpinner(options?: string | Options): Ora {
   // 戻らず、受信済みresponse previewやresponse_complete後のREPL復帰を塞ぐ端末依存事象が
   // Linux/macOSの双方で再現した。ScreenManager自身が一過性statusを描画できるため、
   // ここではOra互換の公開操作だけをScreenManagerへ写像し、stdinとtimerの所有者を増やさない。
-  if (screen.isAlternate()) {
+  if (screen.isAlternate() || screen.currentOwner() === "processing-input") {
     const spinner = ora({ ...given, discardStdin: false });
     let text = given.text ?? "";
     let active = false;

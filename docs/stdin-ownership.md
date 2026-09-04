@@ -99,6 +99,9 @@ ScreenManager が **最下位の `\x03` 監視**を常設する。
   (それぞれが自分で Ctrl+C を処理する)
 - **誰もいない間に `\x03` が来たら `process.emit("SIGINT")` を発火**する
 
+ESC単独中断は50ms debounceでescape sequenceと区別する。`Shift+Tab`の`ESC [ Z`や
+矢印keyがstdin chunk境界で分割されても、debounce中に後続byteが届けば単独ESC予約を解除する。
+
 「誰もいない間」 だけ働く保険なので、 既存の Ctrl+C 処理と競合しない。
 
 #### `InterruptWatcher` をどう数えるか
@@ -129,8 +132,13 @@ stdinConsumers === 0                // 生 stdin の担い手がいない
 ### 3.5 型ずれ入力 (type-ahead) の扱い
 
 raw を保持し続けるので、 応答表示中に打った文字は **cooked バッファに溜まらず、
-そのままアプリに届く**。 通常メッセージはforeground steering FIFOが受け、次のLLM reply／tool完了境界で
-同じturnへ渡す。slash commandはturn後FIFOが受け、`/queue`で確認・一括破棄できる。
+そのままアプリに届く**。cycle 20以降はraw byteを裏で集めるだけでなく、通常時と同じ
+`InteractiveInput`を`[処理中・追加入力]`の固定composerとして表示する。編集中の本文、
+折返し、`Shift+Enter`、`Shift+Tab`のmode循環を目視できる。
+
+通常メッセージはforeground steering FIFOが受け、次のLLM reply／tool完了境界で
+同じturnへ渡す。slash commandはturn後FIFOが受け、`/run`の状態操作は即時に処理する。
+run終了時はAbortSignalでcomposerを解放し、未確定の編集中bufferを別turnとして誤送信しない。
 
 つまりこの変更は「打鍵が消える / 遅れて出る」 のを直すだけでなく、
 **打鍵が正しく先読みキューに入るようになる**。 黙って捨てられる経路が減る。
@@ -155,7 +163,8 @@ raw を保持し続けるので、 応答表示中に打った文字は **cooked
 |----------|------|
 | `src/cli/screen-manager.ts` | セッション単位の raw 保持、 全所有者での再確認、 `release()` 後の再確認、 `\x03` 保険、 `suspendStdin()`/`resumeStdin()` |
 | `src/cli/interrupt-watcher.ts` | ScreenManager が保持中なら `stop()` で cooked に戻さない |
-| `src/cli/interactive-input.ts` | cleanup で cooked に戻さない |
+| `src/cli/interactive-input.ts` | cleanup で cooked に戻さない。処理中composerの外部abortと`Shift+Tab`再描画 |
+| `src/cli/repl.ts` | 処理中固定composerからsteering/commandへ振り分け |
 | `tests/cli/screen-manager.test.ts` | raw 保持 / 解放しない / `\x03` 保険の単体テスト |
 
 ---
