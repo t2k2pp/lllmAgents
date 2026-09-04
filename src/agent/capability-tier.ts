@@ -231,6 +231,8 @@ const PATTERN_RULES: Array<{
   { pattern: /^kimi-k2/i, tier: "T2", reason: "Kimi K2 系" },
   // T2: Qwen3 32B+ (3.x で 32B 以上)
   { pattern: /^qwen3.*-?(32b|35b|72b|110b|a3b)/i, tier: "T2", reason: "Qwen3 32B+ (中堅 MoE 含む)" },
+  // T2: Qwen3 Flash / Next / Turbo 系 (中堅 MoE/推論モデル)
+  { pattern: /^qwen3.*-?(flash|next|turbo)/i, tier: "T2", reason: "Qwen3 Flash/Next/Turbo 系 (中堅)" },
   // T2: Llama 3.x 70B+
   { pattern: /^llama-3\.?\d-70b|^llama-3\.?\d-405b/i, tier: "T2", reason: "Llama 3.x 70B+" },
   // T2: Mistral Large
@@ -254,13 +256,50 @@ const PATTERN_RULES: Array<{
 ];
 
 /**
+ * モデル識別子から、ファイルパスや拡張子、分割サフィックス等を除去した候補名を生成する。
+ * GGUF等のローカルモデルファイルパスが渡された場合でも、元のモデル名（basename等）を
+ * 抽出して tier 判定や override 検索に利用できるようにする。
+ */
+export function extractModelCandidates(modelId: string): string[] {
+  const trimmed = modelId.trim();
+  const candidates: string[] = [trimmed];
+  if (trimmed.includes("/") || trimmed.includes("\\")) {
+    const parts = trimmed.split(/[/\\]+/).filter(Boolean);
+    if (parts.length > 0) {
+      const filename = parts[parts.length - 1];
+      candidates.push(filename);
+      // 拡張子を除去 (例: .gguf, .bin, .safetensors, .pt, .onnx)
+      const noExt = filename.replace(/\.(gguf|bin|safetensors|pt|onnx)$/i, "");
+      if (noExt !== filename) {
+        candidates.push(noExt);
+      }
+      // GGUF分割サフィックスや量子化表記の除去 (例: -00001-of-00003, -UD-IQ4_XS, -Q4_K_M など)
+      const stripped = noExt.replace(
+        /-(?:\d+-of-\d+|[a-z0-9_]+-(?:q\d|iq\d|bf16|fp16)[a-z0-9_]*|q\d_[a-z0-9_]+|bf16|fp16).*$/i,
+        "",
+      );
+      if (stripped && stripped !== noExt) {
+        candidates.push(stripped);
+      }
+      // 直前ディレクトリ名 (例: models/Qwen3.8-Flash-Next/...)
+      if (parts.length >= 2) {
+        const parentDir = parts[parts.length - 2];
+        candidates.push(parentDir);
+      }
+    }
+  }
+  return [...new Set(candidates)];
+}
+
+/**
  * モデル ID と オプションのコンテキスト窓から能力プロファイルを解決する。
  *
  * tier 判定 (KNOWN_MODELS / PATTERN_RULES / 名前ヒューリスティック / 明示override) と、
  * contextWindow の解決 (引数 → 明示override → inferContextLength) は
  * 直交。 後者は providers/utils/context-length.ts に一元化済 (重複層を作らない)。
+ * パス付きモデル名（GGUFファイル等）の場合は候補名を生成して階層的に判定する。
  *
- * @param modelId - LLM モデルの識別子 (例: "claude-opus-4-7", "gpt-5.4", "llama-3.2-7b")
+ * @param modelId - LLM モデルの識別子 (例: "claude-opus-4-7", "gpt-5.4", "llama-3.2-7b", "/path/to/model.gguf")
  * @param ctxWindow - 既知のコンテキスト窓 (provider が報告する値があれば呼出元から渡す)
  * @param override - ユーザ設定による override (config.json の models[modelId])
  */
@@ -269,51 +308,69 @@ export function resolveCapability(
   ctxWindow?: number,
   override?: CapabilityOverride,
 ): CapabilityProfile {
-  const id = modelId.toLowerCase().trim();
+  const candidates = extractModelCandidates(modelId);
   // contextWindow は引数/明示override → inferContextLength の順で 1 回だけ解決。
   // tier 判定とは独立しており、 KNOWN_MODELS / PATTERN_RULES は持たない。
-  const resolvedCtx = resolveContextWindow(modelId, ctxWindow ?? override?.contextWindow);
+  const resolvedCtx = resolveContextWindow(modelId, ctxWindow ?? override?.contextWindow, candidates);
 
   // 1. 完全一致 (tier 判定)
-  if (KNOWN_MODELS[id]) {
-    const entry = KNOWN_MODELS[id];
-    const base = TIER_DEFAULTS[entry.tier];
-    const profile: CapabilityProfile = {
-      ...base,
-      ...filterUndefined(entry),
-      tier: entry.tier,
-      contextWindow: resolvedCtx.value,
-      reason: `known model: ${modelId} (ctx=${resolvedCtx.source})`,
-    };
-    return applyOverride(profile, override);
-  }
-
-  // 2. パターン一致 (tier 判定)
-  for (const rule of PATTERN_RULES) {
-    if (rule.pattern.test(id)) {
-      const base = TIER_DEFAULTS[rule.tier];
+  for (const cand of candidates) {
+    const cid = cand.toLowerCase().trim();
+    if (KNOWN_MODELS[cid]) {
+      const entry = KNOWN_MODELS[cid];
+      const base = TIER_DEFAULTS[entry.tier];
       const profile: CapabilityProfile = {
         ...base,
-        ...filterUndefined(rule.override ?? {}),
-        tier: rule.tier,
+        ...filterUndefined(entry),
+        tier: entry.tier,
         contextWindow: resolvedCtx.value,
-        reason: `pattern match: ${rule.reason} (ctx=${resolvedCtx.source})`,
+        reason:
+          cand === modelId
+            ? `known model: ${modelId} (ctx=${resolvedCtx.source})`
+            : `known model: ${cand} (from path ${modelId}) (ctx=${resolvedCtx.source})`,
       };
       return applyOverride(profile, override);
     }
   }
 
+  // 2. パターン一致 (tier 判定)
+  for (const cand of candidates) {
+    const cid = cand.toLowerCase().trim();
+    for (const rule of PATTERN_RULES) {
+      if (rule.pattern.test(cid)) {
+        const base = TIER_DEFAULTS[rule.tier];
+        const profile: CapabilityProfile = {
+          ...base,
+          ...filterUndefined(rule.override ?? {}),
+          tier: rule.tier,
+          contextWindow: resolvedCtx.value,
+          reason:
+            cand === modelId
+              ? `pattern match: ${rule.reason} (ctx=${resolvedCtx.source})`
+              : `pattern match: ${rule.reason} (from path ${modelId}, candidate: ${cand}) (ctx=${resolvedCtx.source})`,
+        };
+        return applyOverride(profile, override);
+      }
+    }
+  }
+
   // 3. ヒューリスティック: モデル名のパラメータ数表記 (例: "-7b" → T3)
-  const nameTier = inferTierFromName(id);
-  if (nameTier) {
-    const base = TIER_DEFAULTS[nameTier];
-    const profile: CapabilityProfile = {
-      ...base,
-      tier: nameTier,
-      contextWindow: resolvedCtx.value,
-      reason: `heuristic from model name (size hint) (ctx=${resolvedCtx.source})`,
-    };
-    return applyOverride(profile, override);
+  for (const cand of candidates) {
+    const cid = cand.toLowerCase().trim();
+    const nameTier = inferTierFromName(cid);
+    if (nameTier) {
+      const base = TIER_DEFAULTS[nameTier];
+      const profile: CapabilityProfile = {
+        ...base,
+        tier: nameTier,
+        contextWindow: resolvedCtx.value,
+        reason:
+          cand === modelId
+            ? `heuristic from model name (size hint) (ctx=${resolvedCtx.source})`
+            : `heuristic from model name (size hint) (from path ${modelId}, candidate: ${cand}) (ctx=${resolvedCtx.source})`,
+      };
+      return applyOverride(profile, override);
+    }
   }
 
   // 4. 自動判定不能なら、ユーザーが明示した tier だけを使う。
@@ -339,6 +396,7 @@ export function resolveCapability(
 function resolveContextWindow(
   modelId: string,
   ctxWindow: number | undefined,
+  candidates: string[] = [modelId],
 ): {
   value: number;
   source: "arg" | "infer";
@@ -346,9 +404,11 @@ function resolveContextWindow(
   if (typeof ctxWindow === "number" && ctxWindow > 0) {
     return { value: ctxWindow, source: "arg" };
   }
-  const inferred = inferContextLength(modelId);
-  if (inferred > 0) {
-    return { value: inferred, source: "infer" };
+  for (const cand of candidates) {
+    const inferred = inferContextLength(cand);
+    if (inferred > 0) {
+      return { value: inferred, source: "infer" };
+    }
   }
   throw new Error(
     `モデル '${modelId}' の contextWindow を確定できません。 ` +

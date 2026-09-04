@@ -27,4 +27,17 @@ describe("AgentLoop live model binding", () => {
     expect(loop.getLiveBinding()?.signature).toContain("|qwen-new-7b|");
     expect(loop.getLiveBinding()?.label).toContain("qwen-new-7b");
   });
+
+  it("フルパス GGUF モデル (Qwen3.8-Flash-Next) を T2 として解決し初期化できる", () => {
+    const loop = new AgentLoop(
+      provider,
+      "/home/osia/llama.cpp/models/Qwen3.8-Flash-Next/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
+      new ToolRegistry(),
+      new PermissionManager(security),
+      262_144,
+      0.8,
+    );
+    expect(loop.capability.tier).toBe("T2");
+    expect(loop.capability.contextWindow).toBe(262_144);
+  });
 });

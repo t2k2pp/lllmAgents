@@ -34,7 +34,12 @@ import {
 } from "./context-strategy.js";
 import { generateHandoffNote, type HandoffResult } from "./handoff.js";
 import type { ReductionMode } from "../config/types.js";
-import { resolveCapability, formatCapabilityLabel, type CapabilityProfile } from "./capability-tier.js";
+import {
+  resolveCapability,
+  formatCapabilityLabel,
+  extractModelCandidates,
+  type CapabilityProfile,
+} from "./capability-tier.js";
 import { normalizeToolCalls } from "./tool-call-normalizer.js";
 import { classifyTaskComplexity, recommendTier, explainRecommendation } from "./task-complexity.js";
 import { buildSystemPrompt, type SkillInfo, type LLMProfiles, type SystemPromptOverrides } from "./system-prompt.js";
@@ -3827,10 +3832,12 @@ export class AgentLoop {
     const cfg = loadConfig();
     const overrides = cfg.modelCapabilities;
     if (!overrides) return undefined;
-    // 完全一致のみ (lowercase 比較で柔軟に)
-    const id = modelId.toLowerCase().trim();
-    for (const key of Object.keys(overrides)) {
-      if (key.toLowerCase().trim() === id) return overrides[key];
+    // 完全一致または候補名（basename・短縮名）での一致 (lowercase 比較)
+    const candidates = extractModelCandidates(modelId).map((c) => c.toLowerCase().trim());
+    for (const cand of candidates) {
+      for (const key of Object.keys(overrides)) {
+        if (key.toLowerCase().trim() === cand) return overrides[key];
+      }
     }
     return undefined;
   }

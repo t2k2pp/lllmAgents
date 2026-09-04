@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { resolveCapability, formatCapabilityLabel, type Tier } from "../../src/agent/capability-tier.js";
+import {
+  resolveCapability,
+  formatCapabilityLabel,
+  extractModelCandidates,
+  type Tier,
+} from "../../src/agent/capability-tier.js";
 
 describe("resolveCapability — 完全一致テーブル", () => {
   const cases: Array<[string, Tier, string]> = [
@@ -258,5 +263,64 @@ describe("Phase C tunables — ループ制御チューナブル", () => {
     expect(p.tier).toBe("T3");
     expect(p.maxIterations).toBe(50); // T3 の default
     expect(p.compressionThreshold).toBe(0.5);
+  });
+});
+
+describe("resolveCapability — パス付きモデル名および Qwen Flash/Next 系の解決", () => {
+  it("extractModelCandidates: フルパスからファイル名・拡張子除去・親ディレクトリを抽出できる", () => {
+    const candidates = extractModelCandidates(
+      "/home/osia/llama.cpp/models/Qwen3.8-Flash-Next/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
+    );
+    expect(candidates).toContain(
+      "/home/osia/llama.cpp/models/Qwen3.8-Flash-Next/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
+    );
+    expect(candidates).toContain("Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf");
+    expect(candidates).toContain("Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003");
+    expect(candidates).toContain("Qwen3.8-Flash-Next");
+  });
+
+  it("extractModelCandidates: Windows パスでも正しく抽出できる", () => {
+    const candidates = extractModelCandidates("C:\\models\\Qwen3.8-Flash-Next\\model.gguf");
+    expect(candidates).toContain("C:\\models\\Qwen3.8-Flash-Next\\model.gguf");
+    expect(candidates).toContain("model.gguf");
+    expect(candidates).toContain("model");
+    expect(candidates).toContain("Qwen3.8-Flash-Next");
+  });
+
+  it("Qwen3.8-Flash-Next (フルパス GGUF) → T2 (Qwen3 Flash/Next パターンマッチ)", () => {
+    const profile = resolveCapability(
+      "/home/osia/llama.cpp/models/Qwen3.8-Flash-Next/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
+      262_144,
+    );
+    expect(profile.tier).toBe("T2");
+    expect(profile.contextWindow).toBe(262_144);
+    expect(profile.reason).toContain("Qwen3 Flash/Next/Turbo 系");
+  });
+
+  it("Qwen3-Flash (短縮名) → T2", () => {
+    const profile = resolveCapability("Qwen3-Flash", 128_000);
+    expect(profile.tier).toBe("T2");
+    expect(profile.reason).toContain("Qwen3 Flash/Next/Turbo 系");
+  });
+
+  it("パス付きの小型モデル (/path/to/llama-3.2-7b.gguf) → T3", () => {
+    const profile = resolveCapability("/path/to/llama-3.2-7b.gguf", 128_000);
+    expect(profile.tier).toBe("T3");
+  });
+
+  it("親ディレクトリ名にサイズ表記がある場合 (/models/llama-3.1-70b/model.gguf) → T2", () => {
+    const profile = resolveCapability("/models/llama-3.1-70b/model.gguf", 128_000);
+    expect(profile.tier).toBe("T2");
+  });
+
+  it("フルパス指定のモデルに明示 override を適用できる", () => {
+    const profile = resolveCapability(
+      "/home/osia/llama.cpp/models/Qwen3.8-Flash-Next/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
+      undefined,
+      { tier: "T1", contextWindow: 262_144 },
+    );
+    expect(profile.tier).toBe("T1");
+    expect(profile.contextWindow).toBe(262_144);
+    expect(profile.reason).toContain("user override");
   });
 });

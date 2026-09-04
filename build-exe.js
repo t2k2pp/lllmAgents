@@ -85,16 +85,42 @@ async function build() {
     ),
   );
 
+  const seaNode = (() => {
+    if (process.env.NODE_EXE && fs.existsSync(process.env.NODE_EXE)) {
+      return process.env.NODE_EXE;
+    }
+    if (process.config?.variables?.single_executable_application !== false) {
+      return process.execPath;
+    }
+    const candidates = ["/usr/local/bin/node", "/opt/homebrew/bin/node"];
+    for (const cand of candidates) {
+      if (cand !== process.execPath && fs.existsSync(cand)) {
+        try {
+          const out = execSync(`"${cand}" -p "process.config.variables.single_executable_application"`, {
+            encoding: "utf8",
+          }).trim();
+          if (out === "true") {
+            console.log(`       (sea fallback) using SEA-capable node at: ${cand}`);
+            return cand;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    return process.execPath;
+  })();
+
   try {
     console.log("[3/5] Generating Node.js SEA blob...");
-    execSync(`node --experimental-sea-config ${SEA_CONFIG}`, { stdio: "inherit" });
+    execSync(`"${seaNode}" --experimental-sea-config ${SEA_CONFIG}`, { stdio: "inherit" });
 
     console.log("[4/5] Copying node executable...");
     // Node 本体は r-x 権限。copyFileSync が src の mode を継ぎ、
     // 2 回目以降のビルド時に dest 側が読み取り専用で残って EACCES になる罠。
     // 事前削除 + 上書き後 chmod で書き込み可能 mode に揃える。
     if (fs.existsSync(exeDest)) fs.rmSync(exeDest, { force: true });
-    fs.copyFileSync(process.execPath, exeDest);
+    fs.copyFileSync(seaNode, exeDest);
     fs.chmodSync(exeDest, 0o755);
 
     // macOS 固有: 公式 .pkg 版の node は universal binary (arm64+x86_64) で

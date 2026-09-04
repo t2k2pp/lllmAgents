@@ -92,7 +92,7 @@ import { ChatLogger } from "./agent/chat-logger.js";
 import { createSessionId } from "./agent/llm-logger.js";
 import { initOpsLogger, getOpsLogger, parseOpsLogLevel } from "./utils/ops-logger.js";
 import { shutdownHttpClient } from "./utils/http-client.js";
-import { installCrashHandlers, setCrashContext, setTerminalRestore } from "./utils/crash-handler.js";
+import { installCrashHandlers, setCrashContext, setTerminalRestore, writeCrashLog } from "./utils/crash-handler.js";
 import { applyLogRetention } from "./utils/log-rotation.js";
 import { checkForUpdate, formatUpdateInspection, inspectUpdate } from "./utils/update-check.js";
 import { inferContextLength } from "./providers/utils/context-length.js";
@@ -115,6 +115,8 @@ Options:
   --check-browser     Verify the browser runtime
   --computer-use      Enable native OS window capture/input for this session
   --check-computer-use Verify native Computer Use dependencies and visible windows`;
+
+let activeTerminalRestore: (() => void) | null = null;
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -187,7 +189,9 @@ async function main(): Promise<void> {
   const restoreOutput = (): void => {
     screen.stop();
     uninstallOutputRouter();
+    activeTerminalRestore = null;
   };
+  activeTerminalRestore = restoreOutput;
   process.on("exit", restoreOutput);
   // 未捕捉例外 / unhandledRejection 経路でも代替画面から必ず抜ける (§8)。
   // 代替画面の中でスタックを出すと画面ごと消えて読めないため、crash-handler が
@@ -908,6 +912,16 @@ async function main(): Promise<void> {
 }
 
 main().catch((e) => {
-  console.error("Fatal error:", e);
+  try {
+    activeTerminalRestore?.();
+  } catch {
+    /* ignore */
+  }
+  const logPath = writeCrashLog("startup", e);
+  console.error("\nFatal error during startup:");
+  console.error(e instanceof Error ? (e.stack ?? e.message) : String(e));
+  if (logPath) {
+    console.error(`\n詳細ログを保存しました: ${logPath}`);
+  }
   process.exit(1);
 });
