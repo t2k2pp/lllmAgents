@@ -335,7 +335,11 @@ export class AgentLoop {
     restore: (
       saved: unknown,
       messages: Message[],
-    ) => { mode: "exact" | "legacy" | "invalid"; transcript: SessionTerminalTranscript };
+    ) => {
+      mode: "exact" | "recovered" | "legacy" | "invalid";
+      transcript: SessionTerminalTranscript;
+      recoveredMessageCount: number;
+    };
   } | null = null;
   /** Evaluator（成果物の独立レビュー） */
   private evaluator: Evaluator;
@@ -566,7 +570,11 @@ export class AgentLoop {
     restore: (
       saved: unknown,
       messages: Message[],
-    ) => { mode: "exact" | "legacy" | "invalid"; transcript: SessionTerminalTranscript };
+    ) => {
+      mode: "exact" | "recovered" | "legacy" | "invalid";
+      transcript: SessionTerminalTranscript;
+      recoveredMessageCount: number;
+    };
   }): void {
     this.terminalTranscriptBridge = bridge;
   }
@@ -1487,14 +1495,17 @@ export class AgentLoop {
         if (isTruncatedByLength || structural.incomplete) {
           const structReason = "reason" in structural ? structural.reason : undefined;
           const reason = isTruncatedByLength ? "max_tokens到達" : `構造的不完全: ${structReason}`;
+          // buffered modeの1行previewは一過性statusであり、確定stdoutではない。
+          // 継続前に前半本文をflushしないと、後半だけが画面とterminalTranscriptに残る。
+          flushAssistantText(false);
           console.log(chalk.dim(`\n  (${reason}のため、続きを生成します...)`));
           // 部分応答を一旦履歴に積んで「続き」 を促す。 部分テキストは最終回答の前半部分
-          // (ユーザーに見える言葉) なので displayed=true で span 終了後も保全する。
+          // (ユーザーに見える言葉) なので、実際に表示できた場合はdisplayedとしてspan終了後も保全する。
           // これを purge すると履歴に残る最終回答が「続き」 の後半だけになり欠損する。
           this.history.addAssistantMessage(textContent, toolCalls.length > 0 ? toolCalls : undefined, {
             ephemeral: toolCalls.length === 0,
             thinking: thinkingContent,
-            displayed: textContent.trim().length > 0,
+            displayed: assistantTextFlushed || (this.streamingDisplay && hasStartedOutput),
           });
           this.history.addUserMessage("続きを出力してください。途中から再開してください。", { ephemeral: true });
           continue;
@@ -3527,7 +3538,12 @@ export class AgentLoop {
         console.warn(
           "  [resume] terminalTranscriptが不正なため、その記録は使用せず会話履歴から画面を再構成しました。session JSONを確認してください。",
         );
-      } else if (restored.transcript.truncated) {
+      } else if (mode === "recovered") {
+        console.log(
+          `  [resume] 保存stdoutで欠けていた会話本文 ${restored.recoveredMessageCount} 件をmessage履歴から復元しました。`,
+        );
+      }
+      if (restored.transcript.truncated) {
         console.log("  [resume] 保存上限を超えた古い標準出力は省略され、保持されている末尾を復元しました。");
       }
     }

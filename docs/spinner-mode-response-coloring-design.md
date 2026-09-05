@@ -107,6 +107,11 @@ const flushAssistantText = (final: boolean): void => {
 | 自己点検上限到達で turn 終了 | span 終了 | true |
 | `final_text_response`（ツールなしで turn 終了） | span 終了 | true |
 
+`finish_reason=length`または構造的不完全で自動継続する場合もspan継続地点である。buffered modeの
+1行previewは一過性statusで確定表示ではないため、続きを要求する前に前半本文を`final=false`でflushする。
+`hasStartedOutput=true`だけを`displayed`の根拠にしてはならない。確定flush済み、またはstreaming modeで
+実本文を出力済みの場合だけ`displayed=true`として履歴に保全する。
+
 ### 3.3 `response_complete` summary 表示
 
 ```ts

@@ -183,6 +183,12 @@ spinner frame、進捗上書き、編集中composerはlive表示なので保存�
 一方、Discord/Slack runのために内部でRoomを借りるだけの切替ではCLI画面を変更しない。
 旧sessionは空画面へ黙って落とさず、conversationのuser/assistant/tool履歴から可読表示を再構成する。
 
+保存snapshotが存在しても、それだけでconversationが完全とはみなさない。1行previewはlive表示のため、
+旧版で継続前の本文が確定されなかったsessionや、非TTYでuser入力を確定stdoutへechoしないsessionがある。
+resume時はANSI・Markdown装飾・空白差を除いてuser/assistant本文の先頭・中央・末尾を照合し、欠けた本文だけを
+`/resume: 保存stdoutから欠けていた会話を復元`セクションへ補完する。補完件数は明示し、補完後snapshotを
+sessionへ引き継ぐ。これにより過去の診断stdoutを捨てず、canonicalなmessage履歴も画面で読める。
+
 ### 3.5 描画
 
 ```
