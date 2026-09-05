@@ -66,6 +66,22 @@ For official, current facts: cloud pricing, model lists, API specs. Priority is 
 1. `web_search` to locate the official domain
 2. `web_fetch(url, prompt)` to extract the needed value
 
+### Zero-result and corrected-name recovery
+
+A zero-result response is evidence about one query and one provider, not proof that the subject does not exist.
+When the user corrects a name, discard the old interpretation and restart discovery from the corrected core entity.
+
+1. Search the corrected core name alone first (`OpenAI Astra`), then add one qualifier at a time. Do not issue several
+   near-identical queries to the same provider in parallel.
+2. Read provider-health warnings. If engines are rate-limited, blocked by CAPTCHA, or unavailable, treat the search as
+   failed coverage rather than a valid negative result.
+3. Retry once with a materially broader query. If coverage is still degraded or zero, call `web_search` with an explicit
+   per-call `provider: "duckduckgo"` or `provider: "searxng"`. This does not change the saved setting and is not a silent fallback.
+4. Once any credible URL is found, use `web_fetch`; for a blocked/dynamic page use the browser-render path below. For
+   Reddit-focused work, a general entity search may locate the thread even when `site:reddit.com` is filtered.
+5. Conclude that information could not be found only after two independent search paths, or one search provider plus a
+   direct known-URL/browser attempt. Report which coverage failed and never turn provider failure into factual absence.
+
 ### Detect a failed fetch (dynamic page)
 
 `web_fetch` converts static HTML to text and runs no JavaScript. Values rendered by JS (price tables) are absent; only the page shell returns. Treat the fetch as failed when:

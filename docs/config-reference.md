@@ -433,8 +433,10 @@ CLI からは `/integrations` → Slack の picker で対話設定 (canonical)�
 | `provider` | `"duckduckgo"` \| `"searxng"` | `"duckduckgo"` | Web検索プロバイダー |
 | `searxngUrl` | string | — | SearXNGのJSON APIエンドポイント (例: `http://localhost:8888`) |
 
-CLIコマンド `/search provider searxng` → `/search url http://localhost:8888` でも設定可能。
-選択したproviderが失敗した場合、別providerへ自動切替はしない。接続を直すか、`/search provider ...`で明示的に変更する。
+CLIコマンド `/search searxng http://localhost:8888` または `/search duckduckgo` でも設定可能。
+選択したproviderが失敗した場合、別providerへ自動切替はしない。`web_search`呼出しの`provider`に
+`"duckduckgo"`または`"searxng"`を明示すると、保存設定を変えずその1回だけ別経路を検証できる。
+SearXNGが0件と同時にupstream engine障害を返した場合は、情報不存在ではなく検索coverage失敗として報告する。
 
 ## obsidian — Obsidianナレッジベース連携
 

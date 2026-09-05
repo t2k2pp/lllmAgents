@@ -273,7 +273,7 @@ LLMが自律的に呼び出すツール:
 | `glob` | 自動 | パターンによるファイル検索 |
 | `grep` | 自動 | 正規表現によるコンテンツ検索 |
 | `bash` | 要確認 | シェルコマンド実行（120秒タイムアウト） |
-| `web_search` | 自動 | Web検索（DuckDuckGo、APIキー不要） |
+| `web_search` | 自動 | Web検索（SearXNG／DuckDuckGo）。provider障害を0件と区別し、保存設定を変えない1回限りの明示overrideに対応 |
 | `web_fetch` | 自動 | URL取得（HTML→テキスト変換） |
 | `ask_user` | 自動 | ユーザーへの質問・選択肢提示 |
 | `todo_write` | 自動 | タスクリスト管理 |
