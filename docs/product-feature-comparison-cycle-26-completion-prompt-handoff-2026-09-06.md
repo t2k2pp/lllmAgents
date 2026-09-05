@@ -4,7 +4,7 @@
 - 基準commit: `2642238`
 - 対象: 応答完了時の処理中composer、診断ログ、通常promptへの表示handoff
 - 完了条件: session `mtns71kw-aitc`の末尾表示を説明可能にし、重複promptとログ競合を修正、全品質gate・最新push SHAのCIを閉じる
-- 状態: 実装・ローカル評価完了、CI待ち
+- 状態: 実装・評価・初回CI完了
 
 ## 1. session証拠
 
@@ -56,7 +56,8 @@ terminal transcriptにも最終段落、`response_complete`、Discord送信、se
 - build / lint / built-in skill / version / npm package / dependency audit / durable restart: 成功。lintはerror 0、既知のwarning 279 / info 97。
 - Windows PTY smoke: 対話console hostが無いため設計どおりskip。Linux / macOS CIで実行する。
 - Windows SEA: `dist/localllm.exe --version`成功。停止済みの配布先へ`build:deploy`し、`deploy/localllm.exe --version`成功。
-- 実装commitと最新push SHAのCI結果は完了時に追記する。
+- 実装commit: `04c836d242d9599aeb7a547cf17246d042649e95`。
+- 初回CI: run `33980217358`でCommit message policy、Ubuntu / macOS / Windows test、Windows deploy / exe smokeの5 jobsがすべて成功。
 
 ## 6. 終端条件
 

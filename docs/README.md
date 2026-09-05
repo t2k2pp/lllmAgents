@@ -94,7 +94,7 @@
 | [product-feature-comparison-cycle-23-copy-long-line-integrity-2026-09-05.md](product-feature-comparison-cycle-23-copy-long-line-integrity-2026-09-05.md) | implemented | copy-first既定、長文折り返し、resume論理行正規化 |
 | [product-feature-comparison-cycle-24-native-scroll-selection-2026-09-05.md](product-feature-comparison-cycle-24-native-scroll-selection-2026-09-05.md) | implemented | 既定inline表示で端末nativeの選択・コピーとホイールscrollbackを同時に復元 |
 | [product-feature-comparison-cycle-25-search-recovery-2026-09-05.md](product-feature-comparison-cycle-25-search-recovery-2026-09-05.md) | implemented | 名前訂正後の検索復旧、SearXNG劣化診断、明示provider再検索を強化 |
-| [product-feature-comparison-cycle-26-completion-prompt-handoff-2026-09-06.md](product-feature-comparison-cycle-26-completion-prompt-handoff-2026-09-06.md) | in-progress | 応答完了時の処理中composer・診断ログ・通常promptの表示handoffを修復 |
+| [product-feature-comparison-cycle-26-completion-prompt-handoff-2026-09-06.md](product-feature-comparison-cycle-26-completion-prompt-handoff-2026-09-06.md) | implemented | 応答完了時の処理中composer・診断ログ・通常promptの表示handoffを修復 |
 | [durable-run-resume-design.md](durable-run-resume-design.md) | implemented | PC・アプリ再起動を跨ぐdurable run checkpoint（cycle 18） |
 | [spinner-mode-response-coloring-design.md](spinner-mode-response-coloring-design.md) | implemented | 応答テキストの色分け (構造ベース) |
 | [ux-transparency.md](ux-transparency.md) | implemented | UX 透明性+サンプリングパラメータ |
