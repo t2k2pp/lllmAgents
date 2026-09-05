@@ -90,7 +90,7 @@
 | [product-feature-comparison-cycle-17-run-api-pause-2026-09-02.md](product-feature-comparison-cycle-17-run-api-pause-2026-09-02.md) | implemented | Codex / Claude比較とforeground runのLLM API境界pause |
 | [product-feature-comparison-cycle-18-durable-run-resume-2026-09-03.md](product-feature-comparison-cycle-18-durable-run-resume-2026-09-03.md) | implemented | Codex / Claude比較とPC・アプリ再起動を跨ぐdurable run resume |
 | [product-feature-comparison-cycle-20-interactive-resume-2026-09-05.md](product-feature-comparison-cycle-20-interactive-resume-2026-09-05.md) | implemented | 処理中composer・mode切替・session stdout復元 |
-| [product-feature-comparison-cycle-22-resume-preview-integrity-2026-09-05.md](product-feature-comparison-cycle-22-resume-preview-integrity-2026-09-05.md) | in-progress | resume会話補完と1行preview継続時の本文欠落修正 |
+| [product-feature-comparison-cycle-22-resume-preview-integrity-2026-09-05.md](product-feature-comparison-cycle-22-resume-preview-integrity-2026-09-05.md) | implemented | resume会話補完と1行preview継続時の本文欠落修正 |
 | [durable-run-resume-design.md](durable-run-resume-design.md) | implemented | PC・アプリ再起動を跨ぐdurable run checkpoint（cycle 18） |
 | [spinner-mode-response-coloring-design.md](spinner-mode-response-coloring-design.md) | implemented | 応答テキストの色分け (構造ベース) |
 | [ux-transparency.md](ux-transparency.md) | implemented | UX 透明性+サンプリングパラメータ |

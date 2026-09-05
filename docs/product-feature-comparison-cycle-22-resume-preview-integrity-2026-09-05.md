@@ -4,7 +4,7 @@
 - 基準commit: `7cc5cc0`
 - 対象: session resume時の対話表示完全性、buffered 1行previewと最終本文の整合性
 - 完了条件: 欠落を再現したP1を修正し、別process E2E・全品質gate・最新push SHAのCIを閉じる
-- 状態: 実装・ローカル全品質gate完了。最新push SHA CIは評価中
+- 状態: 完了（実装・ローカル全品質gate・実装SHA CI成功）
 
 ## 1. 比較境界
 
@@ -66,9 +66,13 @@ prompt・応答原文は転載せず、最新の`terminalTranscript`付き実ses
 - lint: error 0（既存warning 279、info 97）。build/typecheck、durable restart smoke、skill・version検証成功。
 - package: dry-run 554 files・9.4 MiB。production dependencyはhigh以上を含め0 vulnerabilities。
 - Windows SEA: `build:exe`と生成した`dist/localllm.exe --version`が成功。
-- 最新push SHA CI: push後に全依存jobを監視する。
+- 実装commit: `833afde`。
+- 実装SHA CI: [run 33950630195](https://github.com/t2k2pp/lllmAgents/actions/runs/33950630195)で
+  Commit message policy、Ubuntu、macOS、Windows、Windows deploy / exe smokeの全5 job成功。
+  Linux/macOSの実PTY回帰も各OS job内で通過した。
 
 ## 7. 終端状態
 
-- PREVIEW-02 / RESUME-04 / TEST-02: 修正済み、最新push SHA CI待ち。
-- 未解決P0/P1: 0件。最新push SHA CI成功後に完了確定する。
+- PREVIEW-02 / RESUME-04 / TEST-02: 修正済み。
+- 未解決P0/P1: 0件。
+- 完了証拠: 実装commit `833afde`、GitHub Actions run `33950630195`（全5 job成功）。
