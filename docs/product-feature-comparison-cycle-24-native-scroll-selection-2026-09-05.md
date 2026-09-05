@@ -4,7 +4,7 @@
 - 基準commit: `61fde08`
 - 対象: 端末上のマウス選択・コピーとホイールscrollbackの同時成立
 - 完了条件: 既定操作のデグレを修正し、回帰・全品質gate・最新push SHAのCIを閉じる
-- 状態: 実装・ローカル全品質gate成功（最新push SHAのCI待ち）
+- 状態: 完了（実装・ローカル全品質gate・実装SHA CI成功）
 
 ## 1. 比較境界
 
@@ -64,10 +64,13 @@ Windows Terminalではmouse mode中に`Shift`を押すとVT mouse inputの代わ
 - build/typecheck、durable restart smoke、skill・version・package検証成功。packageは554 files・9.4 MiB。
 - lint: error 0（既存warning 279、info 97）。production dependencyは0 vulnerabilities。
 - Windows SEA: `build:exe`と生成した`dist/localllm.exe --version`が成功。
-- Linux/macOS実PTYと最新push SHAのCI: push後に追記する。
+- 実装commit: `b4caf4a`。
+- 実装SHA CI: [run 33964365867](https://github.com/t2k2pp/lllmAgents/actions/runs/33964365867)で
+  Commit message policy、Ubuntu、macOS、Windows、Windows deploy / exe smokeの全5 job成功。
+  Linux/macOSの実PTY回帰は`--alt-screen`を明示した全画面モードとして各OS job内で成功した。
 
 ## 6. 終端条件
 
 - TUI-MOUSE-02 / TUI-MOUSE-03 / TUI-COMPAT-01 / TEST-04の実装修正。
 - 全品質gate成功。
-- 最新push SHAについてCommit policy、Ubuntu、macOS、Windows、Windows deploy / exe smokeが成功。
+- 完了証拠: 実装commit `b4caf4a`、GitHub Actions run `33964365867`（全5 job成功）。

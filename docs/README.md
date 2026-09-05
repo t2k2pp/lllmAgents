@@ -92,7 +92,7 @@
 | [product-feature-comparison-cycle-20-interactive-resume-2026-09-05.md](product-feature-comparison-cycle-20-interactive-resume-2026-09-05.md) | implemented | 処理中composer・mode切替・session stdout復元 |
 | [product-feature-comparison-cycle-22-resume-preview-integrity-2026-09-05.md](product-feature-comparison-cycle-22-resume-preview-integrity-2026-09-05.md) | implemented | resume会話補完と1行preview継続時の本文欠落修正 |
 | [product-feature-comparison-cycle-23-copy-long-line-integrity-2026-09-05.md](product-feature-comparison-cycle-23-copy-long-line-integrity-2026-09-05.md) | implemented | copy-first既定、長文折り返し、resume論理行正規化 |
-| [product-feature-comparison-cycle-24-native-scroll-selection-2026-09-05.md](product-feature-comparison-cycle-24-native-scroll-selection-2026-09-05.md) | in-progress | 既定inline表示で端末nativeの選択・コピーとホイールscrollbackを同時に復元 |
+| [product-feature-comparison-cycle-24-native-scroll-selection-2026-09-05.md](product-feature-comparison-cycle-24-native-scroll-selection-2026-09-05.md) | implemented | 既定inline表示で端末nativeの選択・コピーとホイールscrollbackを同時に復元 |
 | [durable-run-resume-design.md](durable-run-resume-design.md) | implemented | PC・アプリ再起動を跨ぐdurable run checkpoint（cycle 18） |
 | [spinner-mode-response-coloring-design.md](spinner-mode-response-coloring-design.md) | implemented | 応答テキストの色分け (構造ベース) |
 | [ux-transparency.md](ux-transparency.md) | implemented | UX 透明性+サンプリングパラメータ |
