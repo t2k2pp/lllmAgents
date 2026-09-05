@@ -4,7 +4,7 @@
 - 基準commit: `58c99e4`
 - 対象: 名前訂正後の最新情報検索、provider劣化の診断、探索の粘り強さ
 - 完了条件: session `mtns71kw-aitc`の失敗を再現し、誤った不存在判定を防ぐ回帰・実環境評価・全品質gate・最新push SHAのCIを閉じる
-- 状態: 実装・local評価済み、最新push SHAのCI待ち
+- 状態: 実装・評価・初回CI完了
 
 ## 1. session証拠
 
@@ -63,7 +63,8 @@ SearXNG劣化を明示失敗として検出し、`provider: "duckduckgo"`を明�
 - coverage: statements 45.17%、branches 76.33%、functions 69.44%、lines 45.17%。
 - build / lint / built-in skill / version / npm package / dependency audit / durable restart: 成功。lintはerror 0、既知のwarning 279 / info 97。
 - Windows SEA: `dist/localllm.exe --version`成功。停止済みのローカル配布先へ`build:deploy`し、`deploy/localllm.exe --version`成功。
-- 最新push SHA CI: push後に追記する。
+- 実装commit: `19cea55231d5a4569f44d5dcff2e868361d88027`。
+- 初回CI: run `33966315480`でCommit message policy、Ubuntu / macOS / Windows test、Windows deploy / exe smokeの5 jobsがすべて成功。
 
 ## 6. 終端条件
 
