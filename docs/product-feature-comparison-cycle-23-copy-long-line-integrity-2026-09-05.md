@@ -4,7 +4,7 @@
 - 基準commit: `3139ba7`
 - 対象: TUIのマウス選択・コピー、長文／resume本文の表示完全性
 - 完了条件: 実sessionで残存したP1を修正し、回帰・全品質gate・最新push SHAのCIを閉じる
-- 状態: 実装・ローカル評価完了（push／CI確認待ち）
+- 状態: 完了（実装・ローカル全品質gate・実装SHA CI成功）
 
 ## 1. 比較境界
 
@@ -58,9 +58,13 @@ prompt・応答原文を転載せず保存構造だけを集計すると、1,691
 - lint: error 0（既存warning 279、info 97）。production dependencyは0 vulnerabilities。
 - Windows SEA: `build:exe`と生成した`dist/localllm.exe --version`が成功。
 - 実session相当performance: 1,691保存要素（最大65,697文字）を正規化し、120桁の初回描画42.8ms、本文保持。
-- push・最新SHA CI: 確認待ち。
+- 実装commit: `17ad8c7`。
+- 実装SHA CI: [run 33958892657](https://github.com/t2k2pp/lllmAgents/actions/runs/33958892657)で
+  Commit message policy、Ubuntu、macOS、Windows、Windows deploy / exe smokeの全5 job成功。
+  Linux/macOSの実PTY回帰も各OS job内で通過した。
 
 ## 6. 終端状態
 
 - COPY-02 / DISPLAY-03 / RESUME-05 / TEST-03: 実装修正済み。
-- 完了証拠: 全品質gateと最新push SHAのCI確定後に記録する。
+- 未解決P0/P1: 0件。
+- 完了証拠: 実装commit `17ad8c7`、GitHub Actions run `33958892657`（全5 job成功）。
