@@ -146,8 +146,9 @@ process.stdout.write = (chunk, ...rest) => { screen.write(String(chunk)); return
 注意点:
 - ScreenManager 自身の描画は必ず `rawWrite` を使う (無限再帰の防止)
 - `console.error` は **stderr のまま**にする。 パイプで `2>` に落とす運用を壊さない。
-  ただし、LLM呼び出し失敗などユーザー判断に必要な実行時エラーは`writeRuntimeError()`を使い、
-  Alternate Screen中だけ確定scrollbackへ記録する。classic streamでは従来どおりstderrへ出す
+  ただし、loggerとLLM呼び出し失敗などユーザー判断に必要な実行時診断は`writeRuntimeError()`から
+  `ScreenManager.writeDiagnostic()`へ渡す。Alternate Screen中は確定scrollbackへ記録し、classic streamでは
+  stderrを保ったまま、表示中のsoft ownerを「消去 → stderr書込み → 再描画」の順で保護する。
 - 外部プロセス (bash ツール) の出力は子プロセスの stdout を継承させず、
   既存どおりアプリ側で読んで `console.log` するので自動的に経路に乗る
 
@@ -237,6 +238,10 @@ sessionへ引き継ぐ。保存snapshot・legacy再構成・補完本文は改�
 cycle 20ではsoft ownerを二段にした。通常のspinner/status/progressを上段、
 `pinned: true`の処理中composerを最下段へ予約する。これによりLLM/tool出力が続いても
 入力欄が消えず、`[処理中・追加入力]`と編集中の文字を常に確認できる。
+
+処理完了のAbortでは、classic streamのpinned composerを消去してから所有権を返す。
+消去せずreleaseだけ行うと、直後の通常promptが同じ物理行へ連結され、完了していないように見える。
+またloggerのstrategy診断もraw stderrへ直接書かず、上記のsoft owner保護を通す。
 
 ### 4.3 排他所有 (プロンプト表示中) — ここが不具合 1・2 の直接の修正
 

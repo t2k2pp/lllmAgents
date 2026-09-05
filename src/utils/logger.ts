@@ -1,4 +1,6 @@
 import chalk from "chalk";
+import { format } from "node:util";
+import { writeRuntimeError } from "../cli/runtime-diagnostic.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -19,26 +21,31 @@ function shouldLog(level: LogLevel): boolean {
   return LEVEL_ORDER[level] >= LEVEL_ORDER[currentLevel];
 }
 
+function emit(label: string, ...args: unknown[]): void {
+  const message = format(...args);
+  writeRuntimeError(message ? `${label} ${message}` : label);
+}
+
 export function debug(...args: unknown[]): void {
   if (shouldLog("debug")) {
-    console.error(chalk.gray("[DEBUG]"), ...args);
+    emit(chalk.gray("[DEBUG]"), ...args);
   }
 }
 
 export function info(...args: unknown[]): void {
   if (shouldLog("info")) {
-    console.error(chalk.blue("[INFO]"), ...args);
+    emit(chalk.blue("[INFO]"), ...args);
   }
 }
 
 export function warn(...args: unknown[]): void {
   if (shouldLog("warn")) {
-    console.error(chalk.yellow("[WARN]"), ...args);
+    emit(chalk.yellow("[WARN]"), ...args);
   }
 }
 
 export function error(...args: unknown[]): void {
   if (shouldLog("error")) {
-    console.error(chalk.red("[ERROR]"), ...args);
+    emit(chalk.red("[ERROR]"), ...args);
   }
 }

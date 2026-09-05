@@ -248,6 +248,11 @@ export interface ScreenManager {
   stop(): void;
   /** 出力を 1 つ受け取る。console.log 相当 */
   write(text: string): void;
+  /**
+   * 人間向けstderr診断をライブ入力と競合させず表示する。
+   * classicではstderr分離を維持し、Alternate Screenでは確定scrollbackへ残す。
+   */
+  writeDiagnostic(text: string, stderr?: (text: string) => void): void;
   /** ライブ領域の所有者による描画。スクロールバックに記録しない */
   writeLive(text: string): void;
   /** ライブ領域の高さが変わった等で描き直しを要求する (代替画面のみ有効) */
@@ -578,6 +583,29 @@ export class ScreenManagerImpl implements ScreenManager {
       return;
     }
     this.sink(text);
+  }
+
+  writeDiagnostic(text: string, stderr: (text: string) => void = (value) => process.stderr.write(value)): void {
+    if (!text) return;
+    const line = text.endsWith("\n") ? text : `${text}\n`;
+    if (this.alternate) {
+      this.write(line);
+      return;
+    }
+
+    // stderrをstdoutへ混ぜると`2>`による診断分離を壊す。一方、TTYではstdout上の
+    // inline composerと同じ物理行を共有するため、所有者に一度消去・再描画させる。
+    const soft = this.pinnedOwner() ?? this.softOwner();
+    if (soft?.redraw) {
+      soft.clear?.();
+      try {
+        stderr(line);
+      } finally {
+        soft.redraw();
+      }
+      return;
+    }
+    stderr(line);
   }
 
   /**

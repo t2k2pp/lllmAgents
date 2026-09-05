@@ -10,6 +10,5 @@ export function writeRuntimeError(
   stderr: (text: string) => void = (value) => process.stderr.write(value),
 ): void {
   const line = text.endsWith("\n") ? text : `${text}\n`;
-  if (target.isAlternate()) target.write(line);
-  else stderr(line);
+  target.writeDiagnostic(line, stderr);
 }

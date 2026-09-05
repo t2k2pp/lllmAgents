@@ -571,6 +571,9 @@ export class InteractiveInput {
       onAbort = (): void => {
         if (settled) return;
         settled = true;
+        // inline表示ではreleaseだけでは最後に描いた処理中promptが物理行へ残る。
+        // 次の通常promptを同じ行へ連結しないよう、所有権を返す前に消去する。
+        if (!screen.isAlternate()) clearLive();
         cleanup();
         resolve(INPUT_CANCELLED_SIGNAL);
       };
