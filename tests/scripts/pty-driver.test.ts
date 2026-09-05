@@ -14,6 +14,7 @@ describe("PTY smoke driver", () => {
     const driver = ptyDriver("linux", command);
     expect(driver.executable).toBe("script");
     expect(driver.args[0]).toBe("-qec");
+    expect(driver.args.join(" ")).toContain("--alt-screen");
     expect(driver.parentSubmits).toBe(true);
     expect(driver.scrollMarker).toBe("__PTY_SCROLL_SEEN__");
     expect(driver.imeMarker).toBe("__PTY_IME_SEEN__");
@@ -38,6 +39,7 @@ describe("PTY smoke driver", () => {
     expect(driver.executable).toBe("expect");
     expect(driver.parentSubmits).toBe(false);
     expect(driver.args.join("\n")).toContain('send -- "/help\\r"');
+    expect(driver.args.join("\n")).toContain("--alt-screen");
     expect(driver.args.join("\n")).toContain('send -- "\\033\\[<64;10;4M"');
     expect(driver.args.join("\n")).toContain('send -- "\\033\\[<65;10;4M"');
     expect(driver.args.join("\n")).toContain("expect -re {> }");

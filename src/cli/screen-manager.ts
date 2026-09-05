@@ -1,7 +1,7 @@
 /**
  * ScreenManager — 端末出力の唯一の受け口。
  * 設計: docs/tui-alternate-screen.md §3 (ScreenManager) / §4 (ライブ領域の排他制御)
- *       / §6 (classic stream) / §7 (stdin の一元化) / §8 (終了処理)
+ *       / §6 (inline main buffer) / §7 (stdin の一元化) / §8 (終了処理)
  *
  * ## 実装範囲 (段階 1〜4)
  *
@@ -88,8 +88,12 @@ export function getRawStdout(): NodeJS.WriteStream {
 
 /** `shouldUseAlternateScreen` に渡す環境。テストから差し替えられるよう引数にする */
 export interface AlternateScreenEnv {
+  /** LLLMAGENT_ENABLE_ALTERNATE_SCREEN */
+  enable?: string;
   /** LLLMAGENT_DISABLE_ALTERNATE_SCREEN */
   disable?: string;
+  /** 起動引数 --alt-screen */
+  enableByCli?: boolean;
   /** 起動引数 --no-alt-screen */
   disableByCli?: boolean;
   /** process.stdout.isTTY */
@@ -111,20 +115,18 @@ export interface AlternateScreenEnv {
 /**
  * 代替画面バッファを使ってよいかを判定する (§6.1)。
  *
- * 以下のいずれかでclassic stream表示 (= false):
- *   1. --no-alt-screen、または環境変数 LLLMAGENT_DISABLE_ALTERNATE_SCREEN が設定されている
- *   2. process.stdout.isTTY が false (パイプ・リダイレクト・CI)
+ * 既定はmain bufferへ追記するinline表示 (= false)。端末本来のscrollbackと
+ * マウス選択を同時に使えることを優先する。全画面TUIは --alt-screen または
+ * LLLMAGENT_ENABLE_ALTERNATE_SCREEN=1 で明示選択した場合だけ有効にする。
  *
- * TTYなのに能力が不足・不明な場合は黙って表示を変えず、原因が分かるようfail-fastする。
- * classic stream表示を意図するユーザーは明示的に --no-alt-screen を選べる。
+ * 明示選択したのに端末能力が不足・不明な場合は黙ってinlineへ落とさず、
+ * 原因と解除方法を示してfail-fastする。
  */
 export function shouldUseAlternateScreen(env: AlternateScreenEnv): boolean {
   if (env.disableByCli) return false;
-  const disable = env.disable;
-  if (disable !== undefined && disable !== "" && disable !== "0" && disable.toLowerCase() !== "false") {
-    return false;
-  }
+  if (isTruthyEnv(env.disable)) return false;
   if (!env.isTTY) return false;
+  if (env.enableByCli !== true && !isTruthyEnv(env.enable)) return false;
   const term = env.term ?? "";
   if (term === "dumb") {
     throw new Error(
@@ -168,6 +170,11 @@ function isTruthyEnv(value: string | undefined): boolean {
   return value !== undefined && value !== "" && value !== "0" && value.toLowerCase() !== "false";
 }
 
+/** --mouseは内部履歴を使う明示操作なので、後方互換としてfull-screen TUIも要求する。 */
+export function requestsAlternateScreen(args: readonly string[]): boolean {
+  return args.includes("--alt-screen") || args.includes("--mouse");
+}
+
 /** Native selection/copy is the default. Mouse wheel capture requires an explicit opt-in. */
 export function shouldEnableMouseTracking(env: MouseTrackingEnv): boolean {
   if (env.disableByCli) return false;
@@ -187,7 +194,9 @@ function readMouseTrackingEnv(): MouseTrackingEnv {
 /** 実際の process.env / process.stdout から判定材料を集める */
 function readAlternateScreenEnv(): AlternateScreenEnv {
   return {
+    enable: process.env.LLLMAGENT_ENABLE_ALTERNATE_SCREEN,
     disable: process.env.LLLMAGENT_DISABLE_ALTERNATE_SCREEN,
+    enableByCli: requestsAlternateScreen(process.argv.slice(2)),
     disableByCli: process.argv.slice(2).includes("--no-alt-screen"),
     isTTY: !!process.stdout.isTTY,
     term: process.env.TERM,
@@ -233,7 +242,7 @@ export interface ScrollbackSnapshot {
 }
 
 export interface ScreenManager {
-  /** 起動。alt screen に入る (classic stream / 非TTYでは何もしない) */
+  /** 起動。明示選択時だけalt screenへ入る（既定inline / 非TTYでは入らない） */
   start(): void;
   /** 終了。alt screen を抜けて内容をスクロールバックへ書き戻す */
   stop(): void;

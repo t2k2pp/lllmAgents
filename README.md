@@ -85,18 +85,20 @@ $ npm start
 | 応答中に文字 + `Enter` | `[処理中・追加入力]`欄で編集し、通常メッセージは次の応答／tool完了境界で現在のturnへ反映。`/run pause\|resume\|status`は即時、その他の`/command`はturn完了後に実行 |
 | `/run pause` / `/run pause --durable` | 通常pauseはプロセス内で即時性を優先。durableは進行中APIと開始済みtool結果を確定し、次API直前をatomic保存。`durable_paused`表示後はアプリ・PCを停止可能 |
 | `/resume <id>` → `/run inspect` → `/run resume` | 再起動後にconversationと過去の確定済み標準出力を復元し、cwd/model/provider差分を確認して保存済みrunを明示再開。旧sessionは会話履歴から画面を再構成し、resume途中の異常終了は自動再実行せずblocked表示 |
-| マウスドラッグ | 既定で端末本来の範囲選択・コピー（LLM・ツール実行中も有効） |
-| マウスホイール | `/tui mouse on`または`--mouse`時にAlternate Screen TUIの過去ログを上下する |
-| `PgUp` / `PgDn` | Alternate Screen TUIの過去ログをページ移動する（LLM・ツール実行中も有効） |
-| `/tui mouse on` / `off` | ホイール履歴と端末本来のドラッグ選択を明示切替。履歴移動の`PgUp` / `PgDn`は常時有効 |
+| マウスドラッグ | 既定のinline表示で端末本来の範囲選択・コピー（LLM・ツール実行中も有効） |
+| マウスホイール | 既定のinline表示では端末本来のscrollbackを上下する |
+| `--alt-screen` | 固定viewportの全画面TUIを明示的に使う |
+| `PgUp` / `PgDn` | 全画面TUIの内部履歴をページ移動する（LLM・ツール実行中も有効） |
+| `/tui mouse on` / `off` | 全画面TUI内でホイール内部履歴と端末本来のドラッグ選択を明示切替 |
 | `Ctrl+C` | 現在の操作をキャンセル |
 
-TUIは選択・コピーを優先し、mouse captureを既定で無効にします。ホイールで内部履歴を移動したい場合だけ
-`/tui mouse on`、起動時からなら`--mouse`（または`LLLMAGENT_ENABLE_MOUSE=1`）を使用します。
-`/tui mouse off`でnative選択へ戻せます。どちらの状態でもAlternate Screenと`PgUp` / `PgDn`は維持されます。
-端末本来のscrollbackも必要な場合は、`npm start -- --no-alt-screen`（配布版は`localllm --no-alt-screen`）で
-classic stream表示として起動できます。
-TTYの端末能力が不足または判定不能な場合、自動的に簡易表示へは切り替えず、原因と対処を表示して停止します。
+既定はmain bufferへ追記するinline表示です。端末のマウスドラッグ選択とホイールscrollbackを同時に使えます。
+固定viewportの全画面TUIが必要な場合だけ、`npm start -- --alt-screen`（配布版は`localllm --alt-screen`）を
+指定します。全画面TUIではmouse captureを既定OFFにし、`PgUp` / `PgDn`で内部履歴を移動できます。
+ホイールで内部履歴を移動したい場合は`/tui mouse on`、起動時からなら`--mouse`を使います（`--mouse`は
+`--alt-screen`を含意）。mouse ON中の通常選択は`Shift+ドラッグ`、`/tui mouse off`で通常ドラッグへ戻ります。
+`LLLMAGENT_ENABLE_ALTERNATE_SCREEN=1`と`LLLMAGENT_ENABLE_MOUSE=1`でも同じ明示設定ができます。
+明示した全画面TUIの端末能力が不足または判定不能な場合は、原因と対処を表示して停止します。
 
 ### Native Computer Use（明示opt-in）
 
@@ -166,7 +168,7 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/clear` | 会話履歴クリア（現在の Room） |
 | `/room` | 会話 Room (A/B/C) の表示・移動・再開。`/room A\|B\|C` で移動、`/room resume [A\|B\|C]` で再開、`/room autoresume <on\|off> [A\|B\|C]`。既定 REPL=A / Discord=B / Slack=C（docs/room-model-design.md） |
 | `/queue` | 受信順キューの待ち状況を表示（`/queue clear` でturn後に実行するtype-ahead command等を破棄） |
-| `/tui mouse <on\|off\|status>` | Alternate Screenのmouse captureを実行中に切替。`off`はnative選択・コピー、`on`はホイール履歴を優先 |
+| `/tui mouse <on\|off\|status>` | 全画面TUIのmouse captureを実行中に切替。`off`はnative選択・コピー、`on`はホイール内部履歴を優先 |
 | `/run [status\|pause [--durable]\|resume\|inspect\|discard]` | foreground runの状態表示・通常/永続pause・再開・checkpoint診断/破棄。durableはPC再起動を跨ぐ。background taskとsecond LLMは対象外 |
 | `/context` | コンテキスト使用状況の内訳（トークン数・進捗バー）。`/context <system\|memory\|skills\|tools\|messages>` で各カテゴリの中身をダンプ。`/context strategy [off\|auto\|aggressive]` で区切り整理のモード表示・切替（既定 auto、詳細: docs/context-strategy.md） |
 | `/compact` | コンテキストを手動圧縮 |

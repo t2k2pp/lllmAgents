@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   ScreenManagerImpl,
+  requestsAlternateScreen,
   shouldEnableMouseTracking,
   shouldUseAlternateScreen,
 } from "../../src/cli/screen-manager.js";
@@ -172,8 +173,19 @@ describe("ScreenManager: 所有権", () => {
 describe("ScreenManager: TUI / classic stream 判定 (§6.1)", () => {
   const tty = { isTTY: true, term: "xterm-256color", platform: "linux" };
 
-  it("TTY で TERM があれば代替画面を使う", () => {
-    expect(shouldUseAlternateScreen(tty)).toBe(true);
+  it("TTYでも既定はnative scrollbackと選択を両立するinline表示", () => {
+    expect(shouldUseAlternateScreen(tty)).toBe(false);
+  });
+
+  it("--alt-screen / LLLMAGENT_ENABLE_ALTERNATE_SCREEN=1で全画面TUIを明示選択する", () => {
+    expect(shouldUseAlternateScreen({ ...tty, enableByCli: true })).toBe(true);
+    expect(shouldUseAlternateScreen({ ...tty, enable: "1" })).toBe(true);
+  });
+
+  it("--mouseは後方互換として全画面TUIも明示選択し、--no-mouseだけでは選択しない", () => {
+    expect(requestsAlternateScreen(["--mouse"])).toBe(true);
+    expect(requestsAlternateScreen(["--alt-screen"])).toBe(true);
+    expect(requestsAlternateScreen(["--no-mouse"])).toBe(false);
   });
 
   it("LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1 なら passthrough", () => {
@@ -188,35 +200,48 @@ describe("ScreenManager: TUI / classic stream 判定 (§6.1)", () => {
     expect(shouldUseAlternateScreen({ ...tty, term: "dumb", disableByCli: true })).toBe(false);
   });
 
-  it("空文字 / 0 / false の環境変数は「無効化されていない」 と読む", () => {
-    expect(shouldUseAlternateScreen({ ...tty, disable: "" })).toBe(true);
-    expect(shouldUseAlternateScreen({ ...tty, disable: "0" })).toBe(true);
-    expect(shouldUseAlternateScreen({ ...tty, disable: "false" })).toBe(true);
+  it("無効化指定は有効化指定より優先する", () => {
+    expect(shouldUseAlternateScreen({ ...tty, enableByCli: true, disableByCli: true })).toBe(false);
+    expect(shouldUseAlternateScreen({ ...tty, enable: "1", disable: "1" })).toBe(false);
   });
 
   it("非TTY (パイプ・リダイレクト・CI) は passthrough", () => {
     expect(shouldUseAlternateScreen({ ...tty, isTTY: false })).toBe(false);
   });
 
-  it("TTYのTERM=dumbは黙って表示を落とさず、対処を示してfail-fastする", () => {
-    expect(() => shouldUseAlternateScreen({ ...tty, term: "dumb" })).toThrow(/TERM=dumb.*--no-alt-screen/);
+  it("既定inlineならTERM=dumbでも端末native表示を使える", () => {
+    expect(shouldUseAlternateScreen({ ...tty, term: "dumb" })).toBe(false);
   });
 
-  it("TERM が無い POSIX TTYは判定不明を隠さずfail-fastする (§11)", () => {
-    expect(() => shouldUseAlternateScreen({ isTTY: true, platform: "linux" })).toThrow(/TERMが未設定.*--no-alt-screen/);
+  it("明示した全画面TUIでTERM=dumbなら理由を示してfail-fastする", () => {
+    expect(() => shouldUseAlternateScreen({ ...tty, term: "dumb", enableByCli: true })).toThrow(
+      /TERM=dumb.*--no-alt-screen/,
+    );
   });
 
-  it("Windows で端末能力の印が無ければ判定不明を隠さずfail-fastする", () => {
-    expect(() => shouldUseAlternateScreen({ isTTY: true, platform: "win32" })).toThrow(
+  it("明示した全画面TUIでTERMが無いPOSIX TTYならfail-fastする", () => {
+    expect(() => shouldUseAlternateScreen({ isTTY: true, platform: "linux", enableByCli: true })).toThrow(
+      /TERMが未設定.*--no-alt-screen/,
+    );
+  });
+
+  it("明示した全画面TUIでWindows端末能力が不明ならfail-fastする", () => {
+    expect(() => shouldUseAlternateScreen({ isTTY: true, platform: "win32", enableByCli: true })).toThrow(
       /ANSI\/Alternate Screen対応を判定できません.*--no-alt-screen/,
     );
   });
 
-  it("Windows Terminal / ConEmu / ANSICON なら代替画面を使う", () => {
-    expect(shouldUseAlternateScreen({ isTTY: true, platform: "win32", wtSession: "abc" })).toBe(true);
-    expect(shouldUseAlternateScreen({ isTTY: true, platform: "win32", conEmuANSI: "ON" })).toBe(true);
-    expect(shouldUseAlternateScreen({ isTTY: true, platform: "win32", ansicon: "1" })).toBe(true);
-    expect(shouldUseAlternateScreen({ isTTY: true, platform: "win32", termProgram: "vscode" })).toBe(true);
+  it("明示した全画面TUIはWindows Terminal / ConEmu / ANSICONで使用できる", () => {
+    expect(shouldUseAlternateScreen({ isTTY: true, platform: "win32", wtSession: "abc", enableByCli: true })).toBe(
+      true,
+    );
+    expect(shouldUseAlternateScreen({ isTTY: true, platform: "win32", conEmuANSI: "ON", enableByCli: true })).toBe(
+      true,
+    );
+    expect(shouldUseAlternateScreen({ isTTY: true, platform: "win32", ansicon: "1", enableByCli: true })).toBe(true);
+    expect(shouldUseAlternateScreen({ isTTY: true, platform: "win32", termProgram: "vscode", enableByCli: true })).toBe(
+      true,
+    );
   });
 });
 
@@ -281,6 +306,26 @@ describe("ScreenManager: copy-friendly mouse mode", () => {
 });
 
 describe("ScreenManager: 代替画面の入退場 (§3.1 / §8)", () => {
+  it("既定TTYはmain bufferへ直接書き、Alternate Screenやmouse trackingを有効にしない", () => {
+    const written: string[] = [];
+    const screen = new ScreenManagerImpl({
+      sink: (text) => written.push(text),
+      stdin: null,
+      alternateEnv: { isTTY: true, term: "xterm-256color", platform: "linux" },
+    });
+
+    screen.start();
+    screen.write("選択・スクロールできる本文\n");
+    screen.scrollUp();
+    screen.stop();
+
+    const output = written.join("");
+    expect(output).toBe("選択・スクロールできる本文\n");
+    expect(output).not.toContain("\x1b[?1049h");
+    expect(output).not.toContain("\x1b[?1000h");
+    expect(screen.isAlternate()).toBe(false);
+  });
+
   it("start() で代替画面へ入り isAlternate が立つ", () => {
     const { screen, all } = createAltHarness();
     screen.start();
@@ -772,7 +817,7 @@ describe("ScreenManager: stdin をセッション単位で保持する (§3.1)",
     const screen = new ScreenManagerImpl({
       sink: () => {},
       stdin,
-      alternateEnv: { isTTY: true, term: "dumb", platform: "linux" },
+      alternateEnv: { isTTY: true, term: "dumb", platform: "linux", enableByCli: true },
     });
 
     expect(() => screen.start()).toThrow(/TERM=dumb/);

@@ -47,8 +47,8 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/queue", description: "受信順キューの待ち状況を表示" },
   { command: "/queue clear", description: "REPL の type-ahead 待機入力を破棄" },
   { command: "/tui", description: "TUI表示とmouse captureの状態" },
-  { command: "/tui mouse off", description: "既定の端末選択・コピーへ戻す" },
-  { command: "/tui mouse on", description: "mouse captureを明示的に有効にしてホイール履歴を使う" },
+  { command: "/tui mouse off", description: "全画面TUIで端末選択・コピーを優先する" },
+  { command: "/tui mouse on", description: "全画面TUIでmouse captureとホイール履歴を有効にする" },
   {
     command: "/context",
     description: "コンテキスト使用状況 (System prompt / Memory / Skills / Tools / Messages 内訳)",

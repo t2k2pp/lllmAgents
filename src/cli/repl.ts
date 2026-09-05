@@ -4667,7 +4667,11 @@ export class REPL {
           break;
         }
         if (!screen.isAlternate()) {
-          console.log(chalk.dim("  TUI: classic stream表示です。端末本来のscrollback・選択・コピーを使用できます。"));
+          console.log(
+            chalk.dim(
+              "  表示: inline（既定）— 端末本来のホイールscrollback・選択・コピーを使用できます。全画面は次回起動時に --alt-screen を指定します。",
+            ),
+          );
           break;
         }
         const action = (area === "mouse" ? args[1] : undefined)?.toLowerCase() ?? "status";

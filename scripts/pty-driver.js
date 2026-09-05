@@ -32,7 +32,7 @@ export function interactivePtyEnv(baseEnv, overrides = {}) {
 const EXPECT_PROGRAM = `
 set timeout 30
 log_user 1
-spawn -noecho $env(PTY_NODE) $env(PTY_TSX) $env(PTY_ENTRY) --no-mcp
+spawn -noecho $env(PTY_NODE) $env(PTY_TSX) $env(PTY_ENTRY) --no-mcp --alt-screen
 stty columns 20 rows 24
 expect {
   -re {LocalLLM Agent} {
@@ -140,7 +140,7 @@ export function ptyDriver(platform, { node, tsx, entry }) {
     };
   }
 
-  const command = [node, tsx, entry, "--no-mcp"].map((part) => JSON.stringify(part)).join(" ");
+  const command = [node, tsx, entry, "--no-mcp", "--alt-screen"].map((part) => JSON.stringify(part)).join(" ");
   return {
     executable: "script",
     args: ["-qec", command, "/dev/null"],

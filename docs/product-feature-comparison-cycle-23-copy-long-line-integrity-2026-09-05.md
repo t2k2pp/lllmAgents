@@ -6,6 +6,11 @@
 - 完了条件: 実sessionで残存したP1を修正し、回帰・全品質gate・最新push SHAのCIを閉じる
 - 状態: 完了（実装・ローカル全品質gate・実装SHA CI成功）
 
+> **後続訂正（cycle 24）**: COPY-02でAlternate Screen内のmouse captureを既定OFFにした結果、
+> native drag selectionは復元したが、Alternate Screen自体にnative scrollbackがないため通常ホイールを失った。
+> 選択とホイールを同時に満たす修正は
+> [cycle 24](product-feature-comparison-cycle-24-native-scroll-selection-2026-09-05.md)で扱う。
+
 ## 1. 比較境界
 
 cycle 21で実行中のmouse capture切替、cycle 22でresume対話補完を追加した後の実利用回帰を扱う。

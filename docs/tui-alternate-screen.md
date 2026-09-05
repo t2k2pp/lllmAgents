@@ -1,4 +1,4 @@
-# TUI レンダリング設計書 (Alternate Screen Buffer 方式)
+# TUI レンダリング設計書（inline既定 / Alternate Screen明示選択）
 
 > **ステータス**: 2026-08-13 設計 / 実装
 > **関連**: `docs/repl-io-robustness.md` / `docs/interrupt-and-progress-design.md` /
@@ -38,12 +38,14 @@
 
 ### 1.3 やること
 
-ターミナルの **代替画面バッファ (Alternate Screen Buffer)** を使い、
-画面全体を 1 つのコンポーネントが所有するフルスクリーン描画 (TUI) に移行する。
+端末I/Oを1つのコンポーネントが所有し、既定はmain bufferへ追記するinline表示にする。
+固定viewportが必要な利用者だけ **代替画面バッファ (Alternate Screen Buffer)** の
+フルスクリーン描画 (TUI) を明示的に選択する。
 
 - スクロールバック領域とライブ領域 (入力欄・スピナー) を **構造的に分離**する
 - すべての出力を **1 箇所に集約**し、 書き込み順ではなく所有権で調停する
-- 環境変数 `LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1` で **従来の挙動に戻せる**
+- 既定inline表示で端末本来のマウス選択とホイールscrollbackを同時に維持する
+- `--alt-screen`または`LLLMAGENT_ENABLE_ALTERNATE_SCREEN=1`で全画面TUIを明示選択できる
 
 ---
 
@@ -169,10 +171,11 @@ private viewOffset = 0;           // 0 = 最下部に追従。 >0 で遡り中
   実PTY smokeで保証する。明示的にmouse ONへ切り替えた時だけSGR mouse reportを有効化し、ホイールが
   入力履歴の上下キーへ変換されることを防ぐ。readlineへ分割されたreport断片は入力欄から除外する。
   inquirer等の排他プロンプト中はmouse reportを一時解除し、プロンプト側の入力契約を優先する
-- mouse capture中は多くの端末で通常ドラッグ選択が無効になるため、既定はmouse OFFとし、
-  端末本来の選択・コピーを優先する。ホイール履歴が必要な場合だけ`/tui mouse on`、起動引数
-  `--mouse`、または`LLLMAGENT_ENABLE_MOUSE=1`で明示的に有効化する。`/tui mouse off`でnative選択へ戻せ、
-  どちらの場合もAlternate ScreenとPgUp/PgDnは有効
+- 既定inline表示ではAlternate Screenにもmouse captureにも入らず、端末本来の通常ドラッグ選択と
+  ホイールscrollbackを同時に使う。全画面TUIを明示した場合はmouse captureを既定OFFとし、選択を優先する。
+  内部履歴をホイール移動したい場合だけ`/tui mouse on`、起動引数`--mouse`、または
+  `LLLMAGENT_ENABLE_MOUSE=1`で有効化する。`--mouse`は`--alt-screen`を含意する。mouse ON中の
+  native選択は`Shift+ドラッグ`、`/tui mouse off`で通常ドラッグへ戻せる。PgUp/PgDnは全画面TUIで常時有効
 - 遡り中は案内表示に1行使うため、最大offsetも案内を除いたcontent heightで計算し、
   最古行まで到達できることをunit testで保証する
 
@@ -310,20 +313,21 @@ export const select = gate(rawSelect);   // @inquirer/prompts 系も同様にく
 
 ---
 
-## 6. Classic stream モード (`--no-alt-screen`)
+## 6. Inline main-bufferモード（既定）
 
 ### 6.1 有効になる条件
 
 以下は独立した対応モードとしてAlternate Screenを使わない。
 
-1. `--no-alt-screen`、または環境変数 `LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1` が設定されている
-2. `process.stdout.isTTY` が false (パイプ・リダイレクト・CI)
+1. 通常のTTY起動（既定）
+2. `--no-alt-screen`、または環境変数 `LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1` が設定されている
+3. `process.stdout.isTTY` が false (パイプ・リダイレクト・CI)
 
-TTYで`TERM=dumb`、`TERM`未設定、Windows端末能力の印が無い場合は、黙ってclassic
-stream表示へ落とさない。原因と対処を示してfail-fastし、ユーザーがclassic表示を意図する
-場合だけ`--no-alt-screen`を明示する。raw modeを取得できない場合も同様に停止する。
+全画面TUIは`--alt-screen`または`LLLMAGENT_ENABLE_ALTERNATE_SCREEN=1`で明示した場合だけ使う。
+明示時に`TERM=dumb`、`TERM`未設定、Windows端末能力の印が無い場合は、黙ってinlineへ
+落とさない。原因と対処を示してfail-fastする。raw modeを取得できない場合も同様に停止する。
 
-### 6.2 classic stream での挙動
+### 6.2 inline表示での挙動
 
 | 機能 | 挙動 |
 |------|------|
@@ -332,7 +336,7 @@ stream表示へ落とさない。原因と対処を示してfail-fastし、ユ�
 | ライブ領域の排他制御 | **有効のまま**。 排他所有中のキューイングは動く |
 | スクロール操作 (PgUp 等) | 端末自身のスクロールバックに任せる |
 
-**排他制御だけはclassic streamでも残す**。 §2.1 のとおり、 不具合 1・2 の修正は
+**排他制御だけはinline表示でも残す**。 §2.1 のとおり、 不具合 1・2 の修正は
 代替画面とは独立しているためである。 「環境変数で戻したらバグも戻る」 では
 明示モードによって再発しない。
 
@@ -446,7 +450,7 @@ release()     →  所有者がいなくなったら raw mode を解除
 | セッション終了後にログが残らない (現行からの退行) | `stop()` でスクロールバックを通常画面へ書き戻す (§8) |
 | `console.log` 差し替えが外部ライブラリと衝突する | 差し替えは 1 箇所・起動直後のみ。 元の関数を保持し `stop()` で復元 |
 | 全画面再描画が遅い | 16ms のフレーム集約 (§3.5)。 実測で問題が出たら差分描画は**入れない**で描画頻度を下げる (差分描画は不具合 1 の再来を招く) |
-| Windows conhost で ANSI が効かない | `TERM`/`WT_SESSION`/ConPTY の印が無ければ原因と`--no-alt-screen`を示してfail-fastする。能力不明を黙って別表示へ落とさない |
+| Windows conhost で ANSI が効かない | 全画面TUIの明示時に`TERM`/`WT_SESSION`/ConPTYの印が無ければ原因と`--no-alt-screen`を示してfail-fastする。能力不明を黙って別表示へ落とさない |
 | 日本語入力が右端到達後に1文字ごと改行される | 最終列はDECAWMの折返し待ちを生むため常に1桁空ける。`Intl.Segmenter`で結合文字・ZWJ絵文字を分割せず、端末soft wrapへ依存しない |
 | パイプモードでの検証しかできず TTY 実機の退行に気付けない | 段階ごとに手動 TTY 確認を必須とする。 `CLAUDE.md` の「対話品質はパイプモードで検証できない」 に従う |
 
@@ -456,13 +460,13 @@ release()     →  所有者がいなくなったら raw mode を解除
 
 パイプモードでは確認できないため、 手動確認のチェックリストとして残す。
 
-1. 起動 → 画面が代替バッファに切り替わる。 終了 → 元の画面に戻り、 ログが残っている
-2. `LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1` で従来どおりの表示になる
+1. 既定起動 → main bufferへ追記され、通常ドラッグ選択と端末ホイールscrollbackを同時に使える
+2. `--alt-screen`起動 → 代替バッファへ切替。終了 → 元の画面に戻り、ログが残っている
 3. `ask_user` の選択肢が **1 行目の複製なしに**表示される (不具合 1)
 4. LLM 応答のストリーミング中に `ask_user` が出ても選択肢が埋もれない (不具合 2)
 5. 応答完了直後にすぐタイプできる (Enter を先に押す必要がない) (不具合 4)
 6. 入力中にバックグラウンド通知が来ても、 入力中の文字列が消えない
-7. マウスホイール / PgUp / PgDn でスクロールバックを遡れる。遡り中に新出力が来ても視点が飛ばず、ホイール操作が入力履歴や入力文字へ化けない
+7. inlineでは端末ホイール、全画面TUIではPgUp/PgDnとmouse ON時のホイールで履歴を遡れる。遡り中に新出力が来ても視点が飛ばず、mouse reportが入力文字へ化けない
 8. Ctrl+C 2 回・未捕捉例外で終了しても端末が壊れない
 9. 日本語・結合文字・ZWJ絵文字混じりの入力が右端へ達しても、1文字ごとの余計な改行や文字分割が起きない
 10. LLM 思考中のスピナー (「考え中...」) が画面下端に 1 行で出て、 応答が始まると消える

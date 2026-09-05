@@ -111,8 +111,9 @@ Options:
   --setup             Run the setup wizard
   --safe-mode         Start without customizations
   --no-mcp            Start without MCP servers
-  --no-alt-screen     Disable the terminal alternate screen
-  --mouse             Enable TUI mouse-wheel history (native drag selection is disabled)
+  --alt-screen        Enable the full-screen TUI (inline native scrollback is the default)
+  --no-alt-screen     Explicitly keep the inline display (legacy compatibility)
+  --mouse             Enable full-screen TUI mouse-wheel history (implies --alt-screen)
   --no-mouse          Explicitly keep the copy-first default (legacy compatibility)
   --install-browser   Install the browser runtime
   --check-browser     Verify the browser runtime
