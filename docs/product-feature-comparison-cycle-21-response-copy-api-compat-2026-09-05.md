@@ -4,7 +4,7 @@
 - 基準commit: `262548d`
 - 対象: 応答可視性、TUIでの選択・コピー、OpenAI Responses / Chat Completionsのparameter互換性
 - 完了条件: 再現したP1を修正し、回帰テスト・全品質gate・最新push SHAのCIを閉じる
-- 状態: 実装・ローカル全品質gate完了（最新push SHAのCI待ち）
+- 状態: 完了（実装・ローカル全品質gate・最新実装SHA CI成功）
 
 ## 1. 比較根拠
 
@@ -84,8 +84,11 @@
   `script` / `expect`対象外のため、最新push SHAの両OS jobで閉じる。
 - 初回候補`065ab03` / CI run `33937189061`: Ubuntu成功。macOS実PTYはoff/on動作自体は成功したが、
   expect側の完了markerを`sentMouseOff/sentMouseOn`へ反映せず失敗判定した。driver間の観測契約を補正し再検証する。
+- 実装確定`58a8a8c` / CI run `33937508214`: Commit message policy、Ubuntu、macOS、Windows、
+  Windows deploy / exe smokeの全5 job成功。Linux/macOS実PTYのmouse off/on、wheel、preview、pause/resumeを含む。
 
 ## 7. 終端状態
 
 - API-01 / UX-ERROR-01 / COPY-01 / TEST-01: 修正済み。
-- 未解決P0/P1: ローカル検証では0件。最新push SHAのCI完了まで最終判定保留。
+- 未解決P0/P1: 0件。
+- 完了証拠: 実装commit `58a8a8c`、GitHub Actions run `33937508214`（全5 job成功）。
