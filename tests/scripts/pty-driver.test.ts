@@ -69,7 +69,9 @@ describe("PTY smoke driver", () => {
     expect(driver.args.join("\n")).toContain('send -- "/quit\\r"');
     const previewAt = driver.args.join("\n").lastIndexOf("expect -re {PV42}");
     const mouseOffAt = driver.args.join("\n").lastIndexOf('send -- "/tui mouse off\\r"');
+    const mouseOffMarkerAt = driver.args.join("\n").lastIndexOf("__PTY_MOUSE_OFF_SEEN__");
     const mouseOnAt = driver.args.join("\n").lastIndexOf('send -- "/tui mouse on\\r"');
+    const mouseOnMarkerAt = driver.args.join("\n").lastIndexOf("__PTY_MOUSE_ON_SEEN__");
     const helpAt = driver.args.join("\n").lastIndexOf('send -- "/help\\r"');
     const finalAt = driver.args.join("\n").lastIndexOf("expect -re {FINAL99}");
     const modeCycleAt = driver.args.join("\n").lastIndexOf('send -- "\\033\\[Z"');
@@ -83,7 +85,9 @@ describe("PTY smoke driver", () => {
     const resumeAt = driver.args.join("\n").lastIndexOf('send -- "/run resume\\r"');
     const quitAt = driver.args.join("\n").lastIndexOf('send -- "/quit\\r"');
     expect(steerAt).toBeGreaterThan(previewAt);
-    expect(mouseOnAt).toBeGreaterThan(mouseOffAt);
+    expect(mouseOffMarkerAt).toBeGreaterThan(mouseOffAt);
+    expect(mouseOnAt).toBeGreaterThan(mouseOffMarkerAt);
+    expect(mouseOnMarkerAt).toBeGreaterThan(mouseOnAt);
     expect(helpAt).toBeGreaterThan(mouseOnAt);
     expect(pauseAt).toBeGreaterThan(previewAt);
     expect(modeCycleAt).toBeGreaterThan(pauseAt);

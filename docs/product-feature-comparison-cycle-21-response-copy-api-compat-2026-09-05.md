@@ -82,6 +82,8 @@
 - Windows SEA: `build:exe`成功、`dist/localllm.exe --version`成功。
 - real PTY: Linux/macOS CIで`mouse off → on → wheel → preview → durable pause/resume`を検査する。ローカルWindowsは
   `script` / `expect`対象外のため、最新push SHAの両OS jobで閉じる。
+- 初回候補`065ab03` / CI run `33937189061`: Ubuntu成功。macOS実PTYはoff/on動作自体は成功したが、
+  expect側の完了markerを`sentMouseOff/sentMouseOn`へ反映せず失敗判定した。driver間の観測契約を補正し再検証する。
 
 ## 7. 終端状態
 

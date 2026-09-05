@@ -207,8 +207,15 @@ try {
         scrollSeen = true;
       }
       if (!japaneseSeen && output.includes(driver.imeMarker)) japaneseSeen = true;
-      if (!mouseOffSeen && output.includes(driver.mouseOffMarker)) mouseOffSeen = true;
-      if (!mouseOnSeen && output.includes(driver.mouseOnMarker)) mouseOnSeen = true;
+      if (!mouseOffSeen && output.includes(driver.mouseOffMarker)) {
+        // macOSはexpectが入力も担当するため、完了markerが送信済みの観測証拠になる。
+        sentMouseOff = true;
+        mouseOffSeen = true;
+      }
+      if (!mouseOnSeen && output.includes(driver.mouseOnMarker)) {
+        sentMouseOn = true;
+        mouseOnSeen = true;
+      }
       if (!sentPreview && output.includes(driver.previewSubmittedMarker)) sentPreview = true;
       if (!previewSeen && (output.includes(driver.previewMarker) || output.includes(driver.previewSeenMarker))) {
         previewSeen = true;
