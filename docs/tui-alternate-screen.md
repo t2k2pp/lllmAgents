@@ -157,7 +157,8 @@ private maxLines = 10_000;        // 超えたら先頭から捨てる
 private viewOffset = 0;           // 0 = 最下部に追従。 >0 で遡り中
 ```
 
-- `write()` は受け取ったテキストを改行で分割して `lines` に追加する
+- `write()` は受け取ったテキストを改行で分割して保存用の論理`lines`に追加する。
+  描画時はANSIとgraphemeを保ったまま端末幅の物理行へ折り返し、画面幅より後ろの本文を切り捨てない
 - 末尾が改行で終わらない書き込み (ストリーミング中の逐次出力) は
   **最終行に追記**する。 これをしないと 1 文字ごとに行が増える
 - `viewOffset > 0` (遡り中) のとき新しい出力が来ても **視点を動かさない**。
@@ -165,13 +166,13 @@ private viewOffset = 0;           // 0 = 最下部に追従。 >0 で遡り中
   代わりに下端に `▼ 新しい出力が N 行` を出す
 - マウスホイール / PgUp / PgDn は入力プロンプトだけでなく、ScreenManager が stdin を保持する
   **セッション全期間**で処理する。LLM応答中・ツール実行中も履歴を遡れることを
-  実PTY smokeで保証する。Alternate Screen開始時にSGR mouse reportを有効化し、ホイールが
+  実PTY smokeで保証する。明示的にmouse ONへ切り替えた時だけSGR mouse reportを有効化し、ホイールが
   入力履歴の上下キーへ変換されることを防ぐ。readlineへ分割されたreport断片は入力欄から除外する。
   inquirer等の排他プロンプト中はmouse reportを一時解除し、プロンプト側の入力契約を優先する
-- mouse capture中は多くの端末で通常ドラッグ選択が無効になる。`/tui mouse off`、起動引数
-  `--no-mouse`、または`LLLMAGENT_DISABLE_MOUSE=1`を明示するとAlternate Screenは維持したまま
-  mouse reportだけを停止し、端末本来の選択・コピーを使える。この場合もPgUp/PgDnは有効。
-  `/tui mouse on`で実行中にホイール履歴へ戻せる
+- mouse capture中は多くの端末で通常ドラッグ選択が無効になるため、既定はmouse OFFとし、
+  端末本来の選択・コピーを優先する。ホイール履歴が必要な場合だけ`/tui mouse on`、起動引数
+  `--mouse`、または`LLLMAGENT_ENABLE_MOUSE=1`で明示的に有効化する。`/tui mouse off`でnative選択へ戻せ、
+  どちらの場合もAlternate ScreenとPgUp/PgDnは有効
 - 遡り中は案内表示に1行使うため、最大offsetも案内を除いたcontent heightで計算し、
   最古行まで到達できることをunit testで保証する
 
@@ -187,7 +188,9 @@ spinner frame、進捗上書き、編集中composerはlive表示なので保存�
 旧版で継続前の本文が確定されなかったsessionや、非TTYでuser入力を確定stdoutへechoしないsessionがある。
 resume時はANSI・Markdown装飾・空白差を除いてuser/assistant本文の先頭・中央・末尾を照合し、欠けた本文だけを
 `/resume: 保存stdoutから欠けていた会話を復元`セクションへ補完する。補完件数は明示し、補完後snapshotを
-sessionへ引き継ぐ。これにより過去の診断stdoutを捨てず、canonicalなmessage履歴も画面で読める。
+sessionへ引き継ぐ。保存snapshot・legacy再構成・補完本文は改行を含まない論理行へ正規化してから保持し、
+端末幅に応じた折り返しは表示時だけ行う。これにより過去の診断stdoutを捨てず、canonicalなmessage履歴も
+末尾まで画面で読める。
 
 ### 3.5 描画
 

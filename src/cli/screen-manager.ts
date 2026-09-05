@@ -38,7 +38,7 @@
  * ライブ領域の所有者 (入力欄・進捗インジケータ) も同じ理由で `process.stdout.write` では
  * なく `screen.writeLive()` を使う。ライブ領域の描画はスクロールバックには記録しない。
  */
-import { getDisplayWidth, truncateAnsiToWidth } from "../utils/display-width.js";
+import { getDisplayWidth, truncateAnsiToWidth, wrapAnsiToWidth } from "../utils/display-width.js";
 import { DISABLE_MOUSE_TRACKING, ENABLE_MOUSE_TRACKING, TerminalScrollInputParser } from "./terminal-input.js";
 
 /**
@@ -154,22 +154,32 @@ export function shouldUseAlternateScreen(env: AlternateScreenEnv): boolean {
 }
 
 export interface MouseTrackingEnv {
+  /** LLLMAGENT_ENABLE_MOUSE */
+  enable?: string;
   /** LLLMAGENT_DISABLE_MOUSE */
   disable?: string;
+  /** 起動引数 --mouse */
+  enableByCli?: boolean;
   /** 起動引数 --no-mouse */
   disableByCli?: boolean;
 }
 
-/** Mouse capture is on by default for wheel scrolling, with an explicit copy-friendly opt-out. */
+function isTruthyEnv(value: string | undefined): boolean {
+  return value !== undefined && value !== "" && value !== "0" && value.toLowerCase() !== "false";
+}
+
+/** Native selection/copy is the default. Mouse wheel capture requires an explicit opt-in. */
 export function shouldEnableMouseTracking(env: MouseTrackingEnv): boolean {
   if (env.disableByCli) return false;
-  const disable = env.disable;
-  return !(disable !== undefined && disable !== "" && disable !== "0" && disable.toLowerCase() !== "false");
+  if (isTruthyEnv(env.disable)) return false;
+  return env.enableByCli === true || isTruthyEnv(env.enable);
 }
 
 function readMouseTrackingEnv(): MouseTrackingEnv {
   return {
+    enable: process.env.LLLMAGENT_ENABLE_MOUSE,
     disable: process.env.LLLMAGENT_DISABLE_MOUSE,
+    enableByCli: process.argv.slice(2).includes("--mouse"),
     disableByCli: process.argv.slice(2).includes("--no-mouse"),
   };
 }
@@ -375,11 +385,13 @@ export class ScreenManagerImpl implements ScreenManager {
   /** 代替画面に入っているか */
   private alternate = false;
   /** falseならAlternate Screenを維持しつつ端末本来のドラッグ選択を使う。 */
-  private mouseTracking = true;
+  private mouseTracking = false;
   /** 0 = 最下部に追従。>0 で遡り中 (§3.4) */
   private viewOffset = 0;
   /** 遡り始めてから増えた行数 (下端の「▼ 新しい出力が N 行」 に使う) */
   private newLinesWhileScrolled = 0;
+  /** 端末幅ごとに折り返した表示行。保存用の論理行とは分離する。 */
+  private visualLinesCache: { columns: number; lines: string[] } | null = null;
   /** 描画のフレーム集約タイマー */
   private renderTimer: ReturnType<typeof setTimeout> | null = null;
   /** 描画中フラグ (redraw() 内からの再入を防ぐ) */
@@ -684,10 +696,13 @@ export class ScreenManagerImpl implements ScreenManager {
   }
 
   restoreScrollback(snapshot: ScrollbackSnapshot): void {
-    const incoming = snapshot.lines.filter((line): line is string => typeof line === "string");
+    const incoming = snapshot.lines
+      .filter((line): line is string => typeof line === "string")
+      .flatMap((line) => line.replace(/\r\n?/g, "\n").split("\n"));
     const overflow = incoming.length > this.maxLines;
     this.lines = (overflow ? incoming.slice(-this.maxLines) : incoming).slice();
     if (this.lines.length === 0) this.lines = [""];
+    this.visualLinesCache = null;
     this.scrollbackTruncated = snapshot.truncated || overflow;
     this.viewOffset = 0;
     this.newLinesWhileScrolled = 0;
@@ -959,10 +974,10 @@ export class ScreenManagerImpl implements ScreenManager {
    * これをしないと 1 文字ごとに行が増える。
    */
   private appendLines(text: string): void {
-    const parts = text.split("\n");
+    const previousVisualCount = this.viewOffset > 0 ? this.visualLines(this.columnsOf()).length : 0;
+    const parts = text.replace(/\r\n?/g, "\n").split("\n");
     if (this.lines.length === 0) this.lines.push("");
     this.lines[this.lines.length - 1] += parts[0];
-    const added = parts.length - 1;
     for (let i = 1; i < parts.length; i++) {
       this.lines.push(parts[i]);
     }
@@ -970,11 +985,22 @@ export class ScreenManagerImpl implements ScreenManager {
       this.lines.splice(0, this.lines.length - this.maxLines);
       this.scrollbackTruncated = true;
     }
+    this.visualLinesCache = null;
     // 遡り中は視点を動かさない (§3.4)。増えたぶんだけオフセットも押し上げる
-    if (added > 0 && this.viewOffset > 0) {
-      this.viewOffset += added;
-      this.newLinesWhileScrolled += added;
+    if (this.viewOffset > 0) {
+      const addedVisualLines = Math.max(0, this.visualLines(this.columnsOf()).length - previousVisualCount);
+      this.viewOffset += addedVisualLines;
+      this.newLinesWhileScrolled += addedVisualLines;
     }
+  }
+
+  /** 保存用の論理行を、現在の端末幅で欠落のない表示行へ変換する。 */
+  private visualLines(columns: number): string[] {
+    const normalizedColumns = Math.max(1, columns);
+    if (this.visualLinesCache?.columns === normalizedColumns) return this.visualLinesCache.lines;
+    const lines = this.lines.flatMap((line) => wrapAnsiToWidth(line, normalizedColumns));
+    this.visualLinesCache = { columns: normalizedColumns, lines: lines.length > 0 ? lines : [""] };
+    return this.visualLinesCache.lines;
   }
 
   // ─── スクロール操作 (§3.4) ───────────────────────────
@@ -985,7 +1011,8 @@ export class ScreenManagerImpl implements ScreenManager {
     const viewHeight = this.viewportHeight();
     // 履歴が通常viewportに収まるなら遡る必要はない。溢れている場合は、遡り中に
     // 案内行を1行確保したcontent heightを上限計算にも使い、最古行まで到達可能にする。
-    const max = this.lines.length <= viewHeight ? 0 : Math.max(0, this.lines.length - Math.max(1, viewHeight - 1));
+    const visualLineCount = this.visualLines(this.columnsOf()).length;
+    const max = visualLineCount <= viewHeight ? 0 : Math.max(0, visualLineCount - Math.max(1, viewHeight - 1));
     this.viewOffset = Math.min(max, this.viewOffset + step);
     this.renderNow();
   }
@@ -1096,18 +1123,19 @@ export class ScreenManagerImpl implements ScreenManager {
       const scrolled = this.viewOffset > 0;
       const contentH = scrolled ? Math.max(1, viewH - 1) : viewH;
 
-      const total = this.lines.length;
+      const visualLines = this.visualLines(columns);
+      const total = visualLines.length;
       const maxOffset = Math.max(0, total - contentH);
       if (this.viewOffset > maxOffset) this.viewOffset = maxOffset;
       const end = total - this.viewOffset;
       const start = Math.max(0, end - contentH);
-      const visible = this.lines.slice(start, end);
+      const visible = visualLines.slice(start, end);
 
       let out = "\x1b[?25l";
       for (let i = 0; i < contentH; i++) {
         out += `\x1b[${i + 1};1H\x1b[2K`;
         const line = visible[i];
-        if (line) out += truncateAnsiToWidth(line, columns);
+        if (line) out += line;
       }
       if (scrolled) {
         out += `\x1b[${viewH};1H\x1b[2K`;
@@ -1188,8 +1216,9 @@ export class ScreenManagerImpl implements ScreenManager {
     const rows = Math.max(2, this.rowsOf());
     const columns = Math.max(1, this.columnsOf());
     const keep = Math.max(1, rows - 1);
-    const start = Math.max(0, this.lines.length - keep);
-    const visible = this.lines.slice(start).map((l) => truncateAnsiToWidth(l, columns));
+    const visualLines = this.visualLines(columns);
+    const start = Math.max(0, visualLines.length - keep);
+    const visible = visualLines.slice(start);
     this.sink(`\x1b[?25h\x1b[2J\x1b[H${visible.join("\r\n")}`);
   }
 

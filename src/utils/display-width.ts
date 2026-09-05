@@ -155,3 +155,51 @@ export function truncateAnsiToWidth(str: string, maxCols: number): string {
   }
   return truncated ? `${out}\x1b[0m` : out;
 }
+
+/**
+ * ANSI装飾を保持したまま、表示幅で複数の物理行へ分割する。
+ *
+ * Alternate Screenでは端末任せの自動折り返しを使うとカーソル位置と行数がずれる。
+ * ただし切り詰めると本文そのものが不可視になるため、ScreenManager側で明示的に
+ * 折り返せる形へ変換する。返却行を連結すると、入力の可視文字を一文字も失わない。
+ */
+export function wrapAnsiToWidth(str: string, maxCols: number): string[] {
+  if (maxCols <= 0) return [str];
+  const lines: string[] = [];
+  let out = "";
+  let width = 0;
+  let i = 0;
+
+  while (i < str.length) {
+    const rest = str.slice(i);
+    const esc = ANSI_TOKEN.exec(rest);
+    if (esc) {
+      out += esc[0];
+      i += esc[0].length;
+      continue;
+    }
+
+    const nextEscape = rest.indexOf("\x1b");
+    const plain = nextEscape === -1 ? rest : rest.slice(0, nextEscape);
+    for (const grapheme of splitGraphemes(plain)) {
+      const graphemeWidth = getGraphemeWidth(grapheme);
+      if (width > 0 && width + graphemeWidth > maxCols) {
+        lines.push(out);
+        out = "";
+        width = 0;
+      }
+      out += grapheme;
+      width += graphemeWidth;
+    }
+    i += plain.length;
+
+    // 未対応のescape byteで無限loopしない。可視内容を落とさずそのまま保持する。
+    if (plain.length === 0 && nextEscape === 0) {
+      out += rest[0];
+      i++;
+    }
+  }
+
+  lines.push(out);
+  return lines;
+}

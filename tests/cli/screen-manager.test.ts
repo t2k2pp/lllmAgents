@@ -82,6 +82,27 @@ describe("ScreenManager: 行分割とスクロールバック", () => {
     screen.restoreScrollback({ lines: ["過去1", "過去2", ""], truncated: true });
     expect(screen.snapshotScrollback()).toEqual({ lines: ["過去1", "過去2", ""], truncated: true });
   });
+
+  it("保存snapshot内に改行を含む要素があっても論理行へ正規化する", () => {
+    const { screen } = createHarness();
+    screen.restoreScrollback({ lines: ["1行目\n2行目\r\n3行目", ""], truncated: false });
+    expect(screen.snapshotLines()).toEqual(["1行目", "2行目", "3行目", ""]);
+  });
+
+  it("画面幅を超える確定本文を省略せず複数の表示行へ折り返す", () => {
+    const { screen, all } = createAltHarness({ rows: 6, columns: 8 });
+    screen.start();
+    screen.write("ABCDEFGHIJKL\n");
+    screen.scrollUp();
+
+    const rendered = all();
+    expect(rendered).toContain("ABCDEFGH");
+    expect(rendered).toContain("IJKL");
+    expect(rendered).not.toContain("…");
+    // 保存形式は端末幅に依存させず、元の論理行を維持する。
+    expect(screen.snapshotLines()).toEqual(["ABCDEFGHIJKL", ""]);
+    screen.stop();
+  });
 });
 
 describe("ScreenManager: 所有権", () => {
@@ -200,13 +221,19 @@ describe("ScreenManager: TUI / classic stream 判定 (§6.1)", () => {
 });
 
 describe("ScreenManager: copy-friendly mouse mode", () => {
-  it("既定はmouse trackingを有効にする", () => {
-    expect(shouldEnableMouseTracking({})).toBe(true);
+  it("既定はmouse trackingを無効にしてnative選択・コピーを優先する", () => {
+    expect(shouldEnableMouseTracking({})).toBe(false);
   });
 
-  it("--no-mouse / LLLMAGENT_DISABLE_MOUSE=1ならnative選択を優先する", () => {
+  it("--mouse / LLLMAGENT_ENABLE_MOUSE=1の明示指定でホイール追跡を有効にする", () => {
+    expect(shouldEnableMouseTracking({ enableByCli: true })).toBe(true);
+    expect(shouldEnableMouseTracking({ enable: "1" })).toBe(true);
+  });
+
+  it("--no-mouse / LLLMAGENT_DISABLE_MOUSE=1は有効化指定より優先する", () => {
     expect(shouldEnableMouseTracking({ disableByCli: true })).toBe(false);
     expect(shouldEnableMouseTracking({ disable: "1" })).toBe(false);
+    expect(shouldEnableMouseTracking({ enableByCli: true, disableByCli: true })).toBe(false);
   });
 
   it("mouse offでもAlternate ScreenとPgUp/PgDnを維持する", () => {
@@ -231,7 +258,13 @@ describe("ScreenManager: copy-friendly mouse mode", () => {
   });
 
   it("実行中にmouse trackingをoff/onできる", () => {
-    const { screen, written } = createAltHarness();
+    const written: string[] = [];
+    const screen = new ScreenManagerImpl({
+      sink: (text) => written.push(text),
+      stdin: null,
+      alternate: true,
+      mouseTracking: true,
+    });
     screen.start();
     written.length = 0;
 
@@ -252,7 +285,7 @@ describe("ScreenManager: 代替画面の入退場 (§3.1 / §8)", () => {
     const { screen, all } = createAltHarness();
     screen.start();
     expect(all()).toContain("\x1b[?1049h");
-    expect(all()).toContain("\x1b[?1000h\x1b[?1006h");
+    expect(all()).not.toContain("\x1b[?1000h\x1b[?1006h");
     expect(screen.isAlternate()).toBe(true);
     screen.stop();
   });
@@ -354,15 +387,15 @@ describe("ScreenManager: 描画とフレーム集約 (§3.5)", () => {
     screen.stop();
   });
 
-  it("画面幅を超える行は折り返さずに切り詰める (全角も 2 桁で数える)", () => {
+  it("画面幅を超える行は全角幅を守って折り返し、末尾まで表示する", () => {
     vi.useFakeTimers();
     const { screen, written, all } = createAltHarness({ rows: 3, columns: 6 });
     screen.start();
     written.length = 0;
-    screen.write("あいうえお\n"); // 10 桁 → 6 桁 = 3 文字ぶんで切れる
+    screen.write("あいうえお\n"); // 10 桁 → 6 桁 + 4 桁の2行
     vi.advanceTimersByTime(20);
     expect(all()).toContain("あいう");
-    expect(all()).not.toContain("あいうえ");
+    expect(all()).toContain("えお");
     screen.stop();
   });
 });
@@ -700,7 +733,13 @@ describe("ScreenManager: session全期間のスクロールキー", () => {
   it("排他prompt中はPageUpをpromptへ譲り、履歴を動かさない", () => {
     const { stdin, emitData } = fakeStdin();
     const written: string[] = [];
-    const screen = new ScreenManagerImpl({ sink: (text) => written.push(text), stdin, alternate: true, rows: () => 5 });
+    const screen = new ScreenManagerImpl({
+      sink: (text) => written.push(text),
+      stdin,
+      alternate: true,
+      mouseTracking: true,
+      rows: () => 5,
+    });
     screen.write("1\n2\n3\n4\n5\n6\n7\n8\n");
     screen.start();
     written.length = 0;
@@ -902,7 +941,12 @@ describe("ScreenManager: suspendStdin / resumeStdin (§3.4)", () => {
   it("suspend で cooked に戻し、resume で raw に戻す", () => {
     const { stdin, state } = fakeStdin();
     const written: string[] = [];
-    const screen = new ScreenManagerImpl({ sink: (text) => written.push(text), stdin, alternate: true });
+    const screen = new ScreenManagerImpl({
+      sink: (text) => written.push(text),
+      stdin,
+      alternate: true,
+      mouseTracking: true,
+    });
     screen.start();
     written.length = 0;
     screen.suspendStdin();

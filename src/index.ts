@@ -112,7 +112,8 @@ Options:
   --safe-mode         Start without customizations
   --no-mcp            Start without MCP servers
   --no-alt-screen     Disable the terminal alternate screen
-  --no-mouse          Keep TUI but disable mouse capture for native selection/copy
+  --mouse             Enable TUI mouse-wheel history (native drag selection is disabled)
+  --no-mouse          Explicitly keep the copy-first default (legacy compatibility)
   --install-browser   Install the browser runtime
   --check-browser     Verify the browser runtime
   --computer-use      Enable native OS window capture/input for this session

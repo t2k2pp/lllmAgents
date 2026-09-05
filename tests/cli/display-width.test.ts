@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { getDisplayWidth } from "../../src/cli/interactive-input.js";
-import { nextGraphemeBoundary, previousGraphemeBoundary } from "../../src/utils/display-width.js";
+import {
+  nextGraphemeBoundary,
+  previousGraphemeBoundary,
+  stripAnsi,
+  wrapAnsiToWidth,
+} from "../../src/utils/display-width.js";
 
 describe("getDisplayWidth", () => {
   it("should return 0 for empty string", () => {
@@ -87,5 +92,20 @@ describe("Unicode grapheme editing", () => {
     expect(nextGraphemeBoundary(value, afterAccent)).toBe(afterEmoji);
     expect(previousGraphemeBoundary(value, afterEmoji)).toBe(afterAccent);
     expect(previousGraphemeBoundary(value, value.length)).toBe(afterEmoji);
+  });
+});
+
+describe("wrapAnsiToWidth", () => {
+  it("ANSI装飾と可視文字を失わず、全角文字を表示幅で折り返す", () => {
+    const input = "\x1b[31mABC日本語XYZ\x1b[0m";
+    const lines = wrapAnsiToWidth(input, 6);
+
+    expect(lines.length).toBeGreaterThan(1);
+    expect(stripAnsi(lines.join(""))).toBe("ABC日本語XYZ");
+    expect(lines.every((line) => getDisplayWidth(stripAnsi(line)) <= 6)).toBe(true);
+  });
+
+  it("結合文字やZWJ emojiを途中で分断しない", () => {
+    expect(wrapAnsiToWidth("e\u0301👩‍💻日", 2).map(stripAnsi)).toEqual(["e\u0301", "👩‍💻", "日"]);
   });
 });

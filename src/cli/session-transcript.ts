@@ -19,21 +19,26 @@ function contentText(content: Message["content"]): string {
     .join("\n");
 }
 
+function contentLines(content: string): string[] {
+  return content.replace(/\r\n?/g, "\n").split("\n");
+}
+
 /** stdout未保存の旧sessionを、黙って空画面にせず会話履歴から可読形式へ再構成する。 */
 export function reconstructLegacyTranscript(messages: Message[]): string[] {
   const lines: string[] = [];
   for (const message of messages) {
     const body = contentText(message.content);
     if (message.role === "user") {
-      lines.push(`> ${body}`);
+      const [first = "", ...rest] = contentLines(body);
+      lines.push(`> ${first}`, ...rest.map((line) => `  ${line}`));
     } else if (message.role === "assistant") {
-      if (body) lines.push(body);
+      if (body) lines.push(...contentLines(body));
       for (const call of message.tool_calls ?? []) {
         lines.push(`  • ${call.function.name}`);
       }
     } else if (message.role === "tool") {
       lines.push(`  ↳ tool result${message.tool_call_id ? ` (${message.tool_call_id})` : ""}`);
-      if (body) lines.push(body);
+      if (body) lines.push(...contentLines(body));
     }
     lines.push("");
   }
@@ -72,7 +77,13 @@ function recoverMissingDialogue(savedLines: string[], messages: Message[]): { li
     if (message.role !== "user" && message.role !== "assistant") continue;
     const body = contentText(message.content);
     if (!body.trim() || isCoveredByTranscript(body, normalizedTranscript)) continue;
-    missing.push(message.role === "user" ? `> ${body}` : body, "");
+    const bodyLines = contentLines(body);
+    if (message.role === "user") {
+      const [first = "", ...rest] = bodyLines;
+      missing.push(`> ${first}`, ...rest.map((line) => `  ${line}`), "");
+    } else {
+      missing.push(...bodyLines, "");
+    }
     count++;
   }
 

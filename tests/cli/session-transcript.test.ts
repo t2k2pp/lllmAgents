@@ -44,6 +44,20 @@ describe("session terminal transcript", () => {
     expect(resumedAgain.recoveredMessageCount).toBe(0);
   });
 
+  it("resume補完する複数行本文を画面の論理行へ分割する", () => {
+    const screen = new ScreenManagerImpl({ sink: () => {}, stdin: null });
+    const result = restoreTerminalTranscript(screen, { version: 1, lines: ["> 質問", ""], truncated: false }, [
+      { role: "user", content: "質問" },
+      { role: "assistant", content: "先頭行\n中央行\r\n末尾行" },
+    ]);
+
+    expect(result.mode).toBe("recovered");
+    expect(screen.snapshotLines()).toContain("先頭行");
+    expect(screen.snapshotLines()).toContain("中央行");
+    expect(screen.snapshotLines()).toContain("末尾行");
+    expect(screen.snapshotLines().some((line) => line.includes("\n") || line.includes("\r"))).toBe(false);
+  });
+
   it("Markdown描画済みの本文は欠落と誤判定して重複補完しない", () => {
     const screen = new ScreenManagerImpl({ sink: () => {}, stdin: null });
     const result = restoreTerminalTranscript(
@@ -79,6 +93,19 @@ describe("session terminal transcript", () => {
     expect(result.mode).toBe("legacy");
     expect(screen.snapshotLines().join("\n")).toContain("> 調べて");
     expect(screen.snapshotLines().join("\n")).toContain("結果です");
+  });
+
+  it("legacy再構成でも複数行本文を個別の論理行にする", () => {
+    const lines = reconstructLegacyTranscript([
+      { role: "user", content: "質問1行目\n質問2行目" },
+      { role: "assistant", content: "回答1行目\n回答2行目" },
+    ]);
+
+    expect(lines).toContain("> 質問1行目");
+    expect(lines).toContain("  質問2行目");
+    expect(lines).toContain("回答1行目");
+    expect(lines).toContain("回答2行目");
+    expect(lines.some((line) => line.includes("\n") || line.includes("\r"))).toBe(false);
   });
 
   it("不正schemaをexact扱いせず、invalidとして再構成する", () => {
