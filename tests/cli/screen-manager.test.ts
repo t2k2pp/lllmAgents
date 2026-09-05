@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { ScreenManagerImpl, shouldUseAlternateScreen } from "../../src/cli/screen-manager.js";
+import {
+  ScreenManagerImpl,
+  shouldEnableMouseTracking,
+  shouldUseAlternateScreen,
+} from "../../src/cli/screen-manager.js";
 
 /** 書き出し先を捕まえる ScreenManager を作る (素通しモード) */
 function createHarness(maxLines?: number) {
@@ -192,6 +196,54 @@ describe("ScreenManager: TUI / classic stream 判定 (§6.1)", () => {
     expect(shouldUseAlternateScreen({ isTTY: true, platform: "win32", conEmuANSI: "ON" })).toBe(true);
     expect(shouldUseAlternateScreen({ isTTY: true, platform: "win32", ansicon: "1" })).toBe(true);
     expect(shouldUseAlternateScreen({ isTTY: true, platform: "win32", termProgram: "vscode" })).toBe(true);
+  });
+});
+
+describe("ScreenManager: copy-friendly mouse mode", () => {
+  it("既定はmouse trackingを有効にする", () => {
+    expect(shouldEnableMouseTracking({})).toBe(true);
+  });
+
+  it("--no-mouse / LLLMAGENT_DISABLE_MOUSE=1ならnative選択を優先する", () => {
+    expect(shouldEnableMouseTracking({ disableByCli: true })).toBe(false);
+    expect(shouldEnableMouseTracking({ disable: "1" })).toBe(false);
+  });
+
+  it("mouse offでもAlternate ScreenとPgUp/PgDnを維持する", () => {
+    const { stdin, emitData } = fakeStdin();
+    const written: string[] = [];
+    const screen = new ScreenManagerImpl({
+      sink: (text) => written.push(text),
+      stdin,
+      alternate: true,
+      mouseTracking: false,
+      rows: () => 5,
+    });
+    screen.write("1\n2\n3\n4\n5\n6\n7\n8\n");
+    screen.start();
+
+    expect(screen.isAlternate()).toBe(true);
+    expect(screen.isMouseTrackingEnabled()).toBe(false);
+    expect(written.join("")).not.toContain("\x1b[?1000h");
+    emitData(Buffer.from("\x1b[5~"));
+    expect(screen.scrollOffset()).toBeGreaterThan(0);
+    screen.stop();
+  });
+
+  it("実行中にmouse trackingをoff/onできる", () => {
+    const { screen, written } = createAltHarness();
+    screen.start();
+    written.length = 0;
+
+    screen.setMouseTrackingEnabled(false);
+    expect(screen.isMouseTrackingEnabled()).toBe(false);
+    expect(written.join("")).toContain("\x1b[?1006l\x1b[?1000l");
+
+    written.length = 0;
+    screen.setMouseTrackingEnabled(true);
+    expect(screen.isMouseTrackingEnabled()).toBe(true);
+    expect(written.join("")).toContain("\x1b[?1000h\x1b[?1006h");
+    screen.stop();
   });
 });
 

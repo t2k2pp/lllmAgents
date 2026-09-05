@@ -26,7 +26,13 @@ export function displayWelcome(
   console.log(chalk.dim(`  CWD: ${process.cwd()}`));
   console.log(chalk.dim(`  Type /help for commands, /quit to exit.`));
   if (screen.isAlternate()) {
-    console.log(chalk.dim(`  TUI履歴: マウスホイール / PgUp / PgDn（通常scrollback: 次回起動時 --no-alt-screen）`));
+    console.log(
+      chalk.dim(
+        screen.isMouseTrackingEnabled()
+          ? `  TUI履歴: マウスホイール / PgUp / PgDn | 選択: Shift+ドラッグ / /tui mouse off`
+          : `  TUI履歴: PgUp / PgDn | 端末本来のマウス選択・コピー: ON`,
+      ),
+    );
   }
   console.log(chalk.dim(`  モード切替: Shift+Tab | マルチライン: Shift+Enter / Ctrl+J (代替入力: \`\`\`)\n`));
 }
@@ -100,6 +106,7 @@ export function displayHelp(skills?: SkillSummary[], registryEntries?: RegistryH
     ${chalk.cyan("/continue")}       最新セッションを復元
     ${chalk.cyan("/room")}           会話 Room (A/B/C) の表示・移動・再開 (REPL=A/Discord=B/Slack=C)
     ${chalk.cyan("/queue")}          待ち状況 ([処理中・追加入力]欄で文字+Enter、commandはturn後)
+    ${chalk.cyan("/tui mouse off")}  TUIを保ったままmouse captureを止め、端末本来の選択・コピーを使う
     ${chalk.cyan("/memory")}         自動メモリ表示
     ${chalk.cyan("/remember <text>")} メモリに追記
     ${chalk.cyan("/plan")}           プランモードに入る
@@ -119,7 +126,7 @@ export function displayHelp(skills?: SkillSummary[], registryEntries?: RegistryH
 ${registrySection}
 ${skillSection}
   ${chalk.bold("入力:")}
-    ホイール     TUIの過去ログを上下する（LLM・ツール実行中も有効）
+    ホイール     TUIの過去ログを上下する（mouse ON時。選択はShift+ドラッグ）
     PgUp/PgDn   TUIの過去ログをページ移動する（LLM・ツール実行中も有効）
     Shift+Tab    通常 → Autorun → Plan → 通常を循環（編集中の文字は保持）
     Shift+Enter  改行を挿入（マルチライン入力）

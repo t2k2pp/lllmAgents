@@ -66,6 +66,7 @@ import { LLMLogger } from "./llm-logger.js";
 import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
 import { formatBufferedResponseStatus } from "../cli/response-preview.js";
+import { writeRuntimeError } from "../cli/runtime-diagnostic.js";
 import { getFirstUseGuide, getFailureGuide } from "./tool-guides.js";
 import { IntentClassifier, type CompletionType } from "./intent-classifier.js";
 import { Evaluator } from "./evaluator.js";
@@ -1408,7 +1409,7 @@ export class AgentLoop {
               model: this.model,
               connectionRetries,
             });
-            console.error(chalk.red(`\n  エラー: ${err.message}`));
+            writeRuntimeError(chalk.red(`\n  エラー: ${err.message}`));
             this.notice("error", `LLM 呼び出しエラー: ${err.message}`);
             const action = await askUserOnError(err);
 

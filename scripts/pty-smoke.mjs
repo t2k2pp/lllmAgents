@@ -157,6 +157,10 @@ try {
     let sentHelp = false;
     let sentJapanese = false;
     let japaneseSeen = false;
+    let sentMouseOff = false;
+    let mouseOffSeen = false;
+    let sentMouseOn = false;
+    let mouseOnSeen = false;
     let sentMouseUp = false;
     let mouseUpOutputStart = 0;
     let scrollSeen = false;
@@ -203,6 +207,8 @@ try {
         scrollSeen = true;
       }
       if (!japaneseSeen && output.includes(driver.imeMarker)) japaneseSeen = true;
+      if (!mouseOffSeen && output.includes(driver.mouseOffMarker)) mouseOffSeen = true;
+      if (!mouseOnSeen && output.includes(driver.mouseOnMarker)) mouseOnSeen = true;
       if (!sentPreview && output.includes(driver.previewSubmittedMarker)) sentPreview = true;
       if (!previewSeen && (output.includes(driver.previewMarker) || output.includes(driver.previewSeenMarker))) {
         previewSeen = true;
@@ -264,10 +270,18 @@ try {
         sentJapanese = true;
         child.stdin.write("日本語入力の右端折返し確認");
       }
-      if (driver.parentSubmits && sentJapanese && !sentHelp && output.includes("日本語入力の右端折返し確認")) {
+      if (driver.parentSubmits && sentJapanese && !sentMouseOff && output.includes("日本語入力の右端折返し確認")) {
         japaneseSeen = true;
-        sentHelp = true;
+        sentMouseOff = true;
         child.stdin.write("\x15");
+        child.stdin.write(submitPtyLine("/tui mouse off"));
+      }
+      if (driver.parentSubmits && mouseOffSeen && !sentMouseOn) {
+        sentMouseOn = true;
+        child.stdin.write(submitPtyLine("/tui mouse on"));
+      }
+      if (driver.parentSubmits && mouseOnSeen && !sentHelp) {
+        sentHelp = true;
         child.stdin.write(submitPtyLine("/help"));
       }
       if (
@@ -361,6 +375,10 @@ try {
         goodbyeSeen,
         scrollSeen,
         japaneseSeen,
+        sentMouseOff,
+        mouseOffSeen,
+        sentMouseOn,
+        mouseOnSeen,
         previewSubmitted: sentPreview,
         previewSeen,
         previewSeenBeforeFinal,
@@ -408,6 +426,10 @@ try {
     result.secondRequestReceivedAt < result.resumeSentAt ||
     !result.scrollSeen ||
     !result.japaneseSeen ||
+    !result.sentMouseOff ||
+    !result.mouseOffSeen ||
+    !result.sentMouseOn ||
+    !result.mouseOnSeen ||
     !result.previewSeen ||
     !result.previewSeenBeforeFinal ||
     !/Goodbye!/i.test(result.output)
@@ -427,6 +449,8 @@ try {
       }, ` +
       `steerApplied ${result.steerAppliedSeen}, steerResponse ${result.steerResponseSeen}, ` +
       `japaneseSeen ${result.japaneseSeen}, previewSubmitted ${result.previewSubmitted}, ` +
+      `mouseOffSent ${result.sentMouseOff}, mouseOffSeen ${result.mouseOffSeen}, ` +
+      `mouseOnSent ${result.sentMouseOn}, mouseOnSeen ${result.mouseOnSeen}, ` +
       `previewSeen ${result.previewSeen}, ` +
       `previewBeforeFinal ${result.previewSeenBeforeFinal}, requestSeen ${result.requestSeen}, ` +
       `responseStarted ${result.responseStarted}, firstChunkWritten ${result.firstChunkWritten}, ` +

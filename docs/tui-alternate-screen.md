@@ -143,7 +143,9 @@ process.stdout.write = (chunk, ...rest) => { screen.write(String(chunk)); return
 
 注意点:
 - ScreenManager 自身の描画は必ず `rawWrite` を使う (無限再帰の防止)
-- `console.error` は **stderr のまま**にする。 パイプで `2>` に落とす運用を壊さない
+- `console.error` は **stderr のまま**にする。 パイプで `2>` に落とす運用を壊さない。
+  ただし、LLM呼び出し失敗などユーザー判断に必要な実行時エラーは`writeRuntimeError()`を使い、
+  Alternate Screen中だけ確定scrollbackへ記録する。classic streamでは従来どおりstderrへ出す
 - 外部プロセス (bash ツール) の出力は子プロセスの stdout を継承させず、
   既存どおりアプリ側で読んで `console.log` するので自動的に経路に乗る
 
@@ -166,6 +168,10 @@ private viewOffset = 0;           // 0 = 最下部に追従。 >0 で遡り中
   実PTY smokeで保証する。Alternate Screen開始時にSGR mouse reportを有効化し、ホイールが
   入力履歴の上下キーへ変換されることを防ぐ。readlineへ分割されたreport断片は入力欄から除外する。
   inquirer等の排他プロンプト中はmouse reportを一時解除し、プロンプト側の入力契約を優先する
+- mouse capture中は多くの端末で通常ドラッグ選択が無効になる。`/tui mouse off`、起動引数
+  `--no-mouse`、または`LLLMAGENT_DISABLE_MOUSE=1`を明示するとAlternate Screenは維持したまま
+  mouse reportだけを停止し、端末本来の選択・コピーを使える。この場合もPgUp/PgDnは有効。
+  `/tui mouse on`で実行中にホイール履歴へ戻せる
 - 遡り中は案内表示に1行使うため、最大offsetも案内を除いたcontent heightで計算し、
   最古行まで到達できることをunit testで保証する
 

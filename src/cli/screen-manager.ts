@@ -153,6 +153,27 @@ export function shouldUseAlternateScreen(env: AlternateScreenEnv): boolean {
   return true;
 }
 
+export interface MouseTrackingEnv {
+  /** LLLMAGENT_DISABLE_MOUSE */
+  disable?: string;
+  /** 起動引数 --no-mouse */
+  disableByCli?: boolean;
+}
+
+/** Mouse capture is on by default for wheel scrolling, with an explicit copy-friendly opt-out. */
+export function shouldEnableMouseTracking(env: MouseTrackingEnv): boolean {
+  if (env.disableByCli) return false;
+  const disable = env.disable;
+  return !(disable !== undefined && disable !== "" && disable !== "0" && disable.toLowerCase() !== "false");
+}
+
+function readMouseTrackingEnv(): MouseTrackingEnv {
+  return {
+    disable: process.env.LLLMAGENT_DISABLE_MOUSE,
+    disableByCli: process.argv.slice(2).includes("--no-mouse"),
+  };
+}
+
 /** 実際の process.env / process.stdout から判定材料を集める */
 function readAlternateScreenEnv(): AlternateScreenEnv {
   return {
@@ -228,6 +249,10 @@ export interface ScreenManager {
   onCommittedOutput(listener: (text: string) => void): () => void;
   /** 代替画面が有効か */
   isAlternate(): boolean;
+  /** 端末のmouse trackingが有効か */
+  isMouseTrackingEnabled(): boolean;
+  /** Alternate Screenを維持したままmouse captureを切り替える */
+  setMouseTrackingEnabled(enabled: boolean): void;
   /** スクロールバックを遡る (代替画面のみ)。行数省略で 1 画面ぶん */
   scrollUp(lines?: number): void;
   /** スクロールバックを戻す (代替画面のみ)。行数省略で 1 画面ぶん */
@@ -254,6 +279,8 @@ export interface ScreenManagerOptions {
   maxLines?: number;
   /** 代替画面を使うかを明示指定する (省略時は §6.1 の自動判定)。テスト用 */
   alternate?: boolean;
+  /** mouse trackingを明示指定する。falseならnative選択を優先する。 */
+  mouseTracking?: boolean;
   /** §6.1 の端末能力判定入力。省略時は実環境。テスト用 */
   alternateEnv?: AlternateScreenEnv;
   /** 画面の行数。既定は process.stdout.rows */
@@ -328,6 +355,7 @@ export class ScreenManagerImpl implements ScreenManager {
   private readonly sink: (text: string) => void;
   private readonly maxLines: number;
   private readonly forcedAlternate?: boolean;
+  private readonly forcedMouseTracking?: boolean;
   private readonly alternateEnv?: AlternateScreenEnv;
   private readonly rowsOf: () => number;
   private readonly columnsOf: () => number;
@@ -346,6 +374,8 @@ export class ScreenManagerImpl implements ScreenManager {
   private started = false;
   /** 代替画面に入っているか */
   private alternate = false;
+  /** falseならAlternate Screenを維持しつつ端末本来のドラッグ選択を使う。 */
+  private mouseTracking = true;
   /** 0 = 最下部に追従。>0 で遡り中 (§3.4) */
   private viewOffset = 0;
   /** 遡り始めてから増えた行数 (下端の「▼ 新しい出力が N 行」 に使う) */
@@ -380,6 +410,7 @@ export class ScreenManagerImpl implements ScreenManager {
     this.sink = options.sink ?? rawWrite;
     this.maxLines = options.maxLines ?? 10_000;
     this.forcedAlternate = options.alternate;
+    this.forcedMouseTracking = options.mouseTracking;
     this.alternateEnv = options.alternateEnv;
     this.rowsOf = options.rows ?? (() => process.stdout.rows || 24);
     this.columnsOf = options.columns ?? (() => process.stdout.columns || 80);
@@ -395,6 +426,7 @@ export class ScreenManagerImpl implements ScreenManager {
     const alternate = this.forcedAlternate ?? shouldUseAlternateScreen(this.alternateEnv ?? readAlternateScreenEnv());
     this.started = true;
     this.alternate = alternate;
+    this.mouseTracking = this.forcedMouseTracking ?? shouldEnableMouseTracking(readMouseTrackingEnv());
     // stdin はセッションの間ずっと保持する (docs/stdin-ownership.md §3.1)。
     // 代替画面を使うかどうかとは独立。素通しモードでも「誰も持っていない一瞬」 は作らない。
     try {
@@ -407,7 +439,7 @@ export class ScreenManagerImpl implements ScreenManager {
     if (!this.alternate) return;
 
     // 代替画面へ入り、マウスホイールを入力履歴の↑↓ではなく固有reportとして受け取る。
-    this.sink(`\x1b[?1049h\x1b[2J\x1b[H${ENABLE_MOUSE_TRACKING}`);
+    this.sink(`\x1b[?1049h\x1b[2J\x1b[H${this.mouseTracking ? ENABLE_MOUSE_TRACKING : ""}`);
     this.resizeHandler = () => this.renderNow();
     try {
       process.stdout.on("resize", this.resizeHandler);
@@ -611,7 +643,7 @@ export class ScreenManagerImpl implements ScreenManager {
         this.scheduleRender();
       } else {
         // inquirer等へ画面を渡す間はmouse reportを止め、相手本来の入力契約を保つ。
-        if (!wasExclusive) this.sink(DISABLE_MOUSE_TRACKING);
+        if (!wasExclusive && this.mouseTracking) this.sink(DISABLE_MOUSE_TRACKING);
         // 排他所有 = inquirer に画面を明け渡す。直前までの内容を上から並べ、
         // カーソルを内容の直後に置いて「そこから下は inquirer のもの」 にする
         this.renderForPrompt();
@@ -633,7 +665,7 @@ export class ScreenManagerImpl implements ScreenManager {
       // 入れ子の内側が解けただけならまだ流さない。外側の排他所有者が残っている
       if (this.isExclusive()) return;
       if (this.alternate) {
-        if (wasExclusive) this.sink(ENABLE_MOUSE_TRACKING);
+        if (wasExclusive && this.mouseTracking) this.sink(ENABLE_MOUSE_TRACKING);
         // 内容はスクロールバックに記録済み。全画面再描画で一度に出る
         this.queue = [];
         this.renderNow();
@@ -675,6 +707,18 @@ export class ScreenManagerImpl implements ScreenManager {
 
   isAlternate(): boolean {
     return this.alternate;
+  }
+
+  isMouseTrackingEnabled(): boolean {
+    return this.mouseTracking;
+  }
+
+  setMouseTrackingEnabled(enabled: boolean): void {
+    if (this.mouseTracking === enabled) return;
+    this.mouseTracking = enabled;
+    this.scrollInputParser.reset();
+    if (!this.alternate || !this.started || this.isExclusive() || this.stdinSuspended) return;
+    this.sink(enabled ? ENABLE_MOUSE_TRACKING : DISABLE_MOUSE_TRACKING);
   }
 
   /**
@@ -804,7 +848,7 @@ export class ScreenManagerImpl implements ScreenManager {
     if (!this.stdinRawHeld || this.stdinSuspended) return;
     this.stdinSuspended = true;
     this.uninstallSigintFallback();
-    if (this.alternate && !this.isExclusive()) this.sink(DISABLE_MOUSE_TRACKING);
+    if (this.alternate && this.mouseTracking && !this.isExclusive()) this.sink(DISABLE_MOUSE_TRACKING);
     const stdin = this.stdin;
     if (!stdin?.isTTY) return;
     try {
@@ -824,7 +868,7 @@ export class ScreenManagerImpl implements ScreenManager {
       this.stdinSuspended = true;
       throw error;
     }
-    if (this.alternate && !this.isExclusive()) this.sink(ENABLE_MOUSE_TRACKING);
+    if (this.alternate && this.mouseTracking && !this.isExclusive()) this.sink(ENABLE_MOUSE_TRACKING);
     this.installSigintFallback();
   }
 

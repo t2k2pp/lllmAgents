@@ -87,10 +87,13 @@ $ npm start
 | `/resume <id>` → `/run inspect` → `/run resume` | 再起動後にconversationと過去の確定済み標準出力を復元し、cwd/model/provider差分を確認して保存済みrunを明示再開。旧sessionは会話履歴から画面を再構成し、resume途中の異常終了は自動再実行せずblocked表示 |
 | マウスホイール | Alternate Screen TUIの過去ログを上下する（LLM・ツール実行中も有効） |
 | `PgUp` / `PgDn` | Alternate Screen TUIの過去ログをページ移動する（LLM・ツール実行中も有効） |
+| `/tui mouse off` | TUIを維持したままmouse captureを止め、ドラッグで端末本来の選択・コピーを使う。履歴移動は`PgUp` / `PgDn` |
 | `Ctrl+C` | 現在の操作をキャンセル |
 
-端末本来のscrollback・選択・コピーを優先したい場合は、`npm start -- --no-alt-screen`
-（配布版は`localllm --no-alt-screen`）でclassic stream表示として起動できます。
+TUI内で一時的に選択・コピーを優先する場合は`/tui mouse off`、起動時からなら`--no-mouse`
+（または`LLLMAGENT_DISABLE_MOUSE=1`）を使用します。mouse captureを止めてもAlternate Screenと`PgUp` / `PgDn`は維持されます。
+端末本来のscrollbackも必要な場合は、`npm start -- --no-alt-screen`（配布版は`localllm --no-alt-screen`）で
+classic stream表示として起動できます。
 TTYの端末能力が不足または判定不能な場合、自動的に簡易表示へは切り替えず、原因と対処を表示して停止します。
 
 ### Native Computer Use（明示opt-in）
@@ -161,6 +164,7 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/clear` | 会話履歴クリア（現在の Room） |
 | `/room` | 会話 Room (A/B/C) の表示・移動・再開。`/room A\|B\|C` で移動、`/room resume [A\|B\|C]` で再開、`/room autoresume <on\|off> [A\|B\|C]`。既定 REPL=A / Discord=B / Slack=C（docs/room-model-design.md） |
 | `/queue` | 受信順キューの待ち状況を表示（`/queue clear` でturn後に実行するtype-ahead command等を破棄） |
+| `/tui mouse <on\|off\|status>` | Alternate Screenのmouse captureを実行中に切替。`off`はnative選択・コピー、`on`はホイール履歴を優先 |
 | `/run [status\|pause [--durable]\|resume\|inspect\|discard]` | foreground runの状態表示・通常/永続pause・再開・checkpoint診断/破棄。durableはPC再起動を跨ぐ。background taskとsecond LLMは対象外 |
 | `/context` | コンテキスト使用状況の内訳（トークン数・進捗バー）。`/context <system\|memory\|skills\|tools\|messages>` で各カテゴリの中身をダンプ。`/context strategy [off\|auto\|aggressive]` で区切り整理のモード表示・切替（既定 auto、詳細: docs/context-strategy.md） |
 | `/compact` | コンテキストを手動圧縮 |

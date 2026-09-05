@@ -27,6 +27,7 @@ import { resolveAtMentions, printMentionFeedback } from "./input-resolver.js";
 import { runGoalLoop } from "../goal-loop/goal-loop-runner.js";
 import { InteractiveInput, INPUT_CANCELLED_SIGNAL, SIGINT_SIGNAL } from "./interactive-input.js";
 import { currentInteractionMode, nextInteractionMode } from "./interaction-mode.js";
+import { screen } from "./screen-manager.js";
 import { interruptWatcher } from "./interrupt-watcher.js";
 import { progressIndicator } from "./progress-indicator.js";
 import { createCommandMenuProvider, createFileMenuProvider } from "./completer.js";
@@ -4655,6 +4656,43 @@ export class REPL {
           console.log(chalk.dim("  破棄: /queue clear\n"));
         } else {
           console.log("");
+        }
+        break;
+      }
+
+      case "/tui": {
+        const area = (args[0] ?? "status").toLowerCase();
+        if (area !== "status" && area !== "mouse") {
+          console.log(chalk.yellow("  使い方: /tui [status] | /tui mouse <on|off|status>"));
+          break;
+        }
+        if (!screen.isAlternate()) {
+          console.log(chalk.dim("  TUI: classic stream表示です。端末本来のscrollback・選択・コピーを使用できます。"));
+          break;
+        }
+        const action = (area === "mouse" ? args[1] : undefined)?.toLowerCase() ?? "status";
+        if (action === "off") {
+          screen.setMouseTrackingEnabled(false);
+          console.log(
+            chalk.green(
+              "  TUI マウス追跡: OFF — ドラッグで端末本来の選択・コピーができます。履歴移動はPgUp/PgDnです。",
+            ),
+          );
+        } else if (action === "on") {
+          screen.setMouseTrackingEnabled(true);
+          console.log(
+            chalk.green("  TUI マウス追跡: ON — ホイールで履歴を移動できます。端末の選択はShift+ドラッグです。"),
+          );
+        } else if (action === "status") {
+          console.log(
+            screen.isMouseTrackingEnabled()
+              ? chalk.dim(
+                  "  TUI マウス追跡: ON (ホイール履歴 / 選択はShift+ドラッグ / native選択へ切替: /tui mouse off)",
+                )
+              : chalk.dim("  TUI マウス追跡: OFF (native選択・コピー / 履歴移動はPgUp/PgDn / 復帰: /tui mouse on)"),
+          );
+        } else {
+          console.log(chalk.yellow("  使い方: /tui mouse <on|off|status>"));
         }
         break;
       }

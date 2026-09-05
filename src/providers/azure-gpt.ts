@@ -32,6 +32,7 @@ import type {
 import type { ModelInfo, ModelDetail, SecondLLMProviderType } from "../config/types.js";
 import { httpPostStream } from "../utils/http-client.js";
 import { getOpsLogger } from "../utils/ops-logger.js";
+import { compatibleOpenAISamplingParameters, warnOmittedSamplingParameters } from "./openai-sampling-compat.js";
 
 interface AzureGPTConfig {
   /** ホスト部のみ (例: https://x.openai.azure.com) または完全URL (内部で base に正規化) */
@@ -171,8 +172,9 @@ export class AzureGPTProvider implements LLMProvider {
     };
     if (systemText) body.instructions = systemText;
     if (params.maxTokens) body.max_output_tokens = params.maxTokens;
-    if (params.temperature !== undefined) body.temperature = params.temperature;
-    if (params.top_p !== undefined) body.top_p = params.top_p;
+    const sampling = compatibleOpenAISamplingParameters(this.providerType, this.config.model, params);
+    Object.assign(body, sampling.fields);
+    warnOmittedSamplingParameters(this.providerType, this.config.model, sampling.omitted);
     if (params.tools && params.tools.length > 0) {
       // Chat Completions の {type:"function", function:{name,...}} → Responses のフラット形式
       body.tools = params.tools.map((t) => ({

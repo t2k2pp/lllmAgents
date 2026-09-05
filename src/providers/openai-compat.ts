@@ -11,6 +11,7 @@ import type {
 } from "./base-provider.js";
 import { httpGet, httpPostStream } from "../utils/http-client.js";
 import { inferContextLength } from "./utils/context-length.js";
+import { compatibleOpenAISamplingParameters, warnOmittedSamplingParameters } from "./openai-sampling-compat.js";
 
 interface OpenAIModelResponse {
   data: Array<{ id: string; object: string }>;
@@ -140,10 +141,9 @@ export class OpenAICompatProvider implements LLMProvider {
     };
     // サンプリングパラメータ: 設定値がある場合のみ送信。未指定ならサーバー側デフォルトに委ねる
     // (モデルの generation_config.json / Modelfile 等の推奨値がそのまま使われる)
-    if (params.temperature !== undefined) body.temperature = params.temperature;
-    if (params.top_p !== undefined) body.top_p = params.top_p;
-    if (params.top_k !== undefined) body.top_k = params.top_k;
-    if (params.repetition_penalty !== undefined) body.repetition_penalty = params.repetition_penalty;
+    const sampling = compatibleOpenAISamplingParameters(this.providerType, params.model, params);
+    Object.assign(body, sampling.fields);
+    warnOmittedSamplingParameters(this.providerType, params.model, sampling.omitted);
     // max_tokens は呼び出し側が明示指定したときだけ送信する。
     //
     // 重要: 「contextWindow をそのまま渡してサーバが自動調整する」 と思い込んではいけない。

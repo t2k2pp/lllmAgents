@@ -1,6 +1,8 @@
 const EXPECT_QUIT_MARKER = "__PTY_QUIT_SENT__";
 const EXPECT_SCROLL_MARKER = "__PTY_SCROLL_SEEN__";
 const EXPECT_IME_MARKER = "__PTY_IME_SEEN__";
+const EXPECT_MOUSE_OFF_MARKER = "__PTY_MOUSE_OFF_SEEN__";
+const EXPECT_MOUSE_ON_MARKER = "__PTY_MOUSE_ON_SEEN__";
 const EXPECT_PREVIEW_MARKER = "__PTY_PREVIEW_SEEN__";
 const EXPECT_PREVIEW_SUBMITTED_MARKER = "__PTY_PREVIEW_SUBMITTED__";
 const EXPECT_PROCESSING_INPUT_MARKER = "__PTY_PROCESSING_INPUT_SEEN__";
@@ -44,6 +46,12 @@ expect {
 expect -re {日本語入力の右端折返し確認}
 puts "${EXPECT_IME_MARKER}"
 send -- "\\025"
+send -- "/tui mouse off\\r"
+expect -re {マウス追跡: OFF}
+puts "${EXPECT_MOUSE_OFF_MARKER}"
+send -- "/tui mouse on\\r"
+expect -re {マウス追跡: ON}
+puts "${EXPECT_MOUSE_ON_MARKER}"
 send -- "/help\\r"
 expect -re {Ctrl\\+C}
 send -- "\\033\\[<64;10;4M"
@@ -113,6 +121,8 @@ export function ptyDriver(platform, { node, tsx, entry }) {
       quitMarker: EXPECT_QUIT_MARKER,
       scrollMarker: EXPECT_SCROLL_MARKER,
       imeMarker: EXPECT_IME_MARKER,
+      mouseOffMarker: EXPECT_MOUSE_OFF_MARKER,
+      mouseOnMarker: EXPECT_MOUSE_ON_MARKER,
       previewMarker: RESPONSE_PREVIEW_TEXT,
       previewSeenMarker: EXPECT_PREVIEW_MARKER,
       previewSubmittedMarker: EXPECT_PREVIEW_SUBMITTED_MARKER,
@@ -141,6 +151,8 @@ export function ptyDriver(platform, { node, tsx, entry }) {
     quitMarker: EXPECT_QUIT_MARKER,
     scrollMarker: EXPECT_SCROLL_MARKER,
     imeMarker: EXPECT_IME_MARKER,
+    mouseOffMarker: "マウス追跡: OFF",
+    mouseOnMarker: "マウス追跡: ON",
     previewMarker: RESPONSE_PREVIEW_TEXT,
     previewSeenMarker: EXPECT_PREVIEW_MARKER,
     previewSubmittedMarker: EXPECT_PREVIEW_SUBMITTED_MARKER,

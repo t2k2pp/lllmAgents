@@ -17,6 +17,8 @@ describe("PTY smoke driver", () => {
     expect(driver.parentSubmits).toBe(true);
     expect(driver.scrollMarker).toBe("__PTY_SCROLL_SEEN__");
     expect(driver.imeMarker).toBe("__PTY_IME_SEEN__");
+    expect(driver.mouseOffMarker).toBe("マウス追跡: OFF");
+    expect(driver.mouseOnMarker).toBe("マウス追跡: ON");
     expect(driver.previewMarker).toBe("PV42");
     expect(driver.previewSubmittedMarker).toBe("__PTY_PREVIEW_SUBMITTED__");
     expect(driver.processingInputMarker).toBe("処理中・追加入力");
@@ -41,6 +43,10 @@ describe("PTY smoke driver", () => {
     expect(driver.args.join("\n")).toContain("expect -re {> }");
     expect(driver.args.join("\n")).toContain("__PTY_SCROLL_SEEN__");
     expect(driver.args.join("\n")).toContain("__PTY_IME_SEEN__");
+    expect(driver.args.join("\n")).toContain('send -- "/tui mouse off\\r"');
+    expect(driver.args.join("\n")).toContain("__PTY_MOUSE_OFF_SEEN__");
+    expect(driver.args.join("\n")).toContain('send -- "/tui mouse on\\r"');
+    expect(driver.args.join("\n")).toContain("__PTY_MOUSE_ON_SEEN__");
     expect(driver.args.join("\n")).toContain("stty columns 20 rows 24");
     expect(driver.args.join("\n")).toContain("日本語入力の右端折返し確認");
     expect(driver.args.join("\n")).toContain('send -- "PREVIEW_REQUEST\\r"');
@@ -62,6 +68,9 @@ describe("PTY smoke driver", () => {
     expect(driver.args.join("\n")).toContain("STEER_OK");
     expect(driver.args.join("\n")).toContain('send -- "/quit\\r"');
     const previewAt = driver.args.join("\n").lastIndexOf("expect -re {PV42}");
+    const mouseOffAt = driver.args.join("\n").lastIndexOf('send -- "/tui mouse off\\r"');
+    const mouseOnAt = driver.args.join("\n").lastIndexOf('send -- "/tui mouse on\\r"');
+    const helpAt = driver.args.join("\n").lastIndexOf('send -- "/help\\r"');
     const finalAt = driver.args.join("\n").lastIndexOf("expect -re {FINAL99}");
     const modeCycleAt = driver.args.join("\n").lastIndexOf('send -- "\\033\\[Z"');
     const modeSeenAt = driver.args.join("\n").lastIndexOf("expect -re {モード: Autorun}");
@@ -74,6 +83,8 @@ describe("PTY smoke driver", () => {
     const resumeAt = driver.args.join("\n").lastIndexOf('send -- "/run resume\\r"');
     const quitAt = driver.args.join("\n").lastIndexOf('send -- "/quit\\r"');
     expect(steerAt).toBeGreaterThan(previewAt);
+    expect(mouseOnAt).toBeGreaterThan(mouseOffAt);
+    expect(helpAt).toBeGreaterThan(mouseOnAt);
     expect(pauseAt).toBeGreaterThan(previewAt);
     expect(modeCycleAt).toBeGreaterThan(pauseAt);
     expect(modeSeenAt).toBeGreaterThan(modeCycleAt);
