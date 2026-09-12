@@ -230,6 +230,11 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 
 ### ローカルplugin bundle
 
+Unity公式スキルとCLI/MCPは `localllm unity setup --project "<Unity project>"` で
+本アプリ用bundleへ導入できます。ローカルLLMの既存設定を利用し、setupはUnityやモデルを
+起動しません。出力された `launchArgs` で有効化します。診断・更新・実機検証は
+[Unity連携手順](docs/unity-integration.md)を参照してください。
+
 信頼したローカルdirectoryだけを、起動時に一つの拡張単位として読み込めます。自動探索はしません。
 
 ```text

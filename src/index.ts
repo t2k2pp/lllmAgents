@@ -98,11 +98,14 @@ import { applyLogRetention } from "./utils/log-rotation.js";
 import { checkForUpdate, formatUpdateInspection, inspectUpdate } from "./utils/update-check.js";
 import { inferContextLength } from "./providers/utils/context-length.js";
 import { resolveStartupMode } from "./cli/startup-mode.js";
+import { runUnityCommand } from "./unity/unity-integration.js";
 
 const HELP_TEXT = `LocalLLM Agent
 
 Usage:
   localllm [options]
+  localllm unity setup --project <path> [--revision <SHA>] [--command <executable>]
+  localllm unity doctor --project <path> [--command <executable>]
 
 Options:
   -h, --help          Show this help and exit
@@ -124,6 +127,10 @@ let activeTerminalRestore: (() => void) | null = null;
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+  if (args[0] === "unity" && !args.includes("--help") && !args.includes("-h")) {
+    runUnityCommand(args.slice(1));
+    return;
+  }
   if (args.includes("--help") || args.includes("-h")) {
     console.log(HELP_TEXT);
     return;

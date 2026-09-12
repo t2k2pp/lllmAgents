@@ -40,6 +40,9 @@ export class MCPClient {
   private _serverInfo: MCPInitializeResult | null = null;
   private _tools: MCPTool[] = [];
   private _connected = false;
+  onToolsChanged?: (error?: Error) => void;
+  private toolsDirty = false;
+  private refreshing = false;
 
   // SSE用
   private sseAbortController: AbortController | null = null;
@@ -69,40 +72,80 @@ export class MCPClient {
    * MCPサーバーに接続し、初期化・ツール一覧取得を行う
    */
   async connect(): Promise<void> {
-    if (this.config.transport === "stdio") {
-      await this.connectStdio();
-    } else if (this.config.transport === "sse") {
-      await this.connectSSE();
-    } else {
-      throw new Error(`Unsupported transport: ${this.config.transport}`);
+    try {
+      if (this.config.transport === "stdio") {
+        await this.connectStdio();
+      } else if (this.config.transport === "sse") {
+        await this.connectSSE();
+      } else {
+        throw new Error(`Unsupported transport: ${this.config.transport}`);
+      }
+
+      // Initialize
+      const initResult = await this.sendRequest<MCPInitializeResult>("initialize", {
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: {
+          tools: {},
+        },
+        clientInfo: {
+          name: CLIENT_NAME,
+          version: CLIENT_VERSION,
+        },
+      });
+      this._serverInfo = initResult;
+
+      // Send initialized notification
+      this.sendNotification("notifications/initialized", {});
+
+      // Get tools
+      await this.refreshTools();
+      this._connected = true;
+      if (this.toolsDirty) void this.handleToolsChanged();
+    } catch (error) {
+      await this.disconnect();
+      throw error;
     }
+  }
 
-    // Initialize
-    const initResult = await this.sendRequest<MCPInitializeResult>("initialize", {
-      protocolVersion: PROTOCOL_VERSION,
-      capabilities: {
-        tools: {},
-      },
-      clientInfo: {
-        name: CLIENT_NAME,
-        version: CLIENT_VERSION,
-      },
-    });
-    this._serverInfo = initResult;
+  async refreshTools(): Promise<void> {
+    const tools: MCPTool[] = [];
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      const page = await this.sendRequest<MCPToolsListResult>("tools/list", cursor ? { cursor } : {});
+      if (!Array.isArray(page.tools)) throw new Error(`MCP ${this.name}: invalid tools/list response`);
+      tools.push(...page.tools);
+      cursor = page.nextCursor;
+      if (cursor && (cursors.has(cursor) || cursors.size >= 100))
+        throw new Error(`MCP ${this.name}: invalid tools pagination`);
+      if (cursor) cursors.add(cursor);
+    } while (cursor);
+    this._tools = tools;
+  }
 
-    // Send initialized notification
-    this.sendNotification("notifications/initialized", {});
-
-    // Get tools
-    const toolsResult = await this.sendRequest<MCPToolsListResult>("tools/list", {});
-    this._tools = toolsResult.tools ?? [];
-    this._connected = true;
+  private async handleToolsChanged(): Promise<void> {
+    this.toolsDirty = true;
+    if (!this._connected || this.refreshing) return;
+    this.refreshing = true;
+    try {
+      while (this.toolsDirty && this._connected) {
+        this.toolsDirty = false;
+        await this.refreshTools();
+        if (this._connected) this.onToolsChanged?.();
+      }
+    } catch (error) {
+      this._tools = [];
+      if (this._connected) this.onToolsChanged?.(error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      this.refreshing = false;
+    }
   }
 
   /**
    * MCPツールを呼び出す
    */
   async callTool(params: MCPToolCallParams): Promise<MCPToolCallResult> {
+    if (!this._connected) throw new Error(`MCP ${this.name} is disconnected. Run /mcp reload.`);
     return this.sendRequest<MCPToolCallResult>("tools/call", { ...params });
   }
 
@@ -120,14 +163,17 @@ export class MCPClient {
     this.pendingRequests.clear();
 
     if (this.config.transport === "stdio" && this.process) {
-      this.process.stdin?.end();
-      this.process.kill("SIGTERM");
+      const child = this.process;
+      child.stdin?.end();
+      child.kill("SIGTERM");
       // 猶予を与えてからSIGKILL
-      setTimeout(() => {
-        if (this.process && !this.process.killed) {
-          this.process.kill("SIGKILL");
+      const timer = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGKILL");
         }
       }, 3000);
+      timer.unref();
+      child.once("exit", () => clearTimeout(timer));
       this.process = null;
     }
 
@@ -177,7 +223,10 @@ export class MCPClient {
     });
 
     this.process.on("exit", (code) => {
+      const wasConnected = this._connected;
       this._connected = false;
+      this._tools = [];
+      if (wasConnected) this.onToolsChanged?.(new Error(`Server exited (${code}); run /mcp reload.`));
       for (const [, pending] of this.pendingRequests) {
         clearTimeout(pending.timer);
         pending.reject(new Error(`MCP server "${this.config.name}" exited with code ${code}`));
@@ -368,7 +417,11 @@ export class MCPClient {
     }
   }
 
-  private handleResponse(msg: JsonRpcResponse): void {
+  private handleResponse(msg: JsonRpcResponse & { method?: string }): void {
+    if (msg.id == null && msg.method === "notifications/tools/list_changed") {
+      void this.handleToolsChanged();
+      return;
+    }
     if (msg.id == null) return; // Notification, ignore
 
     const pending = this.pendingRequests.get(msg.id);

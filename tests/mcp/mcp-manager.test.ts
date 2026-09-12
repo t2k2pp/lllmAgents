@@ -162,6 +162,31 @@ describe("MCPManager", () => {
   });
 
   describe("connectAll", () => {
+    it("replaces tools on notification and removes stale tools on refresh failure", async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({ mcpServers: { live: { name: "live", transport: "stdio", command: "fixture" } } }),
+      );
+      const client = {
+        name: "live",
+        connected: true,
+        tools: [{ name: "old", inputSchema: { type: "object" } }],
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        onToolsChanged: undefined as ((error?: Error) => void) | undefined,
+      };
+      vi.mocked(MCPClient).mockImplementation(() => client as unknown as MCPClient);
+      const manager = new MCPManager("/test/project");
+      await manager.connectAll(registry);
+      client.tools = [{ name: "new", inputSchema: { type: "object" } }];
+      client.onToolsChanged?.();
+      expect(registry.getToolNames()).toEqual(["mcp__live__new"]);
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      client.onToolsChanged?.(new Error("disconnected"));
+      expect(registry.getToolNames()).toEqual([]);
+      expect(error).toHaveBeenCalledWith(expect.stringContaining("/mcp reload"));
+      error.mockRestore();
+    });
     it("keeps MCP disabled for the session when startup policy locks it", async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockReturnValue("not json");

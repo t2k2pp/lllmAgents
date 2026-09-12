@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 import type { LLMProvider } from "../../providers/base-provider.js";
 import { collectResponse } from "../../providers/base-provider.js";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
@@ -22,7 +23,7 @@ export class VisionService {
     return this.model;
   }
 
-  async analyzeImage(imageBase64: string, prompt: string): Promise<string> {
+  async analyzeImage(imageBase64: string, prompt: string, mimeType = "image/png"): Promise<string> {
     const gen = this.provider.chatWithVision({
       model: this.model,
       messages: [
@@ -30,7 +31,7 @@ export class VisionService {
           role: "user",
           content: [
             { type: "text", text: prompt },
-            { type: "image_url", image_url: { url: `data:image/png;base64,${imageBase64}` } },
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
           ],
         },
       ],
@@ -76,7 +77,15 @@ export function createVisionTool(visionService: VisionService): ToolHandler {
 
         const base64 = fs.readFileSync(imagePath, "base64");
 
-        const result = await visionService.analyzeImage(base64, params.prompt as string);
+        const mimeTypes: Record<string, string> = {
+          ".png": "image/png",
+          ".jpg": "image/jpeg",
+          ".jpeg": "image/jpeg",
+          ".webp": "image/webp",
+        };
+        const mimeType = mimeTypes[path.extname(imagePath).toLowerCase()];
+        if (!mimeType) return { success: false, output: "", error: "Use a PNG, JPEG or WebP image" };
+        const result = await visionService.analyzeImage(base64, params.prompt as string, mimeType);
         return { success: true, output: result };
       } catch (e) {
         return { success: false, output: "", error: String(e) };

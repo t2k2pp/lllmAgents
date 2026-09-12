@@ -13,6 +13,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import chalk from "chalk";
 import { MCPClient } from "./mcp-client.js";
+import { renderMcpResult } from "./mcp-content.js";
 import type { MCPServerConfig, MCPServersConfig, MCPTool, MCPContentBlock } from "./types.js";
 import type { ToolHandler, ToolResult, ToolRegistry } from "../tools/tool-registry.js";
 import type { ToolDefinition } from "../providers/base-provider.js";
@@ -130,6 +131,7 @@ export class MCPManager {
       if (sn !== name) continue;
       try {
         const client = new MCPClient(c);
+        this.observeTools(client, registry);
         await client.connect();
         this.clients.set(key, client);
         const handlers = this.createToolHandlers(client);
@@ -273,6 +275,7 @@ export class MCPManager {
       }
       try {
         const client = new MCPClient(config);
+        this.observeTools(client, registry);
         await client.connect();
         this.clients.set(key, client);
 
@@ -324,6 +327,19 @@ export class MCPManager {
     return client.tools.map((mcpTool) => this.mcpToolToHandler(client, mcpTool));
   }
 
+  private observeTools(client: MCPClient, registry: ToolRegistry): void {
+    client.onToolsChanged = (error) => {
+      for (const name of registry.getToolNames()) {
+        if (name.startsWith(`mcp__${client.name}__`)) registry.unregister(name);
+      }
+      if (error) {
+        console.error(`MCP ${client.name}: tools refresh failed: ${error.message}. Run /mcp reload.`);
+        return;
+      }
+      for (const handler of this.createToolHandlers(client)) registry.register(handler);
+    };
+  }
+
   /**
    * 単一のMCPツール → ToolHandler変換
    */
@@ -358,7 +374,7 @@ export class MCPManager {
             };
           }
 
-          const output = extractText(result.content);
+          const output = renderMcpResult(result);
           return { success: true, output };
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);

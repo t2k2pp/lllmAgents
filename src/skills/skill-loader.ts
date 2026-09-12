@@ -25,12 +25,35 @@ export function parseSkillFile(content: string, filePath: string, builtIn: boole
 
   // Simple YAML-like parsing
   const meta: Record<string, string> = {};
+  let arrayKey: string | undefined;
+  let blockKey: string | undefined;
+  let blockSeparator = " ";
   for (const line of frontmatter.split("\n")) {
+    if (blockKey && (/^\s+/.test(line) || !line.trim())) {
+      meta[blockKey] += `${meta[blockKey] ? blockSeparator : ""}${line.trim()}`;
+      continue;
+    }
+    blockKey = undefined;
+    const item = line.match(/^\s+-\s+([a-zA-Z0-9_-]+)\s*$/);
+    if (arrayKey && item) {
+      meta[arrayKey] += `${meta[arrayKey] ? "," : ""}${item[1]}`;
+      continue;
+    }
+    if (arrayKey && /^\s+\S/.test(line)) return null;
+    arrayKey = undefined;
     const colonIdx = line.indexOf(":");
     if (colonIdx === -1) continue;
     const key = line.slice(0, colonIdx).trim();
     const value = line.slice(colonIdx + 1).trim();
     meta[key] = value;
+    if (/^[>|][-+]?$/.test(value)) {
+      blockKey = key;
+      blockSeparator = value.startsWith("|") ? "\n" : " ";
+      meta[key] = "";
+    } else if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      meta[key] = value.slice(1, -1);
+    }
+    if ((key === "allowed-tools" || key === "tools") && !value) arrayKey = key;
   }
 
   if (!meta.name || !meta.description) return null;
@@ -52,7 +75,20 @@ export function parseSkillFile(content: string, filePath: string, builtIn: boole
     ? toolsRaw
         .replace(/^\[|\]$/g, "")
         .split(",")
-        .map((t) => t.trim())
+        .map((t) => {
+          const tool = t.trim();
+          const aliases: Record<string, string> = {
+            Bash: "bash",
+            Read: "file_read",
+            Write: "file_write",
+            Edit: "file_edit",
+            Glob: "glob",
+            Grep: "grep",
+            WebFetch: "web_fetch",
+            WebSearch: "web_search",
+          };
+          return aliases[tool] ?? tool;
+        })
         .filter(Boolean)
     : undefined;
   if (tools?.some((tool) => !/^[a-zA-Z0-9_-]+$/.test(tool))) return null;

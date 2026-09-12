@@ -95,6 +95,7 @@ export interface MCPTool {
 
 export interface MCPToolsListResult {
   tools: MCPTool[];
+  nextCursor?: string;
 }
 
 export interface MCPToolCallParams {
@@ -104,6 +105,7 @@ export interface MCPToolCallParams {
 
 export interface MCPToolCallResult {
   content: MCPContentBlock[];
+  structuredContent?: Record<string, unknown>;
   isError?: boolean;
 }
 
@@ -112,4 +114,5 @@ export interface MCPContentBlock {
   text?: string;
   data?: string;
   mimeType?: string;
+  resource?: { uri: string; text?: string; mimeType?: string };
 }
