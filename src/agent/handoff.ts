@@ -17,6 +17,7 @@ import type { LLMProvider, Message } from "../providers/base-provider.js";
 import { collectResponse } from "../providers/base-provider.js";
 import type { MessageHistory } from "./message-history.js";
 import { estimateMessageTokens } from "./token-counter.js";
+import { isRateLimitError } from "../providers/utils/rate-limit.js";
 import * as logger from "../utils/logger.js";
 
 /** 引き継ぎメモ生成のサンプリング。 事実の書き写しなので決定論寄りに倒す */
@@ -174,11 +175,12 @@ export async function generateHandoffNote(
         stream: true,
       });
       const response = await collectResponse(gen);
-      const note = validateHandoffNote(response.content);
+      const note = response.finishReason === "length" ? null : validateHandoffNote(response.content);
       if (note) return { note };
-      lastError = "テンプレートの節が揃っていません";
+      lastError = `引き継ぎメモが未完成です (finishReason=${response.finishReason}, outputChars=${response.content.length}, maxTokens=${HANDOFF_MAX_TOKENS})`;
       logger.warn(`[handoff] 引き継ぎメモの検証に失敗 (試行 ${attempt + 1}/2): ${lastError}`);
     } catch (e) {
+      if (isRateLimitError(e)) throw e;
       lastError = e instanceof Error ? e.message : String(e);
       logger.warn(`[handoff] 引き継ぎメモの生成に失敗 (試行 ${attempt + 1}/2): ${lastError}`);
     }
@@ -198,10 +200,12 @@ export interface HandoffResult {
 }
 
 /** 再投入する user メッセージの本文を組み立てる */
-export function buildHandoffMessage(note: string, savedSessionId?: string): string {
+export function buildHandoffMessage(note: string, savedSessionId?: string, fromFile = false): string {
   const lines = [
     `${HANDOFF_MARKER} ここまでの会話履歴はコンテキスト整理のためリセットされました。`,
-    `以下があなた自身が残した引き継ぎメモです。 これを前提に作業を続けてください。`,
+    fromFile
+      ? "以下は利用者がファイルから指定した引き継ぎメモです。記載された制約と未確認事項を保持してください。"
+      : "以下があなた自身が残した引き継ぎメモです。 これを前提に作業を続けてください。",
   ];
   if (savedSessionId) {
     lines.push(`(リセット前の完全な履歴はセッション ${savedSessionId} に保存済みです)`);
@@ -211,6 +215,8 @@ export function buildHandoffMessage(note: string, savedSessionId?: string): stri
 }
 
 export interface HandoffOptions {
+  /** 明示指定されたメモ。LLMは呼ばず、完全履歴の保存成功を必須とする。 */
+  providedNote?: string;
   /**
    * clear 直前にセッションを保存する。 /resume で完全復元できる状態を作ってから消す。
    * 保存したセッション ID を返すと、 引き継ぎメモに復元先として併記する。
@@ -229,7 +235,18 @@ export async function runHandoff(
   opts: HandoffOptions = {},
 ): Promise<HandoffResult> {
   const beforeTokens = estimateMessageTokens(history.getMessages());
-  const { note, reason } = await generateHandoffNote(provider, model, history.getRawMessages());
+  const fromFile = opts.providedNote !== undefined;
+  if (fromFile && (!opts.providedNote?.trim() || opts.providedNote.length > 16_000 || !opts.saveSession)) {
+    return {
+      applied: false,
+      note: null,
+      freedTokens: 0,
+      reason: "ファイル引き継ぎには1〜16000文字のメモと履歴保存先が必要です",
+    };
+  }
+  const { note, reason } = fromFile
+    ? { note: opts.providedNote?.trim(), reason: undefined }
+    : await generateHandoffNote(provider, model, history.getRawMessages());
   if (!note) {
     return { applied: false, note: null, freedTokens: 0, reason: reason ?? "引き継ぎメモを生成できませんでした" };
   }
@@ -238,13 +255,19 @@ export async function runHandoff(
   let savedSessionId: string | undefined;
   try {
     const id = opts.saveSession?.();
-    if (typeof id === "string") savedSessionId = id;
+    if (opts.saveSession && !id?.trim()) throw new Error("保存先セッションIDがありません");
+    savedSessionId = id;
   } catch (e) {
-    logger.warn(`[handoff] clear 前のセッション保存に失敗しました: ${e}`);
+    return {
+      applied: false,
+      note,
+      freedTokens: 0,
+      reason: `履歴の保存に失敗したためリセットしませんでした: ${String(e)}`,
+    };
   }
 
   history.clear();
-  history.addUserMessage(buildHandoffMessage(note, savedSessionId));
+  history.addUserMessage(buildHandoffMessage(note, savedSessionId, fromFile));
 
   const afterTokens = estimateMessageTokens(history.getMessages());
   const freedTokens = Math.max(0, beforeTokens - afterTokens);

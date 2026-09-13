@@ -272,7 +272,10 @@ export class ContextManager {
 
       case "clear": {
         const result = await runHandoff(this.provider, this.model, history, opts);
-        if (result.applied) this.lastForgetTurn = this.turn;
+        if (result.applied) {
+          this.lastForgetTurn = this.turn;
+          this.compressor = new HierarchicalCompressor(this.provider, this.model);
+        }
         return finish({ applied: result.applied, note: result.reason, ...empty, handoff: result });
       }
 

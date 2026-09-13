@@ -110,7 +110,7 @@ export function buildUnityBundle(source: string, project: string, revision: stri
           version: manifest.version,
           project: root,
           command,
-          adapterVersion: 1,
+          adapterVersion: 2,
         },
         null,
         2,
@@ -125,14 +125,14 @@ name: local-development
 description: UnityプロジェクトをローカルLLMで編集し、コンパイル・テスト結果を確認する。
 ---
 対象プロジェクトは ${JSON.stringify(root)}。Editor操作では常に --project-path でこのパスを指定する。
-まず unity status --format json で接続状態を確認する。未接続・Safe Mode・対象不明なら原因と復旧方法を報告し、操作を止める。
+まず skill ツールで unity-production を読み、登録済みUnity MCPで接続・対象シーン・保存状態・Consoleを限定的に確認する。CLIの実行成功をMCP利用の前提にしない。未接続・Safe Mode・対象不明なら観測した原因と復旧方法を報告し、変更操作を止める。
 公式CLI手順は skill ツールで unity:unity-cli を読む。必要な他の公式スキルも unity: 接頭辞で指定する。
-CLIは bash ツールで実行する。スキル内の相対参照はそのスキルのディレクトリを基準に読む。
+MCPで対応できない操作にCLIが必要な場合は bash ツールで実行し、--project-pathを指定する。スキル内の相対参照はそのスキルのディレクトリを基準に読む。
 シーンとアセットは接続中のEditorのCLI/MCPで変更する。操作前に対象を確認し、変更後に保存状態とコンパイル結果を確認する。
 テストは公式スキルの unity test を使用し、プロセス終了・レポートを確認する。実行不能とテスト不合格を区別し、実行していない検証を成功と報告しない。
 MCPツールが更新されない場合は /mcp reload を案内する。失敗した変更操作を無条件に再実行しない。
 MCP画像は保存先が返る。画面確認には vision_analyze と設定済みの画像対応モデルが必要。画像を保存しただけでは画面確認済みとしない。
-利用者が実行テストを保留している間は、Editor操作・LLM実行・Unityテストを開始しない。
+利用者が実行テストを保留している間はPlayやテストを開始しない。許可済みの実装・保存・静的確認は継続する。入力自動化が使えなければ反復操作に固執せず、操作感の確認をユーザープレイへ残して成果物を仕上げる。
 `,
     );
     const plugins = loadPluginBundles([staging]);

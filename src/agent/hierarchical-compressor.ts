@@ -103,12 +103,17 @@ function parseSummaryResponse(raw: string): { summary: string; keyFacts: string[
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[0]);
-      if (typeof parsed.summary !== "string" || !Array.isArray(parsed.keyFacts)) {
+      if (
+        typeof parsed.summary !== "string" ||
+        !parsed.summary.trim() ||
+        !Array.isArray(parsed.keyFacts) ||
+        !parsed.keyFacts.every((fact: unknown) => typeof fact === "string")
+      ) {
         throw new Error("summary/keyFacts shape mismatch");
       }
       return { summary: parsed.summary, keyFacts: parsed.keyFacts.filter((fact: unknown) => typeof fact === "string") };
     } catch (error) {
-      throw new Error(`Context summarizer returned invalid JSON: ${String(error)}`, { cause: error });
+      throw new Error("Context summarizer returned invalid JSON or summary/keyFacts shape mismatch", { cause: error });
     }
   }
   throw new Error("Context summarizer returned no JSON object; history was not replaced.");
@@ -185,7 +190,17 @@ export class HierarchicalCompressor {
       });
 
       const response = await collectResponse(gen);
-      const { summary, keyFacts } = parseSummaryResponse(response.content);
+      let parsed: { summary: string; keyFacts: string[] };
+      try {
+        if (response.finishReason === "length") throw new Error("Context summarizer output was truncated");
+        parsed = parseSummaryResponse(response.content);
+      } catch (error) {
+        throw new Error(
+          `${String(error)} (finishReason=${response.finishReason}, outputChars=${response.content.length}, maxTokens=${COMPRESSOR_LAYER1_MAX_TOKENS}). 履歴は保持しています。入力超過とは限りません。保存済みメモで再開する場合は /handoff from-file <path> を使用してください。`,
+          { cause: error },
+        );
+      }
+      const { summary, keyFacts } = parsed;
 
       return {
         id: generateBlockId(),
@@ -224,6 +239,10 @@ export class HierarchicalCompressor {
       });
 
       const response = await collectResponse(gen);
+      if (response.finishReason === "length")
+        throw new Error(
+          `Layer 2 summary truncated (maxTokens=${COMPRESSOR_LAYER2_MAX_TOKENS}, outputChars=${response.content.length})`,
+        );
       const { summary, keyFacts } = parseSummaryResponse(response.content);
 
       const layer2Block: SummaryBlock = {

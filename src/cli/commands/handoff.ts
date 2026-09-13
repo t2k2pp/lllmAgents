@@ -9,6 +9,7 @@
  *
  * 引き継ぎ無しで完全に消したい場合は従来通り /clear を使う。
  */
+import * as fs from "node:fs";
 import chalk from "chalk";
 import type { ReplCommandDef, ReplCommandContext } from "./types.js";
 
@@ -30,13 +31,23 @@ async function runDry(ctx: ReplCommandContext): Promise<void> {
   console.log(chalk.dim("  この内容でリセットするには /handoff を実行してください。\n"));
 }
 
-async function runHandoff(ctx: ReplCommandContext): Promise<void> {
-  console.log(chalk.dim("  引き継ぎメモを作成中..."));
-  const outcome = await ctx.agent.runHandoffNow();
+async function runHandoff(ctx: ReplCommandContext, providedNote?: string): Promise<void> {
+  console.log(
+    chalk.dim(
+      providedNote === undefined
+        ? "  引き継ぎメモを作成中..."
+        : "  ファイルから引き継ぎます (LLM呼び出しなし)。完全履歴を別セッションへ保存します。",
+    ),
+  );
+  const outcome = await ctx.agent.runHandoffNow(providedNote);
   if (!outcome.applied) {
     // メモを作れなかった場合は履歴に触れていない (docs §8)
     console.log(chalk.yellow(`  リセットしませんでした: ${outcome.note ?? "引き継ぎメモを生成できませんでした"}`));
-    console.log(chalk.dim("  履歴は変更していません。 忘却なら /forget、 圧縮なら /compact を使ってください。"));
+    console.log(
+      chalk.dim(
+        "  履歴は変更していません。 保存済みメモを使う場合は /handoff from-file <path> でLLMを呼ばずに再開できます。",
+      ),
+    );
     return;
   }
   const note = outcome.handoff?.note;
@@ -57,6 +68,7 @@ export const handoffCommand: ReplCommandDef = {
   name: "/handoff",
   summary: "引き継ぎメモを残してコンテキストをリセット（/handoff dry で事前確認）",
   completions: [
+    { command: "/handoff from-file", description: "保存済みメモからLLMを呼ばずに引き継ぐ" },
     { command: "/handoff", description: "引き継ぎメモを残してコンテキストをリセット" },
     { command: "/handoff dry", description: "引き継ぎメモを表示するだけ（リセットしない）" },
   ],
@@ -66,9 +78,24 @@ export const handoffCommand: ReplCommandDef = {
       await runDry(ctx);
       return;
     }
+    if (sub === "from-file") {
+      const file = args
+        .slice(1)
+        .join(" ")
+        .replace(/^(["'])(.*)\1$/, "$2");
+      try {
+        const stat = fs.statSync(file);
+        if (!stat.isFile() || stat.size > 64_000) throw new Error("64KB以下のUTF-8メモファイルを指定してください");
+        const note = new TextDecoder("utf-8", { fatal: true }).decode(fs.readFileSync(file));
+        await runHandoff(ctx, note);
+      } catch (error) {
+        console.log(chalk.yellow(`  ファイル引き継ぎに失敗しました: ${String(error)}`));
+      }
+      return;
+    }
     if (sub.length > 0) {
       console.log(chalk.yellow(`  不明なサブコマンド: ${sub}`));
-      console.log(chalk.dim("  使い方: /handoff [dry]"));
+      console.log(chalk.dim("  使い方: /handoff [dry | from-file <path>]"));
       return;
     }
     await runHandoff(ctx);

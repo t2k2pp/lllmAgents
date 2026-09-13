@@ -48,6 +48,7 @@ import { loadMemory } from "./memory.js";
 import { loadProjectInstructions } from "./project-context.js";
 import {
   createSession,
+  forkSession,
   appendSessionTerminalOutput,
   normalizeSessionTitle,
   saveSession,
@@ -2432,8 +2433,7 @@ export class AgentLoop {
 
       const outcome = await this.contextManager.applyStrategy(this.history, action, {
         saveSession: () => {
-          this.saveCurrentSession();
-          return this.session.meta.id;
+          return this.saveHandoffArchive();
         },
       });
 
@@ -3316,11 +3316,11 @@ export class AgentLoop {
    * 「今ここで区切りたい」 という判断はユーザーが一番正確にできるので独立コマンドにする。
    * 引き継ぎメモの生成に失敗したら履歴には触れない。
    */
-  async runHandoffNow(): Promise<StrategyOutcome> {
+  async runHandoffNow(providedNote?: string): Promise<StrategyOutcome> {
     const outcome = await this.contextManager.applyStrategy(this.history, "clear", {
+      providedNote,
       saveSession: () => {
-        this.saveCurrentSession();
-        return this.session.meta.id;
+        return this.saveHandoffArchive();
       },
     });
     if (outcome.applied) this.contextStrategy.noteApplied();
@@ -3349,6 +3349,14 @@ export class AgentLoop {
   /** 現在のコンテキスト使用率 (0.0〜1.0) */
   getContextUsageRatio(): number {
     return this.contextManager.getUsageRatio(this.history);
+  }
+
+  private saveHandoffArchive(): string {
+    this.saveCurrentSession();
+    const archive = forkSession(this.session);
+    archive.meta.title = `${this.session.meta.title || "会話"} (handoff archive)`;
+    saveSession(archive);
+    return archive.meta.id;
   }
 
   saveCurrentSession(): void {
