@@ -5,6 +5,8 @@ description: ゲームアプリ・ゲームの実装スキル。ゲーム・ア�
 
 # Game Development Skill
 
+Unityプロジェクトの制作では `unity-production` を併用する。以下の単一HTML出力・ブラウザ用game_smokeはUnityには適用しない。入力自動化がない場合の手動確認は制作成果をまとめた後に行い、制作中の細かな操作依頼を前提にしない。
+
 ## 絶対ルール
 
 ### ✅ 品質基準
