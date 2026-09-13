@@ -426,3 +426,20 @@ describe("ForgettingEngine", () => {
     expect(engine.getLastResult()?.result.applied).toBe(true);
   });
 });
+
+it("忘却LLMのレート制限は再試行せず呼出元へ返す", async () => {
+  let calls = 0;
+  const provider = {
+    async *chat(): AsyncGenerator<ChatChunk> {
+      calls++;
+      yield { type: "error", error: "[azure-gpt] rate_limit_exceeded" };
+    },
+  } as unknown as LLMProvider;
+  const engine = new ForgettingEngine(provider, "test", { keepRecentSegments: 1 });
+  const messages: Message[] = Array.from({ length: 20 }, (_, i) => ({
+    role: i % 2 ? "assistant" : "user",
+    content: "ordinary work " + i,
+  }));
+  await expect(engine.plan(messages, 100)).rejects.toThrow("rate_limit_exceeded");
+  expect(calls).toBe(1);
+});

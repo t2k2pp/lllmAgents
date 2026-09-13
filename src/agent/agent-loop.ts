@@ -409,7 +409,7 @@ export class AgentLoop {
     agentId: string = "main",
     sessionId?: string,
     streamingDisplay: boolean = false,
-    maxParallelTools: number = 3,
+    maxParallelTools: number = 1,
     hasSecondLLM: boolean = false,
     samplingParams: SamplingParams = {},
     hasObsidian: boolean = false,
@@ -513,6 +513,7 @@ export class AgentLoop {
     // ※ 古いセッションの掃除 (pruneOldSessions) は、 resume でセッション identity が
     //    確定した後に runCheckpointMaintenance() で実行する (復元対象を誤って消さないため)。
     this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager, undefined, this.checkpointManager);
+    this.toolExecutor.setParallelExecutionAllowed(this.maxParallelTools > 1);
     // claude-agent-sdk プロバイダの場合、 lllmAgent ツールを in-process MCP として
     // SDK に公開する (docs/claude-agent-sdk-provider-design.md §3.3)。
     // duck typing で attach メソッドを持つプロバイダのみに適用。
@@ -1941,10 +1942,8 @@ export class AgentLoop {
         let isTask = false;
         let isCompleted = false;
         if (shouldReprompt) {
-          const [intent, completion] = await Promise.all([
-            this.intentClassifier.classifyIntent(userMessageText, this.history.getRecentContext(3)),
-            this.intentClassifier.classifyCompletion(textContent),
-          ]);
+          const intent = await this.intentClassifier.classifyIntent(userMessageText, this.history.getRecentContext(3));
+          const completion = await this.intentClassifier.classifyCompletion(textContent);
           isTask = intent === "task";
           isCompleted = completion === "completed";
           // B5 の判定材料として控える。 ここで既に呼んでいる分を流用し、 追加の LLM 呼び出しはしない
@@ -3120,10 +3119,22 @@ export class AgentLoop {
   private async executeToolsParallel(toolCalls: ToolCall[]): Promise<boolean> {
     if (!(await this.runApiGate.waitUntilRunning()) || this._aborted) return true;
     const limit = this.maxParallelTools;
+    if (limit === 1) {
+      for (let i = 0; i < toolCalls.length; i++) {
+        if (await this.executeSingleTool(toolCalls[i])) {
+          for (const pending of toolCalls.slice(i + 1)) {
+            this.history.addToolResult(pending.id, "Error: 前のツールで停止したため未実行です。");
+          }
+          return true;
+        }
+      }
+      return false;
+    }
     console.log(chalk.dim(`\n  ⟹ ${toolCalls.length} tools (max ${limit} parallel)...`));
 
     // セマフォによる同時実行数制限
     let running = 0;
+    let batchStopped = false;
     const queue: (() => void)[] = [];
     function acquire(): Promise<void> {
       if (running < limit) {
@@ -3144,7 +3155,7 @@ export class AgentLoop {
     const promises = toolCalls.map(async (toolCall) => {
       await acquire();
       // 中断チェック: 待機中にabortされた場合はスキップ
-      if (this._aborted) {
+      if (this._aborted || batchStopped) {
         release();
         return { toolCall, result: { success: false, output: "", error: "中断されました" }, durationMs: 0 };
       }
@@ -3160,6 +3171,7 @@ export class AgentLoop {
         } else {
           result = await this.toolExecutor.execute(toolCall, this.currentSource);
         }
+        if (result.abortExecution) batchStopped = true;
         const durationMs = Date.now() - startMs;
         this.runStats.toolsExecuted++;
         this.trackFileChange(toolCall, result.success);
@@ -3940,6 +3952,7 @@ export class AgentLoop {
 
   setMaxParallelTools(value: number): void {
     this.maxParallelTools = Math.max(1, Math.floor(value));
+    this.toolExecutor.setParallelExecutionAllowed(this.maxParallelTools > 1);
   }
 }
 

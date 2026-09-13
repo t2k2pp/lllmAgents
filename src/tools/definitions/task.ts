@@ -111,7 +111,7 @@ const TASK_DESCRIPTION =
   "general-purpose (全ツール) / bash (コマンド実行特化) / code-reviewer (品質・セキュリティレビュー特化)。\n" +
   "[second_llm_agent との使い分け] task = メインLLM (= あなた自身) / " +
   "second_llm_agent = 別モデル。 モデル特性で選ぶ。\n" +
-  "[並列起動] 独立したタスクは複数同時起動で総時間短縮可能 (run_in_background + task_output)。";
+  "[並列起動] 既定は逐次実行。同じマシン/利用枠へ並列送信しない。別の実行基盤と明示的な並列設定がある場合のみrun_in_backgroundを検討する。";
 
 export const taskTool: ToolHandler = {
   name: "task",

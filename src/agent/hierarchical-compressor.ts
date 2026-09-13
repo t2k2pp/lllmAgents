@@ -7,6 +7,7 @@
  *   Layer 2: キーワード+制約のみの圧縮要約
  */
 import type { LLMProvider, Message } from "../providers/base-provider.js";
+import { isRateLimitError } from "../providers/utils/rate-limit.js";
 import { collectResponse } from "../providers/base-provider.js";
 import { estimateTokens } from "./token-counter.js";
 import * as logger from "../utils/logger.js";
@@ -145,16 +146,25 @@ export class HierarchicalCompressor {
       blocks.push(olderMessages.slice(i, i + BLOCK_SIZE));
     }
 
-    // Step 2: 各ブロックを Layer 1 に要約（並列実行）
+    // Step 2: 同一providerへの送信は逐次。失敗したら後続ブロックは送信しない。
     logger.info(`Compressing ${blocks.length} block(s) to Layer 1...`);
-    const newLayer1Blocks = await Promise.all(blocks.map((block) => this.summarizeToLayer1(block)));
+    const newLayer1Blocks: SummaryBlock[] = [];
+    for (const block of blocks) {
+      newLayer1Blocks.push(await this.summarizeToLayer1(block));
+    }
+    const previousBlocks = [...this.summaryBlocks];
     this.summaryBlocks.push(...newLayer1Blocks);
 
     // Step 3: Layer 1 が多すぎたら Layer 2 に統合
     const layer1Blocks = this.summaryBlocks.filter((b) => b.layer === 1);
     if (layer1Blocks.length > MAX_LAYER1_BLOCKS) {
       logger.info(`Layer 1 blocks (${layer1Blocks.length}) exceed limit, promoting to Layer 2...`);
-      await this.promoteToLayer2(layer1Blocks);
+      try {
+        await this.promoteToLayer2(layer1Blocks);
+      } catch (error) {
+        this.summaryBlocks = previousBlocks;
+        throw error;
+      }
     }
 
     return this.buildContextSummary();
@@ -232,6 +242,7 @@ export class HierarchicalCompressor {
 
       logger.info(`Promoted ${layer1Blocks.length} Layer 1 blocks → 1 Layer 2 block`);
     } catch (e) {
+      if (isRateLimitError(e)) throw e;
       logger.warn(`Layer 2 promotion failed: ${e}`);
       // 失敗時は Layer 1 をそのまま維持
     }

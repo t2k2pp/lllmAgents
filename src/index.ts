@@ -530,8 +530,8 @@ async function main(): Promise<void> {
     restoredStates.push("autorun: ON");
   }
 
-  // maxParallelTools がデフォルト(3)以外なら表示
-  if (config.maxParallelTools && config.maxParallelTools !== 3) {
+  // maxParallelTools がデフォルト(1)以外なら表示
+  if (config.maxParallelTools && config.maxParallelTools !== 1) {
     restoredStates.push(`parallel: ${config.maxParallelTools}`);
   }
 
@@ -683,7 +683,7 @@ async function main(): Promise<void> {
     "main",
     sessionId,
     config.streamingDisplay ?? false,
-    config.maxParallelTools ?? 3,
+    config.maxParallelTools ?? 1,
     hasSecondLLM,
     samplingParams,
     !!config.obsidian?.vaultPath,

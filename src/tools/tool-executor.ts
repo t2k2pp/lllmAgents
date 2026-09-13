@@ -1,3 +1,4 @@
+import { isRateLimitError } from "../providers/utils/rate-limit.js";
 import chalk from "chalk";
 import type { ToolCall } from "../providers/base-provider.js";
 import type { ToolRegistry, ToolResult } from "./tool-registry.js";
@@ -45,6 +46,11 @@ export class ToolExecutor {
    * のハンドラはこの値を context.ancestors として受け取り、 子エージェントに伝播させる。
    */
   private readonly ancestors: AncestorTypes;
+  private parallelExecutionAllowed = false;
+
+  setParallelExecutionAllowed(allowed: boolean): void {
+    this.parallelExecutionAllowed = allowed;
+  }
 
   constructor(
     private registry: ToolRegistry,
@@ -162,8 +168,19 @@ export class ToolExecutor {
       progressIndicator.begin(toolName, formatToolSummary(toolName, params));
     }
     try {
+      if (toolName === "task" && params.run_in_background === true && !this.parallelExecutionAllowed) {
+        return {
+          success: false,
+          output: "",
+          error: "逐次実行モードではバックグラウンド委任はできません。run_in_background=falseで完了を待ってください。",
+        };
+      }
       logger.debug(`Executing tool: ${toolName}`, params);
       const result = await handler.execute(params, { ancestors: this.ancestors, source, workspace: this.workspace });
+
+      if (!result.success && isRateLimitError(result.error)) {
+        result.abortExecution = true;
+      }
 
       // Post-tool hooks
       if (this.hookManager) {
@@ -187,6 +204,7 @@ export class ToolExecutor {
         success: false,
         output: "",
         error: errorMsg,
+        abortExecution: isRateLimitError(e),
       };
     } finally {
       if (isRoot) {

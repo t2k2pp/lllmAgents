@@ -33,3 +33,10 @@
 - For a CI correction, include the failing OS/job and root cause. For a closure/documentation commit, identify the implementation boundary and the CI evidence it closes.
 - Before committing, inspect the staged diff and ensure the repository-managed `commit-msg` hook is active with `npm run setup:git-hooks`. The hook validates the proposed message locally, and CI revalidates every commit introduced by a push or pull request.
 - Do not rewrite public history unless the user explicitly requests it. If requested, create a recoverable local backup ref, preserve trees and authorship, and use `--force-with-lease` against the verified remote SHA.
+
+## LLM execution and rate limits
+
+- Default to sequential execution for the same local machine or cloud quota. Do not infer independent capacity from different model names, ports, or Azure deployment URLs.
+- Stop the current operation when a provider reports a rate limit. Do not automatically retry, dispatch queued requests, or start another LLM-based fallback after that failure. Resume only on an explicit user action.
+- Keep internal summarization and auxiliary classification sequential; the tool concurrency setting must not conceal an independent fan-out of LLM calls.
+- Treat parallel execution on independently provisioned machines as an explicit opt-in, not a default recommendation.

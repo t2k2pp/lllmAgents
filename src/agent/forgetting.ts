@@ -14,6 +14,7 @@
  * docs/context-forgetting.md が正本。
  */
 import type { LLMProvider, Message } from "../providers/base-provider.js";
+import { isRateLimitError } from "../providers/utils/rate-limit.js";
 import { collectResponse } from "../providers/base-provider.js";
 import { estimateTokens, estimateMessageTokens } from "./token-counter.js";
 import type { MessageHistory } from "./message-history.js";
@@ -650,6 +651,7 @@ export class ForgettingEngine {
           logger.warn(`[forget] JSON パースに失敗 (試行 ${attempt + 1}/2): ${oneLine(response.content, 200)}`);
         }
       } catch (e) {
+        if (isRateLimitError(e)) throw e;
         logger.warn(`[forget] 忘却選択の LLM 呼び出しに失敗 (試行 ${attempt + 1}/2): ${e}`);
       }
     }
