@@ -19,7 +19,7 @@
     - 単体テスト `tests/tools/bash.test.ts` の実行。
   - 格納: リモートリポジトリにコミット・プッシュ。
 
-- [ ] **Task 2: プロセスグループ全体を確実に終了する `killProcessTree` の刷新**
+- [x] **Task 2: プロセスグループ全体を確実に終了する `killProcessTree` の刷新**
   - 対象: `src/tools/definitions/bash.ts`
   - 内容:
     1. POSIX 環境で `process.kill(-pid, "SIGTERM")` を送信し、一定時間後に `SIGKILL` を送るプロセスグループ強制終了ロジックを実装。

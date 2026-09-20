@@ -415,14 +415,18 @@ export const bashTool: BashToolHandler = {
 
 /**
  * プロセスツリーごと強制終了する。
- * Windowsでは proc.kill() だと直接の子プロセスしか終了せず、
- * 孫プロセス（bash→python→pygame等）が孤立して残る。
- * taskkill /T /F でプロセスツリー全体を殺す。
+ * 子プロセスだけでなく、孫プロセス（sh→git→git-remote-http や bash→python→pygame 等）が
+ * 孤立して残るのを防ぐ。
+ * - Windows: taskkill /T /F でプロセスツリー全体を強制終了。
+ * - POSIX (macOS/Linux): detached: true で起動されているため、-pid に対してシグナルを
+ *   送ることでプロセスグループ全体（子・孫プロセス）を一括終了する。
  */
-function killProcessTree(proc: ChildProcess): void {
+export function killProcessTree(proc: ChildProcess): void {
   if (proc.killed) return;
   const pid = proc.pid;
-  if (pid && isWindows) {
+  if (!pid || pid <= 1 || pid === process.pid) return;
+
+  if (isWindows) {
     try {
       execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], {
         timeout: 5000,
@@ -432,10 +436,27 @@ function killProcessTree(proc: ChildProcess): void {
     } catch {
       // taskkill が失敗した場合はフォールバック
     }
+  } else {
+    // POSIX: プロセスグループ全体に SIGTERM を送信
+    try {
+      process.kill(-pid, "SIGTERM");
+      // 500ms 後にまだ残っていれば SIGKILL を送信
+      setTimeout(() => {
+        try {
+          process.kill(-pid, "SIGKILL");
+        } catch {
+          /* すでに終了していれば無視 */
+        }
+      }, 500).unref();
+      return;
+    } catch {
+      // プロセスグループが存在しない等の場合は通常の proc.kill() へフォールバック
+    }
   }
-  // 非Windows or taskkill失敗時: 通常のkill
+
+  // フォールバック: 通常の kill
   try {
-    proc.kill();
+    proc.kill("SIGKILL");
   } catch {
     /* ignore */
   }

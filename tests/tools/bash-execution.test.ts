@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { bashTool } from "../../src/tools/definitions/bash.js";
+import { spawn } from "node:child_process";
+import { bashTool, killProcessTree } from "../../src/tools/definitions/bash.js";
 
 describe("bashTool execution and non-interactive environment", () => {
   it("子プロセスに非対話環境変数（GIT_TERMINAL_PROMPT, CI等）が正しく注入される", async () => {
@@ -23,4 +24,30 @@ describe("bashTool execution and non-interactive environment", () => {
     expect(result.success).toBe(true);
     expect(result.output).toContain("hello from detached process");
   });
+
+  it("killProcessTreeでプロセスグループ全体（孫プロセス含む）が終了する", async () => {
+    // 孫プロセスとして sleep を起動するシェル
+    const child = spawn("/bin/sh", ["-c", "sleep 100 & sleep 100"], {
+      detached: true,
+      stdio: "ignore",
+    });
+
+    expect(child.pid).toBeDefined();
+    const pid = child.pid!;
+
+    // killProcessTree を実行
+    killProcessTree(child);
+
+    // プロセスグループが終了したことを確認 (ESRCH になるかシグナル送信不可)
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    let alive = true;
+    try {
+      // シグナル 0 でプロセスの存在確認
+      process.kill(-pid, 0);
+    } catch {
+      alive = false;
+    }
+    expect(alive).toBe(false);
+  });
 });
+
