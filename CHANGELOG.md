@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### プロセス分離・タイムアウト刷新・対話デッドロック防止 (2026-09-20)
+
+- 子プロセスへの非対話環境変数（`GIT_TERMINAL_PROMPT=0`, `CI=1`, `DEBIAN_FRONTEND=noninteractive` 等）の注入と、POSIX `detached: true` による制御端末（`/dev/tty`）切り離しを導入
+- 一律120秒の固定タイムアウトを廃止し、出力継続中はタスクを維持し無通信時のみ検知する `idleTimeout`（デフォルト60秒）および長時間タスク進行監視を導入
+- `killProcessTree` を刷新し、POSIX環境でプロセスグループ全体（`-pid`）へ `SIGTERM` / `SIGKILL` を送信して孤立孫プロセスの発生を防止
+- `AskUser` ツールに対話中断（Ctrl+C / `ExitPromptError`）の安全なエラーハンドリングを追加
+
 ### Durable run resume・機能比較 cycle 18 (2026-09-03)
 
 - `/run pause --durable`を追加し、進行中main APIと開始済みtool結果の確定後、次API直前のrun stateをsession JSONへatomic保存
