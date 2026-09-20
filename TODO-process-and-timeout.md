@@ -41,11 +41,11 @@
     - 単体テストの追加と実行。
   - 格納: リモートリポジトリにコミット・プッシュ。
 
-- [ ] **Task 4: AskUser / PermissionManager の対話プロンプト堅牢化の確認**
-  - 対象: `src/security/permission-manager.ts`, `src/cli/prompt-gate.ts`
+- [x] **Task 4: AskUser / PermissionManager の対話プロンプト堅牢化の確認**
+  - 対象: `src/security/permission-manager.ts`, `src/cli/prompt-gate.ts`, `src/tools/definitions/ask-user.ts`
   - 内容:
     1. プロンプト表示時に stdin が不正状態だった場合の例外安全性の検証。
-    2. Ctrl+C による中断時のシグナルハンドリングが確実に作動することの検証。
+    2. Ctrl+C による中断時のシグナルハンドリング（ExitPromptError / force closed）が確実に作動するよう ask-user.ts に保護を追加。
   - 検証:
     - 自動テストおよび手動対話の結合テスト実行。
   - 格納: リモートリポジトリにコミット・プッシュ。

@@ -184,54 +184,61 @@ async function executeTTY(
   multiSelect: boolean,
   otherLabel: string,
 ): Promise<ToolResult> {
-  if (!options || options.length === 0) {
-    const { answer } = await withPrompt(() =>
-      inquirer.prompt<{ answer: string }>([{ type: "input", name: "answer", message: question }]),
-    );
-    return { success: true, output: answer };
-  }
+  try {
+    if (!options || options.length === 0) {
+      const { answer } = await withPrompt(() =>
+        inquirer.prompt<{ answer: string }>([{ type: "input", name: "answer", message: question }]),
+      );
+      return { success: true, output: answer };
+    }
 
-  const choices = [...options.map(formatInquirerChoice), { name: otherLabel, value: otherLabel }];
+    const choices = [...options.map(formatInquirerChoice), { name: otherLabel, value: otherLabel }];
 
-  if (multiSelect) {
+    if (multiSelect) {
+      const { answer } = await withPrompt(() =>
+        inquirer.prompt<{ answer: string[] }>([
+          {
+            type: "checkbox",
+            name: "answer",
+            message: question,
+            choices,
+          },
+        ]),
+      );
+      const selected = [...answer];
+      const otherIdx = selected.indexOf(otherLabel);
+      if (otherIdx !== -1) {
+        selected.splice(otherIdx, 1);
+        const { text } = await withPrompt(() =>
+          inquirer.prompt<{ text: string }>([{ type: "input", name: "text", message: "回答:" }]),
+        );
+        selected.push(text);
+      }
+      return { success: true, output: selected.join(", ") };
+    }
+
     const { answer } = await withPrompt(() =>
-      inquirer.prompt<{ answer: string[] }>([
+      inquirer.prompt<{ answer: string }>([
         {
-          type: "checkbox",
+          type: "list",
           name: "answer",
           message: question,
           choices,
         },
       ]),
     );
-    const selected = [...answer];
-    const otherIdx = selected.indexOf(otherLabel);
-    if (otherIdx !== -1) {
-      selected.splice(otherIdx, 1);
+
+    if (answer === otherLabel) {
       const { text } = await withPrompt(() =>
         inquirer.prompt<{ text: string }>([{ type: "input", name: "text", message: "回答:" }]),
       );
-      selected.push(text);
+      return { success: true, output: text };
     }
-    return { success: true, output: selected.join(", ") };
+    return { success: true, output: answer };
+  } catch (e) {
+    if (e instanceof Error && (e.constructor.name === "ExitPromptError" || e.message.includes("force closed"))) {
+      return { success: false, output: "", error: "ユーザーによって入力が中断されました (Ctrl+C)" };
+    }
+    throw e;
   }
-
-  const { answer } = await withPrompt(() =>
-    inquirer.prompt<{ answer: string }>([
-      {
-        type: "list",
-        name: "answer",
-        message: question,
-        choices,
-      },
-    ]),
-  );
-
-  if (answer === otherLabel) {
-    const { text } = await withPrompt(() =>
-      inquirer.prompt<{ text: string }>([{ type: "input", name: "text", message: "回答:" }]),
-    );
-    return { success: true, output: text };
-  }
-  return { success: true, output: answer };
 }
