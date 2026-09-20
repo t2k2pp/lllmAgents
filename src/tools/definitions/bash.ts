@@ -299,10 +299,21 @@ export const bashTool: BashToolHandler = {
         delete childEnv.ALL_PROXY;
         delete childEnv.all_proxy;
       }
+
+      // 非対話実行の強制:
+      // 子プロセスがパスワード入力や確認プロンプトを求めてハングし、
+      // 制御端末を専有して後続の対話プロンプト（AskUser等）をデッドロックさせる事故を防ぐ。
+      childEnv.GIT_TERMINAL_PROMPT = "0";
+      childEnv.CI = "1";
+      childEnv.DEBIAN_FRONTEND = "noninteractive";
+      childEnv.NPM_CONFIG_YES = "true";
+      childEnv.PIP_NO_INPUT = "1";
+
       const proc = spawn(shell, shellArgs, {
         cwd: workspace.root,
         env: childEnv,
         stdio: ["ignore", "pipe", "pipe"],
+        detached: !isWindows,
       });
       currentProcess = proc;
 
