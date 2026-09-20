@@ -11,7 +11,8 @@ import { Utf8ChunkDecoder } from "../../utils/utf8-chunk-decoder.js";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
 import { createSharedWorkspace } from "../../agent/workspace-context.js";
 
-const DEFAULT_TIMEOUT = 120_000; // 2 minutes
+const DEFAULT_HARD_TIMEOUT = 600_000; // 10 minutes (安全のための総時間上限)
+const DEFAULT_IDLE_TIMEOUT = 60_000; // 60 seconds (無通信監視)
 
 /** Windows で git bash のパスを探す。見つからなければ null */
 export function findGitBash(): string | null {
@@ -150,7 +151,11 @@ export const bashTool: BashToolHandler = {
           },
           timeout: {
             type: "number",
-            description: "タイムアウト（ミリ秒）。デフォルト: 120000",
+            description: "総実行時間の最大タイムアウト（ミリ秒）。デフォルト: 600000 (10分)",
+          },
+          idleTimeout: {
+            type: "number",
+            description: "無通信（出力なし）の最大許容時間（ミリ秒）。デフォルト: 60000 (1分)",
           },
         },
         required: ["command"],
@@ -168,7 +173,8 @@ export const bashTool: BashToolHandler = {
   },
   async execute(params: Record<string, unknown>, context): Promise<ToolResult> {
     const command = params.command as string;
-    const timeout = (params.timeout as number) ?? DEFAULT_TIMEOUT;
+    const timeout = (params.timeout as number) ?? DEFAULT_HARD_TIMEOUT;
+    const idleTimeout = (params.idleTimeout as number) ?? DEFAULT_IDLE_TIMEOUT;
     const workspace = context?.workspace ?? createSharedWorkspace();
     if (workspace.mode === "worktree") {
       const processSandbox = getActiveProcessSandbox();
@@ -275,12 +281,22 @@ export const bashTool: BashToolHandler = {
 
     return new Promise((resolve) => {
       let resolved = false;
+      let idleTimer: NodeJS.Timeout | null = null;
+      let timeoutTimer: NodeJS.Timeout | null = null;
+      let heartbeatTimer: NodeJS.Timeout | null = null;
+
+      const clearAllTimers = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+      };
+
       const done = (result: ToolResult) => {
         if (resolved) return;
         resolved = true;
         currentProcess = null;
         cleanup?.();
-        if (timeoutTimer) clearTimeout(timeoutTimer);
+        clearAllTimers();
         resolve(result);
       };
 
@@ -323,12 +339,31 @@ export const bashTool: BashToolHandler = {
       const stderrDecoder = new Utf8ChunkDecoder();
       let streamsFinalized = false;
 
+      const resetIdleTimer = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        if (idleTimeout > 0) {
+          idleTimer = setTimeout(() => {
+            if (!resolved) {
+              killProcessTree(proc);
+              const elapsed = Date.now() - startMs;
+              done({
+                success: false,
+                output: stdout.trim(),
+                error: `IdleTimeout: no output received for ${idleTimeout}ms (total elapsed: ${elapsed}ms). Command appears hung or waiting for interactive input.`,
+              });
+            }
+          }, idleTimeout);
+        }
+      };
+
       const appendStdout = (text: string): void => {
         stdout += text;
+        resetIdleTimer();
         if (streamOutputEnabled && text) process.stdout.write(text);
       };
       const appendStderr = (text: string): void => {
         stderr += text;
+        resetIdleTimer();
         if (streamOutputEnabled && text) process.stderr.write(text);
       };
       const finalizeStreams = (): void => {
@@ -402,13 +437,32 @@ export const bashTool: BashToolHandler = {
       // _aborted=trueにした後、repl.tsのsigintHandlerがkillRunningProcess()を呼ぶ。
       // killProcessTree()でプロセスツリーごと殺す。
 
-      // 独自タイムアウト: spawn の timeout は Windows で効かないことがあるため
-      const timeoutTimer = setTimeout(() => {
+      // 初期アイドルタイマー開始
+      resetIdleTimer();
+
+      // ハードタイムアウトタイマー: spawn の timeout は Windows で効かないことがあるため独自管理
+      if (timeout > 0) {
+        timeoutTimer = setTimeout(() => {
+          if (!resolved) {
+            killProcessTree(proc);
+            done({
+              success: false,
+              output: stdout.trim(),
+              error: `Timeout: command exceeded hard limit of ${timeout}ms`,
+            });
+          }
+        }, timeout);
+      }
+
+      // 長時間タスクのハートビート監視（30秒ごと）
+      heartbeatTimer = setInterval(() => {
         if (!resolved) {
-          killProcessTree(proc);
-          done({ success: false, output: stdout.trim(), error: `Timeout: command exceeded ${timeout}ms` });
+          const elapsedSec = Math.round((Date.now() - startMs) / 1000);
+          if (elapsedSec >= 30 && streamOutputEnabled) {
+            process.stderr.write(`\n[bash] 実行中... (経過: ${elapsedSec}s, 出力: ${Buffer.byteLength(stdout, "utf8")} bytes)\n`);
+          }
         }
-      }, timeout);
+      }, 30_000);
     });
   },
 };

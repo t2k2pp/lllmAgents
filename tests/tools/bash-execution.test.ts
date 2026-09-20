@@ -49,5 +49,43 @@ describe("bashTool execution and non-interactive environment", () => {
     }
     expect(alive).toBe(false);
   });
+
+  it("無通信状態が続くとidleTimeoutで終了し、明確なエラーを返す", async () => {
+    const result = await bashTool.execute({
+      command: "sleep 2",
+      idleTimeout: 200, // 200ms 無通信でタイムアウト
+      timeout: 5000,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("IdleTimeout: no output received for 200ms");
+    expect(result.error).toContain("waiting for interactive input");
+  });
+
+  it("出力が継続している間はidleTimeoutにならず正常完了する", async () => {
+    // 100ms ごとに 3 回出力（合計約 300ms）。idleTimeout は 250ms。
+    // 出力が出るたびにアイドルタイマーがリセットされるため、完走できるはず
+    const result = await bashTool.execute({
+      command: "for i in 1 2 3; do echo step$i; sleep 0.1; done",
+      idleTimeout: 250,
+      timeout: 5000,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("step1");
+    expect(result.output).toContain("step2");
+    expect(result.output).toContain("step3");
+  });
+
+  it("ハードタイムアウトに達した場合はハードタイムアウトエラーを返す", async () => {
+    const result = await bashTool.execute({
+      command: "while true; do echo ping; sleep 0.05; done",
+      idleTimeout: 1000,
+      timeout: 300, // 300ms でハードタイムアウト
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Timeout: command exceeded hard limit of 300ms");
+  });
 });
 
