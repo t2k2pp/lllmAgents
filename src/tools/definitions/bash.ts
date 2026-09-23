@@ -459,7 +459,9 @@ export const bashTool: BashToolHandler = {
         if (!resolved) {
           const elapsedSec = Math.round((Date.now() - startMs) / 1000);
           if (elapsedSec >= 30 && streamOutputEnabled) {
-            process.stderr.write(`\n[bash] 実行中... (経過: ${elapsedSec}s, 出力: ${Buffer.byteLength(stdout, "utf8")} bytes)\n`);
+            process.stderr.write(
+              `\n[bash] 実行中... (経過: ${elapsedSec}s, 出力: ${Buffer.byteLength(stdout, "utf8")} bytes)\n`,
+            );
           }
         }
       }, 30_000);

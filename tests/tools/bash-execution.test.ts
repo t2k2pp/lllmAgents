@@ -5,7 +5,8 @@ import { bashTool, killProcessTree } from "../../src/tools/definitions/bash.js";
 describe("bashTool execution and non-interactive environment", () => {
   it("子プロセスに非対話環境変数（GIT_TERMINAL_PROMPT, CI等）が正しく注入される", async () => {
     const result = await bashTool.execute({
-      command: "echo GIT_TERMINAL_PROMPT=$GIT_TERMINAL_PROMPT CI=$CI DEBIAN_FRONTEND=$DEBIAN_FRONTEND NPM_CONFIG_YES=$NPM_CONFIG_YES PIP_NO_INPUT=$PIP_NO_INPUT",
+      command:
+        "echo GIT_TERMINAL_PROMPT=$GIT_TERMINAL_PROMPT CI=$CI DEBIAN_FRONTEND=$DEBIAN_FRONTEND NPM_CONFIG_YES=$NPM_CONFIG_YES PIP_NO_INPUT=$PIP_NO_INPUT",
     });
 
     expect(result.success).toBe(true);
@@ -88,4 +89,3 @@ describe("bashTool execution and non-interactive environment", () => {
     expect(result.error).toContain("Timeout: command exceeded hard limit of 300ms");
   });
 });
-
