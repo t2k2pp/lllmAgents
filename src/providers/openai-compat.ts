@@ -183,6 +183,7 @@ export class OpenAICompatProvider implements LLMProvider {
     const partialToolCalls = new Map<number, { id: string; name: string; args: string }>();
     // Track usage from streaming response
     let lastUsage: TokenUsage | undefined;
+    let lastFinishReason: string | undefined;
 
     const reader = streamBody.getReader();
     const decoder = new TextDecoder();
@@ -213,7 +214,7 @@ export class OpenAICompatProvider implements LLMProvider {
                 },
               };
             }
-            yield { type: "done", finishReason: "stop", usage: lastUsage };
+            yield { type: "done", finishReason: lastFinishReason ?? "stop", usage: lastUsage };
             return;
           }
 
@@ -268,6 +269,7 @@ export class OpenAICompatProvider implements LLMProvider {
 
             // Finish reason
             if (choice.finish_reason) {
+              lastFinishReason = choice.finish_reason;
               if (choice.finish_reason === "tool_calls" || choice.finish_reason === "function_call") {
                 for (const [, tc] of partialToolCalls) {
                   yield {

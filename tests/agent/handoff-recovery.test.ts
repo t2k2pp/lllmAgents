@@ -74,7 +74,7 @@ describe("context failure diagnostics", () => {
   });
   it.each([
     ['{"summary":"ok","keyFacts":[]}', "length", "truncated"],
-    ["", "stop", "no JSON object"],
+    ["", "stop", "empty response"],
     ['{"summary":"","keyFacts":[]}', "stop", "shape mismatch"],
     ['{"summary":"ok","keyFacts":[42]}', "stop", "shape mismatch"],
   ])("不完全な要約を採用せず終了理由と復旧方法を返す", async (text, reason, error) => {

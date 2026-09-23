@@ -443,3 +443,9 @@ it("忘却LLMのレート制限は再試行せず呼出元へ返す", async () =
   await expect(engine.plan(messages, 100)).rejects.toThrow("rate_limit_exceeded");
   expect(calls).toBe(1);
 });
+
+it("LLMの応答が空文字（0文字）の場合はパースを行わずnullを返す", async () => {
+  const engine = new ForgettingEngine(stubProvider(["", "   "]), "m", { keepRecentSegments: 1 });
+  const plan = await engine.plan(sampleMessages(), 500);
+  expect(plan).toBeNull();
+});

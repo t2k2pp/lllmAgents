@@ -30,17 +30,17 @@ const MAX_LAYER1_BLOCKS = 5;
 /**
  * Layer 1 圧縮 (個別メッセージブロックの要約) のサンプリング設定。
  *  temperature=0.3: 多少の表現揺れは許容、 但し決定論寄り。
- *  maxTokens=1000: 1 ブロックあたりの要約上限。 これ以上はノイズが増える傾向。
+ *  maxTokens=2000: 思考モデルの最小思考 (100〜300t) + 要約 JSON (300〜800t) を収める適正上限。
  */
 const COMPRESSOR_LAYER1_TEMPERATURE = 0.3;
-const COMPRESSOR_LAYER1_MAX_TOKENS = 1000;
+const COMPRESSOR_LAYER1_MAX_TOKENS = 2000;
 
 /**
  * Layer 2 圧縮 (Layer 1 結果の統合要約) のサンプリング設定。
- *  maxTokens=1500: 統合要約は Layer 1 より長くてよい。 ただし context 圧迫しない上限。
+ *  maxTokens=2500: 統合要約は Layer 1 より長くてよい。 思考枠と要約枠を確保。
  */
 const COMPRESSOR_LAYER2_TEMPERATURE = 0.3;
-const COMPRESSOR_LAYER2_MAX_TOKENS = 1500;
+const COMPRESSOR_LAYER2_MAX_TOKENS = 2500;
 
 // ─── 要約プロンプト ───
 
@@ -57,6 +57,8 @@ const LAYER1_PROMPT = `以下の会話ブロックを要約してください。
 ## 出力形式
 以下のJSON形式のみ返してください。他のテキストは不要です:
 {"summary": "要約テキスト", "keyFacts": ["事実1", "事実2"]}
+
+【重要制約】これは機械的要約タスクです。内部思考（thinking）は最小限にとどめ、直ちに上記JSONのみを出力してください。思考内での下書きや推敲は禁止します。
 
 ## 会話ブロック
 `;
@@ -78,6 +80,8 @@ const LAYER2_PROMPT = `以下は過去の会話要約ブロック群です。こ
 ## 出力形式
 以下のJSON形式のみ返してください。他のテキストは不要です:
 {"summary": "統合要約テキスト", "keyFacts": ["重要事実1", "重要事実2"]}
+
+【重要制約】これは機械的要約タスクです。内部思考（thinking）は最小限にとどめ、直ちに上記JSONのみを出力してください。思考内での下書きや推敲は禁止します。
 
 ## 要約ブロック群
 `;
@@ -183,7 +187,14 @@ export class HierarchicalCompressor {
     try {
       const gen = this.provider.chat({
         model: this.model,
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a fast summarizer for context compression. Keep internal thinking very brief (under 50 words) and output the requested JSON directly without hesitation.",
+          },
+          { role: "user", content: prompt },
+        ],
         temperature: COMPRESSOR_LAYER1_TEMPERATURE,
         maxTokens: COMPRESSOR_LAYER1_MAX_TOKENS,
         stream: true,
@@ -192,6 +203,11 @@ export class HierarchicalCompressor {
       const response = await collectResponse(gen);
       let parsed: { summary: string; keyFacts: string[] };
       try {
+        if (response.content.trim().length === 0) {
+          throw new Error(
+            `Context summarizer returned empty response (finishReason=${response.finishReason}, completionTokens=${response.usage?.completionTokens ?? "unknown"}). Output was truncated before generating content.`,
+          );
+        }
         if (response.finishReason === "length") throw new Error("Context summarizer output was truncated");
         parsed = parseSummaryResponse(response.content);
       } catch (error) {
@@ -232,13 +248,25 @@ export class HierarchicalCompressor {
     try {
       const gen = this.provider.chat({
         model: this.model,
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a fast summarizer for context compression. Keep internal thinking very brief (under 50 words) and output the requested JSON directly without hesitation.",
+          },
+          { role: "user", content: prompt },
+        ],
         temperature: COMPRESSOR_LAYER2_TEMPERATURE,
         maxTokens: COMPRESSOR_LAYER2_MAX_TOKENS,
         stream: true,
       });
 
       const response = await collectResponse(gen);
+      if (response.content.trim().length === 0) {
+        throw new Error(
+          `Layer 2 summary returned empty response (finishReason=${response.finishReason}, completionTokens=${response.usage?.completionTokens ?? "unknown"})`,
+        );
+      }
       if (response.finishReason === "length")
         throw new Error(
           `Layer 2 summary truncated (maxTokens=${COMPRESSOR_LAYER2_MAX_TOKENS}, outputChars=${response.content.length})`,

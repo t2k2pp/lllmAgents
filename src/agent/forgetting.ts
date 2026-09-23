@@ -24,8 +24,8 @@ import * as logger from "../utils/logger.js";
 
 /** 忘却選択の LLM 呼び出しのサンプリング設定。 分類タスクなので決定論寄りに倒す */
 const FORGET_TEMPERATURE = 0.1;
-/** JSON 1 個を返させるだけなので出力上限は小さくてよい */
-const FORGET_MAX_TOKENS = 600;
+/** 思考モデルの最小思考 (100〜300t) + 忘却 JSON (100〜500t) を収める適正上限 */
+const FORGET_MAX_TOKENS = 1500;
 
 /** 直近何セグメントを保護するか (既定) */
 export const DEFAULT_KEEP_RECENT_SEGMENTS = 6;
@@ -244,6 +244,7 @@ export function buildForgetPrompt(manifest: string, targetTokens: number): strin
     `「保護」 と書かれた行は選べません。\n\n` +
     `JSON のみを返してください:\n` +
     `{"thin": [2, 4], "drop": [], "reason": "巨大なソース読み込みの本文を落とした。 指示と判断は全て残した"}\n\n` +
+    `【重要制約】これは機械的分類タスクです。内部思考（thinking）は最小限にとどめ、直ちに上記JSONのみを出力してください。\n\n` +
     `## 履歴一覧\n${manifest}\n`
   );
 }
@@ -640,15 +641,29 @@ export class ForgettingEngine {
       try {
         const gen = this.provider.chat({
           model: this.model,
-          messages: [{ role: "user", content: prompt }],
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a fast classifier for context reduction. Keep internal thinking very brief (under 50 words) and output the requested JSON directly without hesitation.",
+            },
+            { role: "user", content: prompt },
+          ],
           temperature: FORGET_TEMPERATURE,
           maxTokens: FORGET_MAX_TOKENS,
           stream: true,
         });
         const response = await collectResponse(gen);
-        choice = parseForgetResponse(response.content);
+        const trimmed = response.content.trim();
+        if (trimmed.length === 0) {
+          logger.warn(
+            `[forget] LLM の応答テキストが空でした (試行 ${attempt + 1}/2, finishReason=${response.finishReason}, completionTokens=${response.usage?.completionTokens ?? "unknown"})`,
+          );
+          continue;
+        }
+        choice = parseForgetResponse(trimmed);
         if (!choice) {
-          logger.warn(`[forget] JSON パースに失敗 (試行 ${attempt + 1}/2): ${oneLine(response.content, 200)}`);
+          logger.warn(`[forget] JSON パースに失敗 (試行 ${attempt + 1}/2): ${oneLine(trimmed, 200)}`);
         }
       } catch (e) {
         if (isRateLimitError(e)) throw e;

@@ -33,6 +33,20 @@ describe("HierarchicalCompressor failure policy", () => {
       /returned no JSON object/,
     );
   });
+
+  it("要約応答が空文字（0文字）の場合は空応答エラーとして拒否する", async () => {
+    const provider = {
+      async *chat(): AsyncGenerator<ChatChunk> {
+        yield { type: "text", text: "" };
+        yield { type: "done", finishReason: "length" };
+      },
+    } as unknown as LLMProvider;
+    const compressor = new HierarchicalCompressor(provider, "test-model");
+
+    await expect(compressor.compress([{ role: "user", content: "消してはいけない制約" }])).rejects.toThrow(
+      /returned empty response/,
+    );
+  });
 });
 
 describe("HierarchicalCompressor sequential dispatch", () => {
