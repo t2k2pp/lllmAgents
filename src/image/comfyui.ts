@@ -46,13 +46,17 @@ export class ComfyUIProvider implements ImageProvider {
     return this.config.baseUrl.trim().replace(/\/$/, "");
   }
 
-  private loadTemplate(): string {
+  private async loadTemplate(): Promise<string> {
     const tplPath = this.config.workflowTemplate;
     if (!tplPath) return COMFYUI_DEFAULT_WORKFLOW;
-    if (!fs.existsSync(tplPath)) {
-      throw new Error(`ComfyUI ワークフローテンプレートが見つかりません: ${tplPath}`);
+    try {
+      return await fs.promises.readFile(tplPath, "utf-8");
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error(`ComfyUI ワークフローテンプレートが見つかりません: ${tplPath}`);
+      }
+      throw e;
     }
-    return fs.readFileSync(tplPath, "utf-8");
   }
 
   async generate(req: ImageGenRequest): Promise<ImageGenResult> {
@@ -67,7 +71,7 @@ export class ComfyUIProvider implements ImageProvider {
       );
     }
 
-    const workflow = buildWorkflow(this.loadTemplate(), {
+    const workflow = buildWorkflow(await this.loadTemplate(), {
       prompt: req.prompt,
       negative: req.negativePrompt ?? this.config.negativePrompt ?? "",
       width: dim.width,
