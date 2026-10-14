@@ -15,16 +15,22 @@
 
 - [x] 1. ログ調査（1 ターン目 thinking・ToDo・ユーザー追加依頼の流れ）と原因整理 → 設計書 §2〜3
 - [x] 2. 設計書作成（`docs/request-elaboration-design.md`）
-- [ ] 3. 評価スクリプト作成とベースライン計測（変更前プロンプト） — スクリプト `sandbox/scripts/eval-request-elaboration.ts` 作成済、計測中
+- [ ] 3. 評価スクリプト作成とベースライン計測（変更前プロンプト） — スクリプト `sandbox/scripts/eval-request-elaboration.ts` 作成済。
+  初回は非ストリーミングで headers timeout (300s) → SSE 化して再実行中。
+  実行: `bash -l %TEMP%/eval-ab.sh`（goemon×2 / fizzbuzz / janken を baseline・current で計 8 回）、ログ `%TEMP%/eval-ab.log`、結果 `sandbox/output/eval-request-elaboration/`
 - [x] 4. 実装: `buildScopeRules` 追加・宣言拡張・ToDo 例・粗く作る補足（T1/T2/T3 + サブ） — `9a418a4`
 - [x] 5. 実装: 遅延ガイド `requestScope`（todo_append 初回） — `9a418a4`
 - [x] 6. 実装: game-development スキル Step 1 改訂 — `9a418a4`
 - [x] 7. テスト（既存 + 追加）・lint・型チェック — 新規 17 件 + 全 1452 件 PASS、tsc/biome 新規指摘なし
 - [ ] 8. 変更後の A/B 評価と設計書 §6 への結果記録
-- [ ] 9. 独立レビュー（評価者サブエージェント）→ 採否判断
+- [x] 9. 独立レビュー（評価者サブエージェント）→ 採否判断 — 11 件中 10 件採用 (`2c8fdce`)。
+  採用: T3 例の矛盾解消 / ガイドを依頼ごと再注入 / 分量の比例 / rough の扱い / T1 を standard+ 限定 / 委任範囲を広げない /
+  常駐例をゲーム以外へ / 宣言ラベルをユーザーの言語で / 常駐の重複削減 / T3 で X を知らなければ ask_user / テスト強化。
+  保留: 実モデル評価 (= 項目 8 で実施中)
 - [ ] 10. ユーザー報告（game-development スキル無効設定の扱いを確認）
 
 ## 進捗ログ
 - 2026-10-14: 調査完了。主因は「知っていたのに範囲を削り、削ったことを言わない」。H1〜H6 を設計書に記載
 - 2026-10-14: 実装完了 (`9a418a4`)。常駐プロンプト (# Environment より前) の増分:
   T1 2,833→3,294 / T2 6,886→7,907 (+約15%) / T3 5,111→5,629 文字
+- 2026-10-14: レビュー反映 (`2c8fdce`)。T2 常駐 7,743 文字 (+857、+12%) に縮小。全 1455 件 PASS
