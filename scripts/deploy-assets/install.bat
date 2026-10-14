@@ -57,13 +57,16 @@ if exist "%AGENTS_SRC%" (
 )
 
 rem Add to the user PATH. Read and write the raw (unexpanded) value so that
-rem existing %VAR% entries survive. The final SetEnvironmentVariable call
-rem (deleting a variable that does not exist) is only there to broadcast
-rem WM_SETTINGCHANGE so that newly opened terminals see the new PATH.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$d=$env:INSTALL_DIR; if (-not $d) { Write-Host '[ERROR] INSTALL_DIR is empty'; exit 1 }; $k=Get-Item 'HKCU:\Environment'; $p=[string]$k.GetValue('Path','',[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); $parts=@($p -split ';' | Where-Object { $_ -ne '' }); if ($parts | Where-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') -ieq $d.TrimEnd('\') }) { Write-Host '[OK] PATH already contains' $d; exit 0 }; Set-ItemProperty -Path 'HKCU:\Environment' -Name Path -Value (($parts + $d) -join ';') -Type ExpandString; [Environment]::SetEnvironmentVariable('LOCALLLM_PATH_NOTIFY',$null,'User'); Write-Host '[OK] added to user PATH:' $d"
+rem existing %VAR% entries survive.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$d=$env:INSTALL_DIR; if (-not $d) { Write-Host '[ERROR] INSTALL_DIR is empty'; exit 1 }; $k=Get-Item 'HKCU:\Environment'; $p=[string]$k.GetValue('Path','',[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); $parts=@($p -split ';' | Where-Object { $_ -ne '' }); if ($parts | Where-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') -ieq $d.TrimEnd('\') }) { Write-Host '[OK] PATH already contains' $d; exit 0 }; Set-ItemProperty -Path 'HKCU:\Environment' -Name Path -Value (($parts + $d) -join ';') -Type ExpandString; Write-Host '[OK] added to user PATH:' $d"
 if errorlevel 1 (
   echo [WARN] failed to update PATH. Add %INSTALL_DIR% to your user PATH manually.
 )
+
+rem Writing the registry alone does not notify anyone. setx always broadcasts
+rem WM_SETTINGCHANGE, so Explorer and terminals started from it afterwards see
+rem the new PATH without a sign-out. It also records the install location.
+setx LOCALLLM_INSTALL_DIR "%INSTALL_DIR%" >nul
 
 echo.
 echo =========================================
