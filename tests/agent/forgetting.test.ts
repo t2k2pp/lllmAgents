@@ -317,12 +317,13 @@ describe("MessageHistory.replaceMessages — ペア整合を検証して壊れ�
 
 // ─── エンジン (エンドツーエンド) ───
 
+function historyWith(messages: Message[]): MessageHistory {
+  const h = new MessageHistory("sys");
+  h.replaceMessages(messages);
+  return h;
+}
+
 describe("ForgettingEngine", () => {
-  function historyWith(messages: Message[]): MessageHistory {
-    const h = new MessageHistory("sys");
-    h.replaceMessages(messages);
-    return h;
-  }
 
   it("忘却を適用し、 トゥームストーンを 1 件残し、 履歴の整合を保つ", async () => {
     const engine = new ForgettingEngine(stubProvider(['{"thin":[2],"drop":[],"reason":"巨大な読込を落とした"}']), "m", {
@@ -448,4 +449,70 @@ it("LLMの応答が空文字（0文字）の場合はパースを行わずnull�
   const engine = new ForgettingEngine(stubProvider(["", "   "]), "m", { keepRecentSegments: 1 });
   const plan = await engine.plan(sampleMessages(), 500);
   expect(plan).toBeNull();
+});
+
+// ─── 2026-10-15: 思考モデルが上限を思考で使い切って本文が空になる件 (docs §4.2 / §4.5) ───
+
+describe("忘却選択の呼び出し: 思考オフ / 不成立理由の区別", () => {
+  it("忘却選択の LLM 呼び出しは disableThinking=true で送る", async () => {
+    const provider = stubProvider(['{"thin":[2],"drop":[],"reason":"r"}']);
+    const chatSpy = vi.spyOn(provider, "chat");
+    const engine = new ForgettingEngine(provider, "m", { keepRecentSegments: 1 });
+    await engine.plan(sampleMessages(), 500);
+    expect(chatSpy.mock.calls[0][0].disableThinking).toBe(true);
+  });
+
+  it("思考で上限到達して本文が空なら、 理由に finishReason=length と上限到達を出す", async () => {
+    const provider = {
+      async *chat(): AsyncGenerator<ChatChunk> {
+        yield { type: "thinking", text: "考え中..." } as ChatChunk;
+        yield { type: "done", finishReason: "length", usage: { promptTokens: 3000, completionTokens: 1500 } } as ChatChunk;
+      },
+    } as unknown as LLMProvider;
+    const engine = new ForgettingEngine(provider, "m", { keepRecentSegments: 1 });
+    const result = await engine.forget(historyWith(sampleMessages()), 500);
+    expect(result.applied).toBe(false);
+    expect(result.reason).toContain("finishReason=length");
+    expect(result.reason).toContain("思考だけで使い切った");
+    expect(result.reason).toContain("1500");
+  });
+
+  it("JSON が読めないときは応答の先頭を理由に含める", async () => {
+    const engine = new ForgettingEngine(stubProvider(["すみません、 判断できません"]), "m", { keepRecentSegments: 1 });
+    const report = await engine.dryRun(historyWith(sampleMessages()), 500);
+    expect(report.plan).toBeNull();
+    expect(report.reason).toContain("JSON として読めません");
+    expect(report.reason).toContain("判断できません");
+  });
+
+  it("選択 0 件と対象なしは別の理由になる", async () => {
+    const zero = new ForgettingEngine(stubProvider(['{"thin":[],"drop":[],"reason":"r"}']), "m", {
+      keepRecentSegments: 1,
+    });
+    expect((await zero.forget(historyWith(sampleMessages()), 500)).reason).toContain("1 件も選びませんでした");
+
+    const none = new ForgettingEngine(stubProvider(['{"thin":[1]}']), "m", { keepRecentSegments: 100 });
+    expect((await none.forget(historyWith(sampleMessages()), 500)).reason).toContain("忘却できるセグメントがありません");
+  });
+});
+
+describe("buildSegments digest: パスは末尾を見せる", () => {
+  it("長いパスはファイル名側を残して切る", () => {
+    const long = "C:\Users\osia3\GitProjects\acecomb\src\game\campaign.js";
+    const messages: Message[] = [
+      { role: "assistant", content: "", tool_calls: [toolCall("c1", "file_edit", { file_path: long })] },
+      { role: "tool", content: "ok", tool_call_id: "c1" },
+    ];
+    const digest = buildSegments(messages, 0)[0].digest;
+    expect(digest).toContain("campaign.js");
+    expect(digest).toContain("…");
+  });
+
+  it("コマンドは従来どおり先頭を見せる", () => {
+    const messages: Message[] = [
+      { role: "assistant", content: "", tool_calls: [toolCall("c1", "bash", { command: "cd C:/x && node test/logic.test.js --very-long-flag-value" })] },
+      { role: "tool", content: "ok", tool_call_id: "c1" },
+    ];
+    expect(buildSegments(messages, 0)[0].digest).toContain("cd C:/x");
+  });
 });

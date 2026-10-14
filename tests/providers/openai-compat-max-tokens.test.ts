@@ -76,3 +76,52 @@ describe("OpenAICompatProvider: max_tokens 送信ポリシー", () => {
     expect(capturedBody).not.toHaveProperty("max_tokens");
   });
 });
+
+/** ChatParams.disableThinking の送信ポリシー (docs/context-forgetting.md §4.2) */
+describe("OpenAICompatProvider: disableThinking 送信ポリシー", () => {
+  let capturedBody: Record<string, unknown> | undefined;
+
+  beforeEach(() => {
+    capturedBody = undefined;
+    vi.spyOn(httpClient, "httpPostStream").mockImplementation(async (_url, body) => {
+      capturedBody = body as Record<string, unknown>;
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      });
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function send(providerType: string, disableThinking?: boolean) {
+    const provider = new OpenAICompatProvider(providerType as never, "https://example.test");
+    for await (const _ of provider.chat({
+      model: "m",
+      messages: [{ role: "user", content: "hello" }],
+      stream: true,
+      disableThinking,
+    })) {
+      // body の捕捉のみが目的
+    }
+  }
+
+  it.each(["llamacpp", "vllm"])("%s には chat_template_kwargs.enable_thinking=false を送る", async (type) => {
+    await send(type, true);
+    expect(capturedBody?.chat_template_kwargs).toEqual({ enable_thinking: false });
+  });
+
+  it("未指定なら送らない", async () => {
+    await send("llamacpp");
+    expect(capturedBody).not.toHaveProperty("chat_template_kwargs");
+  });
+
+  it("対応外の provider には送らない (未知フィールドで 400 を避ける)", async () => {
+    await send("openai-compat", true);
+    expect(capturedBody).not.toHaveProperty("chat_template_kwargs");
+  });
+});

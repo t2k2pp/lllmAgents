@@ -109,6 +109,15 @@ function oneLine(text: string, max: number): string {
   return flat.length <= max ? flat : `${flat.slice(0, max)}…`;
 }
 
+/**
+ * パスを末尾優先で 1 行に収める。 先頭から切ると同じプロジェクト内のファイルが
+ * `C:\Users\…\src\g…` のように全部同じ表示になり、 モデルが区別できない。
+ */
+function pathTail(path: string, max: number): string {
+  const flat = path.replace(/\s+/g, " ").trim();
+  return flat.length <= max ? flat : `…${flat.slice(flat.length - (max - 1))}`;
+}
+
 /** tool_calls の引数から代表的なパス等を 1 つ拾う (digest 用) */
 function pickRepresentativeArg(msg: Message): string | undefined {
   const calls = msg.tool_calls ?? [];
@@ -117,7 +126,8 @@ function pickRepresentativeArg(msg: Message): string | undefined {
       const args = JSON.parse(c.function.arguments || "{}") as Record<string, unknown>;
       for (const key of ["file_path", "path", "pattern", "command", "url", "query"]) {
         const v = args[key];
-        if (typeof v === "string" && v.trim().length > 0) return oneLine(v, 40);
+        if (typeof v !== "string" || v.trim().length === 0) continue;
+        return key === "file_path" || key === "path" ? pathTail(v, 40) : oneLine(v, 40);
       }
     } catch {
       // 引数が壊れていても digest は best-effort でよい
@@ -626,17 +636,31 @@ export class ForgettingEngine {
    * forget 単独モードは失敗を報告し、hybrid のみ明示された圧縮段階へ進む。
    */
   async plan(messages: Message[], targetTokens: number): Promise<ForgetPlan | null> {
+    return (await this.planWithReason(messages, targetTokens)).plan;
+  }
+
+  /**
+   * plan() の本体。 不成立のときは「なぜ作れなかったか」 を reason に入れて返す。
+   * 原因ごとに打ち手が違う (思考で上限到達 / JSON 崩れ / 選択 0 件 / 対象なし) ため、
+   * 1 つの文言にまとめず利用者に見せる (docs §4.5)。
+   */
+  async planWithReason(
+    messages: Message[],
+    targetTokens: number,
+  ): Promise<{ plan: ForgetPlan | null; reason?: string }> {
     const segments = buildSegments(messages, this.keepRecentSegments);
     const forgettable = segments.filter((s) => !s.protected);
     if (forgettable.length === 0) {
       logger.info("[forget] 忘却可能なセグメントがありません (すべて保護)");
-      return null;
+      return { plan: null, reason: "忘却できるセグメントがありません (直近の作業とノートはすべて保護対象)" };
     }
 
     const manifest = buildManifest(segments);
     const prompt = buildForgetPrompt(manifest, targetTokens);
 
     let choice: RawForgetChoice | null = null;
+    // 2 回とも失敗したときに見せる、 最後の試行の失敗内容
+    let lastFailure = "";
     for (let attempt = 0; attempt < 2 && !choice; attempt++) {
       try {
         const gen = this.provider.chat({
@@ -651,32 +675,41 @@ export class ForgettingEngine {
           ],
           temperature: FORGET_TEMPERATURE,
           maxTokens: FORGET_MAX_TOKENS,
+          // 思考モデルは「思考は短く」 を守らず上限を思考だけで使い切る (docs §4.2)
+          disableThinking: true,
           stream: true,
         });
         const response = await collectResponse(gen);
         const trimmed = response.content.trim();
         if (trimmed.length === 0) {
-          logger.warn(
-            `[forget] LLM の応答テキストが空でした (試行 ${attempt + 1}/2, finishReason=${response.finishReason}, completionTokens=${response.usage?.completionTokens ?? "unknown"})`,
-          );
+          const completion = response.usage?.completionTokens;
+          lastFailure =
+            `モデルの応答本文が空でした (finishReason=${response.finishReason ?? "unknown"}, 出力 ${completion ?? "不明"} トークン)` +
+            (response.finishReason === "length"
+              ? `。 出力上限 ${FORGET_MAX_TOKENS} トークンを思考だけで使い切った可能性があります`
+              : "");
+          logger.warn(`[forget] ${lastFailure} (試行 ${attempt + 1}/2)`);
           continue;
         }
         choice = parseForgetResponse(trimmed);
         if (!choice) {
+          lastFailure = `モデルの応答を JSON として読めませんでした: ${oneLine(trimmed, 80)}`;
           logger.warn(`[forget] JSON パースに失敗 (試行 ${attempt + 1}/2): ${oneLine(trimmed, 200)}`);
         }
       } catch (e) {
         if (isRateLimitError(e)) throw e;
+        lastFailure = `忘却選択の LLM 呼び出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`;
         logger.warn(`[forget] 忘却選択の LLM 呼び出しに失敗 (試行 ${attempt + 1}/2): ${e}`);
       }
     }
-    if (!choice) return null;
+    if (!choice) return { plan: null, reason: `${lastFailure} (2 回試行)` };
 
     const { thin, drop, warnings } = validateChoice(segments, choice);
     if (thin.length === 0 && drop.length === 0) {
       // 「何も忘れない」 は安全側だが縮約としては不成立として返す。
       logger.info("[forget] モデルが thin/drop を 1 件も選ばなかったため忘却は不成立");
-      return null;
+      const ignored = warnings.length > 0 ? ` (無効な指定 ${warnings.length} 件を除外: ${warnings[0]})` : "";
+      return { plan: null, reason: `モデルが忘れる対象を 1 件も選びませんでした${ignored}` };
     }
 
     const before = estimateMessageTokens(messages);
@@ -684,13 +717,15 @@ export class ForgettingEngine {
     const estimatedFreedTokens = Math.max(0, before - estimateMessageTokens(next));
 
     return {
-      segments,
-      thin,
-      drop,
-      reason: choice.reason,
-      warnings,
-      targetTokens,
-      estimatedFreedTokens,
+      plan: {
+        segments,
+        thin,
+        drop,
+        reason: choice.reason,
+        warnings,
+        targetTokens,
+        estimatedFreedTokens,
+      },
     };
   }
 
@@ -785,7 +820,7 @@ export class ForgettingEngine {
 
   /** プラン作成 → 適用までを 1 回で行う */
   async forget(history: MessageHistory, targetTokens: number): Promise<ForgetResult> {
-    const plan = await this.plan(history.getRawMessages(), targetTokens);
+    const { plan, reason } = await this.planWithReason(history.getRawMessages(), targetTokens);
     if (!plan) {
       const failed: ForgetResult = {
         applied: false,
@@ -793,7 +828,7 @@ export class ForgettingEngine {
         thinnedSegments: 0,
         droppedSegments: 0,
         plan: null,
-        reason: "忘却プランを作れませんでした (JSON パース失敗 / 選択 0 件 / 対象なし)",
+        reason: `忘却プランを作れませんでした: ${reason ?? "理由不明"}`,
       };
       this.lastResult = failed;
       this.lastAt = Date.now();
@@ -807,11 +842,11 @@ export class ForgettingEngine {
     const messages = history.getRawMessages();
     const segments = buildSegments(messages, this.keepRecentSegments);
     const manifest = buildManifest(segments);
-    const plan = await this.plan(messages, targetTokens);
+    const { plan, reason } = await this.planWithReason(messages, targetTokens);
     return {
       manifest,
       plan,
-      reason: plan ? undefined : "忘却プランを作れませんでした (JSON パース失敗 / 選択 0 件 / 対象なし)",
+      reason: plan ? undefined : `忘却プランを作れませんでした: ${reason ?? "理由不明"}`,
     };
   }
 }

@@ -13,6 +13,9 @@ import { httpGet, httpPostStream } from "../utils/http-client.js";
 import { inferContextLength } from "./utils/context-length.js";
 import { compatibleOpenAISamplingParameters, warnOmittedSamplingParameters } from "./openai-sampling-compat.js";
 
+/** chat_template_kwargs.enable_thinking を解釈するセルフホスト系サーバ (ChatParams.disableThinking) */
+const THINKING_TOGGLE_PROVIDERS = new Set<string>(["llamacpp", "vllm"]);
+
 interface OpenAIModelResponse {
   data: Array<{ id: string; object: string }>;
 }
@@ -154,6 +157,11 @@ export class OpenAICompatProvider implements LLMProvider {
     // ケースこそ省略が正解。 finish_reason="length" が返った場合はエージェント側で自動継続する。
     if (params.maxTokens) {
       body.max_tokens = params.maxTokens;
+    }
+    // 思考オフ: chat template の enable_thinking を倒す (Qwen3 系等の慣例)。
+    // 未知フィールドで 400 を返し得る商用 API には送らない。
+    if (params.disableThinking && THINKING_TOGGLE_PROVIDERS.has(this.providerType)) {
+      body.chat_template_kwargs = { enable_thinking: false };
     }
     if (params.tools && params.tools.length > 0) {
       body.tools = params.tools;
