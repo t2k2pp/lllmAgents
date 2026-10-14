@@ -43,8 +43,16 @@ export interface CapabilityProfile {
   reason: string;
 
   // === Phase C: ループ制御チューナブル (docs/multi-tier-harness-roadmap.md §4 Phase C) ===
-  /** ツール呼び出しの hard cap (絶対上限) */
+  /**
+   * 1 つの依頼で最初に与える作業回数 (LLM 呼び出し回数)。 到達時、 直近の区間で進捗
+   * (ToDo の完了 / ファイル変更) があれば iterationExtension ずつ延長する。
+   * docs/todo-request-elaboration.md 第 3 段 項目 16
+   */
   maxIterations: number;
+  /** 進捗があっても超えない絶対上限 (暴走の安全網) */
+  maxIterationsCeiling: number;
+  /** 進捗があったときに延長する回数 (= 進捗を判定する区間の長さ) */
+  iterationExtension: number;
   /** 自己点検の最大連続発動回数 (text-only / verification / evaluator 共通) */
   maxSelfCheckRounds: number;
   /** ContextManager の圧縮発火閾値 (0..1, 例: 0.7 = 70% で圧縮) */
@@ -82,6 +90,8 @@ export interface CapabilityOverride {
   promptStyle?: CapabilityProfile["promptStyle"];
   // Phase C tunables も override 可能
   maxIterations?: number;
+  maxIterationsCeiling?: number;
+  iterationExtension?: number;
   maxSelfCheckRounds?: number;
   compressionThreshold?: number;
   toolResultTruncateBytes?: number;
@@ -100,6 +110,8 @@ const TIER_DEFAULTS: Record<Tier, Omit<CapabilityProfile, "tier" | "contextWindo
     promptStyle: "concise",
     // Phase C: T1 は 100 反復まで深掘り、 自己点検 3 回まで、 圧縮閾値 0.7、 truncate 20KB
     maxIterations: 100,
+    maxIterationsCeiling: 500,
+    iterationExtension: 40,
     maxSelfCheckRounds: 3,
     compressionThreshold: 0.7,
     toolResultTruncateBytes: 20 * 1024,
@@ -117,6 +129,8 @@ const TIER_DEFAULTS: Record<Tier, Omit<CapabilityProfile, "tier" | "contextWindo
     promptStyle: "standard",
     // Phase C: T2 は 80 反復、 自己点検 2 回、 圧縮 0.6、 truncate 12KB
     maxIterations: 80,
+    maxIterationsCeiling: 400,
+    iterationExtension: 40,
     maxSelfCheckRounds: 2,
     compressionThreshold: 0.6,
     toolResultTruncateBytes: 12 * 1024,
@@ -132,6 +146,8 @@ const TIER_DEFAULTS: Record<Tier, Omit<CapabilityProfile, "tier" | "contextWindo
     promptStyle: "verbose+examples",
     // Phase C: T3 は 50 反復で打ち切り、 自己点検 1 回、 圧縮 0.5、 truncate 6KB
     maxIterations: 50,
+    maxIterationsCeiling: 150,
+    iterationExtension: 25,
     maxSelfCheckRounds: 1,
     compressionThreshold: 0.5,
     toolResultTruncateBytes: 6 * 1024,

@@ -153,6 +153,32 @@ function renderMarkdown(text: string): string {
  * 残してあるのは過去ドキュメントとの整合性 (DESIGN.md / docs/internal_design.md)。
  */
 const MAX_TOOL_ITERATIONS = 100;
+
+/**
+ * 作業回数の上限で止めるときの報告文 (docs/todo-request-elaboration.md 第 3 段 項目 16)。
+ * 今の依頼の ToDo から「終わったこと / 残り」 を並べ、 「続けて」 で再開できることを伝える。
+ */
+export function buildIterationStopReport(
+  reason: "stalled" | "ceiling",
+  iterations: number,
+  window: number,
+  ceiling: number,
+): string {
+  const todos = getCurrentTodos();
+  const done = todos.filter((t) => t.status === "completed").map((t) => `- ${t.content}`);
+  const left = todos.filter((t) => t.status !== "completed").map((t) => `- ${t.content}`);
+  const head =
+    reason === "ceiling"
+      ? `⏸ 作業回数が絶対上限 (${ceiling} 回) に達したため、 ここで一旦止めました。`
+      : `⏸ 直近 ${window} 回の作業で ToDo の完了もファイルの変更も無かったため、 ここで一旦止めました (作業 ${iterations} 回)。`;
+  const lines = [head];
+  if (todos.length > 0) {
+    lines.push("", `終わったこと (${done.length}):`, ...(done.length > 0 ? done : ["- なし"]));
+    lines.push("", `残り (${left.length}):`, ...(left.length > 0 ? left : ["- なし"]));
+  }
+  lines.push("", "「続けて」 と送ると、 ここから再開します。 方針を変える場合はそれも一緒に伝えてください。");
+  return lines.join("\n");
+}
 const MAX_CONNECTION_RETRIES = 3;
 
 // formatSelfCheck は src/agent/self-check-messages.ts に移動 (ID-012: 2026-04-30 共通化)。
@@ -912,9 +938,20 @@ export class AgentLoop {
       let coherenceGateRetries = durableResume?.run.coherenceGateRetries ?? 0; // Axis (2a) thinking-text コヒーレンス
       const MAX_NEW_GATE_RETRIES = 2; // 各 gate の上限 (自己点検と独立)
 
-      // Phase C-2: hard cap を tier 別に。 T1=100, T2=80, T3=50。
-      // ユーザー override (config.json modelCapabilities) で上書きも可能。
-      const hardCap = this.capability.maxIterations;
+      // 作業回数の上限は「進捗で延長」 (docs/todo-request-elaboration.md 第 3 段 項目 16)。
+      // 最初は capability.maxIterations (T1=100, T2=80, T3=50)。 到達時、 直近の区間で ToDo の完了か
+      // ファイル変更があれば iterationExtension ずつ延長し、 maxIterationsCeiling で必ず止める。
+      // 旧実装は固定上限で、 長い作業が途中で「Maximum tool iterations reached.」 とだけ出して止まっていた。
+      // ユーザー override (config.json modelCapabilities) で各値を上書きできる。
+      const ceiling = Math.max(this.capability.maxIterationsCeiling, this.capability.maxIterations);
+      const extension = Math.max(1, this.capability.iterationExtension);
+      const startIteration = durableResume?.run.nextIteration ?? 0;
+      // durable resume で既に初期上限を超えていても、 再開直後に 1 区間は走らせる
+      let budget = Math.min(ceiling, Math.max(this.capability.maxIterations, startIteration + extension));
+      const progressMark = (): string =>
+        `${getCurrentTodos().filter((t) => t.status === "completed").length}:${this.runStats.filesChanged.size}`;
+      let lastProgressMark = progressMark();
+      let stopReason: "stalled" | "ceiling" | null = null;
       const pauseDurablyIfRequested = async (nextIteration: number): Promise<boolean> => {
         if (!this.runApiGate.isDurablePauseRequested()) return true;
         applyPendingSteering("tool");
@@ -953,29 +990,38 @@ export class AgentLoop {
         }
         return await this.runApiGate.pauseAtDurableBoundary();
       };
-      for (let iteration = durableResume?.run.nextIteration ?? 0; iteration < hardCap; iteration++) {
+      for (let iteration = startIteration; ; iteration++) {
+        if (iteration >= budget) {
+          const mark = progressMark();
+          const progressed = mark !== lastProgressMark;
+          if (progressed && budget < ceiling) {
+            lastProgressMark = mark;
+            budget = Math.min(ceiling, budget + extension);
+            console.log(chalk.dim(`  [作業回数] 進捗あり — 上限を ${budget} 回に延長 (絶対上限 ${ceiling})`));
+          } else {
+            stopReason = progressed ? "ceiling" : "stalled";
+            break;
+          }
+        }
         this.currentIteration = iteration;
         this.runStats.iterations = iteration + 1;
-        // P3-A: レジスター別ソフトキャップ。 hard cap (= capability.maxIterations) 内で、
-        // 軽量タスク (explore/rough) は早めに上限到達を促し、 standard はやや控えめ。
-        // Phase C-4: production が hard cap (T3=50) を超えないよう min を取る。
-        const softCap = Math.min(this.computeRegisterSoftCap(), hardCap);
+        // P3-A: レジスター別ソフトキャップ。 確認を求めて止めるのではなく、 進み具合の自己点検を 1 度だけ促す。
+        // (旧: 「ask_user で続行可否を確認」 → 長い作業ほどユーザー確認が挟まり、 やりきれなかった)
+        const softCap = Math.min(this.computeRegisterSoftCap(), budget);
         if (iteration >= softCap && !this.softCapWarned) {
-          console.log(
-            chalk.yellow(
-              `\n  完了レベル "${this.currentRegister}" のソフト上限 (${softCap}) に到達しました。 ` +
-                `必要なら ask_user で続行可否を確認するか、 区切って報告してください。`,
-            ),
-          );
-          this.notice("warn", `完了レベル "${this.currentRegister}" のソフト上限 (${softCap} 反復) に到達`);
+          const register: string = this.currentRegister; // run 冒頭の代入で型が "unknown" に絞られるのを避ける
+          const light = register === "explore" || register === "rough";
+          console.log(chalk.dim(`  [作業回数] 完了レベル "${this.currentRegister}" の目安 (${softCap} 回) に到達`));
           this.history.addUserMessage(
-            `[ハーネス] 完了レベル "${this.currentRegister}" のソフト上限 (${softCap} 反復) に到達しました。\n` +
-              `  進捗を簡潔にまとめ、 残作業を提示してから ask_user で続行 or 中断を確認してください。\n` +
-              `  「もう少しで終わる」 と判断するなら response_complete で完了報告を。 hard cap は ${hardCap} 反復です (tier=${this.capability.tier})。`,
+            light
+              ? `[ハーネス] 完了レベル "${this.currentRegister}" にしては作業が長くなっています (${softCap} 回)。 ` +
+                  `ここまでで答えられるなら response_complete でまとめてください。 まだ必要な作業があるなら続けてかまいません。`
+              : `[ハーネス] 作業が長くなっています (${softCap} 回)。 ToDo の状態を最新にしてください (終わった項目は completed)。\n` +
+                  `  全部終わっていれば response_complete で完了報告、 残りがあればそのまま続けてください。 ユーザーへの確認は不要です` +
+                  ` (行き詰まったときだけ ask_user)。`,
+            { ephemeral: true },
           );
           this.softCapWarned = true;
-          // ソフトキャップ到達後は hard cap までしか走らないようループ条件で自然終了させる
-          // (即座に return せず、 LLM の応答を 1 回受けてから安全に閉じる)
         }
         // 中断チェック
         if (this._aborted) {
@@ -2239,8 +2285,17 @@ export class AgentLoop {
         return;
       }
 
-      console.log(chalk.yellow("\n  Maximum tool iterations reached."));
-      this.events.emit("harness_notice", { level: "warn", message: "反復上限に到達しました" });
+      // 上限で止めるときは黙って終わらず、 何が終わり何が残ったかを最終応答として届ける
+      // (docs/todo-request-elaboration.md 第 3 段 項目 16)
+      const report = buildIterationStopReport(stopReason ?? "stalled", this.runStats.iterations, extension, ceiling);
+      console.log(chalk.yellow(`\n  ${report.replace(/\n/g, "\n  ")}`));
+      this.events.emit("harness_notice", {
+        level: "warn",
+        message: stopReason === "ceiling" ? "作業回数の絶対上限に到達しました" : "進捗が止まったため作業を止めました",
+      });
+      this.history.addAssistantMessage(report);
+      this.runStats.finalText = report;
+      this.events.emit("assistant_text", { text: report, final: true });
       this.purgeEphemeralAtSpanEnd("max_iterations");
     } finally {
       const pauseBeforeFinish = this.runApiGate.finishRun();
@@ -3734,7 +3789,7 @@ export class AgentLoop {
       recentFailures: this.recentFailures.length,
       register: this.currentRegister,
       softCap: this.computeRegisterSoftCap(),
-      hardCap: this.capability.maxIterations,
+      hardCap: Math.max(this.capability.maxIterationsCeiling, this.capability.maxIterations),
       mode: this.currentMode,
       goalStatement: goal?.statement ?? null,
       acceptanceCriteriaCount: goal?.acceptance_criteria.length ?? 0,
