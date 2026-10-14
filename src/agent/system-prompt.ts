@@ -3,7 +3,6 @@ import { loadMemory } from "./memory.js";
 import { loadProjectInstructions, getGitInfo } from "./project-context.js";
 import { isWindows } from "../utils/platform.js";
 import { getBrowserCapability } from "../browser/browser-capability.js";
-import { detectPython, describePython } from "./runtime-tools.js";
 import { RuleLoader } from "../rules/rule-loader.js";
 import { listResolvableSlots } from "../config/model-resolver.js";
 import { listEntries as listRegistryEntries } from "../config/model-registry.js";
@@ -54,14 +53,6 @@ export interface SystemPromptOverrides {
   projectInstructions?: string;
   memory?: string;
 }
-
-/**
- * git bash 上でネイティブの node/python を使うときのパスの落とし穴 (docs/env-info-and-app-basics.md §2.1)。
- * 引数の /c/... /tmp/... は git bash が変換するが、 スクリプト内に書いたパスは変換されない。
- */
-export const WINDOWS_PATH_NOTE =
-  "- Paths: git bash converts paths in command arguments, but not paths written inside script code or files. " +
-  "There, node/python read `/tmp/x` as `C:\\tmp\\x` — write `C:/Users/...` style paths in scripts, and keep scratch files under the working directory instead of /tmp";
 
 /** system prompt に列挙する named slot の上限 (docs/model-orchestration.md §10)。 */
 const MAX_LISTED_SLOTS = 5;
@@ -240,11 +231,10 @@ No access outside the sandbox. Block dangerous commands (rm -rf, etc.). No hardc
   parts.push(`
 # Environment
 - Platform: ${process.platform}
-- Shell: ${isWindows ? "git bash (use Unix syntax; cmd.exe/PowerShell syntax is not supported)" : (process.env.SHELL ?? "/bin/sh")}${isWindows ? `\n${WINDOWS_PATH_NOTE}` : ""}
+- Shell: ${isWindows ? "git bash (use Unix syntax; cmd.exe/PowerShell syntax is not supported)" : (process.env.SHELL ?? "/bin/sh")}
 - Working directory: ${process.cwd()}
 - Git: ${gitInfo.isGitRepo ? `yes (branch: ${gitInfo.branch ?? "unknown"})` : "no"}
 - Node.js: ${process.version}
-${describePython(detectPython())}
 - Home directory: ${os.homedir()}`);
 
   // ブラウザ機能が無効な環境では、その事実をエージェントに知らせる。
