@@ -22,8 +22,10 @@ README.md         このファイル
    - `localllm.exe` が `%LOCALAPPDATA%\localllm\` にコピーされる
    - `skills/` が `%USERPROFILE%\.localllm\skills\` にコピーされる
    - `agents/` が実行ファイル隣接の `%LOCALAPPDATA%\localllm\agents\` にコピーされる
-3. 表示される手順に従って PATH に `%LOCALAPPDATA%\localllm` を追加
-4. 新しいターミナルで `localllm --setup` を実行して初期設定
+   - `%LOCALAPPDATA%\localllm` がユーザー PATH に自動追加される（既にあれば何もしない。管理者権限不要）
+3. **新しい**ターミナルを開き、どのフォルダからでも `localllm --setup` を実行して初期設定
+
+再インストール（更新）も `install.bat` を再実行するだけ。起動中の `localllm.exe` があると上書きに失敗するので、先に終了しておく。
 
 ### macOS / Linux / git-bash
 

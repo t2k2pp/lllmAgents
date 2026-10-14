@@ -5,7 +5,8 @@ rem localllm インストーラ (Windows)
 rem  - localllm.exe を %LOCALAPPDATA%\localllm\ にコピー
 rem  - skills/ を %USERPROFILE%\.localllm\skills\ にコピー
 rem  - agents/ を実行ファイル隣接の %LOCALAPPDATA%\localllm\agents\ にコピー
-rem  - PATH 追加は手順表示のみ（自動で環境変数に触らない）
+rem  - %LOCALAPPDATA%\localllm をユーザー PATH に追加（既にあれば何もしない）
+rem    Claude Code と同様、どのフォルダのターミナルからでも localllm で起動できるようにする
 
 set "SRC_DIR=%~dp0"
 set "INSTALL_DIR=%LOCALAPPDATA%\localllm"
@@ -52,20 +53,19 @@ if exist "%AGENTS_SRC%" (
   echo [WARN] agents folder not found, sub-agents will be unavailable
 )
 
+rem ユーザー PATH への追加。%VAR% 参照を壊さないよう未展開のまま読み書きする。
+rem 末尾の SetEnvironmentVariable(存在しない変数の削除) は、変更を新しいターミナルへ
+rem 通知 (WM_SETTINGCHANGE) させるためだけに呼ぶ。
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$d=$env:INSTALL_DIR; $k=Get-Item 'HKCU:\Environment'; $p=[string]$k.GetValue('Path','',[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); $parts=@($p -split ';' | Where-Object { $_ -ne '' }); if ($parts | Where-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') -ieq $d.TrimEnd('\') }) { Write-Host '[OK] PATH already contains' $d; exit 0 }; Set-ItemProperty -Path 'HKCU:\Environment' -Name Path -Value (($parts + $d) -join ';') -Type ExpandString; [Environment]::SetEnvironmentVariable('LOCALLLM_PATH_NOTIFY',$null,'User'); Write-Host '[OK] added to user PATH:' $d"
+if errorlevel 1 (
+  echo [WARN] failed to update PATH. Add %INSTALL_DIR% to your user PATH manually.
+)
+
 echo.
 echo =========================================
-echo  Next step: add to PATH
+echo  Done
 echo =========================================
-echo Run this in an Admin PowerShell to add the install dir to user PATH:
-echo.
-echo   [Environment]::SetEnvironmentVariable(
-echo     'Path',
-echo     [Environment]::GetEnvironmentVariable('Path','User') + ';%INSTALL_DIR%',
-echo     'User')
-echo.
-echo Or add manually: Control Panel -^> User Accounts -^> Change env variables
-echo.
-echo Then restart your terminal and run: localllm --setup
+echo Open a NEW terminal and run: localllm --setup
 echo.
 echo NOTE: localllm.exe is not code-signed. On first run Windows
 echo SmartScreen may show "Windows protected your PC".

@@ -189,8 +189,9 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 > **リリース手順 (GitHub Releases)**: exe ビルドはユーザーが行う ([[feedback_user_does_deploy_build]])。
 > 1. package.json / package-lock.json / CHANGELOG.md を更新し、`npm run validate:version -- --tag v<version>`を通してコミット
 > 2. `git tag v<version> && git push --tags`
-> 3. `npm run build:deploy` で deploy/ を組み立て
-> 4. `gh release create v<version> deploy/localllm.exe --title "v<version>" --notes "CHANGELOG.md の該当セクション"`
+> 3. `npm run build:deploy` で deploy/ を組み立て（tag 後に行い、build id を `-dirty` なしにする）
+> 4. deploy/ を `localllm-v<version>-win-x64.zip` にまとめる（exe + skills/ + agents/ + install.bat/sh + README。install.bat が PATH 追加まで行う）
+> 5. `gh release create v<version> deploy/localllm.exe localllm-v<version>-win-x64.zip --title "v<version>" --notes "CHANGELOG.md の該当セクション"`（gh が無い環境では GitHub REST API `POST /repos/{owner}/{repo}/releases` + uploads で同等）
 > リリースを公開すると、旧バージョン利用者には次回起動時に更新通知が出る。
 
 **現状**: deploy フォルダの exe は手動ビルド・手動差し替え。利用者が古いバージョンを使い続けても気づけない。
