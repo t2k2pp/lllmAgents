@@ -10,6 +10,18 @@ coverage/
 *.zip
 
 # Workspace separation (docs/workspace-separation.md)
+# sandbox/ は許可リスト方式: 下記以外 (lllmAgents の実行で生成された検証成果物、
+# 一時スクリプト、入れ子の別リポジトリ等) は追跡しない
+sandbox/*
+!sandbox/README.md
+!sandbox/run.bat
+!sandbox/run.sh
+!sandbox/scripts/
+!sandbox/artifacts/
+!sandbox/output/
+!sandbox/screenshots/
+# scripts/ 内でも lllmAgents が生成した使い捨てスクリプトは除外
+sandbox/scripts/migrate_vault*.mjs
 sandbox/artifacts/*
 sandbox/output/*
 sandbox/screenshots/*

@@ -243,6 +243,14 @@ rem 5. "完了。localllm --help で確認してください"
 
 deploy/skills/, deploy/install.*, deploy/README.md はコミット対象。
 
+### 追記 (2026-10-14): sandbox/ の許可リスト化
+
+sandbox/ 直下に lllmAgents の実行で生成されたもの (Flutter のビルド残骸、入れ子の別リポジトリ、
+一時スクリプト等) が溜まり差分を汚していたため、`sandbox/*` を一括で除外し、
+`README.md` / `run.bat` / `run.sh` / `scripts/` と `.gitkeep` だけを許可する方式に変更した。
+`scripts/` 内でも lllmAgents が生成した使い捨てのもの (`migrate_vault*.mjs`) は個別に除外する。
+再利用する検証スクリプトは `sandbox/scripts/<用途>/` に置くこと。
+
 ---
 
 ## 実装タスク分解
