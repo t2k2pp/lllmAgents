@@ -659,8 +659,10 @@ export class PermissionManager {
       return { allowed: true };
     }
 
-    // glob, grep 等の読み取り系: サンドボックスチェックのみ
-    if (toolName === "glob" || toolName === "grep" || toolName === "file_read") {
+    // glob, grep 等の読み取り系: サンドボックスチェックのみ。
+    // game_smoke も自分で書いたページをヘッドレスブラウザで開いて確かめるだけの読み取り系
+    // (browser_* は上で自動承認済みなのに漏れており、 検証のたびに確認が出ていた — 2026-10-14 動作確認で発覚)
+    if (toolName === "glob" || toolName === "grep" || toolName === "file_read" || toolName === "game_smoke") {
       const filePath = (params.path ?? params.file_path ?? params.pattern) as string | undefined;
       if (filePath && !this.sandbox.isPathAllowed(filePath)) {
         return { allowed: false, reason: `[autorun] パス ${filePath} はサンドボックス外です` };
