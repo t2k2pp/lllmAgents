@@ -38,6 +38,10 @@ describe("依頼の範囲の読み取り (buildScopeRules)", () => {
     expect(buildSubAgentStrategyPrompt(tier)).toContain(buildScopeRules(tier));
   });
 
+  it.each(TIERS)("%s: ユーザーのデータを扱うアプリの土台 (空から始める・新規・保存・開く) を常駐で伝える", (tier) => {
+    expect(buildScopeRules(tier)).toMatch(/start(ing)? empty, new, save,? (and )?open/);
+  });
+
   it.each(TIERS)("%s: 要の言い回しを含む", (tier) => {
     const rules = buildScopeRules(tier);
     for (const phrase of KEY_PHRASES[tier]) expect(rules).toContain(phrase);
@@ -84,6 +88,9 @@ describe("洗い出しガイド (todo_append 初回の遅延注入)", () => {
     const first = getFirstUseGuide("todo_append", "T2");
     expect(first).toContain("依頼の中身を洗い出す");
     expect(first).toContain("黙って外さない");
+    // 道具・アプリの観点 (docs/env-info-and-app-basics.md §2.2)
+    expect(first).toContain("初回は空の状態から始まる");
+    expect(first).toContain("新規作成・保存・開く");
     expect(getFirstUseGuide("todo_append", "T2")).toBeNull();
   });
 

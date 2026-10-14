@@ -62,20 +62,24 @@ For implementation requests with ambiguous granularity, lean to standard or high
  * goemon 試作では原作の看板要素 (店・通行手形等) を想起しながら "Omit for simplicity" と
  * 黙って削っていた。 削ること自体は許し、 黙って削ることを禁じる (= silent な欠損の禁止)。
  * 洗い出しの観点 (how) は todo_append 初回の `scope` ガイドへ遅延注入する。
+ * 「データを扱うアプリの土台」 の 1 行は、 冒頭宣言がガイド注入より前に書かれるため常駐に置く
+ * (docs/env-info-and-app-basics.md §2.2)。
  */
 export function buildScopeRules(tier?: Tier): string {
   if (tier === "T1") {
-    return `# Reading the request — for standard+: build what the user expects, not the minimum the words allow, in proportion to the request. "Like X" / "X-style" → include the signature elements that make X recognizable. The completion level sets verification depth, not how thin the product may be. Dropping a feature is fine; dropping it silently is not.`;
+    return `# Reading the request — for standard+: build what the user expects, not the minimum the words allow, in proportion to the request. "Like X" / "X-style" → include the signature elements that make X recognizable. An app for the user's own data: starting empty, new, save and open are the base, not extras. The completion level sets verification depth, not how thin the product may be. Dropping a feature is fine; dropping it silently is not.`;
   }
   if (tier === "T3") {
     return `# Reading the request [REQUIRED for standard / production]
 - Build what the user expects, not the smallest thing that matches the words. A small, exact request (one function, one fix) is exactly its words
 - "Make something like X" → build what X is known for (its special rules, items, systems). If you do not know X well, ask_user which parts matter
+- An app where the user makes their own data: start empty, new, save, open come first. Sample data only by choice
 - Leaving something out is OK, but say it (line (4) below)`;
   }
   return `# Reading the request [REQUIRED for standard / production]
 Build what the user expects, not the minimum the words allow; keep it proportional (a small, exact request is exactly its words).
 - "Like X" / "X-style" / homage: include the signature elements that make X recognizable.
+- An app for the user's own data: starting empty, new, save and open are the base, not extras; sample data is opt-in.
 - The completion level sets how deeply you verify, not how thin the product may be. At rough, keep the signature features but make each one minimal.
 - Dropping a feature is allowed; dropping it silently is not.`;
 }
