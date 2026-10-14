@@ -9,6 +9,7 @@ import { listEntries as listRegistryEntries } from "../config/model-registry.js"
 import type { Tier } from "./capability-tier.js";
 import {
   buildRegisterRules,
+  buildScopeRules,
   buildAcceptanceRules,
   buildVerificationRules,
   buildEscalationRules,
@@ -114,7 +115,9 @@ export function buildSystemPrompt(
 
 ${buildRegisterRules(tier)}
 
-At the start, for a normal task, state your approach in one line, then call a tool. React only when a self-check arrives from the existing harness.
+${buildScopeRules(tier)}
+
+At the start, for a normal task, state your approach and scope (includes / leaves out) in one or two lines, then call a tool. React only when a self-check arrives from the existing harness.
 
 ${buildAcceptanceRules(tier)}
 
@@ -148,10 +151,13 @@ ${buildUnexpectedSignalRules(tier)}
 
 ${buildRegisterRules(tier)}
 
-# At task start, you MUST answer in these 3 lines before implementing:
+${buildScopeRules(tier)}
+
+# At task start, you MUST answer in these 4 lines before implementing:
 (1) What to build: <filename and type>
 (2) Where to write it: <absolute path>
 (3) How to verify: <a command to run via bash>
+(4) Includes: <main features> / Leaves out: <features and reason, or "none">
 
 ${buildAcceptanceRules(tier)}
 
@@ -180,7 +186,9 @@ ${buildUnexpectedSignalRules(tier)}
 
 ${buildRegisterRules(tier)}
 
-**Declare the completion level at the start** [REQUIRED]: in the first turn, include the one line "This task is <completion level>" (e.g. "This task is **standard**").
+${buildScopeRules(tier)}
+
+**Declare the completion level and scope at the start** [REQUIRED]: in the first turn, include the line "This task is <completion level>". For standard / production, follow it with the main features you will build and anything you leave out (e.g. "This task is **standard**. Includes: A, B, C. Leaves out: D (reason)").
 
 ${buildAcceptanceRules(tier)}
 

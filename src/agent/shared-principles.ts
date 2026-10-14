@@ -55,6 +55,32 @@ Only hesitate between (c) and (d). When unsure, lean to the heavier one (d).
 For implementation requests with ambiguous granularity, lean to standard or higher.`;
 }
 
+/**
+ * 依頼の範囲の読み取り (docs/request-elaboration-design.md §5.1)。
+ *
+ * 完了レベルは「検証の深さ」 しか決めておらず、 「機能の厚み」 を決める軸が無かった。
+ * goemon 試作では原作の看板要素 (店・通行手形等) を想起しながら "Omit for simplicity" と
+ * 黙って削っていた。 削ること自体は許し、 黙って削ることを禁じる (= silent な欠損の禁止)。
+ * 洗い出しの観点 (how) は todo_append 初回の `scope` ガイドへ遅延注入する。
+ */
+export function buildScopeRules(tier?: Tier): string {
+  if (tier === "T1") {
+    return `# Reading the request — build what the user expects, not the minimum the words allow. If the request points at an existing work or product ("like X", "X-style"), include the signature elements that make X recognizable. The completion level sets verification depth, not how thin the product may be. Dropping a feature is fine; dropping it silently is not — name it.`;
+  }
+  if (tier === "T3") {
+    return `# Reading the request [REQUIRED for standard / production]
+- Build what the user expects, not the smallest thing that matches the words
+- "Make something like X" → list what X is known for (its special rules, items, systems) and build those too
+- Leaving something out is OK, but say it: "Leaves out: <thing> (<reason>)"`;
+  }
+  return `# Reading the request [REQUIRED for standard / production]
+Build what the user expects, not the minimum the words allow.
+- Before implementing, list the features the user expects: what they said + what such a thing normally has.
+- If the request points at an existing work or product ("like X", "X-style", homage), list the signature elements that make X recognizable (rules, systems, items, progression, look & sound) and include them by default.
+- The completion level sets how deeply you verify, not how thin the product may be.
+- Leaving a feature out is allowed; leaving it out silently is not. Name what you drop and why.`;
+}
+
 /** 戦略 ToDo + Acceptance Checklist の遵守 (docs/strategic-todo-design.md §2.3) */
 export function buildAcceptanceRules(tier?: Tier): string {
   if (tier === "T1") {
@@ -71,9 +97,9 @@ export function buildAcceptanceRules(tier?: Tier): string {
 
 ## For standard+, commit before starting
 Example:
-1. <filename> is written via file_write
-2. node --check (or build) passes
-3. <verify command> produces the expected output
+1. <feature the user asked for> works (e.g. "the shop sells items for coins")
+2. <another expected feature> works
+3. node --check (or build) passes and <verify command> produces the expected output
 Do not call response_complete until every item is ✓.
 
 ## Important
@@ -81,7 +107,7 @@ Thinking without acting on it (= plan evaporation) is forbidden. Always commit t
 **But explore (chat, play, one-shot answer, research answer) is the exception** — you may answer in 1-3 sentences without calling tools. This is not plan evaporation; it is the correct completion shape for a task with no artifact. Creating a \`todo_append\` for "let's play rock-paper-scissors" is overkill.`;
   }
   return `# Strategic ToDo (completion-condition list) [REQUIRED for standard / production]
-For complex tasks, write 3-5 completion conditions with \`todo_append\` before starting, then execute (do not keep it all in your head). E.g. "the HTML is written via file_write", "it runs in the browser". If completion conditions are handed to you via delegation, carry them over. Do not report completion until every item is done; in the report, list which items were met and which were not, with reasons. If stuck, signal with \`todo_mark(id,"blocked")\` (see each todo tool's description for arguments).`;
+For complex tasks, write 3-5 completion conditions with \`todo_append\` before starting, then execute (do not keep it all in your head). Make most of them user-visible features, not just process steps. E.g. "coins collected can buy items at the shop", "the gate opens only with the pass", "it runs in the browser without errors". If completion conditions are handed to you via delegation, carry them over. Do not report completion until every item is done; in the report, list which items were met and which were not, with reasons. If stuck, signal with \`todo_mark(id,"blocked")\` (see each todo tool's description for arguments).`;
 }
 
 /**
@@ -95,18 +121,18 @@ For complex tasks, write 3-5 completion conditions with \`todo_append\` before s
  */
 export function buildCreativeRhythmRules(tier?: Tier): string {
   if (tier === "T1") {
-    return `# Iterative creative rhythm — first act roughly → check the result → decide the next move. Do not try to build the finished form entirely in your head. Alternate rough-whole → details.`;
+    return `# Iterative creative rhythm — first act roughly → check the result → decide the next move. Do not try to build the finished form entirely in your head. Alternate rough-whole → details. Rough-first is about order, not about cutting scope.`;
   }
   if (tier === "T3") {
     return `# Iterative creation [REQUIRED]
-- First output something rough (it need not be perfect)
+- First output something rough (it need not be perfect). Rough means unpolished, not fewer features
 - Check what you output (file_read / inspect_canvas / bash, etc.)
 - Decide the next move based on the check
 - "Think it all through, then write" is forbidden. "Write while thinking."`;
   }
   return `# Build as you go [REQUIRED]
 - First act roughly → see the result → decide the next move. Do not try to build the finished form in your head alone
-- Proceed rough-whole → details`;
+- Proceed rough-whole → details. Rough-first is about order, not about cutting scope: the rough whole already has a place for every planned feature`;
 }
 
 /** 検証 (詳細は tool-guides で遅延注入) */

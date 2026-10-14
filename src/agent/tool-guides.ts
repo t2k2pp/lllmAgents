@@ -74,6 +74,18 @@ delegate メッセージには次の 4 点を必ず含める:
 - 絶対パス・\`..\` を使って CWD 外を参照する bash も確認必須
 - @添付されたファイルは context に既に入っている。 再度 file_read しないこと`,
 
+  // docs/request-elaboration-design.md §5.5。 常駐の「依頼の読み取り」 原則の how 部分
+  requestScope: `[ガイド: 依頼の中身を洗い出す]
+いま書いた ToDo が「書く・確かめる・報告する」 の作業手順だけなら、 ユーザーに見える機能の項目を足すこと。
+「〜のような」「〜風」 と既存の作品・製品を指す依頼は、 次の観点でその作品らしさを洗い出す:
+1. 中心の遊び方・使い方 (何を繰り返すのか)
+2. その作品だと分かる目印 (独特のルール・道具・仕組み)
+3. 進み方と目標 (面・鍵・クリア条件)
+4. 育つ・稼ぐ仕組み (お金・店・強化)
+5. 見た目と音 (画面の作り・BGM・効果音)
+それぞれを「入れる / 簡単にして入れる / 外す (理由)」 に分け、 入れるものを ToDo の完了条件にする。
+外すものはユーザーへの報告で名前を挙げる (黙って外さない)。`,
+
   obsidian: `[ガイド: ナレッジベース（Obsidian連携）の使い方]
 ## knowledge_save — 保存
 ユーザーが「記録して」「ナレッジに保存して」 等と指示した場合のみ使用する。 自動的には保存しない。
@@ -219,6 +231,7 @@ const TOOL_TO_GUIDES: Record<string, readonly string[]> = {
   second_llm_agent: ["secondLLM", "delegation"],
   bash: ["verification", "scopeStrict"],
   file_write: ["verification"],
+  todo_append: ["requestScope"],
   knowledge_save: ["obsidian"],
   knowledge_search: ["obsidian"],
 };

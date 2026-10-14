@@ -26,6 +26,7 @@ import type { ToolCall } from "../providers/base-provider.js";
 import type { Tier } from "./capability-tier.js";
 import {
   buildRegisterRules,
+  buildScopeRules,
   buildAcceptanceRules,
   buildVerificationRules,
   buildEscalationRules,
@@ -72,6 +73,8 @@ export function buildSubAgentStrategyPrompt(tier?: Tier): string {
 細切れに別の委任に分けず、 必要な作業はこのセッション内でやり切る。 委任メッセージにはレジスター・ Acceptance Criteria・ 仕様ファイルパス・ 保存先パスが含まれているはず。
 
 ${buildRegisterRules(tier)}
+
+${buildScopeRules(tier)}
 
 ${buildAcceptanceRules(tier)}
 
