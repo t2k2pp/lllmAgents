@@ -1,12 +1,15 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal
 
-rem localllm インストーラ (Windows)
-rem  - localllm.exe を %LOCALAPPDATA%\localllm\ にコピー
-rem  - skills/ を %USERPROFILE%\.localllm\skills\ にコピー
-rem  - agents/ を実行ファイル隣接の %LOCALAPPDATA%\localllm\agents\ にコピー
-rem  - %LOCALAPPDATA%\localllm をユーザー PATH に追加（既にあれば何もしない）
-rem    Claude Code と同様、どのフォルダのターミナルからでも localllm で起動できるようにする
+rem localllm installer (Windows)
+rem  - copy localllm.exe to %LOCALAPPDATA%\localllm\
+rem  - copy skills/ to %USERPROFILE%\.localllm\skills\
+rem  - copy agents/ next to the exe: %LOCALAPPDATA%\localllm\agents\
+rem  - add %LOCALAPPDATA%\localllm to the user PATH (no-op if already present)
+rem    so that `localllm` starts from any folder, like Claude Code.
+rem
+rem Keep this file ASCII-only with CRLF line endings: cmd.exe mis-parses
+rem LF or multibyte (UTF-8) lines and silently runs fragments of them.
 
 set "SRC_DIR=%~dp0"
 set "INSTALL_DIR=%LOCALAPPDATA%\localllm"
@@ -31,7 +34,7 @@ if not exist "%SRC_DIR%localllm.exe" (
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 copy /Y "%SRC_DIR%localllm.exe" "%INSTALL_DIR%\localllm.exe" >nul
 if errorlevel 1 (
-  echo [ERROR] failed to copy localllm.exe
+  echo [ERROR] failed to copy localllm.exe. Close any running localllm and retry.
   exit /b 1
 )
 echo [OK] copied localllm.exe
@@ -53,10 +56,11 @@ if exist "%AGENTS_SRC%" (
   echo [WARN] agents folder not found, sub-agents will be unavailable
 )
 
-rem ユーザー PATH への追加。%VAR% 参照を壊さないよう未展開のまま読み書きする。
-rem 末尾の SetEnvironmentVariable(存在しない変数の削除) は、変更を新しいターミナルへ
-rem 通知 (WM_SETTINGCHANGE) させるためだけに呼ぶ。
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$d=$env:INSTALL_DIR; $k=Get-Item 'HKCU:\Environment'; $p=[string]$k.GetValue('Path','',[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); $parts=@($p -split ';' | Where-Object { $_ -ne '' }); if ($parts | Where-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') -ieq $d.TrimEnd('\') }) { Write-Host '[OK] PATH already contains' $d; exit 0 }; Set-ItemProperty -Path 'HKCU:\Environment' -Name Path -Value (($parts + $d) -join ';') -Type ExpandString; [Environment]::SetEnvironmentVariable('LOCALLLM_PATH_NOTIFY',$null,'User'); Write-Host '[OK] added to user PATH:' $d"
+rem Add to the user PATH. Read and write the raw (unexpanded) value so that
+rem existing %VAR% entries survive. The final SetEnvironmentVariable call
+rem (deleting a variable that does not exist) is only there to broadcast
+rem WM_SETTINGCHANGE so that newly opened terminals see the new PATH.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$d=$env:INSTALL_DIR; if (-not $d) { Write-Host '[ERROR] INSTALL_DIR is empty'; exit 1 }; $k=Get-Item 'HKCU:\Environment'; $p=[string]$k.GetValue('Path','',[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); $parts=@($p -split ';' | Where-Object { $_ -ne '' }); if ($parts | Where-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') -ieq $d.TrimEnd('\') }) { Write-Host '[OK] PATH already contains' $d; exit 0 }; Set-ItemProperty -Path 'HKCU:\Environment' -Name Path -Value (($parts + $d) -join ';') -Type ExpandString; [Environment]::SetEnvironmentVariable('LOCALLLM_PATH_NOTIFY',$null,'User'); Write-Host '[OK] added to user PATH:' $d"
 if errorlevel 1 (
   echo [WARN] failed to update PATH. Add %INSTALL_DIR% to your user PATH manually.
 )
