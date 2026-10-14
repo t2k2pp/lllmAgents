@@ -68,7 +68,13 @@ import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
 import { formatBufferedResponseStatus } from "../cli/response-preview.js";
 import { writeRuntimeError } from "../cli/runtime-diagnostic.js";
-import { getFirstUseGuide, getFailureGuide, resetPerRequestGuides } from "./tool-guides.js";
+import {
+  getFirstUseGuide,
+  getFailureGuide,
+  resetPerRequestGuides,
+  takeGuide,
+  LARGE_NEW_FILE_CHARS,
+} from "./tool-guides.js";
 import { IntentClassifier, type CompletionType } from "./intent-classifier.js";
 import { Evaluator } from "./evaluator.js";
 import { judgeProgress, buildRecentSummary } from "./progress-judge.js";
@@ -153,6 +159,24 @@ function renderMarkdown(text: string): string {
  * 残してあるのは過去ドキュメントとの整合性 (DESIGN.md / docs/internal_design.md)。
  */
 const MAX_TOOL_ITERATIONS = 100;
+
+/**
+ * 新規ファイルを一度に大きく書いた直後なら、 1 つずつ確かめて進める手引きを返す (依頼ごと 1 回)。
+ * 作業は止めない (docs/todo-request-elaboration.md 第 3 段 項目 17)。
+ */
+export function largeNewFileGuide(toolCall: ToolCall, result: { success: boolean; output?: string }): string | null {
+  if (toolCall.function.name !== "file_write" || !result.success) return null;
+  if (!/\bcreated:/.test(result.output ?? "")) return null;
+  let content = "";
+  try {
+    const args = JSON.parse(toolCall.function.arguments || "{}") as { content?: unknown };
+    content = typeof args.content === "string" ? args.content : "";
+  } catch {
+    return null;
+  }
+  if (content.length < LARGE_NEW_FILE_CHARS) return null;
+  return takeGuide("largeWrite");
+}
 
 /**
  * 作業回数の上限で止めるときの報告文 (docs/todo-request-elaboration.md 第 3 段 項目 16)。
@@ -3145,6 +3169,8 @@ export class AgentLoop {
     if (guide) {
       resultContent += "\n\n" + guide;
     }
+    const largeWrite = largeNewFileGuide(toolCall, result);
+    if (largeWrite) resultContent += `\n\n${largeWrite}`;
 
     // Phase 5 第2ラウンド: ハーネス介入レイヤ (共通モジュール)。
     // file_edit 連続失敗 / 壁ドンループ / Read→Edit 契約 / 連続委任ガード / 旧エラーガイダンス
@@ -3291,6 +3317,8 @@ export class AgentLoop {
         if (guide) {
           resultContent += "\n\n" + guide;
         }
+        const largeWrite = largeNewFileGuide(toolCall, result);
+        if (largeWrite) resultContent += `\n\n${largeWrite}`;
 
         // Phase 5 第2ラウンド: ハーネス介入レイヤ (並列ルートでも適用)
         resultContent = enrichToolResult(toolCall, result.success, resultContent, this.harnessState);

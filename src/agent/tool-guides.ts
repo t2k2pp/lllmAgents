@@ -88,6 +88,15 @@ delegate メッセージには次の 4 点を必ず含める:
 それぞれを「入れる / 簡単にして入れる / 外す (理由)」 に分け、 入れるものを ToDo の完了条件にする。
 外すものはユーザーへの報告で名前を挙げる (黙って外さない)。`,
 
+  // docs/todo-request-elaboration.md 第 3 段 項目 17。 新規ファイルを一度に大きく書いた直後に 1 度だけ添える
+  // (goemon: 25KB を 1 回で書き、 座標の取り違えバグ 2 件の発見に約 60 ターンかかった)。 作業は止めない
+  largeWrite: `[ガイド: 大きなファイルを一度に書いた後の進め方]
+大きなファイルを一度に書きました。 バグがあっても、 どこで入ったか分かりにくい状態です。 ここからは:
+1. まず起動・構文の確認をして、 最小の動作 (画面が出る・コマンドが通る等) を確かめる
+2. ToDo の機能を 1 つずつ、 実際に動かして確かめてから completed にする (まとめて completed にしない)
+3. 確かめて動かない機能があれば、 次の機能に進む前にそこを直す
+次に大きなものを作るときは、 動く骨組みを先に書き、 機能を 1 つずつ足して、 そのたびに確かめる。`,
+
   obsidian: `[ガイド: ナレッジベース（Obsidian連携）の使い方]
 ## knowledge_save — 保存
 ユーザーが「記録して」「ナレッジに保存して」 等と指示した場合のみ使用する。 自動的には保存しない。
@@ -370,11 +379,24 @@ export function getFailureGuide(toolName: string, errorMsg: string, tier?: Tier)
  * 依頼ごとに出し直すガイド。 依頼の洗い出しは新しい依頼のたびに要るため、
  * セッションで 1 度きりの他ガイドと違い user 発話ごとに未使用へ戻す。
  */
-const PER_REQUEST_GUIDES = ["requestScope"] as const;
+const PER_REQUEST_GUIDES = ["requestScope", "largeWrite"] as const;
 
 /** user 発話の開始時に呼ぶ。 PER_REQUEST_GUIDES だけを未使用へ戻す。 */
 export function resetPerRequestGuides(): void {
   for (const k of PER_REQUEST_GUIDES) usedGuides.delete(k);
+}
+
+/** 新規ファイルを「一度に大きく書いた」 とみなす文字数 (第 3 段 項目 17) */
+export const LARGE_NEW_FILE_CHARS = 12_000;
+
+/**
+ * 条件付きで添えるガイドを、 未使用なら 1 度だけ取り出す (ツール初回使用とは別の契機で出すもの)。
+ * 使用済みなら null。
+ */
+export function takeGuide(key: "largeWrite"): string | null {
+  if (usedGuides.has(key)) return null;
+  usedGuides.add(key);
+  return GUIDE_TEXTS[key] ?? null;
 }
 
 /**
