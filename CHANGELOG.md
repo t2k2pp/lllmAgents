@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-14
+
 - `install.bat`: PATH 追加後の変更通知 (WM_SETTINGCHANGE) が Windows PowerShell 5.1 では届かず、Explorer を再起動するまで新しいターミナルに PATH が反映されなかった。通知を確実に送る `setx LOCALLLM_INSTALL_DIR` に置き換え
 
 ## [0.5.1] - 2026-10-14
