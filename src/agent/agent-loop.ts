@@ -108,7 +108,9 @@ import {
   setTodoChangeListener,
   clearTodos,
   buildTodoSection,
-  formatTodos,
+  formatTodosCurrent,
+  getCurrentTodos,
+  beginTodoRound,
 } from "../tools/definitions/todo-write.js";
 
 /**
@@ -807,7 +809,11 @@ export class AgentLoop {
     this.currentRegister = "unknown";
     this.softCapWarned = false;
     // 依頼の洗い出しガイドは依頼ごとに出し直す (docs/request-elaboration-design.md §5.5)
-    if (!durableResume) resetPerRequestGuides();
+    if (!durableResume) {
+      resetPerRequestGuides();
+      // ToDo を依頼ごとに区切る: 前の依頼で完了した項目を一覧・完了カウントから外す (削除はしない)
+      beginTodoRound();
+    }
     try {
       if (!durableResume) this.history.addUserMessage(userMessage);
       // チャットログ記録
@@ -2169,7 +2175,7 @@ export class AgentLoop {
         // 未完了 todo がある場合、 自己点検 nudge を注入して「完了 or response_complete(force)」 を促す。
         // 上限到達時は未完了を明示してそのまま終了 (無限ループ防止)。
         if (hasExecutedTools && selfCheckRounds < MAX_SELF_CHECK_ROUNDS && !this.planManager?.isInPlanMode()) {
-          const allTodos = getTodosCurrent();
+          const allTodos = getCurrentTodos();
           const openTodos = allTodos.filter((t) => t.status !== "completed");
           if (allTodos.length > 0 && openTodos.length > 0) {
             selfCheckRounds++;
@@ -2193,7 +2199,7 @@ export class AgentLoop {
                 selfCheckRounds,
                 MAX_SELF_CHECK_ROUNDS,
                 userMessageText,
-                `Acceptance Checklist (todo) に未完了が ${openTodos.length} 項目あります:\n${formatTodos()}\n` +
+                `Acceptance Checklist (todo) に未完了が ${openTodos.length} 項目あります:\n${formatTodosCurrent()}\n` +
                   `テキストだけで終わらせず、 次のいずれかを実行してください: ` +
                   `(1) 残項目を実装/検証して該当 todo を completed にする、 ` +
                   `(2) 部分完了で報告するなら \`response_complete(force=true)\` を呼び summary に未完了の理由を明記、 ` +
@@ -2207,7 +2213,7 @@ export class AgentLoop {
 
         // 上限到達などでゲートを通過したが未完了 todo が残る場合: ユーザーに明示してから終了。
         if (hasExecutedTools) {
-          const openAtEnd = getTodosCurrent().filter((t) => t.status !== "completed");
+          const openAtEnd = getCurrentTodos().filter((t) => t.status !== "completed");
           if (openAtEnd.length > 0) {
             console.log(
               chalk.yellow(`\n  ⚠ ToDo が ${openAtEnd.length} 項目未完了のまま応答を返します (自己点検上限到達)。`),

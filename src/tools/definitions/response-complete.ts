@@ -1,5 +1,5 @@
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
-import { getTodos, formatTodos } from "./todo-write.js";
+import { getCurrentTodos, formatTodosCurrent } from "./todo-write.js";
 
 /**
  * response_complete: ユーザーへの応答が完了したことを宣言するツール。
@@ -48,7 +48,7 @@ export const responseCompleteTool: ToolHandler = {
     const force = (params.force as boolean) ?? false;
 
     // Phase 5-O2: Acceptance Checklist のゲートチェック
-    const todos = getTodos();
+    const todos = getCurrentTodos();
     const open = todos.filter((t) => t.status !== "completed");
     if (todos.length > 0 && open.length > 0 && !force) {
       // 未完了 todo があれば警告を返して、 LLM が再考できるようにする
@@ -57,7 +57,7 @@ export const responseCompleteTool: ToolHandler = {
         output: "",
         error:
           `[完了条件リスト 未消化] todo_append で立てた ${todos.length} 項目中 ${open.length} 項目が未完了です。\n` +
-          `${formatTodos()}\n` +
+          `${formatTodosCurrent()}\n` +
           `\n[次の手] (1) 残項目を実装/検証して todo を completed にする  (2) 部分完成で報告するなら force=true で再呼び出し (理由を summary に明記)。\n` +
           `[原則] 「ファイル存在 = 完了」 のような薄い完了報告は禁止。 standard 以上では完了条件を満たしてから完了とする。`,
       };

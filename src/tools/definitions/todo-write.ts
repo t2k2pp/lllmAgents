@@ -12,10 +12,33 @@ export interface TodoItem {
   id?: string;
   content: string;
   status: TodoStatus;
+  /**
+   * どの依頼 (user 発話) の中で作った / 最後に状態を変えたか。 前の依頼で完了した項目を
+   * 一覧・完了カウントから外すために使う (削除はしない)。 旧データには無い。
+   * docs/todo-request-elaboration.md 第 3 段 項目 15
+   */
+  round?: number;
 }
 
 // In-memory todo list for the session
 let todos: TodoItem[] = [];
+/** 現在の依頼番号。 AgentLoop.run が新しい user 発話のたびに beginTodoRound() で進める */
+let currentRound = 0;
+
+/** 新しい依頼の開始。 以後、 前の依頼で完了した項目は「今の一覧」 から外れる */
+export function beginTodoRound(): void {
+  currentRound++;
+}
+
+/** 今の依頼で扱う項目か: 未完了 (依頼をまたいで続く作業) か、 この依頼の中で完了したもの */
+function isCurrent(t: TodoItem): boolean {
+  return t.status !== "completed" || t.round === currentRound;
+}
+
+/** 今の依頼の ToDo (前の依頼で完了した項目を除く)。 完了ゲート・完了カウントはこちらを使う */
+export function getCurrentTodos(): TodoItem[] {
+  return todos.filter(isCurrent);
+}
 
 export function getTodos(): TodoItem[] {
   return [...todos];
@@ -80,6 +103,21 @@ function renderTodoLine(t: TodoItem, idx: number): string {
   const icon =
     t.status === "completed" ? "[x]" : t.status === "in_progress" ? "[>]" : t.status === "blocked" ? "[!]" : "[ ]";
   return `${idx + 1}. ${icon} ${t.content} (id: ${t.id})`;
+}
+
+/**
+ * 今の依頼の ToDo を整形。 ツール結果・完了ゲートでモデルに見せる一覧はこちら。
+ * 前の依頼で完了した項目は件数だけ添える (2026-10-14 goemon: 新しい依頼の todo_append 結果に
+ * 前の依頼の完了済み 4 件が混ざり、 response_complete も 8/8 と数えていた)。
+ */
+export function formatTodosCurrent(): string {
+  ensureIds();
+  const current = todos.filter(isCurrent);
+  const hidden = todos.length - current.length;
+  if (current.length === 0) return hidden > 0 ? `No tasks. (前の依頼の完了済み ${hidden} 件は省略)` : "No tasks.";
+  const lines = current.map((t, i) => renderTodoLine(t, i));
+  if (hidden > 0) lines.push(`(前の依頼の完了済み ${hidden} 件は省略 — /todo all で表示)`);
+  return lines.join("\n");
 }
 
 /** 全件 (completed 含む) を整形。 REPL `/todo all` 経路で使う。 */
@@ -213,11 +251,11 @@ export const todoAppendTool: ToolHandler = {
           ? (r.status as TodoStatus)
           : ("pending" as TodoStatus);
       if (!content) continue;
-      added.push({ id: generateTodoId(), content, status });
+      added.push({ id: generateTodoId(), content, status, round: currentRound });
     }
     todos.push(...added);
     notifyTodoChange(before);
-    return { success: true, output: `${added.length} 項目を追加しました。\n\n${formatTodos()}` };
+    return { success: true, output: `${added.length} 項目を追加しました。\n\n${formatTodosCurrent()}` };
   },
 };
 
@@ -261,8 +299,9 @@ export const todoMarkTool: ToolHandler = {
       };
     const before = getTodos();
     target.status = status as TodoStatus;
+    target.round = currentRound;
     notifyTodoChange(before);
-    return { success: true, output: `id="${id}" を ${status} に変更しました。\n\n${formatTodos()}` };
+    return { success: true, output: `id="${id}" を ${status} に変更しました。\n\n${formatTodosCurrent()}` };
   },
 };
 
@@ -299,7 +338,7 @@ export const todoDeleteTool: ToolHandler = {
     todos = todos.filter((t) => !idSet.has(t.id ?? ""));
     const removed = before.length - todos.length;
     notifyTodoChange(before);
-    return { success: true, output: `${removed} 項目を削除しました。\n\n${formatTodos()}` };
+    return { success: true, output: `${removed} 項目を削除しました。\n\n${formatTodosCurrent()}` };
   },
 };
 
@@ -361,9 +400,9 @@ export const todoWriteTool: ToolHandler = {
           ? (r.status as TodoStatus)
           : ("pending" as TodoStatus);
       if (!content) continue;
-      todos.push({ id: generateTodoId(), content, status });
+      todos.push({ id: generateTodoId(), content, status, round: currentRound });
     }
     notifyTodoChange(before);
-    return { success: true, output: formatTodos() };
+    return { success: true, output: formatTodosCurrent() };
   },
 };
