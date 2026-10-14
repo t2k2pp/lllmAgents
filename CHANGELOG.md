@@ -6,7 +6,9 @@
 
 ## [0.5.2] - 2026-10-14
 
-- `install.bat`: PATH 追加後の変更通知 (WM_SETTINGCHANGE) が Windows PowerShell 5.1 では届かず、Explorer を再起動するまで新しいターミナルに PATH が反映されなかった。通知を確実に送る `setx LOCALLLM_INSTALL_DIR` に置き換え
+- `install.bat`: PATH 追加後の変更通知 (WM_SETTINGCHANGE) を、存在しない変数を削除させる間接的な方法から、必ず通知を送る `setx LOCALLLM_INSTALL_DIR` に変更 (インストール先の記録も兼ねる)
+- 訂正 (2026-10-14): 0.5.1 で「新しいターミナルで localllm が見つからない」と報告された件の真因は通知ではなかった。インストールを MSIX パッケージの Claude デスクトップアプリ内から実行したため、`%LOCALAPPDATA%` への書き込みが `Packages\Claude_…\LocalCache` に仮想化され、PATH (レジストリ) だけが反映されて exe が実在しなかった。通常のターミナル / Explorer から実行した `install.bat` では exe の配置・PATH 追加・別フォルダからの起動まで確認済み
+- 既知の制約: MSIX パッケージ化されたアプリ (Claude デスクトップ等) の内部ターミナルから `install.bat` を実行すると同じ状態になる。Windows Terminal / Explorer から実行すること
 
 ## [0.5.1] - 2026-10-14
 

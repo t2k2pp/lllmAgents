@@ -25,6 +25,8 @@ README.md         このファイル
    - `%LOCALAPPDATA%\localllm` がユーザー PATH に自動追加される（既にあれば何もしない。管理者権限不要）
 3. **新しい**ターミナルを開き、どのフォルダからでも `localllm --setup` を実行して初期設定
 
+`install.bat` は Explorer からのダブルクリック、または通常のターミナル (Windows Terminal / PowerShell / CMD) から実行する。Claude デスクトップアプリなど MSIX パッケージ化されたアプリの内部ターミナルから実行すると、`%LOCALAPPDATA%` への書き込みがそのアプリ専用領域に振り替えられ、PATH は追加されても exe が見つからない状態になる。
+
 再インストール（更新）も `install.bat` を再実行するだけ。起動中の `localllm.exe` があると上書きに失敗するので、先に終了しておく。
 
 ### macOS / Linux / git-bash
