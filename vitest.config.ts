@@ -8,6 +8,8 @@ export default defineConfig({
     // E2E スモーク (アプリ全体を子プロセス起動) は CPU 負荷が大きく、並列実行すると
     // 他のユニットテストを timeout させる。vitest.e2e.config.ts で直列に回す。
     exclude: [...configDefaults.exclude, "tests/e2e/**"],
+    // 利用者の実ログ・実設定 (~/.localllm) を汚さない/読まないよう、 ホームを一時フォルダへ向ける
+    setupFiles: ["tests/setup/isolate-home.ts"],
     testTimeout: 10_000,
     // 2026-08-25 実測 (35.12 / 76.20 / 58.14 / 35.12) を下回る大幅な回帰をCIで止める。
     // 新規コード追加時の小数点揺れを許容しつつ、閾値は改善に合わせてratchetする。

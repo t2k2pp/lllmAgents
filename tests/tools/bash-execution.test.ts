@@ -67,12 +67,14 @@ describe("bashTool execution and non-interactive environment", () => {
   });
 
   it("出力が継続している間はidleTimeoutにならず正常完了する", async () => {
-    // 100ms ごとに 3 回出力（合計約 300ms）。idleTimeout は 250ms。
-    // 出力が出るたびにアイドルタイマーがリセットされるため、完走できるはず
+    // 400ms ごとに 3 回出力（合計約 1.2 秒）。idleTimeout は 1000ms で、 全体の長さより短い。
+    // 出力が出るたびにアイドルタイマーがリセットされるため、完走できるはず。
+    // (旧: 100ms 間隔 / idle 250ms。 Windows の Git Bash は全体テストの負荷下で起動に 250ms 以上かかり、
+    //  最初の出力前にアイドル判定されて落ちることがあった)
     const result = await bashTool.execute({
-      command: "for i in 1 2 3; do echo step$i; sleep 0.1; done",
-      idleTimeout: 250,
-      timeout: 5000,
+      command: "for i in 1 2 3; do echo step$i; sleep 0.4; done",
+      idleTimeout: 1000,
+      timeout: 10000,
     });
 
     expect(result.success).toBe(true);
