@@ -144,9 +144,16 @@ export async function judgeProgress(input: JudgeProgressInput): Promise<JudgePro
       messages: [{ role: "user", content: prompt }],
       temperature: JUDGE_TEMPERATURE,
       maxTokens: JUDGE_MAX_TOKENS,
+      // 思考モデルは 200 tok を思考で使い切り本文が空になる (docs/context-reduction-reasoning-model-fix.md §5)
+      disableThinking: true,
       stream: true,
     });
     const response = await collectResponse(gen);
+    if (response.content.trim().length === 0) {
+      throw new Error(
+        `progress judge の応答本文が空でした (finishReason=${response.finishReason ?? "unknown"}, maxTokens=${JUDGE_MAX_TOKENS})`,
+      );
+    }
     const result = parseJudgeResponse(response.content);
     logger.debug(`[progress-judge] verdict=${result.verdict} reason=${result.reason.slice(0, 80)}`);
     return result;

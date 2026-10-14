@@ -1,7 +1,8 @@
 # コンテキスト削減（忘却・圧縮）における思考モデル対応および空応答ハンドリング設計書
 
-> **ステータス**: 2026-09-23 設計
-> **対象**: `src/agent/forgetting.ts`, `src/agent/hierarchical-compressor.ts`, `src/providers/openai-compat.ts`
+> **ステータス**: 2026-09-23 設計 / 2026-10-15 §4〜§5 改訂 (思考オフを内部呼び出し全体へ適用)
+> **対象**: `src/agent/forgetting.ts`, `src/agent/hierarchical-compressor.ts`, `src/providers/openai-compat.ts`,
+> `src/agent/{intent-classifier,progress-judge,goal-promotion,compress-text,handoff}.ts`
 > **関連**: `docs/context-forgetting.md`, `docs/context-strategy.md`
 
 ---
@@ -65,3 +66,69 @@
    - `tests/providers/openai-compat.test.ts`
    - `tests/agent/forgetting.test.ts`
    - `tests/agent/hierarchical-compressor.test.ts`
+
+---
+
+## 4. 2026-10-15 改訂: 方針 B の見直し (思考を「頼んで短くする」 → 「オフにする」)
+
+方針 B の「思考は最小限に」 という指示は、 思考モデルが守らなかった。 忘却選択では 84 セグメントの一覧を
+1 件ずつ検討し、 1,500t の上限を思考だけで使い切って本文 0 字のまま 2 回失敗した (acecomb セッションで作業停止)。
+上限を広げても一覧が長くなれば再び使い切るため、 **思考そのものを止める**手段を用意した。
+
+- `ChatParams.disableThinking?: boolean` を追加 (`src/providers/base-provider.ts`)
+- `openai-compat.ts` は `llamacpp` / `vllm` のときだけ `chat_template_kwargs: {enable_thinking: false}` を送る。
+  未知フィールドで 400 を返し得る商用 API には送らない (対応外 provider では従来どおり)
+- 忘却選択の扱いは `docs/context-forgetting.md` §4.2 / §4.5
+
+## 5. 内部呼び出しごとの判断 (実測)
+
+**計測条件**: Qwen3.8 Flash Next / llama.cpp (`http://192.168.1.201:9087`)。 入力は acecomb セッション
+(`~/.localllm/sessions/mv82bvpa-gkgv.json`, 170 メッセージ / 84 セグメント) と、 その作業フォルダの `HANDOVER.md`。
+各関数を実コードのまま、 provider だけ包んで `disableThinking` を切り替えて呼んだ。 1 条件 1 回の計測である。
+
+| 呼び出し | 上限 | 思考あり | 思考オフ | 判断 |
+|----------|-----:|----------|----------|------|
+| 忘却選択 (`forgetting.ts`) | 1,500 | `length`・本文 0 字 → **失敗** | 7.6 秒・有効 JSON | **オフ** |
+| 意図分類 (`intent-classifier.ts` classifyIntent) | 50 | `length`・本文 0 字 → **毎回失敗** | 0.3 秒・正答 | **オフ** |
+| 完了分類 (同 classifyCompletion) | 50 | `length`・本文 0 字 → **毎回失敗** | 0.3 秒・正答 | **オフ** |
+| 進捗判定 (`progress-judge.ts`) | 200 | `length`・本文 0 字 → **失敗** | 1.5 秒・妥当な verdict | **オフ** |
+| 完了条件抽出 (`goal-promotion.ts`) | 800 | 8.2 秒・成功 (314t) | 2.0 秒・同等の質 | **オフ** (下記の形式差に対応) |
+| テキスト圧縮 (`compress-text.ts`) | 2,000 | `length` で**途中切れなのに採用されていた** | 32.9 秒・`stop` で完結 | **オフ** + 切れ検出 |
+| 要約 Layer 1 (`hierarchical-compressor.ts`) | 2,000 | 10.8 秒・成功 (401t) | 4.6 秒・同等 (パスと事実が多い) | **オフ** |
+| 要約 Layer 2 (同) | 2,500 | 計 47.1 秒・成功 | 計 27.7 秒・同等 | **オフ** |
+| 引き継ぎメモ (`handoff.ts`) | 1,200 | `length` → **失敗** | `length` → **失敗** (本文だけで 1,272t) | **思考あり** + 上限 8,000 |
+
+### 5.1 思考を残したもの: 引き継ぎメモ
+
+上限 4,000 で両方を生成して比べた。 どちらも検証は通ったが、 思考ありの方が明確に良かった。
+
+- 思考あり (2,390t, 53 秒): 「直前の作業 (campaign テストの注入修正の直後に中断)」 を拾い、 次にやることの先頭に
+  再実行を置いた。 ロック円錐 ±18° / 旋回率 8.9°/s などの具体値も制約に残した
+- 思考なし (1,272t, 29 秒): 直前の作業が抜け、 次にやることが一般論になった。 履歴に無い方針
+  (「ES Modules または IIFE」) が混ざった
+
+引き継ぎメモは clear 後の唯一の拠り所なので質を優先する。 `HANDOFF_MAX_TOKENS` は 1,200 → 8,000 とした。
+これはメモの長さを決める値ではなく (長さはテンプレートで決まる)、 暴走を止める絶対上限である。
+1,200 は思考なしでも本文だけで超えていた。
+
+### 5.2 思考オフに伴う出力形式の差: 完了条件抽出
+
+思考オフでは `{"criteria": [...]}` ではなく素の配列 `[...]` を返した (3 回とも)。 プロンプト中の
+「JSON 配列形式で抽出」 に従った結果で、 中身の質は思考ありと同等。 `parseCriteriaResponse()` で両方を受ける。
+
+### 5.3 失敗理由に finishReason を出す
+
+「思考で上限を使い切った」 のか「本文が崩れた」 のかで打ち手が違うため、 失敗理由に必ず finishReason を含める。
+
+| 呼び出し | 対応 |
+|----------|------|
+| 意図分類 / 完了分類 | `finishReason / outputChars / maxTokens` を例外文に追加 |
+| 進捗判定 | 本文が空なら JSON パースを呼ばず、 finishReason 付きで失敗 |
+| 完了条件抽出 | ベストエフォート (失敗時は提案しないだけ) なので debug ログに finishReason を残す |
+| テキスト圧縮 | 空応答に finishReason を追加。 **`finishReason=length` は原文より短くても採用せず失敗**にした。 途中で切れた圧縮結果を採用すると、 後半の指示・制約が黙って消えるため |
+| 引き継ぎメモ / 要約 Layer 1・2 / 忘却 | もともと finishReason を出している |
+
+### 5.4 限界
+
+- 計測は 1 セッション・1 条件 1 回。 要約の質の比較は目視による
+- 思考オフは `llamacpp` / `vllm` でだけ効く。 他の provider で同じ症状が出たら、 §5.3 の理由表示で分かる

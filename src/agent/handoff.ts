@@ -22,8 +22,13 @@ import * as logger from "../utils/logger.js";
 
 /** 引き継ぎメモ生成のサンプリング。 事実の書き写しなので決定論寄りに倒す */
 const HANDOFF_TEMPERATURE = 0.2;
-/** メモは長くならない方が良い (次の作業の入口で読むもの) */
-const HANDOFF_MAX_TOKENS = 1200;
+/**
+ * 出力上限 (思考 + メモ本文の合算)。 メモの長さはテンプレートで決まるので、 ここは暴走を止める絶対上限。
+ * 思考は残す: 思考ありの方が「直前の作業」 と具体的な数値を拾い、 再開の拠り所として明確に良い。
+ * 1200 では思考なしでもメモ本文だけで超えた (2026-10-15 実測: 84 セグメントの履歴で
+ * 思考なし 1,272t / 思考あり 2,390t。 docs/context-reduction-reasoning-model-fix.md §5)。
+ */
+const HANDOFF_MAX_TOKENS = 8000;
 
 /** LLM に渡す会話ダイジェストの上限文字数。 これ以上は古い側から落とす */
 const TRANSCRIPT_MAX_CHARS = 24_000;

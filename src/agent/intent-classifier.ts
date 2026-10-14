@@ -126,6 +126,11 @@ function extractClassification<T extends string>(raw: string, validValues: T[]):
   return null;
 }
 
+/** 分類失敗時に原因 (思考で上限到達か、 本文が崩れたか) を見分けるための要約 */
+function describeResponse(response: { content: string; finishReason?: string }): string {
+  return `finishReason=${response.finishReason ?? "unknown"}, outputChars=${response.content.length}, maxTokens=${CLASSIFIER_MAX_TOKENS}`;
+}
+
 export class IntentClassifier {
   constructor(
     private provider: LLMProvider,
@@ -161,13 +166,15 @@ export class IntentClassifier {
         messages: [{ role: "user", content: prompt }],
         temperature: CLASSIFIER_TEMPERATURE,
         maxTokens: CLASSIFIER_MAX_TOKENS,
+        // 思考モデルは 50 tok を思考で使い切り本文が空になる (docs/context-reduction-reasoning-model-fix.md §5)
+        disableThinking: true,
         stream: true,
       });
 
       const response = await collectResponse(gen);
       const result = extractClassification(response.content, ["task", "question", "conversation"] as IntentType[]);
 
-      if (!result) throw new Error("応答に有効な intent 分類がありません");
+      if (!result) throw new Error(`応答に有効な intent 分類がありません (${describeResponse(response)})`);
       logger.debug(`Intent classified by LLM: ${result}`);
       return result;
     } catch (e) {
@@ -197,13 +204,15 @@ export class IntentClassifier {
         messages: [{ role: "user", content: prompt }],
         temperature: CLASSIFIER_TEMPERATURE,
         maxTokens: CLASSIFIER_MAX_TOKENS,
+        // 思考モデルは 50 tok を思考で使い切り本文が空になる (docs/context-reduction-reasoning-model-fix.md §5)
+        disableThinking: true,
         stream: true,
       });
 
       const response = await collectResponse(gen);
       const result = extractClassification(response.content, ["completed", "in_progress", "other"] as CompletionType[]);
 
-      if (!result) throw new Error("応答に有効な completion 分類がありません");
+      if (!result) throw new Error(`応答に有効な completion 分類がありません (${describeResponse(response)})`);
       logger.debug(`Completion classified by LLM: ${result}`);
       return result;
     } catch (e) {

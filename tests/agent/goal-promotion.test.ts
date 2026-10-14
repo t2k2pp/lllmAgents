@@ -54,6 +54,24 @@ describe("extractAcceptanceCriteria", () => {
     const criteria = await extractAcceptanceCriteria(mkProvider("ごめんなさい、わかりません"), "m", "goal");
     expect(criteria).toEqual([]);
   });
+
+  it("素の JSON 配列も受ける (思考オフ時に実測した出力形)", async () => {
+    const criteria = await extractAcceptanceCriteria(mkProvider('[\n  "c1 が動作する",\n  "c2 が存在する"\n]'), "m", "goal");
+    expect(criteria).toEqual(["c1 が動作する", "c2 が存在する"]);
+  });
+
+  it("disableThinking=true で呼ぶ", async () => {
+    const calls: Array<{ disableThinking?: boolean }> = [];
+    const provider = {
+      async *chat(params: { disableThinking?: boolean }): AsyncGenerator<ChatChunk> {
+        calls.push(params);
+        yield { type: "text", text: '{"criteria": ["c1"]}' };
+        yield { type: "done", finishReason: "stop" };
+      },
+    } as unknown as LLMProvider;
+    await extractAcceptanceCriteria(provider, "m", "goal");
+    expect(calls[0].disableThinking).toBe(true);
+  });
 });
 
 describe("maybePromoteToGoal (チャネル)", () => {

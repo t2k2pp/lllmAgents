@@ -30,14 +30,16 @@ const MAX_LAYER1_BLOCKS = 5;
 /**
  * Layer 1 圧縮 (個別メッセージブロックの要約) のサンプリング設定。
  *  temperature=0.3: 多少の表現揺れは許容、 但し決定論寄り。
- *  maxTokens=2000: 思考モデルの最小思考 (100〜300t) + 要約 JSON (300〜800t) を収める適正上限。
+ *  maxTokens=2000: 要約 JSON (実測 180〜450t) に十分な上限。
+ *  思考はオフで呼ぶ (disableThinking)。 思考ありと要約の質は同等で、 時間は約 2 倍かかり、
+ *  思考で上限を使い切る失敗の余地も残るため (2026-10-15 実測。 docs/context-reduction-reasoning-model-fix.md §5)。
  */
 const COMPRESSOR_LAYER1_TEMPERATURE = 0.3;
 const COMPRESSOR_LAYER1_MAX_TOKENS = 2000;
 
 /**
  * Layer 2 圧縮 (Layer 1 結果の統合要約) のサンプリング設定。
- *  maxTokens=2500: 統合要約は Layer 1 より長くてよい。 思考枠と要約枠を確保。
+ *  maxTokens=2500: 統合要約は Layer 1 より長くてよい。 Layer 1 と同じく思考はオフで呼ぶ。
  */
 const COMPRESSOR_LAYER2_TEMPERATURE = 0.3;
 const COMPRESSOR_LAYER2_MAX_TOKENS = 2500;
@@ -197,6 +199,7 @@ export class HierarchicalCompressor {
         ],
         temperature: COMPRESSOR_LAYER1_TEMPERATURE,
         maxTokens: COMPRESSOR_LAYER1_MAX_TOKENS,
+        disableThinking: true,
         stream: true,
       });
 
@@ -258,6 +261,7 @@ export class HierarchicalCompressor {
         ],
         temperature: COMPRESSOR_LAYER2_TEMPERATURE,
         maxTokens: COMPRESSOR_LAYER2_MAX_TOKENS,
+        disableThinking: true,
         stream: true,
       });
 

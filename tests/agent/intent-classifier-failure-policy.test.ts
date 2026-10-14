@@ -28,3 +28,31 @@ describe("IntentClassifier failure policy", () => {
     await expect(classifier.classifyCompletion("実装が完了しました")).resolves.toBe("completed");
   });
 });
+
+/** 思考モデルが 50 tok を思考で使い切る件 (docs/context-reduction-reasoning-model-fix.md §5) */
+describe("IntentClassifier: 思考オフと失敗理由", () => {
+  it("LLM 分類は disableThinking=true で呼ぶ", async () => {
+    const calls: Array<{ disableThinking?: boolean }> = [];
+    const provider = {
+      async *chat(params: { disableThinking?: boolean }): AsyncGenerator<ChatChunk> {
+        calls.push(params);
+        yield { type: "text", text: '{"intent":"question"}' } as ChatChunk;
+        yield { type: "done", finishReason: "stop" } as ChatChunk;
+      },
+    } as unknown as LLMProvider;
+    await new IntentClassifier(provider, "m").classifyIntent("この件について考えてほしい");
+    expect(calls[0].disableThinking).toBe(true);
+  });
+
+  it("本文が空で終わったら finishReason を失敗理由に含める", async () => {
+    const provider = {
+      async *chat(): AsyncGenerator<ChatChunk> {
+        yield { type: "thinking", text: "..." } as ChatChunk;
+        yield { type: "done", finishReason: "length" } as ChatChunk;
+      },
+    } as unknown as LLMProvider;
+    await expect(new IntentClassifier(provider, "m").classifyIntent("この件について考えてほしい")).rejects.toThrow(
+      "finishReason=length",
+    );
+  });
+});

@@ -43,3 +43,29 @@ describe("compressText — サイズガードと原文保持", () => {
     await expect(compressText(throwing, "m", "プロジェクト指示", LONG)).rejects.toThrow("boom");
   });
 });
+
+/** 思考モデルで圧縮結果が上限で切れる件 (docs/context-reduction-reasoning-model-fix.md §5) */
+describe("compressText — 出力上限での打ち切りと思考オフ", () => {
+  it("finishReason=length の圧縮結果は原文より短くても採用しない", async () => {
+    const truncated = {
+      async *chat(): AsyncGenerator<ChatChunk> {
+        yield { type: "text", text: "途中までの要約" };
+        yield { type: "done", finishReason: "length" };
+      },
+    } as unknown as LLMProvider;
+    await expect(compressText(truncated, "m", "メモ", LONG)).rejects.toThrow("finishReason=length");
+  });
+
+  it("disableThinking=true で呼ぶ", async () => {
+    const calls: Array<{ disableThinking?: boolean }> = [];
+    const provider = {
+      async *chat(params: { disableThinking?: boolean }): AsyncGenerator<ChatChunk> {
+        calls.push(params);
+        yield { type: "text", text: "短い要約" };
+        yield { type: "done", finishReason: "stop" };
+      },
+    } as unknown as LLMProvider;
+    await compressText(provider, "m", "メモ", LONG);
+    expect(calls[0].disableThinking).toBe(true);
+  });
+});

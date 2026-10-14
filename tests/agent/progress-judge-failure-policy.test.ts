@@ -43,3 +43,29 @@ describe("progress judge failure policy", () => {
     );
   });
 });
+
+/** 思考モデルが 200 tok を思考で使い切る件 (docs/context-reduction-reasoning-model-fix.md §5) */
+describe("progress judge: 思考オフと失敗理由", () => {
+  it("disableThinking=true で呼ぶ", async () => {
+    const calls: Array<{ disableThinking?: boolean }> = [];
+    const provider = {
+      async *chat(params: { disableThinking?: boolean }): AsyncGenerator<ChatChunk> {
+        calls.push(params);
+        yield { type: "text", text: '{"verdict":"took_step","reason":"r"}' } as ChatChunk;
+        yield { type: "done", finishReason: "stop" } as ChatChunk;
+      },
+    } as unknown as LLMProvider;
+    await judgeProgress({ ...baseInput, provider });
+    expect(calls[0].disableThinking).toBe(true);
+  });
+
+  it("本文が空なら finishReason を含めて失敗させる", async () => {
+    const provider = {
+      async *chat(): AsyncGenerator<ChatChunk> {
+        yield { type: "thinking", text: "..." } as ChatChunk;
+        yield { type: "done", finishReason: "length" } as ChatChunk;
+      },
+    } as unknown as LLMProvider;
+    await expect(judgeProgress({ ...baseInput, provider })).rejects.toThrow("finishReason=length");
+  });
+});

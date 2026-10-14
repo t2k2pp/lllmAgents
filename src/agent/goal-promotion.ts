@@ -43,6 +43,30 @@ export function resetGoalPromotionState(): void {
 }
 
 /**
+ * criteria 抽出の応答を読む。 指示した `{"criteria": [...]}` に加え、 プロンプト中の
+ * 「JSON 配列形式」 に従って素の配列 `[...]` を返すモデルがある (思考オフ時に実測) ので両方受ける。
+ */
+export function parseCriteriaResponse(raw: string): string[] {
+  const strings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((c: unknown): c is string => typeof c === "string") : [];
+  const objectMatch = raw.match(/\{[\s\S]*?"criteria"[\s\S]*?\]\s*\}/);
+  if (objectMatch) {
+    try {
+      return strings((JSON.parse(objectMatch[0]) as { criteria?: unknown }).criteria);
+    } catch {
+      // 下の配列形式を試す
+    }
+  }
+  const arrayMatch = raw.match(/\[[\s\S]*\]/);
+  if (!arrayMatch) return [];
+  try {
+    return strings(JSON.parse(arrayMatch[0]));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * goal 文から検証可能な acceptance criteria を抽出する。
  * `/goal-seek` コマンドと B-1 自動提案の共通ロジック (設計書 §3)。
  * 抽出できなければ空配列 (呼び出し元がフォールバックする)。
@@ -67,16 +91,17 @@ export async function extractAcceptanceCriteria(
       messages: [{ role: "user", content: extractPrompt }],
       temperature: 0.1,
       maxTokens: 800,
+      // 思考オフでも同等の criteria が約 1/4 の時間で返る (docs/context-reduction-reasoning-model-fix.md §5)
+      disableThinking: true,
       stream: true,
     });
     const response = await collectResponse(gen);
-    const jsonMatch = response.content.match(/\{[\s\S]*?"criteria"[\s\S]*?\]\s*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (Array.isArray(parsed.criteria)) {
-        return parsed.criteria.filter((c: unknown): c is string => typeof c === "string");
-      }
-    }
+    const criteria = parseCriteriaResponse(response.content);
+    if (criteria.length > 0) return criteria;
+    // 提案はベストエフォートなので通常実行へ戻すが、 原因は残す
+    logger.debug(
+      `acceptance criteria extraction returned nothing (finishReason=${response.finishReason}, outputChars=${response.content.length})`,
+    );
   } catch (e) {
     logger.debug(`acceptance criteria extraction failed: ${e}`);
   }

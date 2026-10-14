@@ -68,6 +68,8 @@ export async function compressText(
       messages: [{ role: "user", content: buildPrompt(label, text) }],
       temperature: COMPRESS_TEMPERATURE,
       maxTokens: COMPRESS_MAX_TOKENS,
+      // 思考に枠を取られると圧縮結果が上限で切れる。 思考オフで完結する (docs/context-reduction-reasoning-model-fix.md §5)
+      disableThinking: true,
       stream: true,
     });
     const response = await collectResponse(gen);
@@ -76,7 +78,16 @@ export async function compressText(
 
     // 空応答は provider 契約違反として失敗させる。別の入力へ自動置換しない。
     if (!compressed) {
-      throw new Error(`compressText が「${label}」に空応答を返しました`);
+      throw new Error(
+        `compressText が「${label}」に空応答を返しました (finishReason=${response.finishReason}, maxTokens=${COMPRESS_MAX_TOKENS})`,
+      );
+    }
+    // 上限で打ち切られた圧縮結果は末尾が欠けている。 原文より短いので「縮んだ」 ように見えるが、
+    // 採用すると後半の指示・制約が黙って消える (2026-10-15 実測: 思考ありで finish=length のまま applied=true)。
+    if (response.finishReason === "length") {
+      throw new Error(
+        `compressText の「${label}」の圧縮結果が出力上限で途中までになりました (finishReason=length, maxTokens=${COMPRESS_MAX_TOKENS}, outputChars=${compressed.length})`,
+      );
     }
     if (afterTokens >= beforeTokens) {
       return {

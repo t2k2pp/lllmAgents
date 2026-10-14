@@ -106,3 +106,20 @@ describe("HierarchicalCompressor sequential dispatch", () => {
     expect(c.getSummaryBlocks()).toEqual([]);
   });
 });
+
+/** 思考オフ (docs/context-reduction-reasoning-model-fix.md §5) */
+describe("HierarchicalCompressor: 思考オフ", () => {
+  it("Layer 1 要約は disableThinking=true で呼ぶ", async () => {
+    const calls: Array<{ disableThinking?: boolean }> = [];
+    const provider = {
+      async *chat(params: { disableThinking?: boolean }): AsyncGenerator<ChatChunk> {
+        calls.push(params);
+        yield { type: "text", text: '{"summary":"s","keyFacts":["f"]}' };
+        yield { type: "done", finishReason: "stop" };
+      },
+    } as unknown as LLMProvider;
+    await new HierarchicalCompressor(provider, "m").compress([{ role: "user", content: "制約" }]);
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((c) => c.disableThinking === true)).toBe(true);
+  });
+});

@@ -91,3 +91,20 @@ describe("context failure diagnostics", () => {
     expect(result.reason).toContain("finishReason=length");
   });
 });
+
+/** 引き継ぎメモは思考を残し、 上限を十分に取る (docs/context-reduction-reasoning-model-fix.md §5) */
+describe("generateHandoffNote: 思考と出力上限", () => {
+  it("思考はオフにせず、 出力上限は思考込みで収まる大きさ (>= 4000) にする", async () => {
+    const calls: Array<{ disableThinking?: boolean; maxTokens?: number }> = [];
+    const provider = {
+      async *chat(params: { disableThinking?: boolean; maxTokens?: number }): AsyncGenerator<ChatChunk> {
+        calls.push(params);
+        yield { type: "text", text: "## これまでにやったこと\n- a\n\n## 次にやること\n- b\n\n## 守るべき制約・決定事項\n- なし" };
+        yield { type: "done", finishReason: "stop" };
+      },
+    } as unknown as LLMProvider;
+    await generateHandoffNote(provider, "m", [{ role: "user", content: "作業して" }]);
+    expect(calls[0].disableThinking).toBeFalsy();
+    expect(calls[0].maxTokens ?? 0).toBeGreaterThanOrEqual(4000);
+  });
+});
