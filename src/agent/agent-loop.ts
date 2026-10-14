@@ -68,7 +68,7 @@ import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
 import { formatBufferedResponseStatus } from "../cli/response-preview.js";
 import { writeRuntimeError } from "../cli/runtime-diagnostic.js";
-import { getFirstUseGuide, getFailureGuide } from "./tool-guides.js";
+import { getFirstUseGuide, getFailureGuide, resetPerRequestGuides } from "./tool-guides.js";
 import { IntentClassifier, type CompletionType } from "./intent-classifier.js";
 import { Evaluator } from "./evaluator.js";
 import { judgeProgress, buildRecentSummary } from "./progress-judge.js";
@@ -806,6 +806,8 @@ export class AgentLoop {
     // P3-A: レジスターは user 発話ごとに再判定 (前タスクのレジスターを引き継がない)
     this.currentRegister = "unknown";
     this.softCapWarned = false;
+    // 依頼の洗い出しガイドは依頼ごとに出し直す (docs/request-elaboration-design.md §5.5)
+    if (!durableResume) resetPerRequestGuides();
     try {
       if (!durableResume) this.history.addUserMessage(userMessage);
       // チャットログ記録

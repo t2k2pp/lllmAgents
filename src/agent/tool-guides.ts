@@ -76,7 +76,9 @@ delegate メッセージには次の 4 点を必ず含める:
 
   // docs/request-elaboration-design.md §5.5。 常駐の「依頼の読み取り」 原則の how 部分
   requestScope: `[ガイド: 依頼の中身を洗い出す]
-いま書いた ToDo が「書く・確かめる・報告する」 の作業手順だけなら、 ユーザーに見える機能の項目を足すこと。
+いま書いた ToDo が「書く・確かめる・報告する」 の作業手順だけなら、 todo_append でユーザーに見える機能の項目を追加する。
+冒頭で伝えた「含める / 外す」 と食い違ったら、 報告で訂正する。
+小さくはっきりした依頼 (関数 1 つ・修正 1 か所など) は、 言われたことがそのまま範囲。 膨らませない。
 「〜のような」「〜風」 と既存の作品・製品を指す依頼は、 次の観点でその作品らしさを洗い出す:
 1. 中心の遊び方・使い方 (何を繰り返すのか)
 2. その作品だと分かる目印 (独特のルール・道具・仕組み)
@@ -178,9 +180,9 @@ const T3_FEW_SHOTS: Record<string, string> = {
 複数の作業ステップを ToDo に commit する。 思考 → 戦略 → 実行 のリズムで使う。
 良い例:
   todo_append({"items": [
-    {"content": "32x32 描画順を決める (遠 → 近)", "status": "in_progress"},
-    {"content": "シルエットを rect.fill で配置", "status": "pending"},
-    {"content": "顔のパーツを dot で詰める", "status": "pending"},
+    {"content": "32x32 で人物の形 (頭・胴・足) が見分けられる", "status": "in_progress"},
+    {"content": "顔が見分けられる (目・口がある)", "status": "pending"},
+    {"content": "依頼された色 (赤い服) になっている", "status": "pending"},
     {"content": "Vision で評価", "status": "pending"}
   ]})
 原則:
@@ -362,6 +364,17 @@ export function getFailureGuide(toolName: string, errorMsg: string, tier?: Tier)
   if (!guide) return null;
   usedFailureGuides.add(key);
   return guide;
+}
+
+/**
+ * 依頼ごとに出し直すガイド。 依頼の洗い出しは新しい依頼のたびに要るため、
+ * セッションで 1 度きりの他ガイドと違い user 発話ごとに未使用へ戻す。
+ */
+const PER_REQUEST_GUIDES = ["requestScope"] as const;
+
+/** user 発話の開始時に呼ぶ。 PER_REQUEST_GUIDES だけを未使用へ戻す。 */
+export function resetPerRequestGuides(): void {
+  for (const k of PER_REQUEST_GUIDES) usedGuides.delete(k);
 }
 
 /**

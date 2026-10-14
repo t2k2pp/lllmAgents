@@ -65,20 +65,19 @@ For implementation requests with ambiguous granularity, lean to standard or high
  */
 export function buildScopeRules(tier?: Tier): string {
   if (tier === "T1") {
-    return `# Reading the request — build what the user expects, not the minimum the words allow. If the request points at an existing work or product ("like X", "X-style"), include the signature elements that make X recognizable. The completion level sets verification depth, not how thin the product may be. Dropping a feature is fine; dropping it silently is not — name it.`;
+    return `# Reading the request — for standard+: build what the user expects, not the minimum the words allow, in proportion to the request. "Like X" / "X-style" → include the signature elements that make X recognizable. The completion level sets verification depth, not how thin the product may be. Dropping a feature is fine; dropping it silently is not.`;
   }
   if (tier === "T3") {
     return `# Reading the request [REQUIRED for standard / production]
-- Build what the user expects, not the smallest thing that matches the words
-- "Make something like X" → list what X is known for (its special rules, items, systems) and build those too
-- Leaving something out is OK, but say it: "Leaves out: <thing> (<reason>)"`;
+- Build what the user expects, not the smallest thing that matches the words. A small, exact request (one function, one fix) is exactly its words
+- "Make something like X" → build what X is known for (its special rules, items, systems). If you do not know X well, ask_user which parts matter
+- Leaving something out is OK, but say it (line (4) below)`;
   }
   return `# Reading the request [REQUIRED for standard / production]
-Build what the user expects, not the minimum the words allow.
-- Before implementing, list the features the user expects: what they said + what such a thing normally has.
-- If the request points at an existing work or product ("like X", "X-style", homage), list the signature elements that make X recognizable (rules, systems, items, progression, look & sound) and include them by default.
-- The completion level sets how deeply you verify, not how thin the product may be.
-- Leaving a feature out is allowed; leaving it out silently is not. Name what you drop and why.`;
+Build what the user expects, not the minimum the words allow; keep it proportional (a small, exact request is exactly its words).
+- "Like X" / "X-style" / homage: include the signature elements that make X recognizable.
+- The completion level sets how deeply you verify, not how thin the product may be. At rough, keep the signature features but make each one minimal.
+- Dropping a feature is allowed; dropping it silently is not.`;
 }
 
 /** 戦略 ToDo + Acceptance Checklist の遵守 (docs/strategic-todo-design.md §2.3) */
@@ -97,7 +96,7 @@ export function buildAcceptanceRules(tier?: Tier): string {
 
 ## For standard+, commit before starting
 Example:
-1. <feature the user asked for> works (e.g. "the shop sells items for coins")
+1. <feature the user asked for> works (e.g. "export writes a CSV the user can open")
 2. <another expected feature> works
 3. node --check (or build) passes and <verify command> produces the expected output
 Do not call response_complete until every item is ✓.
@@ -107,7 +106,7 @@ Thinking without acting on it (= plan evaporation) is forbidden. Always commit t
 **But explore (chat, play, one-shot answer, research answer) is the exception** — you may answer in 1-3 sentences without calling tools. This is not plan evaporation; it is the correct completion shape for a task with no artifact. Creating a \`todo_append\` for "let's play rock-paper-scissors" is overkill.`;
   }
   return `# Strategic ToDo (completion-condition list) [REQUIRED for standard / production]
-For complex tasks, write 3-5 completion conditions with \`todo_append\` before starting, then execute (do not keep it all in your head). Make most of them user-visible features, not just process steps. E.g. "coins collected can buy items at the shop", "the gate opens only with the pass", "it runs in the browser without errors". If completion conditions are handed to you via delegation, carry them over. Do not report completion until every item is done; in the report, list which items were met and which were not, with reasons. If stuck, signal with \`todo_mark(id,"blocked")\` (see each todo tool's description for arguments).`;
+For complex tasks, write 3-5 completion conditions with \`todo_append\` before starting, then execute (do not keep it all in your head). Make most items user-visible features. E.g. "search narrows results by date", "export writes a CSV the user can open", "it runs without errors". If completion conditions are handed to you via delegation, carry them over. Do not report completion until every item is done; in the report, list which items were met and which were not, with reasons. If stuck, signal with \`todo_mark(id,"blocked")\` (see each todo tool's description for arguments).`;
 }
 
 /**

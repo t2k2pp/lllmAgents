@@ -75,6 +75,7 @@ export function buildSubAgentStrategyPrompt(tier?: Tier): string {
 ${buildRegisterRules(tier)}
 
 ${buildScopeRules(tier)}
+If the delegation lists features or completion conditions, that list is the scope: do not add features, and report anything you could not include.
 
 ${buildAcceptanceRules(tier)}
 

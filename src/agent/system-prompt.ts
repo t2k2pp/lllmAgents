@@ -117,7 +117,7 @@ ${buildRegisterRules(tier)}
 
 ${buildScopeRules(tier)}
 
-At the start, for a normal task, state your approach and scope (includes / leaves out) in one or two lines, then call a tool. React only when a self-check arrives from the existing harness.
+At the start, for a normal task, state your approach and scope (what you include / leave out, in the user's language) in one or two lines, then call a tool. React only when a self-check arrives from the existing harness.
 
 ${buildAcceptanceRules(tier)}
 
@@ -157,7 +157,7 @@ ${buildScopeRules(tier)}
 (1) What to build: <filename and type>
 (2) Where to write it: <absolute path>
 (3) How to verify: <a command to run via bash>
-(4) Includes: <main features> / Leaves out: <features and reason, or "none">
+(4) Includes / leaves out (in the user's language, e.g. 含める: <main features> / 外す: <feature (reason)> or なし)
 
 ${buildAcceptanceRules(tier)}
 
@@ -188,7 +188,7 @@ ${buildRegisterRules(tier)}
 
 ${buildScopeRules(tier)}
 
-**Declare the completion level and scope at the start** [REQUIRED]: in the first turn, include the line "This task is <completion level>". For standard / production, follow it with the main features you will build and anything you leave out (e.g. "This task is **standard**. Includes: A, B, C. Leaves out: D (reason)").
+**Declare the completion level and scope at the start** [REQUIRED]: in the first turn, include the line "This task is <completion level>". For standard / production, follow it with the main features you will build and anything you leave out, with reasons, in the user's language (e.g. "This task is **standard**. 含める: A, B, C / 外す: D (理由)").
 
 ${buildAcceptanceRules(tier)}
 
