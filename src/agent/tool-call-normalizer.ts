@@ -21,7 +21,7 @@
  * docs/multi-tier-harness-roadmap.md §4 Phase D-1 参照。
  */
 
-import type { ToolCall } from "../providers/base-provider.js";
+import type { ToolCall, ToolDefinition } from "../providers/base-provider.js";
 
 export interface NormalizationResult {
   /** 抽出されたツール呼び出し (見つからなければ空配列) */
@@ -29,7 +29,12 @@ export interface NormalizationResult {
   /** ツール呼び出し部分を取り除いたテキスト (アシスタントの "考え" 等が残る場合) */
   cleanedText: string;
   /** どの形式で抽出したか (デバッグ・ログ用) */
-  format: "mistral" | "chatml" | "react" | "plain-json" | "anthropic-xml" | "pipe-call" | "none";
+  format: "mistral" | "chatml" | "react" | "plain-json" | "anthropic-xml" | "invoke-xml" | "pipe-call" | "none";
+  /**
+   * 思考欄に `</thinking>` が紛れ込み、 その後ろにユーザー向けの本文が書かれていた場合の本文
+   * (ツール呼び出しを除いたもの)。 invoke-xml 形式でのみ設定する。
+   */
+  visibleText?: string;
 }
 
 /**
@@ -39,7 +44,7 @@ export interface NormalizationResult {
  * 使う側 (AgentLoop) は tier T2/T3 + toolCalls.length === 0 のときだけ
  * これを呼ぶ。 T1 は OpenAI 互換 function calling が確実なので不要。
  */
-export function normalizeToolCalls(text: string): NormalizationResult {
+export function normalizeToolCalls(text: string, toolDefs?: readonly ToolDefinition[]): NormalizationResult {
   if (!text || text.trim().length === 0) {
     return { toolCalls: [], cleanedText: text, format: "none" };
   }
@@ -48,6 +53,8 @@ export function normalizeToolCalls(text: string): NormalizationResult {
   // Anthropic XML は <tool_call><function=...> の入れ子なので ChatML より特異 → 先に試す
   const tries: Array<(t: string) => NormalizationResult | null> = [
     extractMistralToolCalls,
+    // <invoke name=...> は他形式と字面が重ならない。 引数の型をツール定義から決めるため toolDefs を渡す
+    (t) => extractInvokeXmlToolCalls(t, toolDefs),
     // pipe-call の <|tool|> マーカーは他形式 (<tool_call> / [TOOL_CALLS] / 裸 JSON) と
     // 字面が重複しないため順序自体は任意。 ただし {...} を含むので plain-json には
     // 必ず先行させる (先に裸 JSON として食われないため)。 early-exit 効率も兼ねて早めに置く。
@@ -176,6 +183,83 @@ function extractAnthropicXmlToolCalls(text: string): NormalizationResult | null 
   if (toolCalls.length === 0) return null;
   const cleanedText = text.replace(callRe, "").trim();
   return { toolCalls, cleanedText, format: "anthropic-xml" };
+}
+
+/**
+ * Invoke XML 形式 (Claude 本来のツール呼び出し記法):
+ *   <function_calls>                       ← 包みは有っても無くてもよい
+ *     <invoke name="NAME">
+ *       <parameter name="KEY">VALUE</parameter>
+ *     </invoke>
+ *   </function_calls>
+ *
+ * 2026-10-14 観測 (goemon 試作): Claude 蒸留の Qwen3.8 Flash Next が思考の途中に `</thinking>` を書き、
+ * その後ろに本文とこの形式の呼び出しを続けた。 llama.cpp は全体を reasoning_content に入れるため
+ * text/toolCalls が空になり、 空応答扱い → 打ち切りになっていた (docs/todo-request-elaboration.md 第 2 段)。
+ *
+ * - 思考欄に `</thinking>` があり、 その後ろに呼び出しがあれば **後ろだけ** を採る (前は下書き・検討)
+ * - VALUE は既定で文字列のまま。 ツール定義でその引数が string 以外 (number/boolean/array/object) と
+ *   分かるときだけ JSON として読む。 定義が無いときは数値・真偽値の字面だけ変換する。
+ *   (JSON ファイルを書く file_write の content をオブジェクトに化けさせないため)
+ */
+function extractInvokeXmlToolCalls(text: string, toolDefs?: readonly ToolDefinition[]): NormalizationResult | null {
+  const invokeRe = /<invoke\s+name\s*=\s*"([^"]+)"\s*>([\s\S]*?)<\/invoke>/g;
+  // test() は g フラグ付きだと lastIndex を進めて後続の matchAll を狂わせるので、 判定は includes で行う
+  if (!/<invoke\s+name\s*=/.test(text)) return null;
+
+  const closeIdx = text.lastIndexOf("</thinking>");
+  const tail = closeIdx >= 0 ? text.slice(closeIdx + "</thinking>".length) : "";
+  const useTail = closeIdx >= 0 && /<invoke\s+name\s*=/.test(tail);
+  const source = useTail ? tail : text;
+
+  const toolCalls: ToolCall[] = [];
+  for (const m of source.matchAll(invokeRe)) {
+    const name = m[1].trim();
+    if (!name) continue;
+    const props = (
+      toolDefs?.find((d) => d.function.name === name)?.function.parameters as {
+        properties?: Record<string, { type?: unknown }>;
+      }
+    )?.properties;
+    const args: Record<string, unknown> = {};
+    for (const pm of m[2].matchAll(/<parameter\s+name\s*=\s*"([^"]+)"\s*>([\s\S]*?)<\/parameter>/g)) {
+      const key = pm[1].trim();
+      args[key] = decodeInvokeValue(pm[2], props?.[key]?.type);
+    }
+    toolCalls.push({ id: generateCallId(), type: "function", function: { name, arguments: JSON.stringify(args) } });
+  }
+  if (toolCalls.length === 0) return null;
+
+  const strip = (s: string) =>
+    s
+      .replace(invokeRe, "")
+      .replace(/<\/?function_calls>/g, "")
+      .replace(/<\/?thinking>/g, "")
+      .trim();
+  return {
+    toolCalls,
+    cleanedText: strip(text),
+    format: "invoke-xml",
+    ...(useTail ? { visibleText: strip(tail) } : {}),
+  };
+}
+
+/** invoke-xml の parameter 値を、 ツール定義の型に合わせて復元する。 */
+function decodeInvokeValue(raw: string, schemaType: unknown): unknown {
+  // 値の前後の改行はタグを見やすく書いた結果なので 1 つだけ外す (中身の空白は保つ)
+  const value = raw.replace(/^\r?\n/, "").replace(/\r?\n$/, "");
+  if (schemaType === "string") return value;
+  const trimmed = value.trim();
+  if (schemaType !== undefined) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return value;
+    }
+  }
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed);
+  if (trimmed === "true" || trimmed === "false") return trimmed === "true";
+  return value;
 }
 
 /**

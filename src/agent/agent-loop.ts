@@ -1529,7 +1529,7 @@ export class AgentLoop {
         // toolCalls を flush / coherence / 実行 の手前で確定させ、 既存の実行ルートに合流させる。
         // docs/tool-call-salvage-pipe-format-design.md §6 参照。
         if (toolCalls.length === 0 && textContent.trim().length > 0) {
-          const normalized = normalizeToolCalls(textContent);
+          const normalized = normalizeToolCalls(textContent, this.toolRegistry.getDefinitions());
           if (normalized.toolCalls.length > 0) {
             console.log(
               chalk.dim(
@@ -1559,7 +1559,7 @@ export class AgentLoop {
         // 思考は SoWhat/WhySo の核なので、 そこに完成形のツールコールがあるなら捨てずに実行する。
         // docs/ephemeral-context-design.md §7.2 参照。
         if (toolCalls.length === 0 && thinkingContent.trim().length > 0) {
-          const normalized = normalizeToolCalls(thinkingContent);
+          const normalized = normalizeToolCalls(thinkingContent, this.toolRegistry.getDefinitions());
           if (normalized.toolCalls.length > 0) {
             console.log(
               chalk.dim(
@@ -1578,8 +1578,16 @@ export class AgentLoop {
             // (normalized.toolCalls.length===0) 場合は非空のまま到達しうる。 toolCalls を追加すれば
             // 実行ブロックの addAssistantMessage(textContent, toolCalls, ...) が textContent も正しく永続化する。
             toolCalls.push(...normalized.toolCalls);
+            // 思考欄に紛れた `</thinking>` の後ろはモデルがユーザー向けに書いた本文。 本文が空なら表示に使う
+            // (例: 「原因特定！ … 修正します。」)。 docs/todo-request-elaboration.md 第 2 段
+            if (!textContent.trim() && normalized.visibleText) textContent = normalized.visibleText;
           }
         }
+
+        // 空応答の再試行は「連続」回数で数える。 実のある応答 (ツール呼び出し or 本文) が出たらリセットする。
+        // 旧実装は run 累計だったため、 長い作業の途中でぽつぽつ出た空応答が積み上がり、 4 回目で
+        // 「連続して出力できない」 として打ち切っていた (goemon ログ: 45 ターン目、 バグ修正の呼び出しで終了)。
+        if (toolCalls.length > 0 || textContent.trim().length > 0) emptyResponseRetries = 0;
 
         // 通常replyが終わった時点で追加入力があれば、別turnへ送らず現在のrunを継続する。
         // 途中応答はユーザーが既に見ている可能性があるためdisplayedとして保全する。

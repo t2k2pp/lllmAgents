@@ -125,6 +125,76 @@ describe("normalizeToolCalls — Anthropic XML 形式", () => {
   });
 });
 
+describe("normalizeToolCalls — Invoke XML 形式 (<invoke name=...>)", () => {
+  const defs = [
+    {
+      type: "function" as const,
+      function: {
+        name: "file_write",
+        description: "",
+        parameters: { type: "object", properties: { file_path: { type: "string" }, content: { type: "string" } } },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "file_read",
+        description: "",
+        parameters: { type: "object", properties: { file_path: { type: "string" }, offset: { type: "number" } } },
+      },
+    },
+  ];
+
+  it("goemon ログ実例: bash の複数行コマンドをそのまま取り出す", () => {
+    const text = `<invoke name="bash">
+<parameter name="command">cd "C:/x" && grep -n "function updCoins" index.html && sed -n "/function updCoins/,/^}/p" index.html</parameter>
+</invoke>`;
+    const r = normalizeToolCalls(text);
+    expect(r.format).toBe("invoke-xml");
+    expect(r.toolCalls[0].function.name).toBe("bash");
+    expect(JSON.parse(r.toolCalls[0].function.arguments).command).toBe(
+      'cd "C:/x" && grep -n "function updCoins" index.html && sed -n "/function updCoins/,/^}/p" index.html',
+    );
+  });
+
+  it("<function_calls> 包み + 複数呼び出し", () => {
+    const text = `<function_calls>
+<invoke name="file_read"><parameter name="file_path">/a.txt</parameter><parameter name="offset">40</parameter></invoke>
+<invoke name="file_read"><parameter name="file_path">/b.txt</parameter></invoke>
+</function_calls>`;
+    const r = normalizeToolCalls(text, defs);
+    expect(r.toolCalls.map((c) => JSON.parse(c.function.arguments))).toEqual([
+      { file_path: "/a.txt", offset: 40 },
+      { file_path: "/b.txt" },
+    ]);
+    expect(r.cleanedText).toBe("");
+  });
+
+  it("string 型の引数は JSON の字面でもオブジェクトに化けない (JSON ファイルの書き込み)", () => {
+    const text = `<invoke name="file_write"><parameter name="file_path">/p.json</parameter><parameter name="content">{"a":1}</parameter></invoke>`;
+    const args = JSON.parse(normalizeToolCalls(text, defs).toolCalls[0].function.arguments);
+    expect(args.content).toBe('{"a":1}');
+  });
+
+  it("</thinking> の後ろに呼び出しがあれば後ろだけを採り、 後ろの本文を visibleText にする", () => {
+    const text = `検討: <invoke name="bash"><parameter name="command">echo draft</parameter></invoke>
+</thinking>
+原因特定！修正します。
+<invoke name="bash"><parameter name="command">echo real</parameter></invoke>`;
+    const r = normalizeToolCalls(text);
+    expect(r.toolCalls).toHaveLength(1);
+    expect(JSON.parse(r.toolCalls[0].function.arguments).command).toBe("echo real");
+    expect(r.visibleText).toBe("原因特定！修正します。");
+  });
+
+  it("</thinking> の後ろに呼び出しが無ければ全体から採る", () => {
+    const text = `考え中 <invoke name="bash"><parameter name="command">ls</parameter></invoke>\n</thinking>\nまとめ`;
+    const r = normalizeToolCalls(text);
+    expect(r.toolCalls).toHaveLength(1);
+    expect(r.visibleText).toBeUndefined();
+  });
+});
+
 describe("normalizeToolCalls — ReAct 形式", () => {
   it("Action + Action Input (JSON)", () => {
     const text = `Thought: I need to read the file.\nAction: file_read\nAction Input: {"file_path": "/abs/main.py"}`;

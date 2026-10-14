@@ -114,6 +114,83 @@ describe("AgentLoop: salvage したツール呼び出しの実行到達 (§6.5 �
     expect(executed).toEqual(["salvage_probe"]);
   });
 
+  it("thinking に紛れた </thinking> の後ろの <invoke> 呼び出しだけが実行される (goemon ログの形式)", async () => {
+    const calls: Array<{ name: string; args: unknown }> = [];
+    const ref: { loop?: AgentLoop } = {};
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "salvage_probe",
+      definition: {
+        type: "function",
+        function: {
+          name: "salvage_probe",
+          description: "test probe",
+          parameters: { type: "object", properties: { note: { type: "string" } } },
+        },
+      },
+      execute: async (args) => {
+        calls.push({ name: "salvage_probe", args });
+        ref.loop?.abort();
+        return { success: true, output: "ok" };
+      },
+    });
+    const permissions = new PermissionManager(makeSecurityConfig(["salvage_probe"]));
+    const provider = makeProvider([
+      [
+        {
+          type: "thinking",
+          text:
+            '下書き: <invoke name="salvage_probe"><parameter name="note">draft</parameter></invoke>\n' +
+            "</thinking>\n原因特定！修正します。\n" +
+            '<invoke name="salvage_probe">\n<parameter name="note">123</parameter>\n</invoke>',
+        },
+        { type: "done", finishReason: "stop" },
+      ],
+      [{ type: "done", finishReason: "stop" }],
+    ]);
+    const loop = new AgentLoop(provider, "test-model-7b", registry, permissions, 128_000, 0.8);
+    ref.loop = loop;
+    await loop.run("テスト依頼");
+    // 下書きは実行しない / string 型の引数は数字の字面でも文字列のまま
+    expect(calls).toEqual([{ name: "salvage_probe", args: { note: "123" } }]);
+  });
+
+  it("空応答が作業の途中で散発しても、 連続しない限り打ち切らない", async () => {
+    // 旧実装は run 累計で 3 回を超えると打ち切っていた。 空応答 → ツール を 4 回繰り返しても最後まで進むこと。
+    const executed: string[] = [];
+    const ref: { loop?: AgentLoop } = {};
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "salvage_probe",
+      definition: {
+        type: "function",
+        function: { name: "salvage_probe", description: "test probe", parameters: { type: "object", properties: {} } },
+      },
+      execute: async () => {
+        executed.push("salvage_probe");
+        if (executed.length >= 4) ref.loop?.abort();
+        return { success: true, output: "ok" };
+      },
+    });
+    const permissions = new PermissionManager(makeSecurityConfig(["salvage_probe"]));
+    const empty: ChatChunk[] = [
+      { type: "thinking", text: "考え中" },
+      { type: "done", finishReason: "stop" },
+    ];
+    const tool: ChatChunk[] = [
+      {
+        type: "tool_call",
+        toolCall: { id: "c", type: "function", function: { name: "salvage_probe", arguments: "{}" } },
+      },
+      { type: "done", finishReason: "stop" },
+    ];
+    const provider = makeProvider([empty, tool, empty, tool, empty, tool, empty, tool]);
+    const loop = new AgentLoop(provider, "test-model-7b", registry, permissions, 128_000, 0.8);
+    ref.loop = loop;
+    await loop.run("テスト依頼");
+    expect(executed).toHaveLength(4);
+  });
+
   it("ネイティブ tool_call チャンクは従来どおり実行される (アサート機構の健全性確認)", async () => {
     const executed = await runWith([
       {

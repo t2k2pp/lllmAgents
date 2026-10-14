@@ -54,10 +54,13 @@ function referencesOutsideCwd(command: string, cwd: string): boolean {
   const absoluteUnix = /(?<![\w.\-/])\/[\w.\-/]+/g;
   const parentRef = /\.\.[\\/][\w.\-/\\]*/g;
 
+  // ヒアドキュメント本文はインタプリタへ渡すデータ。 `node script.js` の中身を見ないのと同じ扱いにする
+  // (2026-10-14 goemon ログ: 本文中の `//` コメントや `<\/script>` が CWD 外と誤判定され 30 回中 12 回確認が出た)
+  const scanned = stripHeredocBodies(command);
   const candidates = [
-    ...(command.match(absoluteWin) ?? []),
-    ...(command.match(absoluteUnix) ?? []),
-    ...(command.match(parentRef) ?? []),
+    ...(scanned.match(absoluteWin) ?? []),
+    ...(scanned.match(absoluteUnix) ?? []).map((c) => unixCandidateToPath(c)).filter((c): c is string => c !== null),
+    ...(scanned.match(parentRef) ?? []),
   ];
   if (candidates.length === 0) return false;
 
@@ -74,6 +77,74 @@ function referencesOutsideCwd(command: string, cwd: string): boolean {
   return false;
 }
 
+/** シェル自身に渡すヒアドキュメントは本文もコマンドなので走査対象に残す */
+const SHELL_HEREDOC_RE = /\b(?:bash|sh|zsh|ksh|dash)\b[^|;&\n]*<<-?\s*$/;
+
+/**
+ * ヒアドキュメント本文 (`<<'EOF'` 〜 `EOF`) を取り除く。 ただしシェルへ渡すもの (`bash <<EOF`) は残す。
+ */
+function stripHeredocBodies(command: string): string {
+  const lines = command.split("\n");
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    out.push(line);
+    const m = line.match(/<<(-?)\s*(['"]?)([A-Za-z_][\w]*)\2/);
+    if (!m || m.index === undefined) continue;
+    const beforeOp = line.slice(0, m.index + 2 + m[1].length);
+    if (SHELL_HEREDOC_RE.test(beforeOp)) continue;
+    const delimiter = m[3];
+    const allowTabs = m[1] === "-";
+    let j = i + 1;
+    while (j < lines.length && (allowTabs ? lines[j].replace(/^\t+/, "") : lines[j]).trim() !== delimiter) j++;
+    if (j < lines.length) out.push(lines[j]); // 終端行は残す (後続コマンドが同じ行に続くことはない)
+    i = j;
+  }
+  return out.join("\n");
+}
+
+/** 単一階層でも実在の外部パスとみなす Unix のルート直下ディレクトリ */
+const UNIX_ROOT_DIRS = new Set([
+  "bin",
+  "boot",
+  "dev",
+  "etc",
+  "home",
+  "lib",
+  "media",
+  "mnt",
+  "opt",
+  "proc",
+  "root",
+  "run",
+  "sbin",
+  "srv",
+  "sys",
+  "tmp",
+  "usr",
+  "var",
+]);
+const HARMLESS_DEVICE_PATHS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/stdin", "/dev/tty"]);
+
+/**
+ * Unix 形式の絶対パス候補を、 判定に使うパスへ変換する。 パスでない断片なら null。
+ * - `//` や `/4294967296` (コメント・割り算) は英字を含まないので除外
+ * - `/function` のような単一階層は、 sed/grep の正規表現 (`/pattern/`) であることが多いので、
+ *   既知のルート直下ディレクトリ (`/tmp` 等) 以外は除外
+ * - Windows の git bash 形式 `/c/Users/...` は `C:/Users/...` に読み替える
+ */
+function unixCandidateToPath(candidate: string): string | null {
+  if (!/[A-Za-z]/.test(candidate)) return null;
+  if (HARMLESS_DEVICE_PATHS.has(candidate)) return null;
+  const segments = candidate.split("/").filter(Boolean);
+  if (segments.length === 0) return null;
+  // `/p` のような 1 文字だけは sed のコマンド等なのでドライブとみなさない (後ろにパスが続くときだけ)
+  const drive = process.platform === "win32" ? candidate.match(/^\/([A-Za-z])(\/[^/].*)$/) : null;
+  if (drive) return `${drive[1].toUpperCase()}:${drive[2]}`;
+  if (segments.length === 1 && !UNIX_ROOT_DIRS.has(segments[0])) return null;
+  return candidate;
+}
+
 /**
  * 広域再帰スキャン系コマンドを検出（ls -R / find / tree / dir /s 等）。
  * これらは CWD 内でも大量出力でコンテキストを汚染するため、session-allow でも確認を挟む。
@@ -87,8 +158,8 @@ function hasBroadRecursiveScan(command: string): boolean {
 }
 
 /** auto-approve されていても「都度確認」が必要な bash コマンドか判定 */
-function bashNeedsExplicitAsk(command: string, cwd: string): boolean {
-  return referencesOutsideCwd(command, cwd) || hasBroadRecursiveScan(command);
+export function bashNeedsExplicitAsk(command: string, cwd: string): boolean {
+  return referencesOutsideCwd(command, cwd) || hasBroadRecursiveScan(stripHeredocBodies(command));
 }
 
 export class PermissionManager {
