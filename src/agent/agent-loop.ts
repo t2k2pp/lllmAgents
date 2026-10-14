@@ -68,13 +68,7 @@ import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
 import { formatBufferedResponseStatus } from "../cli/response-preview.js";
 import { writeRuntimeError } from "../cli/runtime-diagnostic.js";
-import {
-  getFirstUseGuide,
-  getFailureGuide,
-  resetPerRequestGuides,
-  takeGuide,
-  LARGE_NEW_FILE_CHARS,
-} from "./tool-guides.js";
+import { getFirstUseGuide, getFailureGuide, resetPerRequestGuides } from "./tool-guides.js";
 import { IntentClassifier, type CompletionType } from "./intent-classifier.js";
 import { Evaluator } from "./evaluator.js";
 import { judgeProgress, buildRecentSummary } from "./progress-judge.js";
@@ -154,47 +148,28 @@ function renderMarkdown(text: string): string {
 }
 
 /**
- * 反復上限の絶対 hard cap。 Phase C 以降は capability.maxIterations が
- * 主要な制御点となり、 この定数は実際には使われない (一律 100 に統一)。
- * 残してあるのは過去ドキュメントとの整合性 (DESIGN.md / docs/internal_design.md)。
+ * ループ点検の 1 区間を判定する (docs/todo-request-elaboration.md 第 4 段)。
+ * 進捗 (ToDo の完了 / ファイル変更) があれば ok。 進捗が無くても毎回違う呼び出し (調査を進めている) なら ok。
+ * 進捗が無く、 区間内の呼び出しの半分以上が繰り返し (同じ名前 + 引数) なら "looping"。
+ * 呼び出しが少なすぎる区間 (4 未満) は判断材料が無いので ok (テキストだけの空回りは別の仕組みで扱う)。
  */
-const MAX_TOOL_ITERATIONS = 100;
-
-/**
- * 新規ファイルを一度に大きく書いた直後なら、 1 つずつ確かめて進める手引きを返す (依頼ごと 1 回)。
- * 作業は止めない (docs/todo-request-elaboration.md 第 3 段 項目 17)。
- */
-export function largeNewFileGuide(toolCall: ToolCall, result: { success: boolean; output?: string }): string | null {
-  if (toolCall.function.name !== "file_write" || !result.success) return null;
-  if (!/\bcreated:/.test(result.output ?? "")) return null;
-  let content = "";
-  try {
-    const args = JSON.parse(toolCall.function.arguments || "{}") as { content?: unknown };
-    content = typeof args.content === "string" ? args.content : "";
-  } catch {
-    return null;
-  }
-  if (content.length < LARGE_NEW_FILE_CHARS) return null;
-  return takeGuide("largeWrite");
+export function judgeLoopWindow(calls: readonly string[], progressed: boolean): "ok" | "looping" {
+  if (progressed || calls.length < 4) return "ok";
+  return new Set(calls).size * 2 <= calls.length ? "looping" : "ok";
 }
 
 /**
- * 作業回数の上限で止めるときの報告文 (docs/todo-request-elaboration.md 第 3 段 項目 16)。
+ * ループの疑いで止めるときの報告文 (docs/todo-request-elaboration.md 第 4 段)。
  * 今の依頼の ToDo から「終わったこと / 残り」 を並べ、 「続けて」 で再開できることを伝える。
  */
-export function buildIterationStopReport(
-  reason: "stalled" | "ceiling",
-  iterations: number,
-  window: number,
-  ceiling: number,
-): string {
+export function buildLoopStopReport(iterations: number, window: number): string {
   const todos = getCurrentTodos();
   const done = todos.filter((t) => t.status === "completed").map((t) => `- ${t.content}`);
   const left = todos.filter((t) => t.status !== "completed").map((t) => `- ${t.content}`);
   const head =
-    reason === "ceiling"
-      ? `⏸ 作業回数が絶対上限 (${ceiling} 回) に達したため、 ここで一旦止めました。`
-      : `⏸ 直近 ${window} 回の作業で ToDo の完了もファイルの変更も無かったため、 ここで一旦止めました (作業 ${iterations} 回)。`;
+    `⏸ ループの疑いがあるため、 ここで一旦止めました (作業 ${iterations} 回)。\n` +
+    `直近 ${window * 2} 回、 ToDo の完了もファイルの変更も無く、 同じ呼び出しの繰り返しが続きました ` +
+    `(途中で一度、 やり方を変えるよう促しています)。`;
   const lines = [head];
   if (todos.length > 0) {
     lines.push("", `終わったこと (${done.length}):`, ...(done.length > 0 ? done : ["- なし"]));
@@ -360,12 +335,10 @@ export class AgentLoop {
   private planTodoWarned = false;
   /**
    * P3-A: 現在の対話レジスター。 system-prompt の規約により、 モデルがタスク開始時に
-   * 「このタスクは X として進めます」 と宣言する。 その宣言を読み取り、 反復上限を
-   * レジスター別に切り替える。 unknown のままなら従来通り MAX_TOOL_ITERATIONS=100。
+   * 「このタスクは X として進めます」 と宣言する。 その宣言を読み取り、 standard 以上でだけ働く
+   * 完了ゲート (Q→A 進捗 / コヒーレンス) の発火条件に使う。 作業回数の上限には使わない (上限は撤廃済み)。
    */
   private currentRegister: "explore" | "rough" | "standard" | "production" | "unknown" = "unknown";
-  /** P3-A: ソフトキャップ警告を既に注入したか (1 user span に 1 回だけ) */
-  private softCapWarned = false;
   /**
    * Goal Seek mode: paradigm 軸。 register (style 軸) と直交した別軸。
    * 切替は user 明示のみ (enterGoalSeek / exitGoalSeek)。 AI 自動判定は不可。
@@ -857,7 +830,6 @@ export class AgentLoop {
     this.planTodoWarned = false;
     // P3-A: レジスターは user 発話ごとに再判定 (前タスクのレジスターを引き継がない)
     this.currentRegister = "unknown";
-    this.softCapWarned = false;
     // 依頼の洗い出しガイドは依頼ごとに出し直す (docs/request-elaboration-design.md §5.5)
     if (!durableResume) {
       resetPerRequestGuides();
@@ -962,20 +934,21 @@ export class AgentLoop {
       let coherenceGateRetries = durableResume?.run.coherenceGateRetries ?? 0; // Axis (2a) thinking-text コヒーレンス
       const MAX_NEW_GATE_RETRIES = 2; // 各 gate の上限 (自己点検と独立)
 
-      // 作業回数の上限は「進捗で延長」 (docs/todo-request-elaboration.md 第 3 段 項目 16)。
-      // 最初は capability.maxIterations (T1=100, T2=80, T3=50)。 到達時、 直近の区間で ToDo の完了か
-      // ファイル変更があれば iterationExtension ずつ延長し、 maxIterationsCeiling で必ず止める。
-      // 旧実装は固定上限で、 長い作業が途中で「Maximum tool iterations reached.」 とだけ出して止まっていた。
-      // ユーザー override (config.json modelCapabilities) で各値を上書きできる。
-      const ceiling = Math.max(this.capability.maxIterationsCeiling, this.capability.maxIterations);
-      const extension = Math.max(1, this.capability.iterationExtension);
+      // 作業回数・文字数の上限は設けない (docs/todo-request-elaboration.md 第 4 段)。 Claude Code と同じく、
+      // 止まるのは完了・ユーザー操作・本当に必要な確認のときだけ。 代わりに loopCheckInterval 回ごとに
+      // 「ループしていないか」 を点検する:
+      //   - 直近の区間で ToDo の完了かファイル変更があった、 または毎回違う呼び出しをしている → 何もしない
+      //   - 進捗が無く、 同じ呼び出しが半分以上 → 1 回目はモデルに振り返らせる (ユーザー確認なし)
+      //   - 次の点検でも同じ → 止めて、 終わったこと・残り・理由を報告する (ここだけが必要な確認)
+      // 同じ呼び出しの連続 (MAX_REPEAT_TOOL) と同じエラーの再発 (stuck-loop / サーキットブレーカ) は従来どおり別途検知する。
+      const loopCheckInterval = Math.max(1, this.capability.loopCheckInterval);
       const startIteration = durableResume?.run.nextIteration ?? 0;
-      // durable resume で既に初期上限を超えていても、 再開直後に 1 区間は走らせる
-      let budget = Math.min(ceiling, Math.max(this.capability.maxIterations, startIteration + extension));
       const progressMark = (): string =>
         `${getCurrentTodos().filter((t) => t.status === "completed").length}:${this.runStats.filesChanged.size}`;
       let lastProgressMark = progressMark();
-      let stopReason: "stalled" | "ceiling" | null = null;
+      /** 点検区間内のツール呼び出し (名前 + 引数)。 繰り返しの割合を見る */
+      const windowCalls: string[] = [];
+      let loopStrikes = 0;
       const pauseDurablyIfRequested = async (nextIteration: number): Promise<boolean> => {
         if (!this.runApiGate.isDurablePauseRequested()) return true;
         applyPendingSteering("tool");
@@ -1015,38 +988,32 @@ export class AgentLoop {
         return await this.runApiGate.pauseAtDurableBoundary();
       };
       for (let iteration = startIteration; ; iteration++) {
-        if (iteration >= budget) {
+        if (iteration > startIteration && (iteration - startIteration) % loopCheckInterval === 0) {
           const mark = progressMark();
           const progressed = mark !== lastProgressMark;
-          if (progressed && budget < ceiling) {
-            lastProgressMark = mark;
-            budget = Math.min(ceiling, budget + extension);
-            console.log(chalk.dim(`  [作業回数] 進捗あり — 上限を ${budget} 回に延長 (絶対上限 ${ceiling})`));
+          lastProgressMark = mark;
+          const verdict = judgeLoopWindow(windowCalls, progressed);
+          windowCalls.length = 0;
+          if (verdict === "ok") {
+            loopStrikes = 0;
+          } else if (++loopStrikes === 1) {
+            console.log(
+              chalk.dim(
+                `  [ループ点検] 直近 ${loopCheckInterval} 回で進捗が無く同じ呼び出しが多い — 振り返りを促します`,
+              ),
+            );
+            this.history.addUserMessage(
+              `[ハーネス] 直近 ${loopCheckInterval} 回の作業で、 ToDo の完了もファイルの変更も無く、 同じ呼び出しの繰り返しが多くなっています。\n` +
+                `同じことを繰り返していないか振り返ってください。 繰り返しているなら、 やり方を変える (原因を調べ直す・別の手段を使う・前提を確かめる)。\n` +
+                `必要な調査を進めているだけなら、 そのまま続けてかまいません。 ユーザーの判断が本当に必要なときだけ ask_user を使ってください。`,
+              { ephemeral: true },
+            );
           } else {
-            stopReason = progressed ? "ceiling" : "stalled";
             break;
           }
         }
         this.currentIteration = iteration;
         this.runStats.iterations = iteration + 1;
-        // P3-A: レジスター別ソフトキャップ。 確認を求めて止めるのではなく、 進み具合の自己点検を 1 度だけ促す。
-        // (旧: 「ask_user で続行可否を確認」 → 長い作業ほどユーザー確認が挟まり、 やりきれなかった)
-        const softCap = Math.min(this.computeRegisterSoftCap(), budget);
-        if (iteration >= softCap && !this.softCapWarned) {
-          const register: string = this.currentRegister; // run 冒頭の代入で型が "unknown" に絞られるのを避ける
-          const light = register === "explore" || register === "rough";
-          console.log(chalk.dim(`  [作業回数] 完了レベル "${this.currentRegister}" の目安 (${softCap} 回) に到達`));
-          this.history.addUserMessage(
-            light
-              ? `[ハーネス] 完了レベル "${this.currentRegister}" にしては作業が長くなっています (${softCap} 回)。 ` +
-                  `ここまでで答えられるなら response_complete でまとめてください。 まだ必要な作業があるなら続けてかまいません。`
-              : `[ハーネス] 作業が長くなっています (${softCap} 回)。 ToDo の状態を最新にしてください (終わった項目は completed)。\n` +
-                  `  全部終わっていれば response_complete で完了報告、 残りがあればそのまま続けてください。 ユーザーへの確認は不要です` +
-                  ` (行き詰まったときだけ ask_user)。`,
-            { ephemeral: true },
-          );
-          this.softCapWarned = true;
-        }
         // 中断チェック
         if (this._aborted) {
           // P4 (5.4): サーキットブレーカ起因の中断は、 generic な中断でなく「何が・なぜ恒久的に
@@ -1733,6 +1700,7 @@ export class AgentLoop {
 
           // 同じツール呼び出しの反復検出
           const currentSignature = toolCalls.map((tc) => tc.function.name + ":" + tc.function.arguments).join("|");
+          for (const tc of toolCalls) windowCalls.push(`${tc.function.name}:${tc.function.arguments}`);
           if (currentSignature === lastToolSignature) {
             repeatToolCount++;
             if (repeatToolCount >= MAX_REPEAT_TOOL) {
@@ -2309,14 +2277,11 @@ export class AgentLoop {
         return;
       }
 
-      // 上限で止めるときは黙って終わらず、 何が終わり何が残ったかを最終応答として届ける
-      // (docs/todo-request-elaboration.md 第 3 段 項目 16)
-      const report = buildIterationStopReport(stopReason ?? "stalled", this.runStats.iterations, extension, ceiling);
+      // ここに来るのはループ点検で止めたときだけ (for に終了条件は無い)。 黙って終わらず、
+      // 何が終わり何が残ったか・なぜ止めたかを最終応答として届ける (docs/todo-request-elaboration.md 第 4 段)
+      const report = buildLoopStopReport(this.runStats.iterations, loopCheckInterval);
       console.log(chalk.yellow(`\n  ${report.replace(/\n/g, "\n  ")}`));
-      this.events.emit("harness_notice", {
-        level: "warn",
-        message: stopReason === "ceiling" ? "作業回数の絶対上限に到達しました" : "進捗が止まったため作業を止めました",
-      });
+      this.events.emit("harness_notice", { level: "warn", message: "ループの疑いが続いたため作業を止めました" });
       this.history.addAssistantMessage(report);
       this.runStats.finalText = report;
       this.events.emit("assistant_text", { text: report, final: true });
@@ -2978,27 +2943,12 @@ export class AgentLoop {
   }
 
   /**
-   * P3-A: レジスター別ソフトキャップ。 hard cap (MAX_TOOL_ITERATIONS=100) 内に収まる
-   * 範囲で、 軽量タスクは早めに警告。 docs/agent-loop-efficiency-review.md §4.1 参照。
-   */
-  private static readonly REGISTER_SOFT_CAP: Record<string, number> = {
-    explore: 20,
-    rough: 30,
-    standard: 70,
-    production: 100, // hard cap と同値
-    unknown: 100, // レジスター宣言なし → 従来動作と同じ
-  };
-  /**
    * 「standard 以上」 のレジスター判定。 base harness の persistence gate
    * (Q→A 進捗 / コヒーレンス) の発火条件。 docs/strategic-todo-design.md §2.2 議論。
    */
   private isStandardOrAboveRegister(): boolean {
     const reg: string = this.currentRegister;
     return reg === "standard" || reg === "production";
-  }
-
-  private computeRegisterSoftCap(): number {
-    return AgentLoop.REGISTER_SOFT_CAP[this.currentRegister] ?? MAX_TOOL_ITERATIONS;
   }
 
   /**
@@ -3019,7 +2969,7 @@ export class AgentLoop {
     for (const [re, reg] of patterns) {
       if (re.test(text)) {
         this.currentRegister = reg;
-        console.log(chalk.dim(`  [register] "${reg}" に設定 (soft cap = ${this.computeRegisterSoftCap()})`));
+        console.log(chalk.dim(`  [register] "${reg}" に設定`));
         return;
       }
     }
@@ -3169,8 +3119,6 @@ export class AgentLoop {
     if (guide) {
       resultContent += "\n\n" + guide;
     }
-    const largeWrite = largeNewFileGuide(toolCall, result);
-    if (largeWrite) resultContent += `\n\n${largeWrite}`;
 
     // Phase 5 第2ラウンド: ハーネス介入レイヤ (共通モジュール)。
     // file_edit 連続失敗 / 壁ドンループ / Read→Edit 契約 / 連続委任ガード / 旧エラーガイダンス
@@ -3317,8 +3265,6 @@ export class AgentLoop {
         if (guide) {
           resultContent += "\n\n" + guide;
         }
-        const largeWrite = largeNewFileGuide(toolCall, result);
-        if (largeWrite) resultContent += `\n\n${largeWrite}`;
 
         // Phase 5 第2ラウンド: ハーネス介入レイヤ (並列ルートでも適用)
         resultContent = enrichToolResult(toolCall, result.success, resultContent, this.harnessState);
@@ -3796,11 +3742,9 @@ export class AgentLoop {
     planModeEntries: number;
     todoWriteCount: number;
     planTodoWarned: boolean;
-    softCapWarned: boolean;
     recentFailures: number;
     register: string;
-    softCap: number;
-    hardCap: number;
+    loopCheckInterval: number;
     mode: AgentMode;
     goalStatement: string | null;
     acceptanceCriteriaCount: number;
@@ -3813,11 +3757,9 @@ export class AgentLoop {
       planModeEntries: this.planModeEntries,
       todoWriteCount: this.todoWriteCount,
       planTodoWarned: this.planTodoWarned,
-      softCapWarned: this.softCapWarned,
       recentFailures: this.recentFailures.length,
       register: this.currentRegister,
-      softCap: this.computeRegisterSoftCap(),
-      hardCap: Math.max(this.capability.maxIterationsCeiling, this.capability.maxIterations),
+      loopCheckInterval: this.capability.loopCheckInterval,
       mode: this.currentMode,
       goalStatement: goal?.statement ?? null,
       acceptanceCriteriaCount: goal?.acceptance_criteria.length ?? 0,

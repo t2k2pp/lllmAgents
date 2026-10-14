@@ -113,7 +113,7 @@ interface CapabilityProfile {
   reliableInstructionFollowing: boolean;
   promptStyle: "concise" | "standard" | "verbose+examples";
   // ループ制御チューナブル (Phase C で追加)
-  maxIterations: number;
+  maxIterations: number;  // 2026-10-14 廃止 → loopCheckInterval (docs/todo-request-elaboration.md 第 4 段)
   maxSelfCheckRounds: number;
   compressionThreshold: number;
   toolResultTruncateBytes: number;
@@ -261,6 +261,7 @@ tier テーブルが独自の数値を持つと矛盾と保守負担を生む。
 
 **実装内容**:
 - `MAX_TOOL_ITERATIONS` を `capability.maxIterations` に置換 (T1=100, T2=80, T3=50)
+  - **2026-10-14 撤廃**: 作業回数の上限 (maxIterations / ソフトキャップ) は廃止し、 `loopCheckInterval` 回ごとのループ点検に置き換え (docs/todo-request-elaboration.md 第 4 段)
 - `MAX_SELF_CHECK_ROUNDS` も tier 別 (T1=3, T2=2, T3=1)
 - ContextManager `threshold` を tier 別 (T1=0.7, T2=0.6, T3=0.5)
 - 大 tool_result の truncate 閾値を tier 別 (T1=20KB, T2=12KB, T3=6KB)

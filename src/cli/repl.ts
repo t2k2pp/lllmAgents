@@ -7385,7 +7385,7 @@ export class REPL {
         );
         console.log(
           chalk.dim(
-            `  maxIterations=${cap.maxIterations}  compress@${Math.round(cap.compressionThreshold * 100)}%  truncate>${Math.round(cap.toolResultTruncateBytes / 1024)}KB  keepRecent=${cap.keepRecentMessages}`,
+            `  loopCheck=${cap.loopCheckInterval}回ごと  compress@${Math.round(cap.compressionThreshold * 100)}%  truncate>${Math.round(cap.toolResultTruncateBytes / 1024)}KB  keepRecent=${cap.keepRecentMessages}`,
           ),
         );
         console.log(chalk.dim(`  判定根拠: ${cap.reason}`));
@@ -7394,12 +7394,12 @@ export class REPL {
         console.log(chalk.dim("\n  ── Metrics (this session) ──"));
         console.log(
           chalk.dim(
-            `  iteration=${m.iteration} / softCap=${m.softCap} / hardCap=${m.hardCap}  register=${m.register}  mode=${m.mode === "goal-seek" ? chalk.cyan(m.mode) : m.mode}`,
+            `  iteration=${m.iteration} / ループ点検=${m.loopCheckInterval}回ごと  register=${m.register}  mode=${m.mode === "goal-seek" ? chalk.cyan(m.mode) : m.mode}`,
           ),
         );
         console.log(
           chalk.dim(
-            `  warnings:  softCap=${flag(m.softCapWarned)}  bash=${flag(m.bashWarned)} (${Math.round(m.bashCumulativeMs / 1000)}s)  plan/todo=${flag(m.planTodoWarned)}  stuck-loop=${m.recentFailures}/10`,
+            `  warnings:  bash=${flag(m.bashWarned)} (${Math.round(m.bashCumulativeMs / 1000)}s)  plan/todo=${flag(m.planTodoWarned)}  stuck-loop=${m.recentFailures}/10`,
           ),
         );
 

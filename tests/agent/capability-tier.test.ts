@@ -209,27 +209,27 @@ describe("CapabilityProfile — フィールド整合性", () => {
 });
 
 describe("Phase C tunables — ループ制御チューナブル", () => {
-  it("T1 のループ制御値: 100 反復 / self-check 3 / 0.7 / 20KB / keepRecent 10", () => {
+  it("T1 のループ制御値: 点検 30 回ごと / self-check 3 / 0.7 / 20KB / keepRecent 10", () => {
     const p = resolveCapability("claude-opus-4-7");
-    expect(p.maxIterations).toBe(100);
+    expect(p.loopCheckInterval).toBe(30);
     expect(p.maxSelfCheckRounds).toBe(3);
     expect(p.compressionThreshold).toBe(0.7);
     expect(p.toolResultTruncateBytes).toBe(20 * 1024);
     expect(p.keepRecentMessages).toBe(10);
   });
 
-  it("T2 のループ制御値: 80 反復 / self-check 2 / 0.6 / 12KB / keepRecent 8", () => {
+  it("T2 のループ制御値: 点検 20 回ごと / self-check 2 / 0.6 / 12KB / keepRecent 8", () => {
     const p = resolveCapability("kimi-k2.6");
-    expect(p.maxIterations).toBe(80);
+    expect(p.loopCheckInterval).toBe(20);
     expect(p.maxSelfCheckRounds).toBe(2);
     expect(p.compressionThreshold).toBe(0.6);
     expect(p.toolResultTruncateBytes).toBe(12 * 1024);
     expect(p.keepRecentMessages).toBe(8);
   });
 
-  it("T3 のループ制御値: 50 反復 / self-check 1 / 0.5 / 6KB / keepRecent 5", () => {
+  it("T3 のループ制御値: 点検 15 回ごと / self-check 1 / 0.5 / 6KB / keepRecent 5", () => {
     const p = resolveCapability("phi-4");
-    expect(p.maxIterations).toBe(50);
+    expect(p.loopCheckInterval).toBe(15);
     expect(p.maxSelfCheckRounds).toBe(1);
     expect(p.compressionThreshold).toBe(0.5);
     expect(p.toolResultTruncateBytes).toBe(6 * 1024);
@@ -249,11 +249,11 @@ describe("Phase C tunables — ループ制御チューナブル", () => {
 
   it("ユーザ override で tunables を個別に変更可能", () => {
     const p = resolveCapability("claude-opus-4-7", undefined, {
-      maxIterations: 200,
+      loopCheckInterval: 50,
       compressionThreshold: 0.85,
     });
     expect(p.tier).toBe("T1"); // tier は維持
-    expect(p.maxIterations).toBe(200); // override 反映
+    expect(p.loopCheckInterval).toBe(50); // override 反映
     expect(p.compressionThreshold).toBe(0.85);
     expect(p.maxSelfCheckRounds).toBe(3); // 他のフィールドは T1 default
   });
@@ -261,7 +261,7 @@ describe("Phase C tunables — ループ制御チューナブル", () => {
   it("tier override で tunables も対応する tier の値に切替", () => {
     const p = resolveCapability("claude-opus-4-7", undefined, { tier: "T3" });
     expect(p.tier).toBe("T3");
-    expect(p.maxIterations).toBe(50); // T3 の default
+    expect(p.loopCheckInterval).toBe(15); // T3 の default
     expect(p.compressionThreshold).toBe(0.5);
   });
 });
