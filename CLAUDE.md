@@ -27,6 +27,11 @@ Claude Codeがこのプロジェクトで作業する際のルール。
 - Stop フックは未 push コミットがあれば警告（実装後は必ずpushルールの補助）
 - **exe の再ビルドは Stop フックでは行わない**。`npm run build:deploy` を手動で実行
 
+## コミット前の検査（docs/git-hooks.md 参照）
+- pre-commit フックが `tsc --noEmit` と `biome check --staged` を実行する。`npm install` / `npm ci` で自動有効化（手動は `npm run setup:git-hooks`）
+- `--no-verify` でフックを飛ばさない。落ちたら直してからコミットし直す
+- push 前は CI と同じ手順（`npm run lint` / `npm run test:coverage` / `npm run test:e2e` / `npm audit --package-lock-only --omit=dev --audit-level=high`）を通す。`tsc` と vitest だけで済ませない
+
 ## デバッグ・テスト作業のルール
 
 ### 非TTYパイプモード

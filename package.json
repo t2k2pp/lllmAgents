@@ -19,6 +19,7 @@
     "build": "tsc",
     "build:exe": "node build-exe.js",
     "build:deploy": "node scripts/build-deploy.js --verbose",
+    "prepare": "node scripts/install-git-hooks.mjs",
     "setup:git-hooks": "node scripts/install-git-hooks.mjs",
     "sync:skills": "node scripts/sync-skills.js --verbose",
     "validate:skills": "node scripts/validate-skill.mjs --root src/skills/builtin --root .localllm/skills --root .claude/skills",
