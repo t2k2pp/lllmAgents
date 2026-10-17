@@ -114,3 +114,21 @@ describe("AgentLoop safe mode", () => {
     expectSafePrompt(loop);
   });
 });
+
+describe("AgentLoop restoreSession", () => {
+  it("履歴中の system ノート (忘却トゥームストーン / 圧縮要約) を位置ごと復元する", () => {
+    const loop = createSafeLoop({ chatWithTools: vi.fn() } as unknown as LLMProvider);
+    const tombstone = "[忘却の記録] 3 セグメント / 約 1,000 トークンを履歴から削除しました。";
+    loop.restoreSession({
+      meta: { id: "restored-notes", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      messages: [
+        { role: "user", content: "作って" },
+        { role: "system", content: tombstone },
+        { role: "assistant", content: "作りました" },
+      ],
+    });
+    const raw = loop.getHistory().getRawMessages();
+    expect(raw.map((m) => m.role)).toEqual(["user", "system", "assistant"]);
+    expect(raw[1].content).toBe(tombstone);
+  });
+});

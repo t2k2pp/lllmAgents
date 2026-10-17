@@ -175,6 +175,15 @@ export class MessageHistory {
     this.onAssistantMessage?.(content, toolCalls);
   }
 
+  /**
+   * 履歴中の system ノート (忘却トゥームストーン / 圧縮要約) を追加する。
+   * session 復元用。 これを捨てると「何を忘れたか」 の記録が消え、
+   * 次回の忘却で過去分が統合されず新しい記録だけになる。
+   */
+  addSystemNote(content: string): void {
+    this.messages.push({ role: "system", content });
+  }
+
   addToolResult(toolCallId: string, content: string): void {
     this.messages.push({
       role: "tool",

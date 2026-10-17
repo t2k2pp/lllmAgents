@@ -3647,6 +3647,10 @@ export class AgentLoop {
           msg.tool_call_id ?? "",
           typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
         );
+      } else if (msg.role === "system") {
+        // 忘却トゥームストーン / 圧縮要約。 system prompt は session に保存されないので、
+        // ここに来るのは履歴中のノートだけ
+        this.history.addSystemNote(typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content));
       }
     }
     // docs/todo-goal-lifecycle.md §2.3 — in-memory slot 復元 (旧 session は optional のためスキップ)
