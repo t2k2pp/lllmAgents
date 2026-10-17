@@ -46,6 +46,10 @@ export interface InteractiveInputOptions {
   commandProvider?: MenuProvider;
   /** @ファイルパス候補を返すプロバイダー */
   filePathProvider?: MenuProvider;
+  /** ↑↓ 履歴の初期値 (古い順)。 前回までの起動で確定した入力 */
+  initialHistory?: readonly string[];
+  /** 確定した入力が ↑↓ 履歴へ追加されたときに呼ばれる (永続化用) */
+  onHistoryAdd?: (entry: string) => void;
 }
 
 export interface InteractiveQuestionOptions {
@@ -78,10 +82,13 @@ export class InteractiveInput {
   private history: string[] = [];
   private historyIndex = -1;
   private keypressInitialized = false;
+  private onHistoryAdd: ((entry: string) => void) | undefined;
 
   constructor(options: InteractiveInputOptions = {}) {
     this.commandProvider = options.commandProvider ?? (() => []);
     this.filePathProvider = options.filePathProvider ?? (() => []);
+    this.history = [...(options.initialHistory ?? [])];
+    this.onHistoryAdd = options.onHistoryAdd;
   }
 
   /**
@@ -554,6 +561,7 @@ export class InteractiveInput {
         echoToScrollback(result);
         if (result.trim()) {
           this.history.push(result);
+          this.onHistoryAdd?.(result);
         }
         this.historyIndex = -1;
         resolve(result);

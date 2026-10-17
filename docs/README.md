@@ -96,6 +96,7 @@
 | [product-feature-comparison-cycle-25-search-recovery-2026-09-05.md](product-feature-comparison-cycle-25-search-recovery-2026-09-05.md) | implemented | 名前訂正後の検索復旧、SearXNG劣化診断、明示provider再検索を強化 |
 | [product-feature-comparison-cycle-26-completion-prompt-handoff-2026-09-06.md](product-feature-comparison-cycle-26-completion-prompt-handoff-2026-09-06.md) | implemented | 応答完了時の処理中composer・診断ログ・通常promptの表示handoffを修復 |
 | [durable-run-resume-design.md](durable-run-resume-design.md) | implemented | PC・アプリ再起動を跨ぐdurable run checkpoint（cycle 18） |
+| [prompt-history-resume.md](prompt-history-resume.md) | implemented | 入力欄の ↑↓ 履歴を作業フォルダ単位で永続化（Claude Code の history.jsonl 相当） |
 | [spinner-mode-response-coloring-design.md](spinner-mode-response-coloring-design.md) | implemented | 応答テキストの色分け (構造ベース) |
 | [ux-transparency.md](ux-transparency.md) | implemented | UX 透明性+サンプリングパラメータ |
 | [context-inspector.md](context-inspector.md) | implemented | /context ドリルダウン |

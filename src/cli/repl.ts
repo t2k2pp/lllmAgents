@@ -26,6 +26,7 @@ import { loadMemory, saveMemory } from "../agent/memory.js";
 import { resolveAtMentions, printMentionFeedback } from "./input-resolver.js";
 import { runGoalLoop } from "../goal-loop/goal-loop-runner.js";
 import { InteractiveInput, INPUT_CANCELLED_SIGNAL, SIGINT_SIGNAL } from "./interactive-input.js";
+import { PROMPT_HISTORY_FILE, appendPromptHistory, loadPromptHistory } from "./prompt-history-store.js";
 import { currentInteractionMode, nextInteractionMode } from "./interaction-mode.js";
 import { screen } from "./screen-manager.js";
 import { interruptWatcher } from "./interrupt-watcher.js";
@@ -158,10 +159,51 @@ export class REPL {
     this.input = new InteractiveInput({
       commandProvider: createCommandMenuProvider(skillInfos, toolNames),
       filePathProvider: createFileMenuProvider(),
+      ...this.createPromptHistoryOptions(),
     });
 
     this.configureSandboxNetProxy();
     cleanupStaleSandboxArtifacts(); // 前回クラッシュ等で残った一時プロファイル/ソケットを掃除
+  }
+
+  /**
+   * 入力欄の ↑↓ 履歴を作業フォルダ単位で永続化する (docs/prompt-history-resume.md)。
+   * resume の有無に関わらず、 同じ作業フォルダで前回までに確定した入力を呼び出せる。
+   * 読み書きの失敗は黙って捨てず、 利用者へ一度だけ知らせる。
+   */
+  private createPromptHistoryOptions(): { initialHistory: string[]; onHistoryAdd: (entry: string) => void } {
+    const project = process.cwd();
+    let initialHistory: string[] = [];
+    try {
+      const loaded = loadPromptHistory(project);
+      initialHistory = loaded.entries;
+      if (loaded.invalidLines > 0) {
+        console.log(
+          chalk.yellow(
+            `  ⚠ 入力履歴 ${PROMPT_HISTORY_FILE} の ${loaded.invalidLines} 行が読めなかったため読み飛ばしました。`,
+          ),
+        );
+      }
+    } catch (err) {
+      console.log(chalk.yellow(`  ⚠ 入力履歴 ${PROMPT_HISTORY_FILE} を読めませんでした: ${(err as Error).message}`));
+    }
+    let appendWarned = false;
+    return {
+      initialHistory,
+      onHistoryAdd: (entry) => {
+        try {
+          appendPromptHistory(entry, project);
+        } catch (err) {
+          if (appendWarned) return;
+          appendWarned = true;
+          console.log(
+            chalk.yellow(
+              `  ⚠ 入力履歴 ${PROMPT_HISTORY_FILE} へ保存できませんでした (次回起動では呼び出せません): ${(err as Error).message}`,
+            ),
+          );
+        }
+      },
+    };
   }
 
   /**
