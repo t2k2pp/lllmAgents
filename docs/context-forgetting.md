@@ -113,6 +113,22 @@ interface Segment {
 **tool_call は残す**のがポイント。 消してしまうと「このファイルを読んだ」 という
 行動の記録まで失われ、 同じファイルを何度も読み直す壁ドンループを誘発する。
 
+ただし **tool_call 引数の本文は落とす**。 `file_write` の `content` や `file_edit` の
+`old_string` / `new_string` など、 文字列引数のうち `file_path` / `path` / `url` 以外で
+200 文字を超えるものは先頭 200 文字 + `[忘却済み]` 注記に切り詰める (JSON として読めない引数は触らない)。
+書込中心のセッションではコンテキストの大半が引数側に乗るため、 結果本文だけ落としても減らない。
+
+> 2026-10-17 myppt セッション (392 msg / 約 159K) で `contextReduction=forget` が
+> 「実質削減が -85 トークン」 で不成立になった。 未保護 158 セグメント中 80 が thin しても 0 削減
+> (結果は thin 済み、 残りは引数 82.7K)。 マニフェストは引数込みの total を出すため、
+> モデルは大きく見える thin 済みの `file_write` を選び、 トゥームストーン分だけ増えていた。
+
+thin 済みの結果・引数 (`[忘却済み]` を含むもの) は再変換しない。 各セグメントは
+`thinGain` (thin で実際に減る量) を持ち、 0 のセグメントは
+マニフェストで `thin済` と表示し、 thin 指定されても検証で無視する (§4.3)。
+決定論版の forget-thinking も `thinGain` が 0 の batch は選ばない
+(選ぶと「約 0 トークン削除」 の空振り記録だけがトゥームストーンに積もる)。
+
 `assistant_text` および `user` に対する `thin` は先頭 200 文字 + 省略注記に切り詰める。
 `user` の thin は「モデルが drop を選んだが格下げされた」 経路で必ず発生する (§4.3)。
 
@@ -144,16 +160,20 @@ interface Segment {
 トークンを食わないよう極力コンパクトに。 1 セグメント 1 行。
 
 ```
-#1   user          1,240t  Discord Gateway の受信を WS 方式に切り替えたい。 まず現状の…
-#2   tools         8,900t  grep×1, file_read×2  (src/discord/*)
-#3   assistant       310t  Endpoint 方式は interaction-server.ts に実装されています。 …
-#4   tools        41,200t  file_read×1  (src/agent/agent-loop.ts)
-#5   assistant       180t  読み込みました。 次に gateway クライアントを実装します。
-#6   tools         2,100t  file_write×1, bash×1  (src/discord/gateway.ts)
+#1   user          1,240t  thin→1,180t  Discord Gateway の受信を WS 方式に切り替えたい。 まず現状の…
+#2   tools         8,900t  thin→8,850t  grep×1, file_read×2  (src/discord/*)
+#3   assistant       310t  thin→250t    Endpoint 方式は interaction-server.ts に実装されています。 …
+#4   tools           180t  thin済       file_read×1  (src/agent/agent-loop.ts)
+#5   assistant       180t  thin済       読み込みました。 次に gateway クライアントを実装します。
+#6   tools         2,100t  thin→1,900t  file_write×1, bash×1  (src/discord/gateway.ts)
 --- 以下は保護 (直近) ---
-#7   user            90t   テストして
-#8   tools         1,400t  bash×1
+#7   user            90t   thin済       テストして
+#8   tools         1,400t  thin→1,300t  bash×1
 ```
+
+- 先頭の数値は **drop で減る量** (セグメントの total)、 `thin→Nt` は **thin で減る量** (`thinGain`)。
+  total だけを見せるとモデルは thin 済みの大きなセグメントを選び、 削減 0 になる (§3.1)
+- `thin済`: thin しても減らない (thin 済み・200 文字以下の短文)。 drop は選べる
 
 digest の作り方:
 - `user` / `assistant_text`: 本文の先頭 60 文字 (改行は空白化)
@@ -203,6 +223,7 @@ llama.cpp、 84 セグメントで `finish=length`・思考 3,228 字・本文 0
 | 存在しない index | 無視 (警告ログ) |
 | protected セグメントの指定 | 無視 (警告ログ) |
 | `user` セグメントの `drop` | **`thin` に制限** — 忘却機能内の安全規則としてユーザーの言葉を完全消去させない |
+| `thinGain` が 0 のセグメントの `thin` (格下げ後を含む) | 無視 (警告ログ)。 適用しても削減 0 でトゥームストーン分だけ増えるため |
 | thin/drop が 0 件 | 忘却は不成立。履歴を保持し、`forget` は失敗を報告、`hybrid` のみ圧縮段階へ進む |
 | JSON パース失敗 / 本文が空 | 同じ忘却経路で1回だけ再試行 → だめなら忘却不成立 (理由は §4.5) |
 

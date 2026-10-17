@@ -33,8 +33,14 @@ export const DEFAULT_KEEP_RECENT_SEGMENTS = 6;
 /** digest に載せる本文の文字数 (マニフェスト 1 行に収める) */
 const DIGEST_CHARS = 60;
 
-/** thin したテキストで残す先頭文字数 (docs §3.1) */
+/** thin したテキスト / tool_call 引数で残す先頭文字数 (docs §3.1) */
 const THIN_TEXT_CHARS = 200;
+
+/**
+ * thin でも原文のまま残す tool_call 引数。 「何に対して何をしたか」 の識別子なので、
+ * 長くても切ると行動の記録として役に立たなくなる。
+ */
+const THIN_KEEP_ARG_KEYS = new Set(["file_path", "path", "url"]);
 
 /** トゥームストーンの目印。 これで system_note を再識別する */
 export const TOMBSTONE_MARKER = "[忘却の記録]";
@@ -52,8 +58,15 @@ export interface Segment {
   kind: SegmentKind;
   /** このセグメントに含まれる messages の [開始, 終了) */
   range: [number, number];
-  /** 推定トークン数 */
+  /** 推定トークン数 (drop したときに減る量) */
   tokens: number;
+  /**
+   * thin したときに実際に減る推定トークン数。
+   * thin 済みのセグメントや短文は 0 になる。 total だけを見せるとモデルが
+   * 「大きく見えるが thin しても 1 トークンも減らない」 セグメントを選び、
+   * トゥームストーン分だけ増えて忘却が不成立になる (docs §3.1)
+   */
+  thinGain: number;
   /** 1 行ダイジェスト (manifest 表示用) */
   digest: string;
   /** tool_batch のときの内訳: 呼ばれたツール名 */
@@ -169,6 +182,7 @@ export function buildSegments(messages: Message[], keepRecentSegments = DEFAULT_
         kind: "tool_batch",
         range: [start, end],
         tokens: estimateMessageTokens(messages.slice(start, end)),
+        thinGain: 0,
         digest: summarizeToolNames(names) + (repr ? `  (${repr})` : ""),
         toolNames: names,
         protected: false,
@@ -185,6 +199,7 @@ export function buildSegments(messages: Message[], keepRecentSegments = DEFAULT_
         kind: "system_note",
         range: [start, start + 1],
         tokens: estimateMessageTokens([msg]),
+        thinGain: 0,
         digest: "(孤立した tool 結果 — 保護)",
         protected: true,
       });
@@ -198,11 +213,17 @@ export function buildSegments(messages: Message[], keepRecentSegments = DEFAULT_
       kind,
       range: [start, start + 1],
       tokens: estimateMessageTokens([msg]),
+      thinGain: 0,
       digest: oneLine(contentToText(msg.content), DIGEST_CHARS),
       // 圧縮要約 / 忘却トゥームストーンの system は常に保護 (docs §2.2)
       protected: kind === "system_note",
     });
     i++;
+  }
+
+  for (const seg of segments) {
+    const slice = messages.slice(seg.range[0], seg.range[1]);
+    seg.thinGain = Math.max(0, seg.tokens - estimateMessageTokens(thinSlice(seg.kind, slice).messages));
   }
 
   // 直近 keepRecentSegments 個を保護する
@@ -234,7 +255,9 @@ export function buildManifest(segments: Segment[]): string {
     const num = `#${s.index}`.padEnd(5);
     const kind = KIND_LABEL[s.kind].padEnd(10);
     const tok = `${s.tokens.toLocaleString("en-US")}t`.padStart(9);
-    lines.push(`${num}${kind}${tok}  ${s.digest}`);
+    // drop で減る量 (total) と thin で減る量は別物。 thin 済みは thin しても減らないので明示する
+    const thin = (s.thinGain > 0 ? `thin→${s.thinGain.toLocaleString("en-US")}t` : "thin済").padEnd(13);
+    lines.push(`${num}${kind}${tok}  ${thin}${s.digest}`);
   }
   return lines.join("\n");
 }
@@ -251,7 +274,8 @@ export function buildForgetPrompt(manifest: string, targetTokens: number): strin
     `- drop: 用済みの探索、 失敗して捨てた試行、 現在の作業と無関係な話題\n\n` +
     `原則: 迷ったら thin を選ぶ。 drop はユーザー指示を含まないと確信できるものだけ。\n` +
     `keep は書かなくてよい (thin / drop に挙げなかったものは自動的に keep になる)。\n` +
-    `「保護」 と書かれた行は選べません。\n\n` +
+    `「保護」 と書かれた行は選べません。\n` +
+    `各行の数値は drop で減る量、 thin→Nt は thin で減る量です。 「thin済」 の行は thin しても減らないので thin に挙げないでください。\n\n` +
     `JSON のみを返してください:\n` +
     `{"thin": [2, 4], "drop": [], "reason": "巨大なソース読み込みの本文を落とした。 指示と判断は全て残した"}\n\n` +
     `【重要制約】これは機械的分類タスクです。内部思考（thinking）は最小限にとどめ、直ちに上記JSONのみを出力してください。\n\n` +
@@ -322,7 +346,11 @@ export function validateChoice(
     if (action === "drop" && seg.kind === "user") {
       // ユーザーが言ったことが消えるのが最も回復不能な損失なので、 完全消去はさせない
       warnings.push(`#${idx} は user セグメントのため drop → thin に格下げしました`);
-      thin.add(idx);
+      action = "thin";
+    }
+    if (action === "thin" && seg.thinGain <= 0) {
+      // thin 済み / 短文を thin しても 1 トークンも減らず、 トゥームストーン分だけ増える
+      warnings.push(`#${idx} は thin しても削減できない (thin 済み・短文) ため無視しました`);
       return;
     }
     if (action === "drop") drop.add(idx);
@@ -383,49 +411,109 @@ export function applyPlanToMessages(
       next.push(...slice);
       continue;
     }
-
-    if (seg.kind === "tool_batch") {
-      // tool_call は残す。 消すと「このファイルを読んだ」 という行動の記録まで失われ、
-      // 同じファイルを何度も読み直すループを誘発する (docs §3.1)。
-      const head = slice[0];
-      const callById = new Map((head.tool_calls ?? []).map((c) => [c.id, c]));
-      next.push(head);
-      for (const m of slice.slice(1)) {
-        const call = m.tool_call_id ? callById.get(m.tool_call_id) : undefined;
-        const what = call ? describeToolCall(call.function.name, call.function.arguments) : "ツール";
-        const tokens = estimateTokens(contentToText(m.content));
-        thinnedTools.push(call?.function.name ?? "tool");
-        next.push({
-          role: "tool",
-          content:
-            `${THINNED_MARKER} ${what} の結果 (約 ${tokens.toLocaleString("en-US")} トークン) は履歴から削除しました。 ` +
-            `必要なら再度実行して取得してください。`,
-          tool_call_id: m.tool_call_id,
-        });
-      }
-      continue;
-    }
-
-    // user / assistant_text: 先頭 THIN_TEXT_CHARS 文字 + 省略注記に切り詰める
-    for (const m of slice) {
-      const text = contentToText(m.content);
-      if (text.length <= THIN_TEXT_CHARS) {
-        next.push(m);
-        continue;
-      }
-      const dropped = estimateTokens(text.slice(THIN_TEXT_CHARS));
-      const shrunk: Message = {
-        role: m.role,
-        content:
-          `${text.slice(0, THIN_TEXT_CHARS)}\n` +
-          `${THINNED_MARKER} 以降 約 ${dropped.toLocaleString("en-US")} トークンを履歴から削除しました。`,
-      };
-      if (m.tool_call_id) shrunk.tool_call_id = m.tool_call_id;
-      next.push(shrunk);
-    }
+    const thinned = thinSlice(seg.kind, slice);
+    next.push(...thinned.messages);
+    thinnedTools.push(...thinned.thinnedTools);
   }
 
   return { next, thinnedTools, droppedDigests };
+}
+
+/** 長い文字列を先頭 THIN_TEXT_CHARS 文字 + 省略注記に切り詰める。 thin 済み・短文はそのまま */
+function shrinkText(text: string): string {
+  if (text.length <= THIN_TEXT_CHARS || text.includes(THINNED_MARKER)) return text;
+  const dropped = estimateTokens(text.slice(THIN_TEXT_CHARS));
+  return (
+    `${text.slice(0, THIN_TEXT_CHARS)}\n` +
+    `${THINNED_MARKER} 以降 約 ${dropped.toLocaleString("en-US")} トークンを履歴から削除しました。`
+  );
+}
+
+/**
+ * tool_call 引数の本文 (file_write の content、 file_edit の old/new 文字列など) を切り詰める。
+ * 書込系セッションではコンテキストの大半がここに乗り、 結果本文だけ落としても減らない
+ * (2026-10-17 myppt セッションで未保護 158 セグメント中 80 が thin しても削減 0)。
+ * パス等の識別子は残すので「どのファイルに何をしたか」 の記録は失われない。
+ * 引数が JSON として読めないときは触らない (壊すと provider が 400 を返す)。
+ */
+function shrinkToolArguments(argsJson: string): string {
+  let args: unknown;
+  try {
+    args = JSON.parse(argsJson || "{}");
+  } catch {
+    return argsJson;
+  }
+  if (!args || typeof args !== "object" || Array.isArray(args)) return argsJson;
+  let changed = false;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+    if (typeof value === "string" && !THIN_KEEP_ARG_KEYS.has(key)) {
+      const shrunk = shrinkText(value);
+      if (shrunk !== value) changed = true;
+      out[key] = shrunk;
+    } else {
+      out[key] = value;
+    }
+  }
+  return changed ? JSON.stringify(out) : argsJson;
+}
+
+/** 1 セグメント分の messages に thin を適用する (元配列は変更しない) */
+function thinSlice(kind: SegmentKind, slice: Message[]): { messages: Message[]; thinnedTools: string[] } {
+  const messages: Message[] = [];
+  const thinnedTools: string[] = [];
+
+  if (kind === "tool_batch") {
+    // tool_call は残す。 消すと「このファイルを読んだ」 という行動の記録まで失われ、
+    // 同じファイルを何度も読み直すループを誘発する (docs §3.1)。
+    // ただし引数の本文は落とす (識別子は残る)。
+    const head = slice[0];
+    const calls = head.tool_calls ?? [];
+    const callById = new Map(calls.map((c) => [c.id, c]));
+    const shrunkCalls = calls.map((c) => {
+      const args = shrinkToolArguments(c.function.arguments);
+      return args === c.function.arguments ? c : { ...c, function: { ...c.function, arguments: args } };
+    });
+    messages.push(shrunkCalls.some((c, i) => c !== calls[i]) ? { ...head, tool_calls: shrunkCalls } : head);
+    // 引数か結果のどちらかを縮めた呼び出し (トゥームストーンの記録用)
+    const touched = new Set(shrunkCalls.filter((c, i) => c !== calls[i]).map((c) => c.id));
+    for (const m of slice.slice(1)) {
+      const text = contentToText(m.content);
+      if (text.startsWith(THINNED_MARKER)) {
+        // thin 済み。 再変換しても縮まらない
+        messages.push(m);
+        continue;
+      }
+      const call = m.tool_call_id ? callById.get(m.tool_call_id) : undefined;
+      const what = call ? describeToolCall(call.function.name, call.function.arguments) : "ツール";
+      const tokens = estimateTokens(text);
+      if (call) touched.add(call.id);
+      else thinnedTools.push("tool");
+      messages.push({
+        role: "tool",
+        content:
+          `${THINNED_MARKER} ${what} の結果 (約 ${tokens.toLocaleString("en-US")} トークン) は履歴から削除しました。 ` +
+          `必要なら再度実行して取得してください。`,
+        tool_call_id: m.tool_call_id,
+      });
+    }
+    for (const c of calls) if (touched.has(c.id)) thinnedTools.push(c.function.name);
+    return { messages, thinnedTools };
+  }
+
+  // user / assistant_text: 先頭 THIN_TEXT_CHARS 文字 + 省略注記に切り詰める
+  for (const m of slice) {
+    const text = contentToText(m.content);
+    const shrunkText = shrinkText(text);
+    if (shrunkText === text) {
+      messages.push(m);
+      continue;
+    }
+    const shrunk: Message = { role: m.role, content: shrunkText };
+    if (m.tool_call_id) shrunk.tool_call_id = m.tool_call_id;
+    messages.push(shrunk);
+  }
+  return { messages, thinnedTools };
 }
 
 /** トゥームストーン本文を組み立てる (docs §4.4) */
@@ -490,6 +578,8 @@ export function selectThinkingTargets(segments: Segment[]): number[] {
   for (const s of segments) {
     if (s.protected) continue;
     if (s.kind !== "tool_batch") continue;
+    // thin 済みを選び直すと「約 0 トークン削除」 の空振り記録だけがトゥームストーンに積もる
+    if (s.thinGain <= 0) continue;
     const names = s.toolNames ?? [];
     if (names.length === 0) continue;
     if (!names.every((n) => READONLY_TOOL_NAMES.has(n))) continue;

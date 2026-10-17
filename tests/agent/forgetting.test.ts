@@ -167,10 +167,50 @@ describe("validateChoice — モデルの出力をそのまま信じない", () 
   });
 
   it("user セグメントの drop は thin に格下げされる (ユーザーの言葉を完全消去させない)", () => {
-    const r = validateChoice(segs, { thin: [], drop: [1], reason: "" });
+    const long = sampleMessages();
+    long[0] = { role: "user", content: "あ".repeat(1000) };
+    const r = validateChoice(buildSegments(long, 2), { thin: [], drop: [1], reason: "" });
     expect(r.drop).toEqual([]);
     expect(r.thin).toEqual([1]);
     expect(r.warnings.join()).toContain("格下げ");
+  });
+
+  it("thin しても縮まらないセグメント (短文・thin 済み) の指定は無視される", () => {
+    // #1 は短い user なので格下げ後の thin でも減らない
+    const r = validateChoice(segs, { thin: [], drop: [1], reason: "" });
+    expect(r.thin).toEqual([]);
+    expect(r.warnings.join()).toContain("削減できない");
+
+    const once = applyPlanToMessages(sampleMessages(), buildSegments(sampleMessages(), 2), [2], []).next;
+    const again = buildSegments(once, 2);
+    expect(again[1].thinGain).toBe(0);
+    expect(buildManifest(again)).toContain("thin済");
+    expect(validateChoice(again, { thin: [2], drop: [], reason: "" }).thin).toEqual([]);
+  });
+
+  it("thin は tool_call 引数の本文も縮め、 パスは残す (書込系セッションで減らない問題)", () => {
+    const content = "const x = 1;\n".repeat(2000);
+    const messages: Message[] = [
+      { role: "user", content: "書いて" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [toolCall("w1", "file_write", { file_path: "src/app.js", content })],
+      },
+      { role: "tool", content: `${THINNED_MARKER} file_write の結果は履歴から削除しました。`, tool_call_id: "w1" },
+      { role: "user", content: "次" },
+    ];
+    const segs2 = buildSegments(messages, 1);
+    expect(segs2[1].thinGain).toBeGreaterThan(1000);
+
+    const { next, thinnedTools } = applyPlanToMessages(messages, segs2, [2], []);
+    const args = JSON.parse(next[1].tool_calls![0].function.arguments) as Record<string, string>;
+    expect(args.file_path).toBe("src/app.js");
+    expect(args.content).toContain(THINNED_MARKER);
+    expect(args.content.length).toBeLessThan(400);
+    expect(thinnedTools).toEqual(["file_write"]);
+    // 2 回目は縮まない
+    expect(buildSegments(next, 1)[1].thinGain).toBe(0);
   });
 
   it("thin と drop の両方に出たら drop が勝つ", () => {
