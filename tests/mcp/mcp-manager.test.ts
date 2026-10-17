@@ -25,16 +25,27 @@ vi.mock("chalk", () => ({
   },
 }));
 
+// MCPManager は MCPClient を new で生成する。 vitest 4 以降、 new で呼ばれるモックの実装に
+// アロー関数を渡すと "is not a constructor" になるため、 function でくるんで渡す。
+function asConstructor<T>(build: (config: Record<string, unknown>) => T): (config: Record<string, unknown>) => T {
+  // biome-ignore lint/complexity/useArrowFunction: new で呼ばれるためアロー関数にできない
+  return function (config: Record<string, unknown>) {
+    return build(config);
+  };
+}
+
 // MCPClient モック
 vi.mock("../../src/mcp/mcp-client.js", () => ({
-  MCPClient: vi.fn().mockImplementation((config: Record<string, unknown>) => ({
-    name: config.name,
-    connected: false,
-    tools: [],
-    connect: vi.fn(),
-    callTool: vi.fn(),
-    disconnect: vi.fn(),
-  })),
+  MCPClient: vi.fn().mockImplementation(
+    asConstructor((config) => ({
+      name: config.name,
+      connected: false,
+      tools: [],
+      connect: vi.fn(),
+      callTool: vi.fn(),
+      disconnect: vi.fn(),
+    })),
+  ),
 }));
 
 import * as fs from "node:fs";
@@ -175,7 +186,7 @@ describe("MCPManager", () => {
         disconnect: vi.fn(),
         onToolsChanged: undefined as ((error?: Error) => void) | undefined,
       };
-      vi.mocked(MCPClient).mockImplementation(() => client as unknown as MCPClient);
+      vi.mocked(MCPClient).mockImplementation(asConstructor(() => client as unknown as MCPClient));
       const manager = new MCPManager("/test/project");
       await manager.connectAll(registry);
       client.tools = [{ name: "new", inputSchema: { type: "object" } }];
@@ -258,17 +269,19 @@ describe("MCPManager", () => {
       ];
 
       vi.mocked(MCPClient).mockImplementation(
-        (config: Record<string, unknown>) =>
-          ({
-            name: config.name as string,
-            connected: true,
-            tools: mockTools,
-            connect: vi.fn().mockResolvedValue(undefined),
-            callTool: vi.fn().mockResolvedValue({
-              content: [{ type: "text", text: "result" }],
-            }),
-            disconnect: vi.fn().mockResolvedValue(undefined),
-          }) as unknown as MCPClient,
+        asConstructor(
+          (config: Record<string, unknown>) =>
+            ({
+              name: config.name as string,
+              connected: true,
+              tools: mockTools,
+              connect: vi.fn().mockResolvedValue(undefined),
+              callTool: vi.fn().mockResolvedValue({
+                content: [{ type: "text", text: "result" }],
+              }),
+              disconnect: vi.fn().mockResolvedValue(undefined),
+            }) as unknown as MCPClient,
+        ),
       );
 
       const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -301,15 +314,17 @@ describe("MCPManager", () => {
       vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(serverConfig));
 
       vi.mocked(MCPClient).mockImplementation(
-        (config: Record<string, unknown>) =>
-          ({
-            name: config.name as string,
-            connected: false,
-            tools: [],
-            connect: vi.fn().mockRejectedValue(new Error("spawn ENOENT")),
-            callTool: vi.fn(),
-            disconnect: vi.fn(),
-          }) as unknown as MCPClient,
+        asConstructor(
+          (config: Record<string, unknown>) =>
+            ({
+              name: config.name as string,
+              connected: false,
+              tools: [],
+              connect: vi.fn().mockRejectedValue(new Error("spawn ENOENT")),
+              callTool: vi.fn(),
+              disconnect: vi.fn(),
+            }) as unknown as MCPClient,
+        ),
       );
 
       const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -344,21 +359,23 @@ describe("MCPManager", () => {
       vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(serverConfig));
 
       vi.mocked(MCPClient).mockImplementation(
-        (config: Record<string, unknown>) =>
-          ({
-            name: config.name as string,
-            connected: true,
-            tools: [
-              {
-                name: "read_file",
-                description: "Read file",
-                inputSchema: { type: "object" as const, properties: {} },
-              },
-            ],
-            connect: vi.fn().mockResolvedValue(undefined),
-            callTool: mockCallTool,
-            disconnect: vi.fn(),
-          }) as unknown as MCPClient,
+        asConstructor(
+          (config: Record<string, unknown>) =>
+            ({
+              name: config.name as string,
+              connected: true,
+              tools: [
+                {
+                  name: "read_file",
+                  description: "Read file",
+                  inputSchema: { type: "object" as const, properties: {} },
+                },
+              ],
+              connect: vi.fn().mockResolvedValue(undefined),
+              callTool: mockCallTool,
+              disconnect: vi.fn(),
+            }) as unknown as MCPClient,
+        ),
       );
 
       const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -397,24 +414,26 @@ describe("MCPManager", () => {
       vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(serverConfig));
 
       vi.mocked(MCPClient).mockImplementation(
-        (config: Record<string, unknown>) =>
-          ({
-            name: config.name as string,
-            connected: true,
-            tools: [
-              {
-                name: "fail_tool",
-                description: "Always fails",
-                inputSchema: { type: "object" as const, properties: {} },
-              },
-            ],
-            connect: vi.fn().mockResolvedValue(undefined),
-            callTool: vi.fn().mockResolvedValue({
-              content: [{ type: "text", text: "something went wrong" }],
-              isError: true,
-            }),
-            disconnect: vi.fn(),
-          }) as unknown as MCPClient,
+        asConstructor(
+          (config: Record<string, unknown>) =>
+            ({
+              name: config.name as string,
+              connected: true,
+              tools: [
+                {
+                  name: "fail_tool",
+                  description: "Always fails",
+                  inputSchema: { type: "object" as const, properties: {} },
+                },
+              ],
+              connect: vi.fn().mockResolvedValue(undefined),
+              callTool: vi.fn().mockResolvedValue({
+                content: [{ type: "text", text: "something went wrong" }],
+                isError: true,
+              }),
+              disconnect: vi.fn(),
+            }) as unknown as MCPClient,
+        ),
       );
 
       const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -443,24 +462,26 @@ describe("MCPManager", () => {
       vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(serverConfig));
 
       vi.mocked(MCPClient).mockImplementation(
-        (config: Record<string, unknown>) =>
-          ({
-            name: config.name as string,
-            connected: true,
-            tools: [
-              {
-                name: "t1",
-                inputSchema: { type: "object" as const },
-              },
-              {
-                name: "t2",
-                inputSchema: { type: "object" as const },
-              },
-            ],
-            connect: vi.fn().mockResolvedValue(undefined),
-            callTool: vi.fn(),
-            disconnect: vi.fn(),
-          }) as unknown as MCPClient,
+        asConstructor(
+          (config: Record<string, unknown>) =>
+            ({
+              name: config.name as string,
+              connected: true,
+              tools: [
+                {
+                  name: "t1",
+                  inputSchema: { type: "object" as const },
+                },
+                {
+                  name: "t2",
+                  inputSchema: { type: "object" as const },
+                },
+              ],
+              connect: vi.fn().mockResolvedValue(undefined),
+              callTool: vi.fn(),
+              disconnect: vi.fn(),
+            }) as unknown as MCPClient,
+        ),
       );
 
       const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -490,15 +511,17 @@ describe("MCPManager", () => {
       vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(serverConfig));
 
       vi.mocked(MCPClient).mockImplementation(
-        (config: Record<string, unknown>) =>
-          ({
-            name: config.name as string,
-            connected: true,
-            tools: [],
-            connect: vi.fn().mockResolvedValue(undefined),
-            callTool: vi.fn(),
-            disconnect: mockDisconnect,
-          }) as unknown as MCPClient,
+        asConstructor(
+          (config: Record<string, unknown>) =>
+            ({
+              name: config.name as string,
+              connected: true,
+              tools: [],
+              connect: vi.fn().mockResolvedValue(undefined),
+              callTool: vi.fn(),
+              disconnect: mockDisconnect,
+            }) as unknown as MCPClient,
+        ),
       );
 
       const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
