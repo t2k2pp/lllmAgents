@@ -56,7 +56,11 @@ describe("extractAcceptanceCriteria", () => {
   });
 
   it("素の JSON 配列も受ける (思考オフ時に実測した出力形)", async () => {
-    const criteria = await extractAcceptanceCriteria(mkProvider('[\n  "c1 が動作する",\n  "c2 が存在する"\n]'), "m", "goal");
+    const criteria = await extractAcceptanceCriteria(
+      mkProvider('[\n  "c1 が動作する",\n  "c2 が存在する"\n]'),
+      "m",
+      "goal",
+    );
     expect(criteria).toEqual(["c1 が動作する", "c2 が存在する"]);
   });
 

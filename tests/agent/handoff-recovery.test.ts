@@ -99,7 +99,10 @@ describe("generateHandoffNote: 思考と出力上限", () => {
     const provider = {
       async *chat(params: { disableThinking?: boolean; maxTokens?: number }): AsyncGenerator<ChatChunk> {
         calls.push(params);
-        yield { type: "text", text: "## これまでにやったこと\n- a\n\n## 次にやること\n- b\n\n## 守るべき制約・決定事項\n- なし" };
+        yield {
+          type: "text",
+          text: "## これまでにやったこと\n- a\n\n## 次にやること\n- b\n\n## 守るべき制約・決定事項\n- なし",
+        };
         yield { type: "done", finishReason: "stop" };
       },
     } as unknown as LLMProvider;

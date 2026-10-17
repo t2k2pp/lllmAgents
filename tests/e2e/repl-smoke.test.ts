@@ -31,6 +31,8 @@ import { resolveGitExecutable } from "../../src/cli/worktree-diff.js";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TSX_CLI = path.join(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
 const ENTRY = path.join(ROOT, "src", "index.ts");
+/** --version の期待値。リリースで version を上げても追従するよう package.json から読む */
+const PACKAGE_VERSION: string = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf-8")).version;
 
 /** 子プロセスの起動 (tsx の TS 変換込み) を見込んだタイムアウト */
 const APP_TIMEOUT_MS = 150_000;
@@ -283,7 +285,9 @@ describe("E2E smoke — 非TTYパイプモード起動", () => {
 
         const version = await runApp([], ["--version"], emptyHome);
         expect(version.code, diag(version)).toBe(0);
-        expect(version.stdout, diag(version)).toMatch(/localllm v0\.4\.1 \(build [0-9a-f]+(?:-dirty)?\)/);
+        expect(version.stdout, diag(version)).toMatch(
+          new RegExp(`localllm v${PACKAGE_VERSION.replace(/\./g, "\\.")} \\(build [0-9a-f]+(?:-dirty)?\\)`),
+        );
         expect(version.stdout, diag(version)).not.toContain("unknown");
         expect(fs.existsSync(path.join(emptyHome, ".localllm")), diag(version)).toBe(false);
       } finally {

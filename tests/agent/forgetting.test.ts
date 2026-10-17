@@ -364,7 +364,6 @@ function historyWith(messages: Message[]): MessageHistory {
 }
 
 describe("ForgettingEngine", () => {
-
   it("忘却を適用し、 トゥームストーンを 1 件残し、 履歴の整合を保つ", async () => {
     const engine = new ForgettingEngine(stubProvider(['{"thin":[2],"drop":[],"reason":"巨大な読込を落とした"}']), "m", {
       keepRecentSegments: 1,
@@ -506,7 +505,11 @@ describe("忘却選択の呼び出し: 思考オフ / 不成立理由の区別",
     const provider = {
       async *chat(): AsyncGenerator<ChatChunk> {
         yield { type: "thinking", text: "考え中..." } as ChatChunk;
-        yield { type: "done", finishReason: "length", usage: { promptTokens: 3000, completionTokens: 1500 } } as ChatChunk;
+        yield {
+          type: "done",
+          finishReason: "length",
+          usage: { promptTokens: 3000, completionTokens: 1500 },
+        } as ChatChunk;
       },
     } as unknown as LLMProvider;
     const engine = new ForgettingEngine(provider, "m", { keepRecentSegments: 1 });
@@ -532,7 +535,9 @@ describe("忘却選択の呼び出し: 思考オフ / 不成立理由の区別",
     expect((await zero.forget(historyWith(sampleMessages()), 500)).reason).toContain("1 件も選びませんでした");
 
     const none = new ForgettingEngine(stubProvider(['{"thin":[1]}']), "m", { keepRecentSegments: 100 });
-    expect((await none.forget(historyWith(sampleMessages()), 500)).reason).toContain("忘却できるセグメントがありません");
+    expect((await none.forget(historyWith(sampleMessages()), 500)).reason).toContain(
+      "忘却できるセグメントがありません",
+    );
   });
 });
 
@@ -550,7 +555,11 @@ describe("buildSegments digest: パスは末尾を見せる", () => {
 
   it("コマンドは従来どおり先頭を見せる", () => {
     const messages: Message[] = [
-      { role: "assistant", content: "", tool_calls: [toolCall("c1", "bash", { command: "cd C:/x && node test/logic.test.js --very-long-flag-value" })] },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [toolCall("c1", "bash", { command: "cd C:/x && node test/logic.test.js --very-long-flag-value" })],
+      },
       { role: "tool", content: "ok", tool_call_id: "c1" },
     ];
     expect(buildSegments(messages, 0)[0].digest).toContain("cd C:/x");
