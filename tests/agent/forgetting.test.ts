@@ -188,7 +188,7 @@ describe("validateChoice — モデルの出力をそのまま信じない", () 
     expect(validateChoice(again, { thin: [2], drop: [], reason: "" }).thin).toEqual([]);
   });
 
-  it("thin は tool_call 引数の本文も縮め、 パスは残す (書込系セッションで減らない問題)", () => {
+  it("引数に本文を持つ tool_call は対ごと外し、 実行記録だけ残す (切れた引数をモデルが真似する問題)", () => {
     const content = "const x = 1;\n".repeat(2000);
     const messages: Message[] = [
       { role: "user", content: "書いて" },
@@ -197,20 +197,72 @@ describe("validateChoice — モデルの出力をそのまま信じない", () 
         content: "",
         tool_calls: [toolCall("w1", "file_write", { file_path: "src/app.js", content })],
       },
-      { role: "tool", content: `${THINNED_MARKER} file_write の結果は履歴から削除しました。`, tool_call_id: "w1" },
+      { role: "tool", content: "[file_write] wrote 2000 lines", tool_call_id: "w1" },
       { role: "user", content: "次" },
     ];
     const segs2 = buildSegments(messages, 1);
     expect(segs2[1].thinGain).toBeGreaterThan(1000);
 
-    const { next, thinnedTools } = applyPlanToMessages(messages, segs2, [2], []);
-    const args = JSON.parse(next[1].tool_calls![0].function.arguments) as Record<string, string>;
-    expect(args.file_path).toBe("src/app.js");
-    expect(args.content).toContain(THINNED_MARKER);
-    expect(args.content.length).toBeLessThan(400);
-    expect(thinnedTools).toEqual(["file_write"]);
-    // 2 回目は縮まない
-    expect(buildSegments(next, 1)[1].thinGain).toBe(0);
+    const { next, thinnedTools, removedCalls } = applyPlanToMessages(messages, segs2, [2], []);
+    // 呼び出しも結果も履歴に残らない = 切り詰めた引数という「見本」 が無い
+    expect(next.some((m) => m.tool_calls?.some((c) => c.id === "w1"))).toBe(false);
+    expect(next.some((m) => m.tool_call_id === "w1")).toBe(false);
+    expect(JSON.stringify(next)).not.toContain("const x = 1;");
+    expect(thinnedTools).toEqual([]);
+    expect(removedCalls).toHaveLength(1);
+    expect(removedCalls[0]).toContain("file_write src/app.js");
+    expect(() => new MessageHistory("sys").replaceMessages(next)).not.toThrow();
+
+    const tomb = buildTombstoneText({
+      segmentCount: 1,
+      freedTokens: 1000,
+      thinnedTools,
+      droppedDigests: [],
+      removedCalls,
+    });
+    expect(tomb).toContain("実行済み");
+    expect(tomb).toContain("file_write src/app.js");
+  });
+
+  it("本文あり / なしの呼び出しが混在する batch は短い方を残し、 ペア整合を保つ", () => {
+    const messages: Message[] = [
+      { role: "user", content: "直してコミット" },
+      {
+        role: "assistant",
+        content: "コミットします",
+        tool_calls: [
+          toolCall("r1", "file_read", { file_path: "src/app.js" }),
+          toolCall("b1", "bash", { command: `git commit -m "${"長いメッセージ ".repeat(40)}"` }),
+        ],
+      },
+      { role: "tool", content: "R".repeat(3000), tool_call_id: "r1" },
+      { role: "tool", content: "[main abc123] commit", tool_call_id: "b1" },
+      { role: "user", content: "次" },
+    ];
+    const { next, thinnedTools, removedCalls } = applyPlanToMessages(messages, buildSegments(messages, 1), [2], []);
+    const head = next.find((m) => m.role === "assistant");
+    expect(head?.content).toBe("コミットします");
+    expect(head?.tool_calls?.map((c) => c.id)).toEqual(["r1"]);
+    expect(String(next.find((m) => m.tool_call_id === "r1")?.content)).toContain(THINNED_MARKER);
+    expect(next.some((m) => m.tool_call_id === "b1")).toBe(false);
+    expect(thinnedTools).toEqual(["file_read"]);
+    expect(removedCalls[0]).toContain("bash git commit");
+    expect(() => new MessageHistory("sys").replaceMessages(next)).not.toThrow();
+  });
+
+  it("旧方式で切り詰め済みの引数 ([忘却済み] 入り) も次の thin で記録へ移す", () => {
+    const shrunk = `cd /c/app && git commit -m "feat: x\n${THINNED_MARKER} 以降 約 300 トークンを履歴から削除しました。`;
+    const messages: Message[] = [
+      { role: "user", content: "やって" },
+      { role: "assistant", content: "", tool_calls: [toolCall("o1", "bash", { command: shrunk })] },
+      { role: "tool", content: `${THINNED_MARKER} bash の結果は履歴から削除しました。`, tool_call_id: "o1" },
+      { role: "user", content: "次" },
+    ];
+    const segs2 = buildSegments(messages, 1);
+    expect(segs2[1].thinGain).toBeGreaterThan(0);
+    const { next, removedCalls } = applyPlanToMessages(messages, segs2, [2], []);
+    expect(JSON.stringify(next)).not.toContain("以降 約 300 トークン");
+    expect(removedCalls).toHaveLength(1);
   });
 
   it("thin と drop の両方に出たら drop が勝つ", () => {
@@ -543,7 +595,7 @@ describe("忘却選択の呼び出し: 思考オフ / 不成立理由の区別",
 
 describe("buildSegments digest: パスは末尾を見せる", () => {
   it("長いパスはファイル名側を残して切る", () => {
-    const long = "C:\Users\osia3\GitProjects\acecomb\src\game\campaign.js";
+    const long = "C:Usersosia3GitProjectsacecombsrcgamecampaign.js";
     const messages: Message[] = [
       { role: "assistant", content: "", tool_calls: [toolCall("c1", "file_edit", { file_path: long })] },
       { role: "tool", content: "ok", tool_call_id: "c1" },

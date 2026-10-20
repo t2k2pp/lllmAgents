@@ -33,14 +33,20 @@ export const DEFAULT_KEEP_RECENT_SEGMENTS = 6;
 /** digest に載せる本文の文字数 (マニフェスト 1 行に収める) */
 const DIGEST_CHARS = 60;
 
-/** thin したテキスト / tool_call 引数で残す先頭文字数 (docs §3.1) */
+/**
+ * thin したテキストで残す先頭文字数。 tool_call 引数ではこれを超える文字列を「本文」 とみなし、
+ * その呼び出しを対ごと履歴から外す (docs §3.1)
+ */
 const THIN_TEXT_CHARS = 200;
 
 /**
- * thin でも原文のまま残す tool_call 引数。 「何に対して何をしたか」 の識別子なので、
- * 長くても切ると行動の記録として役に立たなくなる。
+ * 本文とみなさない tool_call 引数。 「何に対して何をしたか」 の識別子なので、
+ * 長くても呼び出しを残す理由になる (パスが長いだけの file_read を記録へ移さない)。
  */
 const THIN_KEEP_ARG_KEYS = new Set(["file_path", "path", "url"]);
+
+/** トゥームストーンに 1 行ずつ列挙する「呼び出しごと外した tool_call」 の上限 (超過分は件数で示す) */
+const REMOVED_CALLS_LISTED = 10;
 
 /** トゥームストーンの目印。 これで system_note を再識別する */
 export const TOMBSTONE_MARKER = "[忘却の記録]";
@@ -394,12 +400,13 @@ export function applyPlanToMessages(
   segments: Segment[],
   thin: number[],
   drop: number[],
-): { next: Message[]; thinnedTools: string[]; droppedDigests: string[] } {
+): { next: Message[]; thinnedTools: string[]; droppedDigests: string[]; removedCalls: string[] } {
   const thinSet = new Set(thin);
   const dropSet = new Set(drop);
   const next: Message[] = [];
   const thinnedTools: string[] = [];
   const droppedDigests: string[] = [];
+  const removedCalls: string[] = [];
 
   for (const seg of segments) {
     const slice = messages.slice(seg.range[0], seg.range[1]);
@@ -414,9 +421,10 @@ export function applyPlanToMessages(
     const thinned = thinSlice(seg.kind, slice);
     next.push(...thinned.messages);
     thinnedTools.push(...thinned.thinnedTools);
+    removedCalls.push(...thinned.removedCalls);
   }
 
-  return { next, thinnedTools, droppedDigests };
+  return { next, thinnedTools, droppedDigests, removedCalls };
 }
 
 /** 長い文字列を先頭 THIN_TEXT_CHARS 文字 + 省略注記に切り詰める。 thin 済み・短文はそのまま */
@@ -430,75 +438,93 @@ function shrinkText(text: string): string {
 }
 
 /**
- * tool_call 引数の本文 (file_write の content、 file_edit の old/new 文字列など) を切り詰める。
- * 書込系セッションではコンテキストの大半がここに乗り、 結果本文だけ落としても減らない
+ * tool_call 引数に「本文」 (file_write の content、 file_edit の old/new 文字列、 長い bash の command など) が
+ * 含まれるか。 書込系セッションではコンテキストの大半がここに乗り、 結果本文だけ落としても減らない
  * (2026-10-17 myppt セッションで未保護 158 セグメント中 80 が thin しても削減 0)。
- * パス等の識別子は残すので「どのファイルに何をしたか」 の記録は失われない。
- * 引数が JSON として読めないときは触らない (壊すと provider が 400 を返す)。
+ * 旧方式で切り詰め済みの引数 (`[忘却済み]` を含む) も本文ありとして扱い、 次の thin で記録へ移す。
+ * 引数が JSON として読めないときは本文なしとして触らない (壊すと provider が 400 を返す)。
  */
-function shrinkToolArguments(argsJson: string): string {
+function hasBulkyArguments(argsJson: string): boolean {
   let args: unknown;
   try {
     args = JSON.parse(argsJson || "{}");
   } catch {
-    return argsJson;
+    return false;
   }
-  if (!args || typeof args !== "object" || Array.isArray(args)) return argsJson;
-  let changed = false;
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
-    if (typeof value === "string" && !THIN_KEEP_ARG_KEYS.has(key)) {
-      const shrunk = shrinkText(value);
-      if (shrunk !== value) changed = true;
-      out[key] = shrunk;
-    } else {
-      out[key] = value;
-    }
-  }
-  return changed ? JSON.stringify(out) : argsJson;
+  if (!args || typeof args !== "object" || Array.isArray(args)) return false;
+  return Object.entries(args as Record<string, unknown>).some(
+    ([key, value]) =>
+      typeof value === "string" &&
+      !THIN_KEEP_ARG_KEYS.has(key) &&
+      (value.length > THIN_TEXT_CHARS || value.includes(THINNED_MARKER)),
+  );
 }
 
 /** 1 セグメント分の messages に thin を適用する (元配列は変更しない) */
-function thinSlice(kind: SegmentKind, slice: Message[]): { messages: Message[]; thinnedTools: string[] } {
+function thinSlice(
+  kind: SegmentKind,
+  slice: Message[],
+): { messages: Message[]; thinnedTools: string[]; removedCalls: string[] } {
   const messages: Message[] = [];
   const thinnedTools: string[] = [];
+  const removedCalls: string[] = [];
 
   if (kind === "tool_batch") {
-    // tool_call は残す。 消すと「このファイルを読んだ」 という行動の記録まで失われ、
-    // 同じファイルを何度も読み直すループを誘発する (docs §3.1)。
-    // ただし引数の本文は落とす (識別子は残る)。
+    // 引数が短い tool_call は残し、 結果本文だけ落とす。 呼び出しごと消すと
+    // 「このファイルを読んだ」 という行動の記録まで失われ、 読み直しループを誘発する (docs §3.1)。
+    //
+    // 引数に本文を持つ tool_call は、 呼び出しと結果の対ごと履歴から外し、
+    // 何をしたかの 1 行記録をトゥームストーンへ移す。 引数を「先頭 N 文字 + [忘却済み]」 に
+    // 書き換えて残すと、 モデルがそれを自分の呼び出しの書き方として真似し、
+    // 途中で切れたコマンドや本文を実際に出力する (2026-10-18〜19 myppt セッションで 12 件:
+    // git commit の引用符が閉じず bash が構文エラー、 切れたスクリプトを file_write 等)。
     const head = slice[0];
     const calls = head.tool_calls ?? [];
-    const callById = new Map(calls.map((c) => [c.id, c]));
-    const shrunkCalls = calls.map((c) => {
-      const args = shrinkToolArguments(c.function.arguments);
-      return args === c.function.arguments ? c : { ...c, function: { ...c.function, arguments: args } };
-    });
-    messages.push(shrunkCalls.some((c, i) => c !== calls[i]) ? { ...head, tool_calls: shrunkCalls } : head);
-    // 引数か結果のどちらかを縮めた呼び出し (トゥームストーンの記録用)
-    const touched = new Set(shrunkCalls.filter((c, i) => c !== calls[i]).map((c) => c.id));
+    const resultById = new Map(slice.slice(1).map((m) => [m.tool_call_id, m]));
+    const keptCalls = calls.filter((c) => !hasBulkyArguments(c.function.arguments));
+    const keptIds = new Set(keptCalls.map((c) => c.id));
+    for (const c of calls) {
+      if (keptIds.has(c.id)) continue;
+      const result = resultById.get(c.id);
+      const argTokens = estimateTokens(c.function.arguments);
+      const resultTokens = result ? estimateTokens(contentToText(result.content)) : 0;
+      removedCalls.push(
+        `${describeToolCall(c.function.name, c.function.arguments)} ` +
+          `(引数 約 ${argTokens.toLocaleString("en-US")} / 結果 約 ${resultTokens.toLocaleString("en-US")} トークン)`,
+      );
+    }
+
+    if (keptCalls.length === calls.length) {
+      messages.push(head);
+    } else if (keptCalls.length > 0) {
+      messages.push({ ...head, tool_calls: keptCalls });
+    } else {
+      // 呼び出しが 1 つも残らないときは本文だけの assistant にする (本文も無ければ消す)
+      const { tool_calls: _removed, ...rest } = head;
+      if (contentToText(head.content).trim().length > 0) messages.push(rest);
+    }
+
     for (const m of slice.slice(1)) {
+      const call = keptCalls.find((c) => c.id === m.tool_call_id);
+      // 除去した呼び出しの結果は対ごと外す (記録は removedCalls に移した)
+      if (!call) continue;
       const text = contentToText(m.content);
       if (text.startsWith(THINNED_MARKER)) {
         // thin 済み。 再変換しても縮まらない
         messages.push(m);
         continue;
       }
-      const call = m.tool_call_id ? callById.get(m.tool_call_id) : undefined;
-      const what = call ? describeToolCall(call.function.name, call.function.arguments) : "ツール";
       const tokens = estimateTokens(text);
-      if (call) touched.add(call.id);
-      else thinnedTools.push("tool");
+      thinnedTools.push(call.function.name);
       messages.push({
         role: "tool",
         content:
-          `${THINNED_MARKER} ${what} の結果 (約 ${tokens.toLocaleString("en-US")} トークン) は履歴から削除しました。 ` +
+          `${THINNED_MARKER} ${describeToolCall(call.function.name, call.function.arguments)} の結果 (約 ${tokens.toLocaleString("en-US")} トークン) は履歴から削除しました。 ` +
           `必要なら再度実行して取得してください。`,
         tool_call_id: m.tool_call_id,
       });
     }
-    for (const c of calls) if (touched.has(c.id)) thinnedTools.push(c.function.name);
-    return { messages, thinnedTools };
+    return { messages, thinnedTools, removedCalls };
   }
 
   // user / assistant_text: 先頭 THIN_TEXT_CHARS 文字 + 省略注記に切り詰める
@@ -513,7 +539,7 @@ function thinSlice(kind: SegmentKind, slice: Message[]): { messages: Message[]; 
     if (m.tool_call_id) shrunk.tool_call_id = m.tool_call_id;
     messages.push(shrunk);
   }
-  return { messages, thinnedTools };
+  return { messages, thinnedTools, removedCalls };
 }
 
 /** トゥームストーン本文を組み立てる (docs §4.4) */
@@ -522,12 +548,20 @@ export function buildTombstoneText(params: {
   freedTokens: number;
   thinnedTools: string[];
   droppedDigests: string[];
+  /** 呼び出しごと履歴から外した tool_call の 1 行記録 (引数に本文を持つもの。 docs §3.1) */
+  removedCalls?: string[];
 }): string {
   const lines = [
     `${TOMBSTONE_MARKER} ${params.segmentCount} セグメント / 約 ${params.freedTokens.toLocaleString("en-US")} トークンを履歴から削除しました。`,
   ];
   if (params.thinnedTools.length > 0) {
     lines.push(`- 本文のみ削除 (行動の記録は残存): ${summarizeToolNames(params.thinnedTools)}`);
+  }
+  const removed = params.removedCalls ?? [];
+  if (removed.length > 0) {
+    lines.push("- 実行済み (呼び出しと結果の本文は削除):");
+    for (const r of removed.slice(0, REMOVED_CALLS_LISTED)) lines.push(`  - ${r}`);
+    if (removed.length > REMOVED_CALLS_LISTED) lines.push(`  - ほか ${removed.length - REMOVED_CALLS_LISTED} 件`);
   }
   if (params.droppedDigests.length > 0) {
     for (const d of params.droppedDigests.slice(0, 5)) lines.push(`- 完全削除: ${d}`);
@@ -634,7 +668,12 @@ export function forgetThinking(
     };
   }
 
-  const { next, thinnedTools, droppedDigests } = applyPlanToMessages(history.getRawMessages(), segments, thin, []);
+  const { next, thinnedTools, droppedDigests, removedCalls } = applyPlanToMessages(
+    history.getRawMessages(),
+    segments,
+    thin,
+    [],
+  );
   const firstSeg = segments.find((s) => s.index === thin[0]);
   const insertAt = firstSeg ? Math.min(firstSeg.range[0], next.length) : next.length;
   const tombstone = buildTombstoneText({
@@ -642,6 +681,7 @@ export function forgetThinking(
     freedTokens: Math.max(0, estimateMessageTokens(history.getRawMessages()) - estimateMessageTokens(next)),
     thinnedTools,
     droppedDigests,
+    removedCalls,
   });
   const withTombstone = insertTombstone(next, tombstone, insertAt);
 
@@ -839,7 +879,12 @@ export class ForgettingEngine {
     const before = history.getRawMessages();
     const beforeTokens = estimateMessageTokens(before);
 
-    const { next, thinnedTools, droppedDigests } = applyPlanToMessages(before, plan.segments, plan.thin, plan.drop);
+    const { next, thinnedTools, droppedDigests, removedCalls } = applyPlanToMessages(
+      before,
+      plan.segments,
+      plan.thin,
+      plan.drop,
+    );
     const freedBeforeTombstone = Math.max(0, beforeTokens - estimateMessageTokens(next));
 
     // トゥームストーンは「最初に忘却した位置」 に置く。 何が消えたか分からない状態を作らない
@@ -851,6 +896,7 @@ export class ForgettingEngine {
       freedTokens: freedBeforeTombstone,
       thinnedTools,
       droppedDigests,
+      removedCalls,
     });
     const withTombstone = insertTombstone(next, tombstone, insertAt);
 
