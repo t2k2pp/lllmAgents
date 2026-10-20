@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
 import { createSharedWorkspace, resolveWorkspacePath } from "../../agent/workspace-context.js";
+import { applyLineEnding, detectLineEnding, toLF } from "../line-endings.js";
 
 /**
  * 書き込み後の構文チェック。エラーがあればメッセージを返す。
@@ -123,7 +124,11 @@ export const fileWriteTool: ToolHandler = {
     // diff用: 上書き前の内容を保持
     const oldContent = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : null;
 
-    fs.writeFileSync(filePath, content, "utf-8");
+    // 既存ファイルの上書きでは、 そのファイルの改行コードを保つ (docs/file-tools-line-endings.md)。
+    // モデルは LF で書くので、 そのまま書くと CRLF のファイルが全行 LF に変わってしまう。
+    // 新規作成は渡された内容のまま書く。
+    const keepCRLF = oldContent !== null && detectLineEnding(oldContent).eol === "\r\n";
+    fs.writeFileSync(filePath, keepCRLF ? applyLineEnding(toLF(content), "\r\n") : content, "utf-8");
 
     // Phase 5-C1: 副次情報の標準同梱
     const stat = fs.statSync(filePath);
@@ -131,7 +136,9 @@ export const fileWriteTool: ToolHandler = {
     const mtime = stat.mtime.toISOString();
     const lineCount = content.split("\n").length;
     const mode = oldContent === null ? "created" : "overwritten";
-    const meta = `[file_write] ${mode}: ${filePath} | ${bytes} bytes | ${lineCount} lines | mtime=${mtime}`;
+    const meta =
+      `[file_write] ${mode}: ${filePath} | ${bytes} bytes | ${lineCount} lines | mtime=${mtime}` +
+      (keepCRLF ? " | 改行コード CRLF を保って書き込みました" : "");
 
     // 構文チェック
     const syntaxError = syntaxCheck(filePath, content);
@@ -150,8 +157,8 @@ export const fileWriteTool: ToolHandler = {
       userDisplay: {
         type: "write-diff",
         filePath,
-        oldContent,
-        newContent: content,
+        oldContent: oldContent === null ? null : toLF(oldContent),
+        newContent: toLF(content),
       },
     };
   },

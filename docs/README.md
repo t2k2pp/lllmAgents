@@ -133,6 +133,7 @@
 
 | ドキュメント | Status | 内容 |
 |---|---|---|
+| [file-tools-line-endings.md](file-tools-line-endings.md) | implemented | file_read / file_edit / file_write の改行コード (LF で照合し、ファイルの改行コードを保って書く) |
 | [image-generation.md](image-generation.md) | implemented | 画像生成 (Azure GPT Images / SD WebUI / ComfyUI) |
 | [obsidian-integration.md](obsidian-integration.md) | implemented | Obsidian ナレッジベース連携 |
 | [chat-log.md](chat-log.md) | implemented | チャットログ保存 |

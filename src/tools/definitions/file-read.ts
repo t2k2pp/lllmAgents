@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
 import { createSharedWorkspace, resolveWorkspacePath } from "../../agent/workspace-context.js";
+import { detectLineEnding, toLF } from "../line-endings.js";
 
 export const fileReadTool: ToolHandler = {
   name: "file_read",
@@ -60,8 +61,11 @@ export const fileReadTool: ToolHandler = {
       };
     }
 
-    const content = fs.readFileSync(filePath, "utf-8");
-    const lines = content.split("\n");
+    const raw = fs.readFileSync(filePath, "utf-8");
+    // 表示は LF に揃える。 file_edit / file_write はファイルの改行コードを保って書くので、
+    // モデルが \r を指定に含める必要は無い (docs/file-tools-line-endings.md)
+    const lineEnding = detectLineEnding(raw);
+    const lines = toLF(raw).split("\n");
     const totalLines = lines.length;
     const startIdx = Math.max(0, offset - 1);
     const endIdx = Math.min(totalLines, startIdx + limit);
@@ -80,8 +84,15 @@ export const fileReadTool: ToolHandler = {
       endIdx < totalLines
         ? `\n[file_read] ${endIdx}/${totalLines} 行表示 (残り ${totalLines - endIdx} 行)。続きは offset=${endIdx + 1} で読み取り。`
         : `\n[file_read] 全 ${totalLines} 行を表示完了。`;
+    // CRLF のファイルだと知らないと、 モデルは \r\n を自前で扱う置換スクリプトに逃げる
+    // (2026-10-18 myppt: そのスクリプトが構文エラーを 3 件作った)
+    const eolNote =
+      lineEnding.eol === "\r\n" || lineEnding.mixed
+        ? `\n[file_read] 改行コード: ${lineEnding.mixed ? "CRLF と LF が混在" : "CRLF"}。 ` +
+          `file_edit / file_write には LF のまま指定すればよい (書き込み時に ${lineEnding.eol === "\r\n" ? "CRLF" : "LF"} で保存される)。`
+        : "";
 
-    return { success: true, output: numbered + truncatedNote };
+    return { success: true, output: numbered + truncatedNote + eolNote };
   },
 };
 

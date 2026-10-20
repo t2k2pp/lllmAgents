@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
 import { createSharedWorkspace, resolveWorkspacePath } from "../../agent/workspace-context.js";
+import { applyLineEnding, describeLineEnding, detectLineEnding, toLF } from "../line-endings.js";
 
 export const fileEditTool: ToolHandler = {
   name: "file_edit",
@@ -13,7 +14,7 @@ export const fileEditTool: ToolHandler = {
         "[使うべき場面] 数行〜数十行の修正。Read で確認した直後の編集。\n" +
         "[使うべきでない] (1) ファイル全体の置換 → file_write の方が確実。 " +
         "(2) Read していないファイル → 内容を知らずに old_string を当てるのは無理。先に file_read。\n" +
-        "[よくある誤用] (a) 空白・タブ・改行コードの違いで old_string が一致しない → ファイル先頭の方をそのままコピーして指定。 " +
+        "[よくある誤用] (a) 空白・タブの違いで old_string が一致しない → file_read の表示をそのままコピーして指定 (改行は LF で書けばよい。 CRLF のファイルも CRLF を保って書き込む)。 " +
         "(b) 同じ文字列が複数箇所 → replace_all=true、または前後を含めて一意化。 " +
         "[副次情報] 失敗時はファイル現状を添付。同ファイルで連続失敗時は file_write 推奨に切り替えて。",
       parameters: {
@@ -42,15 +43,20 @@ export const fileEditTool: ToolHandler = {
   },
   async execute(params: Record<string, unknown>, context): Promise<ToolResult> {
     const filePath = resolveWorkspacePath(context?.workspace ?? createSharedWorkspace(), params.file_path as string);
-    const oldString = params.old_string as string;
-    const newString = params.new_string as string;
+    // 照合は LF に揃えて行い、 書き戻しでファイルの改行コードに戻す (docs/file-tools-line-endings.md)。
+    // モデルには \r が見えないので、 CRLF のファイルでは複数行の old_string が一致しなかった
+    // (2026-10-18 myppt: git checkout で CRLF 化した main.js への file_edit が連続失敗)
+    const oldString = toLF(params.old_string as string);
+    const newString = toLF(params.new_string as string);
     const replaceAll = (params.replace_all as boolean) ?? false;
 
     if (!fs.existsSync(filePath)) {
       return { success: false, output: "", error: `File not found: ${filePath}` };
     }
 
-    const beforeContent = fs.readFileSync(filePath, "utf-8");
+    const rawContent = fs.readFileSync(filePath, "utf-8");
+    const lineEnding = detectLineEnding(rawContent);
+    const beforeContent = toLF(rawContent);
     const occurrences = beforeContent.split(oldString).length - 1;
 
     if (occurrences === 0) {
@@ -80,7 +86,7 @@ export const fileEditTool: ToolHandler = {
       ? beforeContent.split(oldString).join(newString)
       : beforeContent.replace(oldString, newString);
 
-    fs.writeFileSync(filePath, content, "utf-8");
+    fs.writeFileSync(filePath, applyLineEnding(content, lineEnding.eol), "utf-8");
     const replacedCount = replaceAll ? occurrences : 1;
     // Phase 5-C1: 副次情報の標準同梱
     const stat = fs.statSync(filePath);
@@ -88,8 +94,10 @@ export const fileEditTool: ToolHandler = {
     // P0-B: 編集箇所 ±20 行のスニペットを同梱して、 直後の file_read を不要にする。
     // 観測ログでは file_edit 直後に同じファイルを read し直す行動が頻発 (15-15 セッションで app.js を 22 回読込)。
     const editedSnippet = formatEditedSnippet(beforeContent, content, oldString, newString, replaceAll);
+    const eolNote = describeLineEnding(lineEnding);
     const meta =
-      `[file_edit] replaced ${replacedCount} occurrence(s) in ${filePath} | ${stat.size} bytes | ${totalLines} lines | mtime=${stat.mtime.toISOString()}\n\n` +
+      `[file_edit] replaced ${replacedCount} occurrence(s) in ${filePath} | ${stat.size} bytes | ${totalLines} lines | mtime=${stat.mtime.toISOString()}` +
+      `${eolNote ? ` | ${eolNote}` : ""}\n\n` +
       editedSnippet +
       "\n\n[ハーネス] 編集箇所のコンテキストは上記スニペットに含まれています。 同じファイルを直後に file_read で読み直す必要はありません。 別箇所を見たい時のみ file_read を使ってください。";
     return {
