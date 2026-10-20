@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
-import { bashTool, killProcessTree } from "../../src/tools/definitions/bash.js";
+import { bashTool, killProcessTree, resolveIdleTimeout } from "../../src/tools/definitions/bash.js";
 
 describe("bashTool execution and non-interactive environment", () => {
   it("子プロセスに非対話環境変数（GIT_TERMINAL_PROMPT, CI等）が正しく注入される", async () => {
@@ -81,6 +81,15 @@ describe("bashTool execution and non-interactive environment", () => {
     expect(result.output).toContain("step1");
     expect(result.output).toContain("step2");
     expect(result.output).toContain("step3");
+  });
+
+  it("timeout を明示して idleTimeout を省いたときは無通信監視をしない (resolveIdleTimeout)", () => {
+    // 2026-10-18 myppt: timeout 150000 を指定した `... | tail -1` が既定 60 秒の無通信判定で殺された
+    expect(resolveIdleTimeout(150_000, undefined)).toBe(0);
+    expect(resolveIdleTimeout(150_000, 5_000)).toBe(5_000);
+    expect(resolveIdleTimeout(undefined, undefined)).toBe(60_000);
+    // timeout 0 (= 総時間無制限) で無通信監視まで外すと、 ハングを止めるものが無くなる
+    expect(resolveIdleTimeout(0, undefined)).toBe(60_000);
   });
 
   it("ハードタイムアウトに達した場合はハードタイムアウトエラーを返す", async () => {

@@ -87,6 +87,11 @@ const NON_INTERACTIVE_ENV: NodeJS.ProcessEnv = {
   - `proc.stdout.on("data")` または `proc.stderr.on("data")` が呼ばれるたびに `lastActivityMs = Date.now()` を更新。
   - 最後の出力から `idleTimeout` の間、1バイトも出力がない場合のみ「ハング・無応答」と判定して終了させる。
   - `timeout`（ハードリミット）: 明示的に指定された場合のみ適用し、未指定（または 0）の場合は「出力がある限り無制限」を許容する（設定可能）。
+  - **`timeout` (>0) を明示して `idleTimeout` を省いた場合は無通信監視をしない** (`resolveIdleTimeout`)。
+    モデルが「この時間までは待つ」 と示しているので、 `timeout` だけで止める。
+    `cmd | tail -1` や `cmd > log 2>&1` は正常でも終わるまで何も出さないため、 既定 60 秒の無通信判定が
+    明示した `timeout` より先に殺してしまう (2026-10-18 myppt: `timeout: 150000` の electron smoke が 60 秒で IdleTimeout)。
+    `timeout: 0` (総時間無制限) のときは無通信監視を残す (外すとハングを止めるものが無くなる)。
 
 #### (2) 長時間タスクの可視化
 - 実行時間が 30 秒を超えるタスクについては、30 秒ごとに「実行中... (経過: X秒, 受信: Y bytes)」のハートビートログを出力する。

@@ -14,6 +14,19 @@ import { createSharedWorkspace } from "../../agent/workspace-context.js";
 const DEFAULT_HARD_TIMEOUT = 600_000; // 10 minutes (安全のための総時間上限)
 const DEFAULT_IDLE_TIMEOUT = 60_000; // 60 seconds (無通信監視)
 
+/**
+ * 無通信監視の時間を決める (docs/fix-plan-process-and-timeout-management.md §3.2)。
+ * モデルが timeout (>0) を明示して idleTimeout を省いたときは、 「その時間までは待つ」 という
+ * 意思表示なので無通信監視を外し、 timeout だけで止める。 `cmd | tail -1` や `> log 2>&1` は
+ * 正常でも終わるまで何も出さず、 既定 60 秒で切ると明示した timeout より先に殺してしまう
+ * (2026-10-18 myppt: timeout 150000 指定の electron smoke が 60 秒で IdleTimeout)。
+ */
+export function resolveIdleTimeout(timeout: unknown, idleTimeout: unknown): number {
+  if (typeof idleTimeout === "number") return idleTimeout;
+  if (typeof timeout === "number" && timeout > 0) return 0;
+  return DEFAULT_IDLE_TIMEOUT;
+}
+
 /** Windows で git bash のパスを探す。見つからなければ null */
 export function findGitBash(): string | null {
   const candidates = [
@@ -155,7 +168,8 @@ export const bashTool: BashToolHandler = {
           },
           idleTimeout: {
             type: "number",
-            description: "無通信（出力なし）の最大許容時間（ミリ秒）。デフォルト: 60000 (1分)",
+            description:
+              "無通信（出力なし）の最大許容時間（ミリ秒）。デフォルト: 60000 (1分)。timeout を指定して idleTimeout を省いた場合は無通信監視をせず timeout まで待つ",
           },
         },
         required: ["command"],
@@ -174,7 +188,7 @@ export const bashTool: BashToolHandler = {
   async execute(params: Record<string, unknown>, context): Promise<ToolResult> {
     const command = params.command as string;
     const timeout = (params.timeout as number) ?? DEFAULT_HARD_TIMEOUT;
-    const idleTimeout = (params.idleTimeout as number) ?? DEFAULT_IDLE_TIMEOUT;
+    const idleTimeout = resolveIdleTimeout(params.timeout, params.idleTimeout);
     const workspace = context?.workspace ?? createSharedWorkspace();
     if (workspace.mode === "worktree") {
       const processSandbox = getActiveProcessSandbox();
