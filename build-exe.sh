@@ -3,7 +3,7 @@
 #
 # build-exe.bat は `npm run build:deploy` を呼ぶだけで完了するが、
 # macOS / Linux では SEA ビルド後に以下が追加で必要なため本スクリプトに集約する:
-#   1. Node.js 20+ の存在チェック (SEA は v20 から安定)
+#   1. Node.js 22+ の存在チェック (Node 20 は 2026-04-30 EOL)
 #   2. node_modules 未インストール時に自動で npm install
 #   3. macOS のみ: postject 経路でのみ必要だった ad-hoc codesign は build-exe.js
 #      側に移動済み。本スクリプトは事前チェックと事後の起動ガイダンスを担当
@@ -27,7 +27,7 @@ echo "========================================="
 
 # ---- 前提チェック: node ----
 if ! command -v node >/dev/null 2>&1; then
-  echo "[ERROR] node コマンドが見つかりません。Node.js 20+ をインストールしてください。"
+  echo "[ERROR] node コマンドが見つかりません。Node.js 22+ (推奨: 24 LTS 最新パッチ) をインストールしてください。"
   echo "        macOS 推奨: 公式 .pkg を https://nodejs.org/ からダウンロード"
   echo "        (homebrew の node は SEA 不可。下記参照)"
   exit 1
@@ -73,8 +73,8 @@ if [ "$(uname -s)" = "Darwin" ]; then
 fi
 
 NODE_MAJOR="$("$NODE_BIN" -p 'process.versions.node.split(".")[0]')"
-if [ "$NODE_MAJOR" -lt 20 ]; then
-  echo "[ERROR] Node.js $NODE_MAJOR.x が検出されました ($NODE_BIN)。SEA ビルドには Node.js 20+ が必要です。"
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  echo "[ERROR] Node.js $NODE_MAJOR.x が検出されました ($NODE_BIN)。SEA ビルドには Node.js 22+ が必要です。"
   exit 1
 fi
 echo "[OK] node $("$NODE_BIN" -v)  ($NODE_BIN)"

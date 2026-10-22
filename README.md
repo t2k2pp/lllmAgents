@@ -588,7 +588,7 @@ npm run format
 
 ## 必要環境
 
-- Node.js 20+ （SEA ビルドのため。実行のみなら 18+ で動作するが、`build:exe` には 20 以上が必要）
+- Node.js 22+（推奨: 24 LTS の最新パッチ版。20 以前は EOL。`build:exe` の exe にはビルドに使った Node が埋め込まれるため、セキュリティリリース後は最新パッチ版で再ビルドする。詳細: docs/nodejs-security-review-2026-10.md）
 - ローカルLLMサーバー（Ollama / LM Studio / llama.cpp / vLLM）
 - Playwright（ブラウザ操作を使う場合）
 

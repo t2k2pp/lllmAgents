@@ -408,7 +408,7 @@ sequenceDiagram
 
 ## 5. 設定と環境要件
 
-- **要件**: Node.js 20+（SEA ビルド `npm run build:exe` の前提。`@types/node` も 22 系で揃え、`engines.node` も `>=20.0.0`）
+- **要件**: Node.js 22+（Node 20 は 2026-04-30 EOL。CI は 24 系。SEA ビルド `npm run build:exe` は実行中の Node を exe に埋め込むため、Node のセキュリティリリース後は最新パッチ版で再ビルドする。`@types/node` は 22 系、`engines.node` は `>=22.0.0`）
 - **LLM**: ローカルLLM環境（Ollama等）の起動
 - **設定ロケーション**: `~/.localllm/config.json`
 
