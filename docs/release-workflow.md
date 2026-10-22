@@ -15,13 +15,16 @@
 | 起動 | 用途 | 動作 |
 |---|---|---|
 | `v*.*.*` tag の push | 通常のリリース | Release が無ければ作成し、exe と zip を添付 |
-| 手動実行 (`workflow_dispatch`, 入力 `tag`) | Node のセキュリティリリース時の再ビルド | 指定 tag を checkout してビルドし、既存 Release の資産を `--clobber` で差し替え。Release が無ければ作成 |
+| 手動実行 (`workflow_dispatch`, 入力 `tag`)・tag 既存 | Node のセキュリティリリース時の再ビルド | 指定 tag の commit をビルドし、既存 Release の資産を `--clobber` で差し替え。Release が無ければ作成 |
+| 手動実行・tag 未作成 | tag を push できない環境からの新規リリース | 実行ブランチ (main) の先頭をビルドし、`gh release create --target <commit>` で tag と Release を同時に作成 |
 
-手動実行は Actions 画面の「Release」→「Run workflow」で tag を入力する。workflow 定義は既定ブランチのものが使われ、ビルド対象のソースは指定 tag の内容になる。
+手動実行は Actions 画面の「Release」→「Run workflow」で tag を入力する。workflow 定義は実行ブランチのものが使われる。
+
+tag 未作成の手動実行を設けた理由: Claude Code の Web 実行環境では git 経由の tag push が拒否されるため (2026-10-22 確認)、tag push を起点にできない場合でも main からリリースできるようにする。
 
 ## 3. 処理の流れ (windows-latest)
 
-1. 対象 tag を checkout
+1. checkout し、tag があればその commit、手動実行で tag が無ければ実行ブランチの先頭をビルド対象に決める (`RELEASE_SHA`)
 2. `actions/setup-node` で Node 24 の**最新パッチ版**を取得 (`check-latest: true`)
 3. **下限チェック**: `SECURITY_NODE_FLOOR` 未満なら失敗。キャッシュ等で古い Node が使われても修正前 Node の exe を作らない
 4. `npm ci` → `validate:version --tag` (tag / package.json / lock / CHANGELOG の整合) → `lint` → `test` → 本番依存の `npm audit`
@@ -35,7 +38,7 @@
 ### 通常リリース
 
 1. `package.json` / `package-lock.json` (`npm version <x.y.z> --no-git-tag-version`) と `CHANGELOG.md` を更新し、`npm run validate:version -- --tag v<x.y.z>` を通して main へマージ
-2. main の該当コミットに `v<x.y.z>` tag を付けて push → workflow が Release を作成
+2. main の該当コミットに `v<x.y.z>` tag を付けて push → workflow が Release を作成 (tag を push できない環境では、main で「Run workflow」に `v<x.y.z>` を入力して実行)
 
 ### Node のセキュリティリリースが出たとき
 
