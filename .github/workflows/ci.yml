@@ -38,6 +38,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+          check-latest: true
           cache: npm
       - run: npm ci
       - name: Validate release version policy
@@ -87,22 +88,11 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+          check-latest: true
           cache: npm
       - run: npm ci
       - name: Build deploy directory and SEA executable
         run: npm run build:deploy
       - name: Smoke packaged entry points
         shell: pwsh
-        run: |
-          $exeVersion = & .\deploy\localllm.exe --version
-          if ($LASTEXITCODE -ne 0 -or -not $exeVersion) { throw "localllm.exe --version failed" }
-          $publicVersion = (Get-Content -LiteralPath '.\package.json' -Raw | ConvertFrom-Json).version
-          $expectedVersion = "^localllm v$([regex]::Escape($publicVersion)) \(build [0-9a-f]+\)$"
-          if ($exeVersion -notmatch $expectedVersion) { throw "unexpected packaged version: $exeVersion" }
-          if (Test-Path -LiteralPath '.\deploy\localllm.cjs') { throw 'non-equivalent CJS fallback must not be packaged' }
-          if (-not (Test-Path -LiteralPath '.\deploy\agents\general-purpose.md')) { throw 'agent asset missing' }
-          if (-not (Test-Path -LiteralPath '.\deploy\skills\product-quality-cycle\SKILL.md')) { throw 'skill asset missing' }
-          $meta = Get-Content -LiteralPath '.\deploy\.deploy-meta.json' -Raw | ConvertFrom-Json
-          if ($meta.schemaVersion -ne 1 -or $meta.version -ne $publicVersion -or $meta.displayVersion -ne ($exeVersion -replace '^localllm ', '')) {
-            throw "deploy metadata does not identify the executable: $($meta | ConvertTo-Json -Compress)"
-          }
+        run: ./scripts/smoke-deploy.ps1

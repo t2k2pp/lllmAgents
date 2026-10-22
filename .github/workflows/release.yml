@@ -1,0 +1,106 @@
+name: Release
+
+# 配布 exe (SEA) はビルドに使った Node をそのまま埋め込む。Node のセキュリティリリース時に
+# Windows 機での手作業なしで、最新パッチ版 Node による再ビルドと Release への添付を行う。
+# 設計: docs/release-workflow.md
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "再ビルドして Release の資産を差し替える既存 tag (例: v0.5.3)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  # Node のセキュリティリリースが出たらここを修正版へ上げる。check-latest が古いキャッシュを
+  # 返した場合でも、修正前の Node で exe を作って配布しないための下限。
+  SECURITY_NODE_FLOOR: "24.22.1"
+
+jobs:
+  release:
+    name: Build and publish Windows exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          check-latest: true
+          cache: npm
+      - name: Enforce security Node floor
+        shell: pwsh
+        run: |
+          $node = (node -p "process.versions.node").Trim()
+          if ([version]$node -lt [version]$env:SECURITY_NODE_FLOOR) {
+            throw "Node $node is below security floor $env:SECURITY_NODE_FLOOR"
+          }
+          "BUILD_NODE=v$node" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - run: npm ci
+      - name: Validate release version policy
+        run: npm run validate:version -- --tag ${{ env.RELEASE_TAG }}
+      - run: npm run lint
+      - run: npm test
+      - name: Runtime dependency audit
+        run: npm audit --package-lock-only --omit=dev --audit-level=high
+      - name: Build deploy directory and SEA executable
+        run: npm run build:deploy
+      - name: Smoke packaged entry points
+        shell: pwsh
+        run: ./scripts/smoke-deploy.ps1 -ExpectedNode $env:BUILD_NODE
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $version = $env:RELEASE_TAG.TrimStart('v')
+          $zip = "localllm-v$version-win-x64.zip"
+          Compress-Archive -Path .\deploy\localllm.exe, .\deploy\skills, .\deploy\agents, .\deploy\install.bat, .\deploy\install.sh, .\deploy\README.md -DestinationPath $zip
+          "RELEASE_ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Publish to GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:RELEASE_TAG.TrimStart('v')
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            # 既存 Release は資産だけ差し替える (Node 修正版での再ビルド)
+            gh release upload $env:RELEASE_TAG .\deploy\localllm.exe $env:RELEASE_ZIP --clobber
+            if ($LASTEXITCODE -ne 0) { throw "gh release upload failed" }
+            exit 0
+          }
+          # CHANGELOG.md の該当版セクションをリリースノートにする
+          $lines = Get-Content -LiteralPath .\CHANGELOG.md -Encoding utf8
+          $start = -1
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match "^## \[$([regex]::Escape($version))\]") { $start = $i; break }
+          }
+          if ($start -lt 0) { throw "CHANGELOG.md has no section for $version" }
+          $body = @()
+          for ($i = $start; $i -lt $lines.Count; $i++) {
+            if ($i -gt $start -and $lines[$i] -match '^## \[') { break }
+            $body += $lines[$i]
+          }
+          $body += ''
+          $body += "Built with Node.js $env:BUILD_NODE on GitHub Actions (windows-latest)."
+          $body += ''
+          $body += '## インストール (Windows)'
+          $body += ''
+          $body += "1. ``$env:RELEASE_ZIP`` を展開"
+          $body += '2. `install.bat` を Explorer でダブルクリック、または通常のターミナルから実行（exe を `%LOCALAPPDATA%\localllm` に配置し、ユーザー PATH に自動追加）'
+          $body += '3. 新しいターミナルを開き、どのフォルダからでも `localllm --setup`'
+          $body += ''
+          $body += '`localllm.exe` 単体は既存インストールの差し替え用です。'
+          $body | Out-File -FilePath notes.md -Encoding utf8
+          gh release create $env:RELEASE_TAG .\deploy\localllm.exe $env:RELEASE_ZIP --title $env:RELEASE_TAG --notes-file notes.md --verify-tag
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }

@@ -18,6 +18,8 @@
 | [config-reference.md](config-reference.md) | 設定リファレンス (`~/.localllm/config.json` / `credentials.json`) |
 | [workspace-separation.md](workspace-separation.md) | ワークスペース構成 (src/dist/deploy/sandbox) と Stop フック |
 | [git-hooks.md](git-hooks.md) | Git フック (commit-msg / pre-commit) — コミット前に CI と同じ型・lint 検査を通す |
+| [release-workflow.md](release-workflow.md) | リリース自動ビルド — tag push / 手動実行で最新パッチ版 Node 24 の exe を Windows runner でビルドし Release へ添付 |
+| [nodejs-security-review-2026-10.md](nodejs-security-review-2026-10.md) | Node.js セキュリティ調査 (2026-10) — 汎用チェックリストと本アプリへの影響・対応状況 |
 | [production-readiness.md](production-readiness.md) | 製品品質改善計画 PR-01〜16 — P1〜P4 の進行管理表 |
 | [issues.md](issues.md) | 設計書レビュー起点の課題一覧 (2026-07-04 棚卸し済み) |
 | [product-review-cycle-1-2026-08-24.md](product-review-cycle-1-2026-08-24.md) | 商品品質レビュー・修正・評価サイクル第1回の記録 |

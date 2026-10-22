@@ -186,12 +186,11 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 
 > 実装: `src/utils/update-check.ts`。TTY起動時の非同期通知に加え、副作用なしの`--check-update [--json]`を追加。明示診断は通信/API失敗、tag不正、新版releaseのasset 0件を理由・復旧手順つきでexit 1にする。background確認では通信不能を起動障害にしない一方、更新先に配布物が無い状態は隠さない。`updateCheck.enabled: false`はbackground確認だけを無効化する。
 >
-> **リリース手順 (GitHub Releases)**: exe ビルドはユーザーが行う ([[feedback_user_does_deploy_build]])。
-> 1. package.json / package-lock.json / CHANGELOG.md を更新し、`npm run validate:version -- --tag v<version>`を通してコミット
-> 2. `git tag v<version> && git push --tags`
-> 3. `npm run build:deploy` で deploy/ を組み立て（tag 後に行い、build id を `-dirty` なしにする）
-> 4. deploy/ を `localllm-v<version>-win-x64.zip` にまとめる（exe + skills/ + agents/ + install.bat/sh + README。install.bat が PATH 追加まで行う）
-> 5. `gh release create v<version> deploy/localllm.exe localllm-v<version>-win-x64.zip --title "v<version>" --notes "CHANGELOG.md の該当セクション"`（gh が無い環境では GitHub REST API `POST /repos/{owner}/{repo}/releases` + uploads で同等）
+> **リリース手順 (GitHub Releases)**: 2026-10-22 から GitHub Actions (`release.yml`) で自動化 (設計: [release-workflow.md](release-workflow.md))。手元の Windows 機でのビルドは不要。
+> 1. package.json / package-lock.json / CHANGELOG.md を更新し、`npm run validate:version -- --tag v<version>`を通して main へマージ
+> 2. main の該当コミットに `v<version>` tag を付けて push
+> 3. workflow が最新パッチ版 Node 24 で検査・`build:deploy`・exe スモークを行い、`localllm.exe` と `localllm-v<version>-win-x64.zip` を添付した Release を作成する
+> 4. Node のセキュリティリリース時は `SECURITY_NODE_FLOOR` を上げ、新 tag でリリース (または既存 tag を手動実行で再ビルド)
 > リリースを公開すると、旧バージョン利用者には次回起動時に更新通知が出る。
 
 **現状**: deploy フォルダの exe は手動ビルド・手動差し替え。利用者が古いバージョンを使い続けても気づけない。

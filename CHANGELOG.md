@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-22
+
+### セキュリティ
+
+- 配布 exe を Node.js 24 の 2026-10-21 セキュリティリリース (v24.22.1 以降) で再ビルド。0.5.2 以前の exe は修正前の Node を内包しており、Brotli 展開の範囲外書込み (CVE-2026-111497, RCE) や TLS ホスト名検証バイパス (CVE-2026-105483 / CVE-2026-106069) などの影響を受ける。0.5.2 以前を使っている場合は 0.5.3 へ差し替えること
+- 本番依存 follow-redirects を 1.16.1 へ更新 (GHSA-q3jh-wrc6-jgq8, GHSA-8r9p-f939-6h3c)
+- Node.js の最低要件を 22 に引き上げ (20 は 2026-04-30 EOL)。CI は Node 24 の最新パッチ版で実行
+
+### リリース
+
+- tag push で GitHub Actions (windows-latest) が最新パッチ版 Node 24 で exe をビルドし、検査後に Release へ exe と zip を添付する `release.yml` を追加。Node のセキュリティリリース時は既存 tag の再ビルド (手動実行) にも対応 (docs/release-workflow.md)
+
 ## [0.5.2] - 2026-10-14
 
 - `install.bat`: PATH 追加後の変更通知 (WM_SETTINGCHANGE) を、存在しない変数を削除させる間接的な方法から、必ず通知を送る `setx LOCALLLM_INSTALL_DIR` に変更 (インストール先の記録も兼ねる)

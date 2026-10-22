@@ -112,10 +112,11 @@
 
 | # | 対応 | 状態 |
 |---|---|---|
-| 1 | ローカルのビルド環境 Node を v24.22.1 以上（または v22.23.4 以上）に更新し、`npm run build:deploy` で exe を再ビルド・再配布 | **未実施（ユーザー手元の Windows 環境で実施が必要）** |
+| 1 | 修正版 Node で exe を再ビルド・再配布 | **仕組みは実装済み・リリースは未実施**。`release.yml` (docs/release-workflow.md) を追加し、0.5.3 として版上げ済み。main へマージ後に `v0.5.3` tag を push すると GitHub Actions が Node 24 最新パッチ版でビルドし Release を作成する |
+| 1b | 修正前 Node で作った v0.5.1 / v0.5.2 Release の配布停止 | **未実施（GitHub 画面での操作が必要）**。2026-10-22 時点でダウンロード数は全資産 0 |
 | 2 | CI の `node-version` を 20 → 24、`engines.node` を `>=22.0.0`、`build-exe.sh` の最低バージョンチェックを 22 に、README / `docs/external_design.md` の要件記載を更新 | 実施済み |
 | 3 | `npm audit fix` で follow-redirects を 1.16.0 → 1.16.1 に更新（`npm audit --omit=dev` で 0 件を確認） | 実施済み |
-| 4 | （任意）`build-exe.js` にビルド用 Node が修正版以上かのチェックを追加 | 未提案のまま保留 |
+| 4 | ビルド用 Node が修正版以上かのチェック | `release.yml` の `SECURITY_NODE_FLOOR` として実装（ローカルの `build-exe.js` には未追加） |
 
 Node 24.22.1 での検証結果（Linux コンテナ）: `npm run lint` 成功、`npm run test:e2e` 成功、`npm run build:deploy` で SEA 生成・`--version` 起動成功。`npm run test:coverage` は `tests/security/containment.test.ts` の 2 件が失敗したが、変更前コード・Node 22 でも同一に失敗し、コンテナに `bwrap` が無いことによる環境依存（CI の Ubuntu は `bwrap` を導入済み）。
 
