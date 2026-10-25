@@ -34,6 +34,7 @@
 | `request` | 前回requestと最初に食い違った位置以降のmessages、変更時だけtools、messageOffset / messageTotal (messageOffset が前回の messageTotal より小さい = 既存メッセージが書き換わった) | ✅ |
 | `response` | text + thinking + toolCalls + finishReason + tokensIn + tokensOut + tokensCached (サーバ報告時のみ) | ✅ 既存 (tokens 修正必要) |
 | `tool_result` | toolCallId + toolName + input + output + success + durationMs | ✅ |
+| `prefix_break` | 送信済みの部分が変わった記録 (messageOffset / previousTotal / toolsChanged / reasons / unexpected)。docs/prompt-prefix-stability.md §7.3 | ✅ |
 | `log_limit` | 単一ファイル上限へ到達して追記を停止した事実 | 上限到達時 |
 
 すべての値は書込み前に機密キーと既知token形式をマスクする。極端に長い文字列は切り詰め、単一ファイルは既定32 MiBで停止する。

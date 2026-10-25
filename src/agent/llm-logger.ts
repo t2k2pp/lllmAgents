@@ -78,7 +78,36 @@ export interface LLMToolResultLog extends LogContext {
   durationMs: number;
 }
 
-export type LLMLogEntry = LLMRequestLog | LLMResponseLog | LLMToolResultLog;
+/**
+ * 送信済みの部分 (前回 request の列) が今回の request で変わった記録 = プロンプトキャッシュが外れた記録。
+ * reasons が空なら、 理由の分かっている書き換え (忘却・圧縮 等) ではない「予期しない破壊」。
+ * docs/prompt-prefix-stability.md §7。
+ */
+export interface LLMPrefixBreakLog extends LogContext {
+  ts: string;
+  turn: number;
+  agentId: string;
+  type: "prefix_break";
+  /** 前回 request と最初に食い違った位置 */
+  messageOffset: number;
+  /** 前回 request の件数 */
+  previousTotal: number;
+  /** tools 定義が変わったか */
+  toolsChanged: boolean;
+  /** 履歴側が申告した書き換え理由 (ephemeral-purge / thinking-clear / replace / compress / system-prompt / clear) */
+  reasons: string[];
+  /** 理由の申告が無い = 予期しない破壊 */
+  unexpected: boolean;
+}
+
+/** logRequest() の返り値。 前方一致が保たれたかを呼び出し側が判定するのに使う。 */
+export interface RequestPrefixInfo {
+  messageOffset: number;
+  previousTotal: number;
+  toolsChanged: boolean;
+}
+
+export type LLMLogEntry = LLMRequestLog | LLMResponseLog | LLMToolResultLog | LLMPrefixBreakLog;
 
 export interface LLMLoggerOptions {
   logsDir?: string;
@@ -178,7 +207,7 @@ export class LLMLogger {
   }
 
   /** LLM リクエストをログに記録 */
-  logRequest(messages: unknown[], model: string, tools?: unknown[]): void {
+  logRequest(messages: unknown[], model: string, tools?: unknown[]): RequestPrefixInfo {
     // 件数ではなく内容で比べる: 件数だけだと既存メッセージの書き換えが記録に残らず、
     // キャッシュが外れた原因も、 ログからの再現も分からなくなる。
     const messageJsons = messages.map((m) => JSON.stringify(m));
@@ -192,6 +221,7 @@ export class LLMLogger {
       messageOffset++;
     }
     const messageDelta = messages.slice(messageOffset);
+    const previousTotal = prev.length;
     this.previousMessageJsons = messageJsons;
     const toolsJson = tools === undefined ? undefined : JSON.stringify(sanitizeLogValue(tools));
     const changedTools = toolsJson !== this.previousToolsJson ? tools : undefined;
@@ -207,6 +237,29 @@ export class LLMLogger {
       messageTotal: messages.length,
       tools: changedTools,
     });
+    return { messageOffset, previousTotal, toolsChanged: previousTotal > 0 && changedTools !== undefined };
+  }
+
+  /**
+   * 前方一致が崩れたことを記録する。 info は logRequest() の返り値、 reasons は履歴側が申告した書き換え理由。
+   * 崩れていなければ何もせず false を返す。 予期しない破壊なら true を返す (呼び出し側が警告する)。
+   */
+  logPrefixBreak(info: RequestPrefixInfo, reasons: string[]): boolean {
+    const messagesBroken = info.previousTotal > 0 && info.messageOffset < info.previousTotal;
+    if (!messagesBroken && !info.toolsChanged) return false;
+    const unexpected = messagesBroken && reasons.length === 0;
+    this.write({
+      ts: new Date().toISOString(),
+      turn: this.turn,
+      agentId: this.agentId,
+      type: "prefix_break",
+      messageOffset: info.messageOffset,
+      previousTotal: info.previousTotal,
+      toolsChanged: info.toolsChanged,
+      reasons,
+      unexpected,
+    });
+    return unexpected;
   }
 
   /** LLM レスポンスをログに記録（thinking content 含む） */

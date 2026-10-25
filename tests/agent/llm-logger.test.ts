@@ -176,6 +176,59 @@ describe("LLMLogger privacy / capacity", () => {
     expect(r.tokensCached).toBe(900);
   });
 
+  it("末尾に足しただけなら prefix_break を記録しない", () => {
+    const logger = new LLMLogger("pb-ok", "pb-ok", { logsDir: tmpHome });
+    const sys = { role: "system", content: "S" };
+    logger.logRequest([sys, { role: "user", content: "one" }], "m", [{ name: "t" }]);
+    const info = logger.logRequest([sys, { role: "user", content: "one" }, { role: "tool", content: "R" }], "m", [
+      { name: "t" },
+    ]);
+    expect(logger.logPrefixBreak(info, [])).toBe(false);
+    expect(readEntries(logger).some((e) => e.type === "prefix_break")).toBe(false);
+  });
+
+  it("理由の無い前方の書き換えは unexpected として記録し true を返す", () => {
+    const logger = new LLMLogger("pb-bad", "pb-bad", { logsDir: tmpHome });
+    logger.logRequest(
+      [
+        { role: "system", content: "S 10:00:00" },
+        { role: "user", content: "one" },
+      ],
+      "m",
+    );
+    const info = logger.logRequest(
+      [
+        { role: "system", content: "S 10:00:05" },
+        { role: "user", content: "one" },
+        { role: "tool", content: "R" },
+      ],
+      "m",
+    );
+    expect(logger.logPrefixBreak(info, [])).toBe(true);
+    const pb = readEntries(logger).find((e) => e.type === "prefix_break");
+    expect(pb).toMatchObject({ messageOffset: 0, previousTotal: 2, unexpected: true, reasons: [] });
+  });
+
+  it("忘却・圧縮など理由の申告がある書き換えは記録するが unexpected にしない", () => {
+    const logger = new LLMLogger("pb-known", "pb-known", { logsDir: tmpHome });
+    const sys = { role: "system", content: "S" };
+    logger.logRequest([sys, { role: "tool", content: "long result" }], "m");
+    const info = logger.logRequest([sys, { role: "tool", content: "[忘却済み]" }], "m");
+    expect(logger.logPrefixBreak(info, ["replace"])).toBe(false);
+    const pb = readEntries(logger).find((e) => e.type === "prefix_break");
+    expect(pb).toMatchObject({ messageOffset: 1, unexpected: false, reasons: ["replace"] });
+  });
+
+  it("tools 定義の変化も prefix_break として記録する", () => {
+    const logger = new LLMLogger("pb-tools", "pb-tools", { logsDir: tmpHome });
+    const msgs = [{ role: "system", content: "S" }];
+    logger.logRequest(msgs, "m", [{ name: "a" }]);
+    const info = logger.logRequest(msgs, "m", [{ name: "a" }, { name: "b" }]);
+    expect(info.toolsChanged).toBe(true);
+    logger.logPrefixBreak(info, []);
+    expect(readEntries(logger).find((e) => e.type === "prefix_break")).toMatchObject({ toolsChanged: true });
+  });
+
   it("単一ファイル上限に達した後はlog_limitを残して追記を止める", () => {
     const logger = new LLMLogger("cap", "cap", { logsDir: tmpHome, maxFileBytes: 600 });
     logger.logResponse({ model: "m", text: "x".repeat(300) });

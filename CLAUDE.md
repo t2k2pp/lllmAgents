@@ -28,6 +28,12 @@ Claude Codeがこのプロジェクトで作業する際のルール。
 - Stop フックは未 push コミットがあれば警告（実装後は必ずpushルールの補助）
 - **exe の再ビルドは Stop フックでは行わない**。`npm run build:deploy` を手動で実行
 
+## プロンプトの前方一致を壊さない（docs/prompt-prefix-stability.md 参照）
+- 一度 LLM に送ったメッセージ列（system・tools を含む）は、次の送信でもそのまま先頭に残すこと。日時・ToDo・Goal・進捗など変わる情報は system や履歴の前方に置かず、末尾に足す（`MessageHistory.attachDynamicContext()`）
+- 破るとローカル LLM の KV キャッシュが毎回全損し、1 呼び出しが数十分になる（2026-10 myppt で実害）。機能は正しく動くのでテストやレビューで気付きにくい
+- 送信済みの部分を書き換える処理を足すときは、`MessageHistory` に書き換え理由を申告させる（無申告の書き換えは `prefix_break` の `unexpected` として警告される）
+- `tests/agent/prompt-prefix-invariant.test.ts` が落ちたら、テストを緩めずに設計を見直す
+
 ## コミット前の検査（docs/git-hooks.md 参照）
 - pre-commit フックが `tsc --noEmit` と `biome check --staged` を実行する。`npm install` / `npm ci` で自動有効化（手動は `npm run setup:git-hooks`）
 - `--no-verify` でフックを飛ばさない。落ちたら直してからコミットし直す

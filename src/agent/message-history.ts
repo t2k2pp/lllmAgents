@@ -92,6 +92,12 @@ export class MessageHistory {
   private sentMessages = new WeakSet<Message>();
   /** 直近に添付した状態通知。 key は日時を除いた内容 (変化の判定用)。 */
   private lastContextNote: { key: string; message: Message } | null = null;
+  /**
+   * 前回の送信以降に、 送信済みの部分を書き換えた操作の理由 (忘却・圧縮・揮発除去 等)。
+   * AgentLoop が送信時に takeRewriteReasons() で取り出し、 理由の無い前方の変化を
+   * 「予期しないキャッシュ破壊」 として記録する (docs/prompt-prefix-stability.md §7)。
+   */
+  private rewriteReasons: string[] = [];
 
   constructor(systemPrompt: string) {
     this.systemPrompt = systemPrompt;
@@ -266,7 +272,9 @@ export class MessageHistory {
   purgeEphemeral(): number {
     const before = this.messages.length;
     this.messages = this.messages.filter((m) => !this.ephemeralMessages.has(m));
-    return before - this.messages.length;
+    const removed = before - this.messages.length;
+    if (removed > 0) this.rewriteReasons.push("ephemeral-purge");
+    return removed;
   }
 
   /**
@@ -301,6 +309,7 @@ export class MessageHistory {
         cleared++;
       }
     }
+    if (cleared > 0) this.rewriteReasons.push("thinking-clear");
     return cleared;
   }
 
@@ -320,6 +329,7 @@ export class MessageHistory {
   replaceMessages(next: Message[]): void {
     MessageHistory.assertToolPairing(next);
     this.messages = [...next];
+    this.rewriteReasons.push("replace");
   }
 
   /**
@@ -378,6 +388,7 @@ export class MessageHistory {
 
     const recent = this.messages.slice(boundary);
     this.messages = [{ role: "system", content: `[会話履歴の要約]\n${summary}` }, ...recent];
+    this.rewriteReasons.push("compress");
   }
 
   /** 直近 N 往復の会話テキストを返す（意図分類の文脈提供用） */
@@ -401,11 +412,20 @@ export class MessageHistory {
   }
 
   updateSystemPrompt(prompt: string): void {
+    if (prompt !== this.systemPrompt) this.rewriteReasons.push("system-prompt");
     this.systemPrompt = prompt;
+  }
+
+  /** 前回取り出して以降の書き換え理由を返し、 空にする。 送信の直前に呼ぶ。 */
+  takeRewriteReasons(): string[] {
+    const reasons = this.rewriteReasons;
+    this.rewriteReasons = [];
+    return reasons;
   }
 
   clear(): void {
     this.messages = [];
+    this.rewriteReasons.push("clear");
     // WeakSet は参照消失で自動 GC されるので明示クリア不要だが、 防御的に新規化
     this.ephemeralMessages = new WeakSet<Message>();
     this.displayedMessages = new WeakSet<Message>();

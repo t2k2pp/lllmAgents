@@ -315,4 +315,27 @@ describe("MessageHistory — 前方一致の安定化 (docs/prompt-prefix-stabil
     expect(parts[1].type).toBe("text");
     expect(parts[1].text).toContain("# Current datetime");
   });
+
+  it("送信済みの部分を書き換える操作は理由を申告し、 取り出すと空になる", () => {
+    const h = new MessageHistory("BASE");
+    h.addUserMessage("nudge", { ephemeral: true });
+    h.addAssistantMessage("", callA, { thinking: "考え中" });
+    h.addToolResult("call_a", "R1");
+    h.purgeEphemeral();
+    h.clearAllThinking();
+    h.updateSystemPrompt("BASE"); // 同じ内容なら書き換えではない
+    h.updateSystemPrompt("BASE2");
+    expect(h.takeRewriteReasons()).toEqual(["ephemeral-purge", "thinking-clear", "system-prompt"]);
+    expect(h.takeRewriteReasons()).toEqual([]);
+  });
+
+  it("末尾への追加と状態通知の添付は書き換え理由にならない", () => {
+    const h = withState({ value: "TODO-1" });
+    h.addUserMessage("U1");
+    h.attachDynamicContext(T0);
+    h.addAssistantMessage("", callA);
+    h.addToolResult("call_a", "R1");
+    h.attachDynamicContext(T1);
+    expect(h.takeRewriteReasons()).toEqual([]);
+  });
 });

@@ -1105,11 +1105,19 @@ export class AgentLoop {
             this.history.attachDynamicContext();
             // LLM I/O ログ: リクエスト記録
             this.llmLogger.nextTurn();
-            this.llmLogger.logRequest(
+            const prefixInfo = this.llmLogger.logRequest(
               this.history.getMessages(),
               this.model,
               toolDefs.length > 0 ? toolDefs : undefined,
             );
+            // 送信済みの部分が変わった = プロンプトキャッシュが外れた。 忘却・圧縮など理由の分かる
+            // 書き換えでなければ退行の疑いなので警告する (docs/prompt-prefix-stability.md §7)。
+            if (this.llmLogger.logPrefixBreak(prefixInfo, this.history.takeRewriteReasons())) {
+              logger.warn(
+                `[prefix] 理由の無い書き換えで送信済みの履歴が変わりました (messages[${prefixInfo.messageOffset}] 以降、` +
+                  `前回 ${prefixInfo.previousTotal} 件)。プロンプトキャッシュが外れています。`,
+              );
+            }
             // maxTokens は意図的に渡さない:
             //   - openai-compat (Azure Foundry / vLLM 等): 省略すると「残りコンテキスト全部」がサーバ既定値となる。
             //     contextWindow をそのまま渡すと、サーバによっては input + max_tokens > context で 400 を返す

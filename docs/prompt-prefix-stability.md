@@ -111,7 +111,43 @@ myppt の例なら 13 万トークンの prefill (約 17 分) → 数千トー�
 | `src/agent/sub-agent.ts` | (composer 未使用のため変更なし) |
 | `src/agent/llm-logger.ts` | 差分の基準を「最初に食い違った位置」 に / `tokensCached` |
 | `src/providers/openai-compat.ts` | `timings.cache_n` を cachedTokens の代替に |
+| `tests/agent/prompt-prefix-invariant.test.ts` | 前方一致の不変条件 (§7.2) |
+| `src/agent/message-history.ts` / `llm-logger.ts` / `agent-loop.ts` | 書き換え理由の申告と `prefix_break` 記録 (§7.3) |
 
 ## 6. 未確認・今後
 - 実機 (llama-server, Qwen3.8-27B) での `n_prompt_tokens_cache` の改善は未確認。 次回セッションのログの `tokensCached` で確認する。
 - 忘却トゥームストーンは openai-compat の system 統合で先頭へ寄る。 忘却時は元々キャッシュが外れるので今回は対象外。
+
+## 7. 再発防止 (不変条件・検査・実行時検出)
+
+毎ターン変わる値を前方に置く変更は、 機能は正しく動くのでレビューでもテストでも気付きにくく、
+症状は「ローカル LLM が遅い」 としてしか現れない。 そこで 3 段で止める。
+
+### 7.1 不変条件
+**一度送ったメッセージ列 (system・tools を含む) は、 次の送信でもそのまま先頭に残る。 変わる情報は末尾に足す。**
+例外は文脈を減らすための書き換えだけ (忘却・圧縮・揮発除去・思考の破棄・システムプロンプト更新・クリア)。
+
+### 7.2 CI で止める (`tests/agent/prompt-prefix-invariant.test.ts`)
+AgentLoop を台本プロバイダで実際に回し、 各送信が直前の送信をそのまま先頭に含むことを検証する。
+- 1 回の依頼の中で ToDo が変わる場合 / 依頼をまたぐ場合 (2 回目の run)
+- system がリクエスト間で不変で、 日時・ToDo を含まないこと
+旧実装 (dynamic を履歴の前に置く) を戻すと 3 件とも失敗し、 「request N: messages[i] (system) が書き換わった」 と位置を示すことを確認済み。
+
+### 7.3 実行時に見つける (`prefix_break` レコード)
+- `MessageHistory` は送信済みの部分を書き換える操作のたびに理由を記録する
+  (`ephemeral-purge` / `thinking-clear` / `replace` (忘却) / `compress` / `system-prompt` / `clear`)。
+- AgentLoop は送信時に `llmLogger.logRequest()` の結果 (最初に食い違った位置) と `takeRewriteReasons()` を照合し、
+  前方が変わっていれば `prefix_break` を記録する。 理由の申告が無ければ `unexpected: true` とし、 警告ログを出す。
+- tools 定義の変化も `toolsChanged: true` で記録する (ツール定義は system より前に描画されるので、 変われば全体が外れる)。
+
+ログでの確認例:
+```bash
+# 予期しない破壊の一覧
+grep '"type":"prefix_break"' ~/.localllm/logs/sessions/<sid>_main.jsonl | grep '"unexpected":true'
+# キャッシュ再利用率 (response の tokensCached / tokensIn)
+grep '"type":"response"' ~/.localllm/logs/sessions/<sid>_main.jsonl | node -e 'require("readline").createInterface({input:process.stdin}).on("line",l=>{const o=JSON.parse(l);if(o.tokensIn)console.log(o.turn,o.tokensIn,o.tokensCached??0)})'
+```
+
+### 7.4 対象外
+- provider 層の変換 (例: openai-compat の system 統合で、 履歴途中の system ノートが先頭へ寄る) は履歴より後段なので
+  `prefix_break` では見えない。 忘却トゥームストーンが該当するが、 忘却時は元々キャッシュが外れるので許容。
