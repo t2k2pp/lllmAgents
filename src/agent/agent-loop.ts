@@ -4236,38 +4236,42 @@ function hasLargeCodeBlock(text: string): boolean {
  * 注意: AsyncGenerator は同時に1つの .next() しか保留できないため、
  * 同じ Promise を再利用してタイムアウトと競争させる。
  */
-async function* abortableIterator<T>(gen: AsyncGenerator<T>, isAborted: () => boolean): AsyncGenerator<T> {
+export async function* abortableIterator<T>(gen: AsyncGenerator<T>, isAborted: () => boolean): AsyncGenerator<T> {
   const POLL_INTERVAL = 500;
   // 中断時は放置せず gen.return() で generator の finally (ストリーム cancel 等) を
   // 走らせる。 これが無いと provider 側の HTTP 接続クリーンアップが永久に実行されない。
   const cleanup = (): void => {
     void gen.return(undefined as never).catch(() => {});
   };
-  while (true) {
-    if (isAborted()) {
-      cleanup();
-      return;
-    }
-    // gen.next() を1回だけ呼び、その Promise をタイムアウトと繰り返し競争させる
-    const nextPromise = gen.next();
+  // 呼び出し側が途中で抜けた時 (error チャンクでの throw / 中断の return) も中の generator を閉じる。
+  // 閉じないと run gate の API 実行中カウントが戻らず、 /run pause が永久に成立しなくなる。
+  let finished = false;
+  try {
     while (true) {
-      if (isAborted()) {
-        cleanup();
-        return;
+      if (isAborted()) return;
+      // gen.next() を1回だけ呼び、その Promise をタイムアウトと繰り返し競争させる
+      const nextPromise = gen.next();
+      while (true) {
+        if (isAborted()) return;
+        const result = await Promise.race([
+          nextPromise.then((v) => ({ kind: "value" as const, v })),
+          new Promise<{ kind: "timeout" }>((resolve) => setTimeout(() => resolve({ kind: "timeout" }), POLL_INTERVAL)),
+        ]);
+        if (result.kind === "timeout") {
+          // タイムアウト: abort チェックして再度同じ nextPromise を待つ
+          continue;
+        }
+        // 値が来た
+        if (result.v.done) {
+          finished = true;
+          return;
+        }
+        yield result.v.value;
+        break; // 外側ループで次の gen.next() へ
       }
-      const result = await Promise.race([
-        nextPromise.then((v) => ({ kind: "value" as const, v })),
-        new Promise<{ kind: "timeout" }>((resolve) => setTimeout(() => resolve({ kind: "timeout" }), POLL_INTERVAL)),
-      ]);
-      if (result.kind === "timeout") {
-        // タイムアウト: abort チェックして再度同じ nextPromise を待つ
-        continue;
-      }
-      // 値が来た
-      if (result.v.done) return;
-      yield result.v.value;
-      break; // 外側ループで次の gen.next() へ
     }
+  } finally {
+    if (!finished) cleanup();
   }
 }
 

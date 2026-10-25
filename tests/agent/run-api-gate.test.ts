@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { gateLLMProvider, RunApiGate } from "../../src/agent/run-api-gate.js";
+import { abortableIterator } from "../../src/agent/agent-loop.js";
 import { collectResponse, type ChatChunk, type LLMProvider } from "../../src/providers/base-provider.js";
 
 function makeProvider(onStart: (method: string) => void): LLMProvider {
@@ -128,5 +129,67 @@ describe("RunApiGate", () => {
     await boundary;
     expect(passed).toBe(true);
     gate.finishRun();
+  });
+
+  describe("abortableIterator 経由で途中で抜けても API 実行中カウントが戻る (2026-10-25 myppt: API実行中=7 で pause 不成立)", () => {
+    function streamingProvider(): LLMProvider {
+      const reply = async function* (): AsyncGenerator<ChatChunk> {
+        yield { type: "text", text: "a" };
+        yield { type: "error", error: "server error" };
+        yield { type: "done", finishReason: "stop" };
+      };
+      return {
+        providerType: "openai-compat",
+        chat: reply,
+        chatWithTools: reply,
+        chatWithVision: reply,
+      } as unknown as LLMProvider;
+    }
+
+    it("error チャンクで throw して抜けた時", async () => {
+      const gate = new RunApiGate();
+      gate.beginRun("cli");
+      const provider = gateLLMProvider(streamingProvider(), gate);
+      await expect(
+        (async () => {
+          for await (const chunk of abortableIterator(provider.chat(params), () => false)) {
+            if (chunk.type === "error") throw new Error(chunk.error);
+          }
+        })(),
+      ).rejects.toThrow("server error");
+      await new Promise((r) => setTimeout(r, 0));
+      expect(gate.snapshot().inFlight).toBe(0);
+      gate.finishRun();
+    });
+
+    it("中断 (isAborted) で抜けた時", async () => {
+      const gate = new RunApiGate();
+      gate.beginRun("cli");
+      const provider = gateLLMProvider(streamingProvider(), gate);
+      let aborted = false;
+      for await (const chunk of abortableIterator(provider.chat(params), () => aborted)) {
+        if (chunk.type === "text") aborted = true;
+      }
+      await new Promise((r) => setTimeout(r, 0));
+      expect(gate.snapshot().inFlight).toBe(0);
+      gate.finishRun();
+    });
+
+    it("途中で抜けた後でも pause 予約が成立する", async () => {
+      const reached = vi.fn();
+      const gate = new RunApiGate(reached);
+      gate.beginRun("cli");
+      const provider = gateLLMProvider(streamingProvider(), gate);
+      await (async () => {
+        for await (const chunk of abortableIterator(provider.chat(params), () => false)) {
+          if (chunk.type === "error") return;
+        }
+      })();
+      await new Promise((r) => setTimeout(r, 0));
+      gate.requestPause("process");
+      expect(gate.snapshot().state).toBe("paused");
+      expect(reached).toHaveBeenCalled();
+      gate.finishRun();
+    });
   });
 });

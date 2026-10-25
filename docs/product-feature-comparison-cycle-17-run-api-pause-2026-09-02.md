@@ -82,3 +82,10 @@
 ## 7. 次cycle候補
 
 利用者が期待したPC再起動後の`/resume`→`/run resume`はcycle 17の契約外である。会話、pending response/tool、追加入力、実行journalを安全境界でatomic保存する`GAP-DURABLE-RUN-01`をP1候補として分離した。実装条件とcross-process受け入れ試験は[durable run resume設計](durable-run-resume-design.md)を正本とする。
+
+## 8. 不具合修正 (2026-10-25): API 実行中カウントの漏れ
+
+- 症状: myppt の長い run で `/run status` が `API実行中=7` のまま。process / durable どちらの pause も「実行中 0 件」が成立条件のため、永久に成立しなかった (`durable checkpoint=none`)。
+- 原因: AgentLoop の `abortableIterator` が、呼び出し側が途中で抜けた時 (error チャンクでの throw、中断の return) に中の gated generator を閉じていなかった。`gateLLMProvider` の `finally` (`leaveRequest`) が走らず、件数が残る。カウントは run 終了で 0 に戻るため、長い run の中でだけ溜まる。
+- 修正: `abortableIterator` を try/finally にし、最後まで読み切らずに抜けた時は必ず `gen.return()` で閉じる。
+- 検証: `tests/agent/run-api-gate.test.ts` に「error で抜けた時 / 中断で抜けた時 / 抜けた後でも pause が成立する」の 3 件。修正を外すと 3 件とも失敗する。
