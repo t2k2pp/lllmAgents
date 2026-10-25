@@ -152,8 +152,6 @@ describe("Sandbox Security", () => {
       const sandbox = new Sandbox({
         allowedDirectories: [],
         blockedCommands: [],
-        autoApproveTools: [],
-        requireApprovalTools: [],
       });
       const testPath = path.join(process.cwd(), "src", "test.ts");
       expect(sandbox.isPathAllowed(testPath)).toBe(true);
@@ -163,8 +161,6 @@ describe("Sandbox Security", () => {
       const sandbox = new Sandbox({
         allowedDirectories: [],
         blockedCommands: [],
-        autoApproveTools: [],
-        requireApprovalTools: [],
       });
       // /tmp は通常 cwd や ~/.localllm と異なる
       const outsidePath = path.resolve(os.tmpdir(), "evil", "payload.sh");
@@ -180,8 +176,6 @@ describe("Sandbox Security", () => {
       const sandbox = new Sandbox({
         allowedDirectories: [],
         blockedCommands: [],
-        autoApproveTools: [],
-        requireApprovalTools: [],
       });
       // 相対パスで cwd を脱出しようとする
       const traversal = path.join(process.cwd(), "..", "..", "..", "etc", "passwd");
@@ -196,8 +190,6 @@ describe("Sandbox Security", () => {
       const sandbox = new Sandbox({
         allowedDirectories: [],
         blockedCommands: [],
-        autoApproveTools: [],
-        requireApprovalTools: [],
       });
       const newDir = path.resolve(os.tmpdir(), "allowed-sandbox-test");
       sandbox.addAllowedDir(newDir);
@@ -224,8 +216,6 @@ describe("Sandbox Security", () => {
       const sandbox = new FreshSandbox({
         allowedDirectories: [],
         blockedCommands: [],
-        autoApproveTools: [],
-        requireApprovalTools: [],
       });
 
       // symlinkPath は cwd 配下に見えるが、実パスは /etc/secrets
@@ -237,8 +227,6 @@ describe("Sandbox Security", () => {
       const sandbox = new Sandbox({
         allowedDirectories: [],
         blockedCommands: [],
-        autoApproveTools: [],
-        requireApprovalTools: [],
       });
       // /home/user/project-evil は /home/user/project にマッチしてはいけない
       const evilPath = process.cwd() + "-evil" + path.sep + "steal.sh";

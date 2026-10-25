@@ -55,7 +55,7 @@ function createSafeLoop(provider: LLMProvider): AgentLoop {
     provider,
     "mock-model-7b",
     new ToolRegistry(),
-    new PermissionManager({ autoApproveTools: [], allowedDirectories: [], rules: [] }),
+    new PermissionManager({ allowedDirectories: [], rules: { allow: [], deny: [], ask: [] } }),
     8192,
     undefined,
     [],

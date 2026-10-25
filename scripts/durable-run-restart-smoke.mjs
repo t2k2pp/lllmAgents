@@ -17,11 +17,7 @@ function securityConfig(toolNames) {
   return {
     allowedDirectories: [],
     blockedCommands: [],
-    autoApproveTools: toolNames,
-    requireApprovalTools: [],
-    discordAutoApproveTools: [],
-    slackAutoApproveTools: [],
-    rules: { allow: [], deny: [], ask: [] },
+    rules: { allow: [...toolNames], deny: [], ask: [] },
   };
 }
 

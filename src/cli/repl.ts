@@ -87,12 +87,15 @@ import {
 } from "./integrations-settings.js";
 import {
   addPatternRule,
-  addToolToList,
-  getToolList,
   type PermissionSettingsContext,
+  RULE_ACTIONS,
+  RULE_SCOPE_LABELS,
+  RULE_SCOPES,
+  type RuleAction,
+  type RuleScope,
   removePatternRule,
-  removeToolFromList,
-  type ToolListKind,
+  rulesForScope,
+  scopedRule,
 } from "./permission-settings.js";
 // プロンプトは prompt-gate 経由で呼ぶ (docs/tui-alternate-screen.md §4.3)。
 // 表示中はライブ領域を排他所有し、他の出力をキューへ退避させる。
@@ -2695,9 +2698,10 @@ export class REPL {
   }
 
   /**
-   * /permission の対話 picker (Phase optimize #1、 2026-05-28)。
-   * 引数なし呼び出しから入り、 カテゴリ → アクション → ツール/ルール選択 のループ。
+   * /permission の対話 picker (Phase optimize #1、 2026-05-28 / T4 でルール一本化 2026-10-25)。
+   * 引数なし呼び出しから入り、 範囲 (すべての面 / CLI / Discord / Slack) → 操作 → ツール/ルール選択 のループ。
    * Esc / Ctrl+C で終了。 権限の設定方法はこの画面だけ (旧サブコマンドは T3 で削除)。
+   * 権限は security.rules のルールだけで表す (旧ツール名一覧は T4 で廃止)。
    * 設定の書き換えは src/cli/permission-settings.ts の関数で行う。
    */
   private async handlePermissionInteractive(): Promise<void> {
@@ -2707,33 +2711,22 @@ export class REPL {
     }
     const permissions = this.agent.getPermissions();
     while (true) {
-      const rules = permissions.getRules();
-      const auto = permissions.getAutoApproveList();
-      const requireL = permissions.getRequireApprovalList();
-      const discord = permissions.getDiscordAutoApproveList();
-      const slack = permissions.getSlackAutoApproveList();
-      const ruleCount = rules.deny.length + rules.allow.length + rules.ask.length;
-
+      const count = (scope: RuleScope): string => {
+        const list = rulesForScope(permissions, scope);
+        const n = (a: RuleAction): number => list.filter((r) => r.action === a).length;
+        return `[${n("deny")} deny / ${n("allow")} allow / ${n("ask")} ask]`;
+      };
       let category: string;
       try {
         category = await select({
-          message: "Permission settings — 編集する対象を選択:",
+          message: "権限ルール — 編集する範囲を選択:",
           choices: [
-            {
-              name: `Pattern rules                              [${rules.deny.length} deny / ${rules.allow.length} allow / ${rules.ask.length} ask]`,
-              value: "rules",
-            },
-            { name: `Auto-approve tools (CLI)                   [${auto.length} tools]`, value: "auto" },
-            { name: `Require-approval tools (CLI)               [${requireL.length} tools]`, value: "require" },
-            { name: `Discord auto-approve tools                 [${discord.length} tools]`, value: "discord" },
-            { name: `Slack auto-approve tools                   [${slack.length} tools]`, value: "slack" },
-            {
-              name: chalk.dim(
-                `View all (${ruleCount} rules + ${auto.length + requireL.length + discord.length + slack.length} entries)`,
-              ),
-              value: "list",
-            },
-            { name: chalk.dim("Done"), value: "done" },
+            ...RULE_SCOPES.map((scope) => ({
+              name: `${RULE_SCOPE_LABELS[scope]}  ${count(scope)}`,
+              value: scope as string,
+            })),
+            { name: chalk.dim("すべてのルールを表示"), value: "list" },
+            { name: chalk.dim("終える"), value: "done" },
           ],
           pageSize: 10,
         });
@@ -2745,60 +2738,50 @@ export class REPL {
         this.printPermissionAll();
         continue;
       }
-      if (category === "rules") {
-        await this.permissionPatternRulesMenu();
-        continue;
-      }
-      await this.permissionToolListMenu(category as ToolListKind);
+      await this.permissionScopeMenu(category as RuleScope);
     }
   }
 
-  /** /permission 対話 picker から呼ばれる「全リスト一覧表示」 */
-  private printPermissionAll(): void {
-    const permissions = this.agent.getPermissions();
-    const rules = permissions.getRules();
-    console.log(chalk.bold("\n  [Pattern rules] (ツール名リストより優先):"));
-    for (const action of ["deny", "allow", "ask"] as const) {
-      const icon = action === "deny" ? chalk.red("✗") : action === "allow" ? chalk.green("✓") : chalk.yellow("?");
-      console.log(chalk.bold(`    ${action}:`));
-      if (rules[action].length === 0) console.log(chalk.dim("      (なし)"));
-      else for (const r of rules[action]) console.log(`      ${icon} ${r}`);
+  /** 範囲ごとのルールを表示する */
+  private printScopedRules(scope: RuleScope): void {
+    const list = rulesForScope(this.agent.getPermissions(), scope);
+    console.log(chalk.bold(`\n  ── ${RULE_SCOPE_LABELS[scope]} ──`));
+    for (const a of RULE_ACTIONS) {
+      const icon = a === "deny" ? chalk.red("✗") : a === "allow" ? chalk.green("✓") : chalk.yellow("?");
+      const rows = list.filter((r) => r.action === a);
+      console.log(chalk.bold(`  ${a}:`));
+      if (rows.length === 0) console.log(chalk.dim("    (なし)"));
+      else for (const r of rows) console.log(`    ${icon} ${r.body}`);
     }
-    const dump = (label: string, list: string[], col: (s: string) => string): void => {
-      console.log(chalk.bold(`  ${label}:`));
-      if (list.length === 0) console.log(chalk.dim("    (なし)"));
-      else for (const t of list) console.log(col(`    ✓ ${t}`));
-    };
-    dump("[CLI] Auto-approve", permissions.getAutoApproveList(), chalk.green);
-    dump("[CLI] Require-approval", permissions.getRequireApprovalList(), chalk.yellow);
-    dump("[Discord] Auto-approve", permissions.getDiscordAutoApproveList(), chalk.cyan);
-    dump("[Slack] Auto-approve", permissions.getSlackAutoApproveList(), chalk.cyan);
+    if (scope !== "all") console.log(chalk.dim(`  (「${RULE_SCOPE_LABELS.all}」 もこの面に効きます)`));
+  }
+
+  /** /permission 対話 picker から呼ばれる「すべてのルールを表示」 */
+  private printPermissionAll(): void {
+    console.log(
+      chalk.dim("\n  評価順: deny → 引数パターン付き allow → ask → ツール名だけの allow (安全確認は残る) → 確認"),
+    );
+    for (const scope of RULE_SCOPES) this.printScopedRules(scope);
     console.log();
   }
 
-  /** /permission 対話 picker のパターンルール編集サブメニュー */
-  private async permissionPatternRulesMenu(): Promise<void> {
+  /** /permission 対話 picker の範囲ごとの編集サブメニュー */
+  private async permissionScopeMenu(scope: RuleScope): Promise<void> {
     const permissions = this.agent.getPermissions();
     while (true) {
-      const rules = permissions.getRules();
-      console.log(chalk.bold("\n  ── Pattern rules ──"));
-      for (const a of ["deny", "allow", "ask"] as const) {
-        const icon = a === "deny" ? chalk.red("✗") : a === "allow" ? chalk.green("✓") : chalk.yellow("?");
-        console.log(chalk.bold(`  ${a}:`));
-        if (rules[a].length === 0) console.log(chalk.dim("    (なし)"));
-        else for (const r of rules[a]) console.log(`    ${icon} ${r}`);
-      }
-      const totalRules = rules.deny.length + rules.allow.length + rules.ask.length;
+      this.printScopedRules(scope);
+      const list = rulesForScope(permissions, scope);
       let action: string;
       try {
         action = await select({
           message: "操作:",
           choices: [
-            { name: "Add deny rule (常に拒否)", value: "add-deny" },
-            { name: "Add allow rule (常に許可)", value: "add-allow" },
-            { name: "Add ask rule (常に確認)", value: "add-ask" },
-            { name: "Remove rule", value: "remove", disabled: totalRules === 0 },
-            { name: chalk.dim("Back"), value: "back" },
+            { name: "ツール全体を許可する (allow。 ツールを一覧から選ぶ)", value: "allow-tool" },
+            { name: "引数パターンで許可する (allow。 例: bash(npm *))", value: "add-allow" },
+            { name: "常に確認するルールを追加 (ask)", value: "add-ask" },
+            { name: "常に拒否するルールを追加 (deny)", value: "add-deny" },
+            { name: "ルールを削除", value: "remove", disabled: list.length === 0 },
+            { name: chalk.dim("戻る"), value: "back" },
           ],
         });
       } catch {
@@ -2806,107 +2789,58 @@ export class REPL {
       }
       if (action === "back") return;
 
-      if (action.startsWith("add-")) {
-        const kind = action.slice(4) as "deny" | "allow" | "ask";
-        try {
-          const pattern = await input({
-            message: `${kind} ルールのパターン (例: bash(npm *) / file_write(./src/**) / web_fetch(domain:github.com)):`,
-          });
-          if (!pattern.trim()) {
-            console.log(chalk.dim("  キャンセル。"));
-            continue;
-          }
-          addPatternRule(this.permissionSettingsContext(), kind, pattern);
-          const icon = kind === "deny" ? "🚫" : kind === "allow" ? "✅" : "❓";
-          console.log(chalk.green(`  ${icon} ${kind}: "${pattern}" を追加`));
-        } catch {
-          /* cancel */
-        }
-      } else if (action === "remove") {
-        const flat = [
-          ...rules.deny.map((p) => ({ act: "deny" as const, pat: p })),
-          ...rules.allow.map((p) => ({ act: "allow" as const, pat: p })),
-          ...rules.ask.map((p) => ({ act: "ask" as const, pat: p })),
-        ];
-        try {
-          const chosen = await select({
-            message: "削除するルールを選択:",
-            choices: flat.map((r) => {
-              const icon = r.act === "deny" ? chalk.red("✗") : r.act === "allow" ? chalk.green("✓") : chalk.yellow("?");
-              return { name: `${icon} ${r.act}: ${r.pat}`, value: `${r.act}|${r.pat}` };
-            }),
-          });
-          const sepIdx = chosen.indexOf("|");
-          const a = chosen.slice(0, sepIdx) as "deny" | "allow" | "ask";
-          const pat = chosen.slice(sepIdx + 1);
-          removePatternRule(this.permissionSettingsContext(), a, pat);
-          console.log(chalk.green(`  ✓ ${a}: "${pat}" を削除`));
-        } catch {
-          /* cancel */
-        }
-      }
-    }
-  }
-
-  /** /permission 対話 picker のツールリスト編集サブメニュー (auto/require/discord/slack) */
-  private async permissionToolListMenu(kind: ToolListKind): Promise<void> {
-    const permissions = this.agent.getPermissions();
-    const labelMap = {
-      auto: "Auto-approve (CLI)",
-      require: "Require-approval (CLI)",
-      discord: "Discord auto-approve",
-      slack: "Slack auto-approve",
-    };
-    const getList = (): string[] => getToolList(permissions, kind);
-
-    while (true) {
-      const list = getList();
-      console.log(chalk.bold(`\n  ── ${labelMap[kind]} ──`));
-      if (list.length === 0) console.log(chalk.dim("  (なし)"));
-      else for (const t of list) console.log(chalk.green(`  ✓ ${t}`));
-
-      let action: string;
-      try {
-        action = await select({
-          message: "操作:",
-          choices: [
-            { name: "Add tool", value: "add" },
-            { name: "Remove tool", value: "remove", disabled: list.length === 0 },
-            { name: chalk.dim("Back"), value: "back" },
-          ],
-        });
-      } catch {
-        return;
-      }
-      if (action === "back") return;
-
-      if (action === "add") {
-        const allTools = this.agent.getToolRegistry().getToolNames();
-        const candidates = allTools.filter((t) => !list.includes(t)).sort();
+      if (action === "allow-tool") {
+        const already = new Set(list.filter((r) => r.action === "allow").map((r) => r.body));
+        const candidates = this.agent
+          .getToolRegistry()
+          .getToolNames()
+          .filter((t) => !already.has(t))
+          .sort();
         if (candidates.length === 0) {
-          console.log(chalk.dim("  追加可能なツールはありません。"));
+          console.log(chalk.dim("  追加できるツールはありません。"));
           continue;
         }
         try {
           const chosen = await select({
-            message: "追加するツールを選択:",
+            message: "許可するツールを選択:",
             choices: candidates.map((t) => ({ name: t, value: t })),
             pageSize: 12,
           });
-          addToolToList(this.permissionSettingsContext(), kind, chosen);
-          console.log(chalk.green(`  ✓ ${chosen} を追加`));
+          const rule = scopedRule(scope, chosen);
+          addPatternRule(this.permissionSettingsContext(), "allow", rule);
+          console.log(chalk.green(`  ✓ allow: "${rule}" を追加`));
+        } catch {
+          /* cancel */
+        }
+      } else if (action.startsWith("add-")) {
+        const kind = action.slice(4) as RuleAction;
+        try {
+          const body = await input({
+            message: `${kind} ルール (例: bash(npm *) / file_write(./src/**) / web_fetch(domain:github.com) / bash):`,
+          });
+          if (!body.trim()) {
+            console.log(chalk.dim("  キャンセル。"));
+            continue;
+          }
+          const rule = scopedRule(scope, body);
+          addPatternRule(this.permissionSettingsContext(), kind, rule);
+          console.log(chalk.green(`  ✓ ${kind}: "${rule}" を追加`));
         } catch {
           /* cancel */
         }
       } else if (action === "remove") {
         try {
           const chosen = await select({
-            message: "削除するツールを選択:",
-            choices: list.map((t) => ({ name: t, value: t })),
-            pageSize: 12,
+            message: "削除するルールを選択:",
+            choices: list.map((r, i) => {
+              const icon =
+                r.action === "deny" ? chalk.red("✗") : r.action === "allow" ? chalk.green("✓") : chalk.yellow("?");
+              return { name: `${icon} ${r.action}: ${r.body}`, value: String(i) };
+            }),
           });
-          removeToolFromList(this.permissionSettingsContext(), kind, chosen);
-          console.log(chalk.green(`  ✓ ${chosen} を削除`));
+          const r = list[Number(chosen)];
+          removePatternRule(this.permissionSettingsContext(), r.action, r.rule);
+          console.log(chalk.green(`  ✓ ${r.action}: "${r.rule}" を削除`));
         } catch {
           /* cancel */
         }

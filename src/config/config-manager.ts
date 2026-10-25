@@ -13,6 +13,7 @@ import {
   saveCredentialsFile,
   getCredentialsPath,
 } from "./credentials.js";
+import { migrateLegacyPermissionLists, migrationNotice, writeMigrationBackup } from "./permission-migration.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".localllm");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
@@ -47,6 +48,19 @@ export function loadConfig(): Config {
   } catch {
     parsed = recoverFromBrokenConfig();
   }
+  // 旧ツール名一覧 (autoApproveTools 等) を security.rules へ 1 回だけ移行する (docs/todo-legacy-ways-cleanup.md T4)。
+  // 書き換え前の内容をバックアップしてから変換し、 下で保存し直す。 2 回目以降は旧キーが無いので何もしない。
+  // バックアップは他の保存 (下のシークレット分離など) より先に書く
+  const originalParsed = structuredClone(parsed);
+  const permissionMigration = migrateLegacyPermissionLists(parsed);
+  let migrationBackupPath: string | null = null;
+  if (permissionMigration.migrated) {
+    try {
+      migrationBackupPath = writeMigrationBackup(CONFIG_FILE, originalParsed);
+    } catch (e) {
+      console.error(`移行前の設定のバックアップに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
   // シークレットは credentials.json から合流させる (PR-04 方針2)。
   // config.json 側に残っている旧形式のシークレットは後段のマイグレーションで分離する。
   const hadInlineSecrets = hasInlineSecrets(parsed);
@@ -61,30 +75,20 @@ export function loadConfig(): Config {
   }
   const defaults = getDefaultConfig();
 
-  // ツール配列はデフォルト ∪ ユーザー設定 で合成する。
-  // こうすることでコード側に追加されたデフォルトツールが既存 config.json でも有効になる。
-  const mergeToolList = (defaultList: string[], savedList?: string[]): string[] => {
-    if (!savedList) return defaultList;
-    return [...new Set([...defaultList, ...savedList])];
-  };
-
   const savedSecurity = parsed.security ?? ({} as Partial<Config["security"]>);
+  // 権限ルールは保存されていればそれが全て (既定ルールと混ぜない。 画面で外した既定ルールが起動のたびに戻らないように)。
+  // 保存が無いときだけ既定ルール。 欠けた種類 (allow だけ書いた等) は空で補う
+  const savedRules = savedSecurity.rules;
+  const rules = savedRules
+    ? { allow: savedRules.allow ?? [], deny: savedRules.deny ?? [], ask: savedRules.ask ?? [] }
+    : defaults.security.rules;
   const merged: Config = {
     ...defaults,
     ...parsed,
     security: {
       ...defaults.security,
       ...savedSecurity,
-      autoApproveTools: mergeToolList(defaults.security.autoApproveTools, savedSecurity.autoApproveTools),
-      requireApprovalTools: mergeToolList(defaults.security.requireApprovalTools, savedSecurity.requireApprovalTools),
-      discordAutoApproveTools: mergeToolList(
-        defaults.security.discordAutoApproveTools,
-        savedSecurity.discordAutoApproveTools,
-      ),
-      slackAutoApproveTools: mergeToolList(
-        defaults.security.slackAutoApproveTools,
-        savedSecurity.slackAutoApproveTools,
-      ),
+      rules,
     },
     context: { ...defaults.context, ...parsed.context },
     features: { ...defaults.features, ...parsed.features },
@@ -102,6 +106,17 @@ export function loadConfig(): Config {
     saveConfig(merged);
     console.log(`config.json 内のシークレットを ${getCredentialsPath()} に分離しました。`);
     console.log(`config.json は共有・バックアップしても安全な内容になりました。`);
+  }
+
+  // バックアップできなかったときは元の config.json を上書きしない (今回の起動だけルールで判定し、 次回また移行を試みる)
+  if (permissionMigration.migrated && migrationBackupPath) {
+    try {
+      saveConfig(merged);
+      console.log(migrationNotice(migrationBackupPath, permissionMigration));
+    } catch (e) {
+      // 保存できなくても今回の起動はルールで判定する (旧キーは読まない)。 次回起動で再び移行を試みる
+      console.error(`権限設定のルールへの移行を保存できませんでした: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   return merged;

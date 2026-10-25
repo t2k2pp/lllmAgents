@@ -14,8 +14,6 @@ import { nonTTYReader } from "../../src/utils/non-tty-reader.js";
 function mkConfig(): SecurityConfig {
   return {
     allowedDirectories: [process.cwd()],
-    autoApproveTools: [], // bash は自動承認リストに入れない（=本来は確認が要る）
-    requireApprovalTools: [],
     rules: { allow: [], deny: [], ask: [] },
   } as unknown as SecurityConfig;
 }

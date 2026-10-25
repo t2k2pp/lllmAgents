@@ -81,10 +81,6 @@ const securitySchema = z
   .object({
     allowedDirectories: z.array(z.string()),
     blockedCommands: z.array(z.string()),
-    autoApproveTools: z.array(z.string()),
-    requireApprovalTools: z.array(z.string()),
-    discordAutoApproveTools: z.array(z.string()),
-    slackAutoApproveTools: z.array(z.string()),
     discordAutorun: z.boolean(),
     slackAutorun: z.boolean(),
     rules: z

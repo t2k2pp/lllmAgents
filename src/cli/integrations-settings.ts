@@ -488,9 +488,9 @@ export function nonInteractiveSettingsNotice(command: "/permission" | "/integrat
     return [
       ...head,
       "  関係するキー:",
-      '    security.rules.allow / security.rules.deny / security.rules.ask  (パターンルール。例: "bash(npm *)")',
-      "    security.autoApproveTools / security.requireApprovalTools        (CLI のツール名一覧)",
-      "    security.discordAutoApproveTools / security.slackAutoApproveTools (Discord / Slack のツール名一覧)",
+      '    security.rules.allow / security.rules.deny / security.rules.ask  (権限ルール。例: "bash(npm *)")',
+      '    先頭に "cli:" / "discord:" / "slack:" を付けるとその面だけに効く (例: "discord:web_fetch")。 無ければすべての面',
+      '    ツール名だけの allow ("file_read") はツール全体の許可 (安全確認は残る)。 引数パターン付き ("bash(npm test)") はその形だけを確認なしで許可',
     ];
   }
   return [

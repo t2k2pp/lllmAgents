@@ -22,11 +22,7 @@ function setup(execute: () => Promise<ToolResult>, name = "vision_analyze", back
   const security: SecurityConfig = {
     allowedDirectories: [],
     blockedCommands: [],
-    autoApproveTools: [name],
-    requireApprovalTools: [],
-    discordAutoApproveTools: [],
-    slackAutoApproveTools: [],
-    rules: { allow: [], deny: [], ask: [] },
+    rules: { allow: [name], deny: [], ask: [] },
   };
   const loop = new AgentLoop(
     { providerType: "openai-compat" } as LLMProvider,

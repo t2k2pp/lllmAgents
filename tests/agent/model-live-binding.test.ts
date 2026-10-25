@@ -9,10 +9,6 @@ const provider = { providerType: "ollama" } as unknown as LLMProvider;
 const security: SecurityConfig = {
   allowedDirectories: [],
   blockedCommands: [],
-  autoApproveTools: [],
-  requireApprovalTools: [],
-  discordAutoApproveTools: [],
-  slackAutoApproveTools: [],
   rules: { allow: [], deny: [], ask: [] },
 };
 

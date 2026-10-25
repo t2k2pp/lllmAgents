@@ -57,11 +57,7 @@ describe("AgentLoop buffered response display", () => {
     const security: SecurityConfig = {
       allowedDirectories: [],
       blockedCommands: [],
-      autoApproveTools: ["response_complete"],
-      requireApprovalTools: [],
-      discordAutoApproveTools: [],
-      slackAutoApproveTools: [],
-      rules: { allow: [], deny: [], ask: [] },
+      rules: { allow: ["response_complete"], deny: [], ask: [] },
     };
     const provider = scriptedProvider([
       [

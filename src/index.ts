@@ -481,12 +481,12 @@ async function main(): Promise<void> {
   await mcpManager.connectAll(toolRegistry);
 
   // Permissions
-  const permissions = new PermissionManager(config.security, (tool) => {
-    // "許可 (設定に保存)" 選択時にconfig.jsonを更新
-    if (!config.security.autoApproveTools.includes(tool)) {
-      config.security.autoApproveTools.push(tool);
-      saveConfig(config);
-    }
+  const permissions = new PermissionManager(config.security, (rule) => {
+    // "許可 (設定に保存)" 選択時に allow ルールを config.json へ保存する。
+    // PermissionManager は config.security.rules を共有しているので通常は追加済み。 念のため無ければ足す
+    config.security.rules ??= { allow: [], deny: [], ask: [] };
+    if (!config.security.rules.allow.includes(rule)) config.security.rules.allow.push(rule);
+    saveConfig(config);
   });
 
   // Hooks

@@ -2585,10 +2585,7 @@ export class AgentLoop {
         });
       }
       // ブリッジ無し: 従来の headless フィルタ
-      const allowed =
-        this.currentSource === "discord"
-          ? this.permissions.getDiscordAllowedToolNames()
-          : this.permissions.getSlackAllowedToolNames();
+      const allowed = this.permissions.getAllowedToolNames(this.currentSource);
       return allDefs.filter((d) => allowed.has(d.function.name));
     }
 

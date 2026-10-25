@@ -13,15 +13,11 @@ vi.mock("../../src/agent/session-manager.js", async (importOriginal) => {
   return { ...actual, saveSession: vi.fn() };
 });
 
-function securityConfig(autoApproveTools: string[] = []): SecurityConfig {
+function securityConfig(allowedTools: string[] = []): SecurityConfig {
   return {
     allowedDirectories: [],
     blockedCommands: [],
-    autoApproveTools,
-    requireApprovalTools: [],
-    discordAutoApproveTools: [],
-    slackAutoApproveTools: [],
-    rules: { allow: [], deny: [], ask: [] },
+    rules: { allow: [...allowedTools], deny: [], ask: [] },
   };
 }
 

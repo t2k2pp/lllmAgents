@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { PlanManager } from "../../src/agent/plan-mode.js";
 import { getDefaultConfig } from "../../src/config/types.js";
+import { PermissionManager } from "../../src/security/permission-manager.js";
 import * as todoModule from "../../src/tools/definitions/todo-write.js";
 
 /**
@@ -21,9 +22,11 @@ describe("ToDo ツールの特別扱い", () => {
     expect(allowed.has("todo_write")).toBe(false);
   });
 
-  it("既定設定の autoApproveTools に ToDo ツールが入り、 todo_write は入らない", () => {
-    const auto = getDefaultConfig().security.autoApproveTools;
-    for (const t of TODO_TOOLS) expect(auto, t).toContain(t);
-    expect(auto).not.toContain("todo_write");
+  it("既定設定で ToDo ツールは確認なし (本質的に安全なツール)、 todo_write は既定ルールに入らない", () => {
+    const config = getDefaultConfig();
+    const pm = new PermissionManager(config.security);
+    for (const t of TODO_TOOLS) expect(pm.getPermissionLevel(t), t).toBe("auto");
+    expect(config.security.rules?.allow).not.toContain("todo_write");
+    expect(pm.getPermissionLevel("todo_write")).toBe("ask");
   });
 });

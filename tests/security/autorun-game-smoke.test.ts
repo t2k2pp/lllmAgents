@@ -10,8 +10,6 @@ import { PermissionManager } from "../../src/security/permission-manager.js";
 function mkConfig(): SecurityConfig {
   return {
     allowedDirectories: [process.cwd()],
-    autoApproveTools: [], // game_smoke は自動承認リストに入れない (= autorun が無ければ確認が要る)
-    requireApprovalTools: [],
     rules: { allow: [], deny: [], ask: [] },
   } as unknown as SecurityConfig;
 }

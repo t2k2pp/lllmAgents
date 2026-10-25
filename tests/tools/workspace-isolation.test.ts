@@ -23,11 +23,7 @@ function security(root: string): SecurityConfig {
   return {
     allowedDirectories: [root],
     blockedCommands: [],
-    autoApproveTools: ["file_write", "bash", "plugin_write"],
-    requireApprovalTools: [],
-    discordAutoApproveTools: [],
-    slackAutoApproveTools: [],
-    rules: { allow: [], deny: [], ask: [] },
+    rules: { allow: ["file_write", "bash", "plugin_write"], deny: [], ask: [] },
   };
 }
 

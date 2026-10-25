@@ -106,7 +106,10 @@ export interface SecondLLMConfig {
 }
 
 export interface SecurityRuleConfig {
-  /** 自動許可するパターンルール例: "bash(npm *)", "file_write(./src/**)" */
+  /**
+   * 許可するルール例: "file_read" (ツール全体。 安全確認は残る), "bash(npm *)", "discord:web_fetch"。
+   * 先頭の "cli:" / "discord:" / "slack:" で効く面を限定できる (無ければすべての面)
+   */
   allow: string[];
   /** 常に拒否するパターンルール例: "bash(rm -rf *)" */
   deny: string[];
@@ -144,12 +147,6 @@ export interface ProcessSandboxConfig {
 export interface SecurityConfig {
   allowedDirectories: string[];
   blockedCommands: string[];
-  autoApproveTools: string[];
-  requireApprovalTools: string[];
-  /** Discord経由のリクエストで自動許可するツール（インタラクティブ確認なし） */
-  discordAutoApproveTools: string[];
-  /** Slack経由のリクエストで自動許可するツール（インタラクティブ確認なし） */
-  slackAutoApproveTools: string[];
   /**
    * 背景サーフェス(Discord/Slack)の autorun (docs/async-surface-permission-delivery-design.md 5.3)。
    * 非同期面では人が15分以内に確認できず、同期ボタン確認(失効 interaction token で必ず401)が
@@ -158,7 +155,12 @@ export interface SecurityConfig {
    */
   discordAutorun?: boolean;
   slackAutorun?: boolean;
-  /** Claude Code 互換のパターンベース権限ルール（ツール名リストより優先） */
+  /**
+   * 権限ルール (Claude Code 互換のパターン + 面の指定)。 権限の設定はこれだけで表す。
+   * 書き方・評価順は src/security/rule-engine.ts と docs/config-reference.md。
+   * 旧キー autoApproveTools / requireApprovalTools / discordAutoApproveTools / slackAutoApproveTools は
+   * 起動時に 1 回だけこのルールへ移行して削除する (src/config/permission-migration.ts)。
+   */
   rules?: SecurityRuleConfig;
   streamCommandOutput?: boolean;
   /** OS-level プロセスサンドボックス設定（bash ツール実行に適用） */
@@ -737,6 +739,17 @@ export const GEMINI_MODELS: readonly GeminiModelEntry[] = [
   },
 ];
 
+/** 既定の allow ルール (読み取り・調べもの系のツール全体の許可。 すべての面) */
+export const DEFAULT_ALLOW_RULES: readonly string[] = [
+  "file_read",
+  "glob",
+  "grep",
+  "browser_snapshot",
+  "vision_analyze",
+  "web_search",
+  "web_fetch",
+];
+
 export function getDefaultConfig(): Config {
   return {
     mainLLM: {
@@ -749,50 +762,11 @@ export function getDefaultConfig(): Config {
     security: {
       allowedDirectories: [],
       blockedCommands: [],
-      autoApproveTools: [
-        "file_read",
-        "glob",
-        "grep",
-        "browser_snapshot",
-        "vision_analyze",
-        "ask_user",
-        "todo_append",
-        "todo_mark",
-        "todo_delete",
-        "enter_plan_mode",
-        "exit_plan_mode",
-        "task_output",
-        "task_list",
-        "task_send",
-        "task_cancel",
-        "web_search",
-        "web_fetch",
-      ],
-      requireApprovalTools: ["file_write", "file_edit", "bash", "browser_navigate", "browser_click", "browser_type"],
-      discordAutoApproveTools: [
-        "file_read",
-        "glob",
-        "grep",
-        "web_search",
-        "web_fetch",
-        "browser_snapshot",
-        "vision_analyze",
-        "current_datetime",
-        "sandbox_info",
-      ],
-      slackAutoApproveTools: [
-        "file_read",
-        "glob",
-        "grep",
-        "web_search",
-        "web_fetch",
-        "browser_snapshot",
-        "vision_analyze",
-        "current_datetime",
-        "sandbox_info",
-      ],
+      // 旧既定の autoApproveTools / discordAutoApproveTools / slackAutoApproveTools と同じ判定になる既定ルール
+      // (本質的に安全なツール INHERENTLY_SAFE_TOOLS は書かなくても常に許可。 3 つの一覧の残りは同じだったので面の指定なし)。
+      // requireApprovalTools は判定に使われていなかったため対応するルールは無い (docs/todo-legacy-ways-cleanup.md T4)
       rules: {
-        allow: [],
+        allow: [...DEFAULT_ALLOW_RULES],
         deny: [],
         ask: [],
       },

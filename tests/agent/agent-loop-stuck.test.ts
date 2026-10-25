@@ -10,10 +10,6 @@ function makeLoop(): AgentLoop {
   const security: SecurityConfig = {
     allowedDirectories: [],
     blockedCommands: [],
-    autoApproveTools: [],
-    requireApprovalTools: [],
-    discordAutoApproveTools: [],
-    slackAutoApproveTools: [],
     rules: { allow: [], deny: [], ask: [] },
   };
   return new AgentLoop(provider, "test-model-7b", new ToolRegistry(), new PermissionManager(security), 8192);

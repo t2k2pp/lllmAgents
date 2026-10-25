@@ -16,10 +16,6 @@ function securityConfig(): SecurityConfig {
   return {
     allowedDirectories: [],
     blockedCommands: [],
-    autoApproveTools: [],
-    requireApprovalTools: [],
-    discordAutoApproveTools: [],
-    slackAutoApproveTools: [],
     rules: { allow: [], deny: [], ask: [] },
   };
 }
@@ -188,7 +184,7 @@ describe("background sub-agent lifecycle", () => {
       chatWithTools: chat,
     } as LLMProvider;
     const config = securityConfig();
-    config.autoApproveTools = ["file_read", "grep"];
+    config.rules = { allow: ["file_read", "grep"], deny: [], ask: [] };
     const manager = makeManager(provider, registry, config);
     const id = manager.launchBackground("general-purpose", "tool cancellation", "run probes");
     await firstStartedPromise;
@@ -300,7 +296,7 @@ describe("background sub-agent lifecycle", () => {
     };
     const provider = { ...immediateProvider(), chat, chatWithTools: chat } as LLMProvider;
     const config = securityConfig();
-    config.autoApproveTools = ["file_read", "grep"];
+    config.rules = { allow: ["file_read", "grep"], deny: [], ask: [] };
     const manager = makeManager(provider, registry, config);
     const id = manager.launchBackground("general-purpose", "tool steer", "run probes");
     await firstStartedPromise;
@@ -360,7 +356,7 @@ describe("background sub-agent lifecycle", () => {
     };
     const provider = { ...immediateProvider(), chat, chatWithTools: chat } as LLMProvider;
     const config = securityConfig();
-    config.autoApproveTools = ["grep"];
+    config.rules = { allow: ["grep"], deny: [], ask: [] };
     const manager = makeManager(provider, registry, config);
     const id = manager.launchBackground("general-purpose", "ignore signal", "old direction");
     const signal = await firstStartedPromise;
@@ -428,7 +424,7 @@ describe("background sub-agent lifecycle", () => {
     };
     const turnProvider = { ...immediateProvider(), chat, chatWithTools: chat } as LLMProvider;
     const turnConfig = securityConfig();
-    turnConfig.autoApproveTools = ["file_read"];
+    turnConfig.rules = { allow: ["file_read"], deny: [], ask: [] };
     const turnManager = makeManager(turnProvider, registry, turnConfig);
     const turnId = turnManager.launchBackground(
       "general-purpose",

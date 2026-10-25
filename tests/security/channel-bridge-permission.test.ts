@@ -21,10 +21,6 @@ import type { InteractionBridge, PermissionRequest, PermissionDecision } from ".
 function mkConfig(overrides: Partial<SecurityConfig> = {}): SecurityConfig {
   return {
     allowedDirectories: [process.cwd()],
-    autoApproveTools: [],
-    requireApprovalTools: [],
-    discordAutoApproveTools: [],
-    slackAutoApproveTools: [],
     rules: { allow: [], deny: [], ask: [] },
     ...overrides,
   } as unknown as SecurityConfig;
@@ -111,10 +107,10 @@ describe("checkToolPermission (channel + bridge)", () => {
     expect(r.allowed).toBe(true);
   });
 
-  it("channel autoApprove のツールはブリッジを呼ばず許可", async () => {
+  it("その面に効くツール全体の allow ルールはブリッジを呼ばず許可", async () => {
     const { bridge, calls } = mkBridge("deny");
     setInteractionBridge("slack", bridge);
-    const pm = new PermissionManager(mkConfig({ slackAutoApproveTools: ["web_search"] }));
+    const pm = new PermissionManager(mkConfig({ rules: { allow: ["slack:web_search"], deny: [], ask: [] } }));
     const r = await pm.checkToolPermission("web_search", { query: "x" }, "slack");
     expect(r.allowed).toBe(true);
     expect(calls.length).toBe(0);
@@ -228,7 +224,7 @@ describe("checkToolPermission (channel + bridge)", () => {
     expect(r.allowed).toBe(false);
     expect(r.reason).toContain("封じ込め");
     // 削除した旧サブコマンドではなく /permission 画面の項目を案内する (T3)
-    expect(r.reason).toContain("/permission → Discord auto-approve tools に bash を追加");
+    expect(r.reason).toContain(`/permission → Discord のルールで許可ルール "discord:bash" を追加`);
     expect(r.reason).not.toContain("discord-add");
   });
 
@@ -248,9 +244,9 @@ describe("checkToolPermission (channel + bridge)", () => {
     expect(r.reason).toContain("自動実行できません");
   });
 
-  it("エスケープハッチ: autoApproveTools に bash を明示追加すれば封じ込め無しでも許可", async () => {
+  it("エスケープハッチ: discord:bash の allow ルールを明示追加すれば封じ込め無しでも許可", async () => {
     vi.mocked(isBashNetworkContained).mockReturnValue(false);
-    const pm = new PermissionManager(mkConfig({ discordAutoApproveTools: ["bash"] }));
+    const pm = new PermissionManager(mkConfig({ rules: { allow: ["discord:bash"], deny: [], ask: [] } }));
     const r = await pm.checkToolPermission("bash", { command: "echo hi" }, "discord");
     expect(r.allowed).toBe(true);
   });

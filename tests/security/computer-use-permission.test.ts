@@ -6,11 +6,7 @@ import { nonTTYReader } from "../../src/utils/non-tty-reader.js";
 function config(overrides: Partial<SecurityConfig> = {}): SecurityConfig {
   return {
     allowedDirectories: [process.cwd()],
-    autoApproveTools: ["computer_click", "computer_screenshot"],
-    requireApprovalTools: [],
-    discordAutoApproveTools: ["computer_click"],
-    slackAutoApproveTools: ["computer_click"],
-    rules: { allow: ["computer_click(*)"], deny: [], ask: [] },
+    rules: { allow: ["computer_click", "cli:computer_screenshot", "computer_click(*)"], deny: [], ask: [] },
     ...overrides,
   } as SecurityConfig;
 }
@@ -25,7 +21,7 @@ describe("native computer use permission boundary", () => {
     expect(result.reason).toContain("CLI");
   });
 
-  it("CLI autorun・autoApprove・allow ruleでも一回確認を省略しない", async () => {
+  it("CLI autorun・ツール全体のallow・引数パターンのallowでも一回確認を省略しない", async () => {
     const readLine = vi.spyOn(nonTTYReader, "readLine").mockResolvedValue("2");
     const pm = new PermissionManager(config());
     pm.setAutorunMode(true);

@@ -207,8 +207,10 @@ describe("非TTY の案内", () => {
     expect(text).toContain("TTY");
     expect(text).toContain("~/.localllm/config.json");
     expect(text).toContain("security.rules");
-    expect(text).toContain("security.autoApproveTools");
-    expect(text).toContain("security.slackAutoApproveTools");
+    expect(text).toContain("discord:");
+    expect(text).not.toContain("AutoApproveTools");
+    expect(text).not.toContain("autoApproveTools");
+    expect(text).not.toContain("requireApprovalTools");
   });
 
   it("/integrations は端末が必要なことと config.json の連携キーを示す", () => {

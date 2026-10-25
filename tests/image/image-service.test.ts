@@ -12,10 +12,6 @@ function makeConfig(imageGen?: ImageGenConfig): Config {
     security: {
       allowedDirectories: [],
       blockedCommands: [],
-      autoApproveTools: [],
-      requireApprovalTools: [],
-      discordAutoApproveTools: [],
-      slackAutoApproveTools: [],
     },
     context: {},
     imageGen,

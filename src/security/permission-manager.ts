@@ -5,40 +5,23 @@ import type { SecurityConfig, SecurityRuleConfig } from "../config/types.js";
 import type { PermissionLevel } from "./rules.js";
 import { checkCommand } from "./rules.js";
 import { Sandbox } from "./sandbox.js";
-import { evaluateRules } from "./rule-engine.js";
+import {
+  allowRuleToolNames,
+  evaluateRules,
+  formatRule,
+  isDeniedByRule,
+  isToolAllowedByRule,
+  type RuleSurface,
+} from "./rule-engine.js";
 import { isBashNetworkContained } from "./containment.js";
 import { isDestructiveCommand } from "./destructive-commands.js";
+import { INHERENTLY_SAFE_TOOLS } from "./inherently-safe-tools.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { getInteractionBridge } from "../agent/interaction-bridge-registry.js";
 import * as logger from "../utils/logger.js";
 
-/** リクエストの発生元 */
-export type RequestSource = "cli" | "discord" | "slack";
-
-// ユーザーに質問する・タスク管理するなど本質的に安全なツール
-// configに関わらず常にauto-approve
-const INHERENTLY_SAFE_TOOLS = new Set([
-  "ask_user",
-  // ToDo 操作系 (戦略 ToDo Phase 1 — docs/strategic-todo-design.md §3.2):
-  // タスク管理は本質的に副作用なし (in-memory state 操作のみ) なので Claude Code の
-  // TaskCreate/TaskUpdate と同じく確認不要。
-  "todo_append",
-  "todo_mark",
-  "todo_delete",
-  "enter_plan_mode",
-  "exit_plan_mode",
-  "task_output",
-  "task_list",
-  "task_send",
-  "task_cancel",
-  "task_diff",
-  "schedule_create",
-  "schedule_list",
-  "schedule_delete",
-  "current_datetime",
-  "sandbox_info",
-  "response_complete",
-]);
+/** リクエストの発生元 (= 権限ルールの面) */
+export type RequestSource = RuleSurface;
 
 function isComputerUseTool(toolName: string): boolean {
   return toolName.startsWith("computer_");
@@ -163,10 +146,6 @@ export function bashNeedsExplicitAsk(command: string, cwd: string): boolean {
 
 export class PermissionManager {
   private sandbox: Sandbox;
-  private autoApprove: Set<string>;
-  private requireApproval: Set<string>;
-  private discordAutoApprove: Set<string>;
-  private slackAutoApprove: Set<string>;
   private discordAutorun: boolean = true;
   private slackAutorun: boolean = true;
   private rules: SecurityRuleConfig;
@@ -194,18 +173,22 @@ export class PermissionManager {
 
   constructor(
     securityConfig: SecurityConfig,
-    /** autoApproveToolsへの永続追加時に呼ばれるコールバック（config.json保存用） */
-    private onPermanentApprove?: (tool: string) => void,
+    /**
+     * 確認ダイアログで「設定に保存して常に許可」 を選んだときに呼ばれるコールバック (config.json 保存用)。
+     * 引数は追加した allow ルール (例: "cli:file_write")。
+     */
+    private onPermanentAllowRule?: (rule: string) => void,
   ) {
     this.sandbox = new Sandbox(securityConfig);
-    this.autoApprove = new Set(securityConfig.autoApproveTools);
-    this.requireApproval = new Set(securityConfig.requireApprovalTools);
-    this.discordAutoApprove = new Set(securityConfig.discordAutoApproveTools ?? []);
-    this.slackAutoApprove = new Set(securityConfig.slackAutoApproveTools ?? []);
     // 5.3: 背景面の autorun。 未指定は true (非同期面では同期確認が成立しないため既定で autorun)。
     this.discordAutorun = securityConfig.discordAutorun ?? true;
     this.slackAutorun = securityConfig.slackAutorun ?? true;
-    this.rules = securityConfig.rules ?? { allow: [], deny: [], ask: [] };
+    // config のルールオブジェクトをそのまま共有する (画面からの変更が config にもそのまま載る)。 欠けた種類は空で補う
+    const rules = securityConfig.rules ?? { allow: [], deny: [], ask: [] };
+    rules.allow ??= [];
+    rules.deny ??= [];
+    rules.ask ??= [];
+    this.rules = rules;
   }
 
   /** 背景面 (discord/slack) の autorun が有効か。 5.3。 */
@@ -231,64 +214,12 @@ export class PermissionManager {
 
   // --- 参照メソッド ---
 
-  getAutoApproveList(): string[] {
-    return [...this.autoApprove].sort();
-  }
-
-  getRequireApprovalList(): string[] {
-    return [...this.requireApproval].sort();
-  }
-
-  getDiscordAutoApproveList(): string[] {
-    return [...this.discordAutoApprove].sort();
-  }
-
-  /** Discord経由で使用可能なツール名のセットを返す（INHERENTLY_SAFE_TOOLS含む） */
-  getDiscordAllowedToolNames(): Set<string> {
-    return new Set([...INHERENTLY_SAFE_TOOLS, ...this.discordAutoApprove]);
-  }
-
-  getSlackAutoApproveList(): string[] {
-    return [...this.slackAutoApprove].sort();
-  }
-
-  /** Slack経由で使用可能なツール名のセットを返す（INHERENTLY_SAFE_TOOLS含む） */
-  getSlackAllowedToolNames(): Set<string> {
-    return new Set([...INHERENTLY_SAFE_TOOLS, ...this.slackAutoApprove]);
-  }
-
-  // --- 変更メソッド（REPLの /permission 画面から使用。 src/cli/permission-settings.ts） ---
-
-  addAutoApprove(tool: string): void {
-    this.autoApprove.add(tool);
-  }
-
-  removeAutoApprove(tool: string): void {
-    this.autoApprove.delete(tool);
-  }
-
-  addRequireApproval(tool: string): void {
-    this.requireApproval.add(tool);
-  }
-
-  removeRequireApproval(tool: string): void {
-    this.requireApproval.delete(tool);
-  }
-
-  addDiscordAutoApprove(tool: string): void {
-    this.discordAutoApprove.add(tool);
-  }
-
-  removeDiscordAutoApprove(tool: string): void {
-    this.discordAutoApprove.delete(tool);
-  }
-
-  addSlackAutoApprove(tool: string): void {
-    this.slackAutoApprove.add(tool);
-  }
-
-  removeSlackAutoApprove(tool: string): void {
-    this.slackAutoApprove.delete(tool);
+  /**
+   * Discord/Slack 経由で確認手段が無いときにモデルへ見せるツール名
+   * (INHERENTLY_SAFE_TOOLS + その面に効く allow ルールのツール名)。
+   */
+  getAllowedToolNames(source: "discord" | "slack"): Set<string> {
+    return new Set([...INHERENTLY_SAFE_TOOLS, ...allowRuleToolNames(this.rules, source)]);
   }
 
   // --- 自律実行モード ---
@@ -304,11 +235,14 @@ export class PermissionManager {
 
   // ---
 
+  /**
+   * CLI でのツール単位の既定レベル (引数を見ない)。 本質的に安全なツール・ツール名だけの allow ルール (CLI に効くもの)・
+   * セッション中常に許可したツールは auto、 それ以外は ask。
+   */
   getPermissionLevel(toolName: string): PermissionLevel {
     if (INHERENTLY_SAFE_TOOLS.has(toolName)) return "auto";
-    if (this.autoApprove.has(toolName)) return "auto";
+    if (isToolAllowedByRule(this.rules, toolName, "cli")) return "auto";
     if (this.alwaysAllowTools.has(toolName)) return "auto";
-    if (this.requireApproval.has(toolName)) return "ask";
     return "ask";
   }
 
@@ -332,7 +266,7 @@ export class PermissionManager {
           reason: `Native Computer Use (${toolName}) is restricted to the local CLI. Discord/Slack remote desktop control is blocked.`,
         };
       }
-      if (evaluateRules({ allow: [], deny: this.rules.deny, ask: [] }, toolName, params) === "deny") {
+      if (isDeniedByRule(this.rules, toolName, params, "cli")) {
         return { allowed: false, reason: `ルールにより ${toolName} はブロックされました` };
       }
       if (toolName === "computer_screenshot" && params.save_path) {
@@ -352,17 +286,14 @@ export class PermissionManager {
     return this.checkCliPermission(toolName, params);
   }
 
-  /** チャネル別の自動許可セット (discord/slackAutoApproveTools) */
-  private channelAutoApprove(source: RequestSource): Set<string> {
-    return source === "discord" ? this.discordAutoApprove : this.slackAutoApprove;
-  }
-
   /**
    * Discord/Slack 経由の権限チェック (docs/channel-interaction-bridge-design.md §3)。
    *
-   * 自動許可 (INHERENTLY_SAFE + チャネル autoApprove + セッション許可) に無いツールは、
-   * InteractionBridge が登録されていればチャネルのボタン UI で確認する (A-2)。
-   * ブリッジが無ければ従来どおり拒否 (headless 互換)。
+   * 評価順: deny ルール → サンドボックス → 引数パターン付き allow ルール → (ask ルールに一致しなければ)
+   * 本質的に安全なツール・ツール名だけの allow ルール・セッション許可 → autorun → ブリッジ確認。
+   * ルールはその面 (discord / slack) に効くもの (面の指定なし、 または "discord:" 等) だけを見る。
+   * 自動許可されないツールは、 InteractionBridge が登録されていればチャネルのボタン UI で確認する (A-2)。
+   * ブリッジが無ければ拒否 (headless)。
    */
   private async checkChannelPermission(
     source: RequestSource,
@@ -372,7 +303,8 @@ export class PermissionManager {
     const label = source === "discord" ? "Discord" : "Slack";
 
     // denyルールはチャネルでも有効（セキュリティ上の強制、 ブリッジでも覆せない）
-    if (evaluateRules({ allow: [], deny: this.rules.deny, ask: [] }, toolName, params) === "deny") {
+    const ruleResult = evaluateRules(this.rules, toolName, params, source);
+    if (ruleResult === "deny") {
       return { allowed: false, reason: `ルールにより ${toolName} はブロックされました（${label}）` };
     }
 
@@ -380,12 +312,17 @@ export class PermissionManager {
     const sandboxHit = this.checkChannelSandbox(toolName, params);
     if (sandboxHit) return sandboxHit;
 
-    // 自動許可: INHERENTLY_SAFE + チャネル autoApprove + チャネルセッション許可
+    if (ruleResult === "allow") return { allowed: true };
+    // ask ルールに一致したら自動許可 (ツール全体の許可・autorun) を使わず確認へ回す
+    const forceAsk = ruleResult === "ask";
+
+    // 自動許可: INHERENTLY_SAFE + ツール名だけの allow ルール + チャネルセッション許可
     const sessionAllow = this.channelSessionAllow.get(source);
     if (
-      INHERENTLY_SAFE_TOOLS.has(toolName) ||
-      this.channelAutoApprove(source).has(toolName) ||
-      sessionAllow?.has(toolName)
+      !forceAsk &&
+      (INHERENTLY_SAFE_TOOLS.has(toolName) ||
+        isToolAllowedByRule(this.rules, toolName, source) ||
+        sessionAllow?.has(toolName))
     ) {
       return { allowed: true };
     }
@@ -415,7 +352,8 @@ export class PermissionManager {
     // proposal §2.5「封じ込めの保証を確認削減に交換する」に従い、 CLI autorun と同じ
     // checkAutorunPermission ロジック (破壊的→拒否 / sandbox パス検査 / 読取・browser・web→許可) を
     // 適用し、 bash は OS 封じ込め (isBashNetworkContained) が成立している面でのみ自動実行する。
-    if (this.channelAutorun(source)) {
+    const ruleHint = `CLI の /permission → ${label} のルールで許可ルール "${formatRule(source, toolName)}" を追加`;
+    if (this.channelAutorun(source) && !forceAsk) {
       // bash は封じ込め必須。 背景面はライブな対話フォールバックが無い (token 失効) ため、
       // 封じ込めが無ければ silent block でなく正直な理由つきで拒否する。
       if (toolName === "bash" && !isBashNetworkContained()) {
@@ -423,7 +361,7 @@ export class PermissionManager {
           allowed: false,
           reason:
             `${label}経由の bash は OS 封じ込め (sandbox) が未確立のため自動実行しません。` +
-            `封じ込めを有効化するか、 CLI の /permission → ${label} auto-approve tools に bash を追加して明示許可してください。`,
+            `封じ込めを有効化するか、 ${ruleHint}して明示許可してください。`,
         };
       }
       const autorunResult = this.checkAutorunPermission(toolName, params);
@@ -435,15 +373,16 @@ export class PermissionManager {
         allowed: false,
         reason:
           `${label}経由では ${toolName} を自動実行できません (破壊的操作または確認が必要な操作)。` +
-          `CLI の /permission → ${label} auto-approve tools に ${toolName} を追加して明示許可してください。`,
+          `${ruleHint}して明示許可してください。`,
       };
     }
-    // autorun 無効時のみ、 従来のブリッジ確認に退避する (対話可能な環境向け)。 ブリッジが無ければ拒否。
+    // autorun 無効時 (または ask ルールに一致) は、 ブリッジ確認に退避する (対話可能な環境向け)。 ブリッジが無ければ拒否。
     const bridge = getInteractionBridge(source);
     if (!bridge?.requestPermission) {
+      const why = forceAsk ? "ask ルールに一致・確認手段なし" : "autorun 無効・確認手段なし";
       return {
         allowed: false,
-        reason: `${label}経由では ${toolName} は許可されていません（autorun 無効・確認手段なし。CLI の /permission → ${label} auto-approve tools で追加可能）`,
+        reason: `${label}経由では ${toolName} は許可されていません（${why}。${ruleHint}すると許可できます）`,
       };
     }
 
@@ -516,8 +455,8 @@ export class PermissionManager {
     toolName: string,
     params: Record<string, unknown>,
   ): Promise<{ allowed: boolean; reason?: string; abortExecution?: boolean }> {
-    // パターンルール評価（ツール名リストより優先）
-    const ruleResult = evaluateRules(this.rules, toolName, params);
+    // ルール評価 (deny > 引数パターン付き allow > ask)。 CLI に効くルールだけを見る
+    const ruleResult = evaluateRules(this.rules, toolName, params, "cli");
     if (ruleResult === "deny") {
       return { allowed: false, reason: `ルールにより ${toolName} はブロックされました` };
     }
@@ -525,7 +464,7 @@ export class PermissionManager {
       return { allowed: true };
     }
     // ruleResult === "ask" の場合はそのまま確認ダイアログへ進む
-    // ruleResult === null の場合はツール名リストで判定
+    // ruleResult === null の場合は autorun → ツール単位のレベル (ツール名だけの allow ルール等) で判定
 
     // --- 封じ込め連動の bash 自動許可 (Phase 3) / 自律実行モード (autorun) ---
     // 封じ込め(macOS fs + proxy 強制)時は autorun トグル OFF でも bash を自動許可する。
@@ -838,12 +777,12 @@ export class PermissionManager {
       };
     }
     if (action === "permanent") {
-      this.autoApprove.add(toolName);
-      if (this.onPermanentApprove) {
-        this.onPermanentApprove(toolName);
-      }
+      // CLI だけに効くツール全体の allow ルールとして保存する (Discord/Slack には広げない)
+      const rule = formatRule("cli", toolName);
+      this.addRule("allow", rule);
+      this.onPermanentAllowRule?.(rule);
       console.log(
-        chalk.green(`  ✅ ${toolName} を設定に保存しました（/permission → Auto-approve tools (CLI) で取り消し可能）`),
+        chalk.green(`  ✅ 許可ルール "${rule}" を設定に保存しました（/permission → CLI のルール で取り消し可能）`),
       );
     } else if (action === "always") {
       this.alwaysAllowTools.add(toolName);

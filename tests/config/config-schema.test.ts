@@ -11,7 +11,7 @@ describe("sanitizeParsedConfig", () => {
       mainLLM: { providerType: "vllm", baseUrl: "http://x:8000", model: "m", contextWindow: 32768 },
       streamingDisplay: true,
       jpyPerUsd: 150,
-      security: { autoApproveTools: ["file_read"] },
+      security: { rules: { allow: ["file_read", "discord:web_fetch"] } },
     };
     const r = sanitizeParsedConfig(input);
     expect(r.warnings).toEqual([]);
@@ -40,9 +40,9 @@ describe("sanitizeParsedConfig", () => {
   });
 
   it("配列であるべき箇所にスカラーが入っていたら取り除く", () => {
-    const r = sanitizeParsedConfig({ security: { autoApproveTools: "file_read" } });
+    const r = sanitizeParsedConfig({ security: { allowedDirectories: "C:/work" } });
     expect(r.warnings).toHaveLength(1);
-    expect(r.warnings[0]).toContain("security.autoApproveTools");
+    expect(r.warnings[0]).toContain("security.allowedDirectories");
     expect(r.config).toEqual({ security: {} });
   });
 

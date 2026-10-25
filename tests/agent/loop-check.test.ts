@@ -12,11 +12,7 @@ import { clearTodos, todoAppendTool, todoMarkTool, getCurrentTodos } from "../..
 const security: SecurityConfig = {
   allowedDirectories: [],
   blockedCommands: [],
-  autoApproveTools: ["work"],
-  requireApprovalTools: [],
-  discordAutoApproveTools: [],
-  slackAutoApproveTools: [],
-  rules: { allow: [], deny: [], ask: [] },
+  rules: { allow: ["work"], deny: [], ask: [] },
 };
 
 /**

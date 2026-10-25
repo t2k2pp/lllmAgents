@@ -24,11 +24,7 @@ function makeSecurityConfig(autoApprove: string[]): SecurityConfig {
   return {
     allowedDirectories: [],
     blockedCommands: [],
-    autoApproveTools: autoApprove,
-    requireApprovalTools: [],
-    discordAutoApproveTools: [],
-    slackAutoApproveTools: [],
-    rules: { allow: [], deny: [], ask: [] },
+    rules: { allow: [...autoApprove], deny: [], ask: [] },
   };
 }
 

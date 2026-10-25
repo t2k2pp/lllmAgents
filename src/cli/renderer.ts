@@ -86,7 +86,7 @@ export const BUILTIN_HELP_ENTRIES: ReadonlyArray<{ usage: string; summary: strin
   { usage: "/swap", summary: "メインLLM ⇔ セカンドLLM を入れ替え (-y で確認スキップ)" },
   { usage: "/models", summary: "Model Registry: 登録済モデル一覧 → main/second に設定・編集・複製・削除・追加" },
   { usage: "/integrations", summary: "外部サービス連携の設定 (Discord / Slack / 会話ログ / Web検索)" },
-  { usage: "/permission", summary: "権限の設定画面 (パターンルール / ツール名一覧)" },
+  { usage: "/permission", summary: "権限の設定画面 (権限ルール。 すべての面 / CLI・Discord・Slack ごと)" },
   { usage: "/todo", summary: "タスクリスト (active のみ。 all / archive サブコマンドあり)" },
   { usage: "/goal-seek <goal>", summary: "Goal Seek mode 開始 — acceptance criteria を立て合格まで自律実行" },
   { usage: "/exit-goal-seek", summary: "Goal Seek mode を抜ける (acceptance 未達成でも user 明示で中断)" },

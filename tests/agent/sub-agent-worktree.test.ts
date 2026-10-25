@@ -78,11 +78,7 @@ function setup(): {
   const config: SecurityConfig = {
     allowedDirectories: [root],
     blockedCommands: [],
-    autoApproveTools: ["file_write"],
-    requireApprovalTools: [],
-    discordAutoApproveTools: [],
-    slackAutoApproveTools: [],
-    rules: { allow: [], deny: [], ask: [] },
+    rules: { allow: ["file_write"], deny: [], ask: [] },
   };
   const worktrees = new WorktreeManager({ mainRoot: repo, managedRoot: path.join(root, "managed"), git });
   return {
