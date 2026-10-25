@@ -6,7 +6,7 @@
 > **運用ルール**:
 > - 新しい設計書を追加したら、この索引に1行追加する (Status 付き)
 > - Status は索引で一元管理する (各ファイルへのヘッダ付与は、そのファイルを触るついでに行う)
-> - Status 凡例: `implemented` = 実装済みの正 / `in-progress` = 実装進行中 / `proposal` = 未実装の構想 / `record` = レビュー・調査の記録 (更新しない) / `reference` = 手順書・参照資料 / `superseded` = 後継 doc に置き換え
+> - Status 凡例: `implemented` = 実装済みの正 / `in-progress` = 実装進行中 / `proposal` = 未実装の構想 / `record` = レビュー・調査の記録 (更新しない) / `reference` = 手順書・参照資料 / `superseded` = 後継 doc に置き換え / `design` = 設計済み・未実装
 
 ## 正典 (常に実装と一致させる)
 
@@ -65,6 +65,7 @@
 | [todo-goal-lifecycle.md](todo-goal-lifecycle.md) | implemented | ToDo / Goal Slot のライフサイクル |
 | [ephemeral-context-design.md](ephemeral-context-design.md) | implemented | Ephemeral Context (span スコープの揮発メッセージ) |
 | [context-intelligence.md](context-intelligence.md) | implemented | コンテキストインテリジェンス (圧縮・履歴管理) |
+| [context-reduction-redesign.md](context-reduction-redesign.md) | design | コンテキスト整理の作り直し (次が必ず入る予約で発火・決まった段階で 1 回だけ書き換え・予熱・計測)。 実装後に忘却/区切り戦略の設計を置き換える |
 | [evaluation-loop.md](evaluation-loop.md) | implemented | 評価ループ (/try 試行錯誤モード) |
 | [tool-call-salvage-pipe-format-design.md](tool-call-salvage-pipe-format-design.md) | implemented | ツール呼び出しサルベージ (`<\|tool\|>call:` 形式) |
 | [input-compression-design.md](input-compression-design.md) | implemented | opt-in 入力圧縮モード (/compress-input) |

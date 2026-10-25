@@ -3,6 +3,7 @@
 > 作成日: 2026-10-25 / ステータス: **未着手** (計画のみ。 改修は今後実施)
 > 前提: [prompt-prefix-stability.md](prompt-prefix-stability.md) (状態通知の追記化、 2026-10-25 実装済) の続き。
 > 関連: [response-latency-improvement.md](response-latency-improvement.md) / [prompt-cache-cost-reduction.md](prompt-cache-cost-reduction.md)
+> 分担: T1 (計測) と T4 (依頼の区切りでの書き換え) は [context-reduction-redesign.md](context-reduction-redesign.md) (§10 / §6.2) で扱う。 本書は T2/T3/T5/T6 を扱う。
 
 ## 背景
 - myppt セッション (2026-10-24) で 1 回の LLM 呼び出しが 17〜44 分。 主因 (日時・Goal・ToDo を履歴より前に置いていた) は
@@ -38,6 +39,7 @@
 | evaluator (second LLM 無し時) | `src/agent/evaluator.ts` | 条件付き |
 | 圧縮 / 忘却の要約 | `hierarchical-compressor.ts` / `compress-text.ts` / `forgetting.ts` | 文脈が溢れた時 |
 | handoff / goal 昇格 | `handoff.ts` / `goal-promotion.ts` | まれ |
+| サブエージェント (`task` ツールでメインのモデル自身に委任) | `src/agent/sub-agent.ts` | 委任のたび。 別の文脈で何度も呼ぶので、 戻った後のメイン呼び出しは確実に全部の再計算になる (影響が最も大きい見込み) |
 
 - [ ] 補助呼び出しの経路を 1 か所 (例: 補助用 provider の取得関数) にまとめ、 振り分けを差し替えられるようにする
 - [ ] 振り分け先の選択肢を比較して決める
