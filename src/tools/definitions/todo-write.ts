@@ -182,7 +182,7 @@ export function buildTodoSection(): string {
   }
   if (completedCount > 0) {
     lines.push("");
-    lines.push(`(completed: ${completedCount} 件 — system prompt から省略)`);
+    lines.push(`(completed: ${completedCount} 件 — 一覧から省略)`);
   }
   return lines.join("\n");
 }

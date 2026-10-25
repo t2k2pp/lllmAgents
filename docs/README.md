@@ -56,7 +56,8 @@
 | [prompt-language-policy.md](prompt-language-policy.md) | in-progress | プロンプト言語ポリシー (モデル向け英語正本。Phase 1 済 / 2,3 未) |
 | [prompt-ja-reference.md](prompt-ja-reference.md) | reference | プロンプト日本語リファレンス (参照用スナップショット) |
 | [prompt-optimization.md](prompt-optimization.md) | implemented | システムプロンプト最適化 |
-| [prompt-cache-cost-reduction.md](prompt-cache-cost-reduction.md) | implemented | プロンプトキャッシュによるコスト削減 |
+| [prompt-cache-cost-reduction.md](prompt-cache-cost-reduction.md) | implemented | プロンプトキャッシュによるコスト削減 (§3.1 は下記で改訂) |
+| [prompt-prefix-stability.md](prompt-prefix-stability.md) | implemented | プロンプト前方一致の安定化 (状態通知を末尾へ追記、 KV キャッシュ再利用) |
 | [strategic-todo-design.md](strategic-todo-design.md) | implemented | 準システムプロンプト+戦略 ToDo アーキテクチャ |
 | [lightweight-register-anchors-design.md](lightweight-register-anchors-design.md) | implemented | 軽量タスクの過剰プラン抑制 (軽いアンカー) |
 | [reactive-intervention-coherence-design.md](reactive-intervention-coherence-design.md) | implemented | 反応的介入レイヤーの整合 (成果物形状の単一前提) |

@@ -356,7 +356,7 @@ async function main(): Promise<void> {
   toolRegistry.register(sandboxInfoTool);
   toolRegistry.register(webFetchTool);
   toolRegistry.register(createWebSearchTool(config.search));
-  // current_datetime は不要（システムプロンプトの環境情報に現在日時を含めているため）
+  // current_datetime は不要（ユーザー発言ごと・状態変化ごとの状態通知に現在日時を添付しているため）
 
   // Knowledge (Obsidian) tools
   setObsidianConfig(config.obsidian ?? null);

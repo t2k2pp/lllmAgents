@@ -42,6 +42,10 @@
 ## 3. 設計
 
 ### 3.1 安定プレフィクス化(全プロバイダ)
+
+> **2026-10-25 改訂**: 下記の「dynamic を 2 つ目の system にする」 方式は、 dynamic が履歴より前に入るため
+> 前方一致が毎ターン system の末尾で途切れていた (llama.cpp ハイブリッドモデルでは毎回 0 から再計算)。
+> 現在は dynamic を末尾の未送信メッセージへの状態通知として追記する。 正本は [prompt-prefix-stability.md](prompt-prefix-stability.md)。
 system プロンプトを **stable(キャッシュ対象)** と **dynamic(毎ターン変化)** に分離する。
 
 - `system-prompt.ts`: Environment 節から **現在日時を除去**(session 内で安定な値のみ base に残す)。

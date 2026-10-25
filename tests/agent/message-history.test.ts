@@ -179,7 +179,18 @@ describe("MessageHistory.purgeEphemeral — span 境界での揮発メッセー�
   });
 });
 
-describe("MessageHistory.getMessages — system の stable/dynamic 分割 (プロンプトキャッシュ)", () => {
+describe("MessageHistory — 前方一致の安定化 (docs/prompt-prefix-stability.md)", () => {
+  const callA = [{ id: "call_a", type: "function" as const, function: { name: "f", arguments: "{}" } }];
+  const callB = [{ id: "call_b", type: "function" as const, function: { name: "f", arguments: "{}" } }];
+  const T0 = new Date(2026, 9, 25, 10, 0, 0);
+  const T1 = new Date(2026, 9, 25, 10, 5, 0);
+
+  function withState(state: { value: string }): MessageHistory {
+    const h = new MessageHistory("BASE");
+    h.setSystemPromptComposer((base) => ({ stable: base, dynamic: state.value }));
+    return h;
+  }
+
   it("composer 未設定なら system は 1 メッセージ (後方互換)", () => {
     const h = new MessageHistory("BASE");
     h.addUserMessage("U1");
@@ -188,22 +199,12 @@ describe("MessageHistory.getMessages — system の stable/dynamic 分割 (プ�
     expect(msgs[0].content).toBe("BASE");
   });
 
-  it("composer が {stable,dynamic} を返すと system が 2 メッセージに分かれる (stable が先頭=キャッシュ対象)", () => {
-    const h = new MessageHistory("BASE");
-    h.setSystemPromptComposer((base) => ({ stable: base, dynamic: "DT/GOAL/TODO" }));
+  it("dynamic は履歴より前の system に入らない (system は stable の 1 通だけ)", () => {
+    const h = withState({ value: "TODO-1" });
     h.addUserMessage("U1");
-    const msgs = h.getMessages();
-    const sys = msgs.filter((m) => m.role === "system");
-    expect(sys.length).toBe(2);
-    expect(sys[0].content).toBe("BASE"); // 安定 base = キャッシュ対象 (先頭)
-    expect(sys[1].content).toBe("DT/GOAL/TODO"); // 動的 = キャッシュ境界より後ろ
-  });
-
-  it("dynamic が空文字なら system は 1 メッセージのまま", () => {
-    const h = new MessageHistory("BASE");
-    h.setSystemPromptComposer((base) => ({ stable: base, dynamic: "   " }));
     const sys = h.getMessages().filter((m) => m.role === "system");
     expect(sys.length).toBe(1);
+    expect(sys[0].content).toBe("BASE");
   });
 
   it("文字列を返す旧シグネチャ composer は全量 stable 扱い (1 メッセージ)", () => {
@@ -212,5 +213,106 @@ describe("MessageHistory.getMessages — system の stable/dynamic 分割 (プ�
     const sys = h.getMessages().filter((m) => m.role === "system");
     expect(sys.length).toBe(1);
     expect(sys[0].content).toBe("BASE\n\nEXTRA");
+  });
+
+  it("新しい user メッセージには日時と状態を添付し、 本文の後ろに描画する", () => {
+    const h = withState({ value: "TODO-1" });
+    h.addUserMessage("U1");
+    expect(h.attachDynamicContext(T0)).toBe(true);
+    const last = h.getMessages().at(-1);
+    expect(typeof last?.content).toBe("string");
+    const text = last?.content as string;
+    expect(text.startsWith("U1\n\n<harness-context>")).toBe(true);
+    expect(text).toContain("# Current datetime");
+    expect(text).toContain("TODO-1");
+    expect(last).not.toHaveProperty("contextNote"); // provider に内部フィールドを渡さない
+    // ユーザー発言の判定用の raw は本文のまま
+    expect(h.getRawMessages().at(-1)?.content).toBe("U1");
+  });
+
+  it("状態が変わらない間は tool 結果に添付せず、 前回送った部分は 1 文字も変わらない", () => {
+    const state = { value: "TODO-1" };
+    const h = withState(state);
+    h.addUserMessage("U1");
+    h.attachDynamicContext(T0);
+    const first = JSON.stringify(h.getMessages());
+    h.addAssistantMessage("", callA);
+    h.addToolResult("call_a", "R1");
+    expect(h.attachDynamicContext(T1)).toBe(false);
+    const second = JSON.stringify(h.getMessages());
+    expect(second.startsWith(first.slice(0, -1))).toBe(true); // 末尾 "]" を除いて前方一致
+  });
+
+  it("状態が変わったら末尾の tool 結果に添付し、 過去の通知は書き換えない", () => {
+    const state = { value: "TODO-1" };
+    const h = withState(state);
+    h.addUserMessage("U1");
+    h.attachDynamicContext(T0);
+    const userRendered = JSON.stringify(h.getMessages()[1]);
+    h.addAssistantMessage("", callA);
+    h.addToolResult("call_a", "R1");
+    state.value = "TODO-2";
+    expect(h.attachDynamicContext(T1)).toBe(true);
+    const msgs = h.getMessages();
+    expect(JSON.stringify(msgs[1])).toBe(userRendered);
+    expect(msgs.at(-1)?.content as string).toContain("TODO-2");
+  });
+
+  it("送信済みのメッセージには添付しない (接続リトライで同じ履歴を再送する場合)", () => {
+    const state = { value: "TODO-1" };
+    const h = withState(state);
+    h.addUserMessage("U1");
+    h.attachDynamicContext(T0);
+    h.addAssistantMessage("", callA);
+    h.addToolResult("call_a", "R1");
+    h.attachDynamicContext(T1); // 送信 (状態不変なので添付なし)
+    const sent = JSON.stringify(h.getMessages());
+    state.value = "TODO-2";
+    expect(h.attachDynamicContext(T1)).toBe(false); // 再送: 末尾は送信済み
+    expect(JSON.stringify(h.getMessages())).toBe(sent);
+    // 次の新しいメッセージで反映される
+    h.addAssistantMessage("", callB);
+    h.addToolResult("call_b", "R2");
+    expect(h.attachDynamicContext(T1)).toBe(true);
+    expect(h.getMessages().at(-1)?.content as string).toContain("TODO-2");
+  });
+
+  it("前回通知を付けたメッセージが消えたら (揮発除去など) 状態を出し直す", () => {
+    const h = withState({ value: "TODO-1" });
+    h.addUserMessage("nudge", { ephemeral: true });
+    h.attachDynamicContext(T0);
+    h.purgeEphemeral();
+    h.addUserMessage("U2");
+    h.attachDynamicContext(T1);
+    h.addAssistantMessage("", callA);
+    h.addToolResult("call_a", "R1");
+    h.replaceOlderMessages("要約", 2); // U2 (通知付き) を圧縮で落とす
+    expect(h.attachDynamicContext(T1)).toBe(true);
+    expect(h.getMessages().at(-1)?.content as string).toContain("TODO-1");
+  });
+
+  it("末尾が assistant なら添付を見送り、 次の呼び出しで添付する", () => {
+    const state = { value: "TODO-1" };
+    const h = withState(state);
+    h.addUserMessage("U1");
+    h.attachDynamicContext(T0);
+    state.value = "TODO-2";
+    h.addAssistantMessage("途中の応答");
+    expect(h.attachDynamicContext(T1)).toBe(false);
+    h.addUserMessage("続けて");
+    expect(h.attachDynamicContext(T1)).toBe(true);
+    expect(h.getMessages().at(-1)?.content as string).toContain("TODO-2");
+  });
+
+  it("画像付き user (ContentPart[]) には text パートとして足す", () => {
+    const h = withState({ value: "" });
+    h.addUserMessage([{ type: "image_url", image_url: { url: "data:x" } }]);
+    h.attachDynamicContext(T0);
+    const content = h.getMessages().at(-1)?.content;
+    expect(Array.isArray(content)).toBe(true);
+    const parts = content as { type: string; text?: string }[];
+    expect(parts.length).toBe(2);
+    expect(parts[1].type).toBe("text");
+    expect(parts[1].text).toContain("# Current datetime");
   });
 });

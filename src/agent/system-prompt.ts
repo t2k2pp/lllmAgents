@@ -235,8 +235,8 @@ No access outside the sandbox. Block dangerous commands (rm -rf, etc.). No hardc
   // 注: 「現在日時」 は **意図的にここへ含めない**。 秒単位で変化する値を system prompt の
   // 前方に置くと、 プロンプトキャッシュ (Anthropic の cache_control / GPT・Gemini の自動キャッシュ /
   // ローカル LLM の KV 前方一致) が毎ターン無効化され、 入力コスト・TTFT が悪化する
-  // (docs/prompt-cache-cost-reduction.md)。 現在日時はキャッシュ境界より後ろの動的サフィクス
-  // (agent-loop の composeQuasiSystemPrompt) で注入する。 ここに置くのは session 内で安定な値のみ。
+  // (docs/prompt-prefix-stability.md)。 現在日時は MessageHistory.attachDynamicContext() が
+  // 末尾の未送信メッセージに添付する。 ここに置くのは session 内で安定な値のみ。
   parts.push(`
 # Environment
 - Platform: ${process.platform}

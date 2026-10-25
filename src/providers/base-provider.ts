@@ -13,6 +13,13 @@ export interface Message {
    * docs/ephemeral-context-design.md §7 参照。
    */
   thinking?: string;
+  /**
+   * ハーネスが添付した状態通知 (現在日時 / Goal / ToDo)。 内部ストレージ専用フィールドで、
+   * provider への送信時は MessageHistory.getMessages() が本文の後ろに連結して送る。
+   * 一度送ったメッセージには付け直さない (前方一致キャッシュを壊さないため)。
+   * docs/prompt-prefix-stability.md 参照。
+   */
+  contextNote?: string;
 }
 
 export interface ContentPart {

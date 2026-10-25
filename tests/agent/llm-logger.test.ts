@@ -147,6 +147,35 @@ describe("LLMLogger privacy / capacity", () => {
     expect("tools" in b).toBe(false);
   });
 
+  it("既存メッセージが書き換わったら、 最初に食い違った位置から記録する (キャッシュ破壊の可視化)", () => {
+    const logger = new LLMLogger("rewrite", "rewrite", { logsDir: tmpHome });
+    const sys = { role: "system", content: "S" };
+    logger.logRequest([sys, { role: "user", content: "one" }, { role: "tool", content: "R1" }], "m");
+    // 件数は増えたが、 index 2 が書き換わっている (忘却のトゥームストーン化など)
+    logger.logRequest(
+      [
+        sys,
+        { role: "user", content: "one" },
+        { role: "tool", content: "[忘却済み]" },
+        { role: "user", content: "two" },
+      ],
+      "m",
+    );
+    const [, b] = readEntries(logger);
+    expect(b.messageOffset).toBe(2);
+    expect(b.messages).toEqual([
+      { role: "tool", content: "[忘却済み]" },
+      { role: "user", content: "two" },
+    ]);
+  });
+
+  it("サーバが報告したキャッシュ再利用数を response に記録する", () => {
+    const logger = new LLMLogger("cached", "cached", { logsDir: tmpHome });
+    logger.logResponse({ model: "m", tokensIn: 1000, tokensCached: 900 });
+    const [r] = readEntries(logger);
+    expect(r.tokensCached).toBe(900);
+  });
+
   it("単一ファイル上限に達した後はlog_limitを残して追記を止める", () => {
     const logger = new LLMLogger("cap", "cap", { logsDir: tmpHome, maxFileBytes: 600 });
     logger.logResponse({ model: "m", text: "x".repeat(300) });

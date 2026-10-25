@@ -496,7 +496,8 @@ export class AgentLoop {
     }
     // 戦略 ToDo Phase 1 (docs/strategic-todo-design.md §2.2 / §3.1):
     // 準システムプロンプト動的合成。 base + goal section + todo section を毎呼出で fresh に作る。
-    // composer は MessageHistory.getMessages() が呼ぶたびに最新の goal-slot / todos を読んで合成。
+    // composer は MessageHistory が呼ぶたびに最新の goal-slot / todos を読んで合成する。
+    // Goal / ToDo は system ではなく、 変化時に末尾へ添付する状態通知になる (docs/prompt-prefix-stability.md)。
     this.history = new MessageHistory(systemPrompt);
     this.history.setSystemPromptComposer((base) => this.composeQuasiSystemPrompt(base));
     // Phase C-2 + D-4: 圧縮閾値と keepRecentMessages を tier 由来で設定。
@@ -1090,6 +1091,7 @@ export class AgentLoop {
         let finishReason = "stop"; // LLMの終了理由（"length"なら出力が途中で切れた）
         let tokensIn: number | undefined;
         let tokensOut: number | undefined;
+        let tokensCached: number | undefined;
         // LLM呼び出しループ: 接続エラー時は自動リトライ、その他はユーザーに判断を委ねる
         let connectionRetries = 0;
 
@@ -1098,6 +1100,9 @@ export class AgentLoop {
           if (!(await pauseDurablyIfRequested(iteration))) return;
           try {
             const toolDefs = this.getFilteredToolDefs();
+            // 状態通知 (現在日時 / Goal / ToDo) を末尾の未送信メッセージに添付する。
+            // 送信済みのメッセージは書き換えないので、 リトライで再送しても前方一致は崩れない。
+            this.history.attachDynamicContext();
             // LLM I/O ログ: リクエスト記録
             this.llmLogger.nextTurn();
             this.llmLogger.logRequest(
@@ -1358,6 +1363,7 @@ export class AgentLoop {
                     this.lastPromptTokens = chunk.usage.promptTokens ?? this.lastPromptTokens;
                     tokensIn = chunk.usage.promptTokens;
                     tokensOut = chunk.usage.completionTokens;
+                    tokensCached = chunk.usage.cachedTokens;
                     const promptTokens = chunk.usage.promptTokens ?? 0;
                     const outputTokens = chunk.usage.completionTokens ?? 0;
                     const cacheRead = chunk.usage.cachedTokens ?? 0;
@@ -1420,6 +1426,7 @@ export class AgentLoop {
               toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
               tokensIn,
               tokensOut,
+              tokensCached,
               finishReason,
             });
 
@@ -2617,7 +2624,8 @@ export class AgentLoop {
    * (「セカンドLLM」「セカンド LLM」「second llm」「サブエージェント」「委任」「頼んで」「依頼」 等)
    */
   private hasRecentDelegationIntent(): boolean {
-    const messages = this.history.getMessages();
+    // raw を見る: getMessages() は状態通知 (ToDo の文言) を本文に連結するため誤検出する
+    const messages = this.history.getRawMessages();
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       if (m.role === "user") {
@@ -3790,7 +3798,7 @@ export class AgentLoop {
     if (seedTodos) {
       setTodosFromGoal(goal.acceptance_criteria.map((c) => ({ content: c, status: "pending" as const })));
     }
-    // 準システムプロンプト composer (構築時に注入済) が次回 getMessages() で goal section を含めて再合成する。
+    // 準システムプロンプト composer (構築時に注入済) が次回の状態通知で goal section を含めて再合成する。
     // ここで明示的な updateSystemPrompt は不要。
     logger.info(`[goal-seek] mode entered, ${goal.acceptance_criteria.length} criteria`);
   }
@@ -3803,13 +3811,14 @@ export class AgentLoop {
     if (this.currentMode === "forward") return;
     clearGoalSlot();
     this.currentMode = "forward";
-    // composer が次回 getMessages() で goal section を含めない形で再合成する。
+    // composer が次回の状態通知で goal section を含めない形で再合成する。
     logger.info(`[goal-seek] mode exited (${reason})`);
   }
 
   /**
    * 準システムプロンプトを毎呼出で fresh に合成する composer。
-   * MessageHistory.getMessages() から呼ばれる (動的合成、 docs/strategic-todo-design.md §3.1)。
+   * MessageHistory が呼ぶ (動的合成、 docs/strategic-todo-design.md §3.1)。 base は getMessages() の先頭 system、
+   * Goal / ToDo は attachDynamicContext() の状態通知になる (docs/prompt-prefix-stability.md)。
    *
    * 構成:
    *   1. base: 静的 system prompt (agent identity / tool guides 等)
@@ -3819,21 +3828,9 @@ export class AgentLoop {
    * 注: register / mode 表示 は今後追加候補 (Phase 1 試験的)。 現状は省略。
    */
   private composeQuasiSystemPrompt(base: string): { stable: string; dynamic: string } {
+    // dynamic は system には入らず、 MessageHistory.attachDynamicContext() が状態の変わった時だけ
+    // 末尾の未送信メッセージに添付する。 現在日時もそこで付く (docs/prompt-prefix-stability.md)。
     const dynamicParts: string[] = [];
-    // 現在日時: 旧版は buildSystemPrompt (base) の Environment 節に置いていたが、
-    // 秒変化する値が stable プレフィクスに混じるとプロンプトキャッシュが毎ターン壊れる
-    // (docs/prompt-cache-cost-reduction.md)。 キャッシュ境界より後ろの dynamic 側へ移設。
-    const now = new Date();
-    const localDatetime = now.toLocaleString("ja-JP", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    });
-    dynamicParts.push(`# Current datetime\n${localDatetime}`);
     if (this.currentMode === "goal-seek") {
       const goalSection = buildGoalSlotSection();
       if (goalSection) dynamicParts.push(goalSection);

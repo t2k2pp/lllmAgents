@@ -206,7 +206,7 @@ export class AzureAnthropicProvider implements LLMProvider {
     };
     // system: キャッシュ ON のときは text ブロック配列にし、 先頭(安定 base)に cache_control を付与。
     // レンダリング順は tools → system なので、 system[0] の breakpoint で tools+system[0] がキャッシュされる。
-    // 末尾 (dynamic = 現在日時/goal/todo) はキャッシュ境界より後ろなので毎ターン再処理 (=正しい)。
+    // 現在日時/goal/todo は system に入らず、 末尾メッセージへの状態通知になる (docs/prompt-prefix-stability.md)。
     if (systemBlocksText.length > 0) {
       if (cacheControl) {
         body.system = systemBlocksText.map((text, i) => {

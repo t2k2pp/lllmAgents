@@ -30,7 +30,11 @@ export interface LLMRequestLog extends LogContext {
   type: "request";
   model: string;
   messages: unknown[];
-  /** messages が履歴全体の何番目から始まるか。v2 ログの差分復元用。 */
+  /**
+   * messages が履歴全体の何番目から始まるか。v2 ログの差分復元用。
+   * 前回 request と最初に食い違った位置。 前回の messageTotal より小さければ、 既存メッセージが
+   * 書き換わった (= 前方一致キャッシュが外れた) ことを示す (docs/prompt-prefix-stability.md §4.1)。
+   */
   messageOffset?: number;
   /** このリクエスト時点の履歴総件数。 */
   messageTotal?: number;
@@ -48,6 +52,8 @@ export interface LLMResponseLog extends LogContext {
   toolCalls?: unknown[];
   tokensIn?: number;
   tokensOut?: number;
+  /** プロンプトキャッシュで再利用された入力トークン数 (サーバが報告した時だけ)。 */
+  tokensCached?: number;
   durationMs?: number;
   finishReason?: string;
 }
@@ -129,7 +135,8 @@ export class LLMLogger {
   private readonly filePath: string;
   private turn: number = 0;
   private requestStartMs: number = 0;
-  private previousMessageCount = 0;
+  /** 前回 request の各メッセージの JSON。 最初に食い違った位置を求めるために保持する。 */
+  private previousMessageJsons: string[] = [];
   private previousToolsJson?: string;
   private readonly maxFileBytes: number;
   private bytesWritten = 0;
@@ -172,9 +179,20 @@ export class LLMLogger {
 
   /** LLM リクエストをログに記録 */
   logRequest(messages: unknown[], model: string, tools?: unknown[]): void {
-    const messageOffset = messages.length >= this.previousMessageCount ? this.previousMessageCount : 0;
+    // 件数ではなく内容で比べる: 件数だけだと既存メッセージの書き換えが記録に残らず、
+    // キャッシュが外れた原因も、 ログからの再現も分からなくなる。
+    const messageJsons = messages.map((m) => JSON.stringify(m));
+    const prev = this.previousMessageJsons;
+    let messageOffset = 0;
+    while (
+      messageOffset < prev.length &&
+      messageOffset < messageJsons.length &&
+      prev[messageOffset] === messageJsons[messageOffset]
+    ) {
+      messageOffset++;
+    }
     const messageDelta = messages.slice(messageOffset);
-    this.previousMessageCount = messages.length;
+    this.previousMessageJsons = messageJsons;
     const toolsJson = tools === undefined ? undefined : JSON.stringify(sanitizeLogValue(tools));
     const changedTools = toolsJson !== this.previousToolsJson ? tools : undefined;
     this.previousToolsJson = toolsJson;
@@ -199,6 +217,7 @@ export class LLMLogger {
     toolCalls?: unknown[];
     tokensIn?: number;
     tokensOut?: number;
+    tokensCached?: number;
     finishReason?: string;
   }): void {
     this.write({

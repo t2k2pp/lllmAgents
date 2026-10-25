@@ -55,6 +55,8 @@ interface SSEUsage {
 interface SSEChunk {
   choices: SSEChoice[];
   usage?: SSEUsage;
+  /** llama.cpp が最終チャンクに付ける計測値。 cache_n = KV キャッシュから再利用したプロンプトトークン数。 */
+  timings?: { cache_n?: number };
 }
 
 export class OpenAICompatProvider implements LLMProvider {
@@ -237,7 +239,8 @@ export class OpenAICompatProvider implements LLMProvider {
           if (chunk.usage) {
             // 自動プロンプトキャッシュのヒット分 (cached_tokens は prompt_tokens の内数)。
             // 報告があればコスト計算で割引単価に回す (docs/prompt-cache-cost-reduction.md)。
-            const cached = chunk.usage.prompt_tokens_details?.cached_tokens;
+            // llama.cpp は版によって cached_tokens を返さず timings.cache_n だけを返すので、 それで補う。
+            const cached = chunk.usage.prompt_tokens_details?.cached_tokens ?? chunk.timings?.cache_n;
             lastUsage = {
               promptTokens: chunk.usage.prompt_tokens,
               completionTokens: chunk.usage.completion_tokens,

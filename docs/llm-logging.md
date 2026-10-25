@@ -31,8 +31,8 @@
 
 | type | 内容 | 必須性 |
 |---|---|---|
-| `request` | 前回requestから増えたmessages、変更時だけtools、messageOffset / messageTotal | ✅ |
-| `response` | text + thinking + toolCalls + finishReason + tokensIn + tokensOut | ✅ 既存 (tokens 修正必要) |
+| `request` | 前回requestと最初に食い違った位置以降のmessages、変更時だけtools、messageOffset / messageTotal (messageOffset が前回の messageTotal より小さい = 既存メッセージが書き換わった) | ✅ |
+| `response` | text + thinking + toolCalls + finishReason + tokensIn + tokensOut + tokensCached (サーバ報告時のみ) | ✅ 既存 (tokens 修正必要) |
 | `tool_result` | toolCallId + toolName + input + output + success + durationMs | ✅ |
 | `log_limit` | 単一ファイル上限へ到達して追記を停止した事実 | 上限到達時 |
 

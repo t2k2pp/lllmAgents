@@ -69,6 +69,11 @@ function makeLoop(provider: LLMProvider, registry = new ToolRegistry()): AgentLo
   );
 }
 
+/** 本文が text で始まるか (後ろに状態通知が連結されていてもよい)。 */
+function startsWithText(content: unknown, text: string): boolean {
+  return typeof content === "string" && content.startsWith(text);
+}
+
 describe("AgentLoop foreground steering", () => {
   it("durable pauseはtool結果確定後に保存し、別AgentLoopが次APIから一度だけ再開する", async () => {
     vi.mocked(saveSession).mockClear();
@@ -309,7 +314,10 @@ describe("AgentLoop foreground steering", () => {
 
     expect(requests).toHaveLength(2);
     expect(
-      requests[1].messages.some((message) => message.role === "user" && message.content === "失敗テストを修正して"),
+      // user 発言の後ろには状態通知 (<harness-context>) が付く (docs/prompt-prefix-stability.md)
+      requests[1].messages.some(
+        (message) => message.role === "user" && startsWithText(message.content, "失敗テストを修正して"),
+      ),
     ).toBe(true);
     expect(loop.getPendingSteeringCount()).toBe(0);
   });
@@ -352,7 +360,7 @@ describe("AgentLoop foreground steering", () => {
     const messages = requests[1].messages;
     const toolIndex = messages.findIndex((message) => message.role === "tool" && message.content === "probe completed");
     const steerIndex = messages.findIndex(
-      (message) => message.role === "user" && message.content === "実装より原因調査を優先して",
+      (message) => message.role === "user" && startsWithText(message.content, "実装より原因調査を優先して"),
     );
     expect(toolIndex).toBeGreaterThan(-1);
     expect(steerIndex).toBeGreaterThan(toolIndex);

@@ -25,12 +25,13 @@ export type AssistantMessageCallback = (content: string, toolCalls?: ToolCall[])
  * 毎 getMessages() 呼出で呼ばれて fresh な system prompt を作る (動的合成)。
  *
  * 返り値を { stable, dynamic } の 2 分割にしているのはプロンプトキャッシュ最適化のため
- * (docs/prompt-cache-cost-reduction.md):
+ * (docs/prompt-prefix-stability.md):
  *   - stable: session 内で不変な base (identity / rules / skills / project / memory)。
  *     getMessages() はこれを **先頭の** system メッセージとして返し、 Anthropic 系プロバイダは
  *     ここに cache_control を付ける (= tools+system がキャッシュされる)。
- *   - dynamic: 毎ターン変わる部分 (現在日時 / goal / todo)。 キャッシュ境界より後ろの
- *     2 つ目の system メッセージとして返す。
+ *   - dynamic: 毎ターン変わる部分 (現在日時 / goal / todo)。 getMessages() には入れない。
+ *     履歴より前に置くと前方一致が毎回そこで途切れ、 履歴全部が再計算になるため。
+ *     呼び出し側が attachDynamicContext() で末尾の未送信メッセージに添付する。
  * 文字列を返す旧シグネチャも後方互換で受理し、 その場合は全量を stable 扱いにする。
  *
  * docs/strategic-todo-design.md §2.2 / §3.1 参照。
@@ -40,6 +41,29 @@ export interface ComposedSystemPrompt {
   dynamic: string;
 }
 export type SystemPromptComposer = (basePrompt: string) => string | ComposedSystemPrompt;
+
+/** 状態通知の現在日時 (ローカル時刻、 秒まで)。 */
+function formatLocalDatetime(now: Date): string {
+  return now.toLocaleString("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+/** contextNote を送信用の本文に描画する。 tool 出力やユーザー発言と取り違えないよう囲む。 */
+function renderContextNote(note: string): string {
+  return (
+    "<harness-context>\n" +
+    "The harness attached the current state below. It is not part of the tool output or the user's message.\n\n" +
+    `${note}\n` +
+    "</harness-context>"
+  );
+}
 
 export class MessageHistory {
   private messages: Message[] = [];
@@ -61,6 +85,13 @@ export class MessageHistory {
    * 未注入なら従来通り this.systemPrompt をそのまま返す (後方互換)。
    */
   private composer: SystemPromptComposer | null = null;
+  /**
+   * 送信済みのメッセージ。 attachDynamicContext() が添付のたびに全件を登録する。
+   * 送信済みのメッセージには状態通知を付けない (書き換えると前方一致キャッシュが外れる)。
+   */
+  private sentMessages = new WeakSet<Message>();
+  /** 直近に添付した状態通知。 key は日時を除いた内容 (変化の判定用)。 */
+  private lastContextNote: { key: string; message: Message } | null = null;
 
   constructor(systemPrompt: string) {
     this.systemPrompt = systemPrompt;
@@ -78,29 +109,21 @@ export class MessageHistory {
     this.composer = composer;
   }
 
+  /** composer を呼んで { stable, dynamic } を得る。 composer が無ければ base 全量が stable。 */
+  private compose(): ComposedSystemPrompt {
+    if (!this.composer) return { stable: this.systemPrompt, dynamic: "" };
+    const composed = this.composer(this.systemPrompt);
+    // 旧シグネチャ後方互換: 全量を stable 扱い
+    return typeof composed === "string" ? { stable: composed, dynamic: "" } : composed;
+  }
+
   getMessages(): Message[] {
-    // 準システムプロンプト: composer があれば毎回再合成、 無ければ既存挙動 (base のみ)。
-    // プロンプトキャッシュ最適化のため stable / dynamic を別々の system メッセージとして返す
-    // (docs/prompt-cache-cost-reduction.md)。 stable = キャッシュ対象、 dynamic = 毎ターン変化。
-    let stable: string;
-    let dynamic = "";
-    if (this.composer) {
-      const composed = this.composer(this.systemPrompt);
-      if (typeof composed === "string") {
-        stable = composed; // 旧シグネチャ後方互換: 全量を stable 扱い
-      } else {
-        stable = composed.stable;
-        dynamic = composed.dynamic;
-      }
-    } else {
-      stable = this.systemPrompt;
-    }
-    const systemMessages: Message[] = [{ role: "system", content: stable }];
-    if (dynamic.trim().length > 0) {
-      systemMessages.push({ role: "system", content: dynamic });
-    }
+    // 返すのは [固定 system, ...履歴] だけ。 毎ターン変わる dynamic はここに入れない
+    // (docs/prompt-prefix-stability.md)。 状態通知は attachDynamicContext() が添付した
+    // contextNote として、 添付先メッセージの本文の後ろに描画する。
+    const { stable } = this.compose();
     return [
-      ...systemMessages,
+      { role: "system", content: stable },
       // 思考保全: assistant.thinking がある場合は content の先頭に inline 化して送信。
       // provider に未対応フィールドを渡さないために thinking フィールド自体は除外。
       //
@@ -121,9 +144,52 @@ export class MessageHistory {
           if (m.tool_call_id) out.tool_call_id = m.tool_call_id;
           return out;
         }
+        if (m.contextNote) {
+          const { contextNote, ...rest } = m;
+          const note = renderContextNote(contextNote);
+          const content: string | ContentPart[] =
+            typeof m.content === "string"
+              ? m.content.length > 0
+                ? `${m.content}\n\n${note}`
+                : note
+              : [...m.content, { type: "text", text: note }];
+          return { ...rest, content };
+        }
         return m;
       }),
     ];
+  }
+
+  /**
+   * 状態通知 (現在日時 / Goal / ToDo) を末尾の未送信メッセージに添付する。
+   * LLM 呼び出しの直前に呼ぶ。 呼んだ時点の全メッセージを送信済みとして記録する。
+   *
+   * 一度送ったメッセージは書き換えず、 変わった情報だけを末尾に足す (docs/prompt-prefix-stability.md §3.2)。
+   * 添付する条件 (いずれか):
+   *   1. 日時を除いた内容が前回の通知と違う
+   *   2. 前回通知を付けたメッセージが履歴から消えた (忘却・圧縮・揮発除去)。 状態を見失わせない
+   *   3. 末尾が user メッセージ (新しい依頼の始まり)。 現在日時をここで更新する
+   * 末尾が送信済み・既に通知付き・assistant の時は添付しない (次の呼び出しで再判定する)。
+   *
+   * 通知の中身 = 現在日時 + composer の dynamic (Goal 節 / ToDo 節)。
+   * @returns 添付したら true
+   */
+  attachDynamicContext(now: Date = new Date()): boolean {
+    let attached = false;
+    const tail = this.messages[this.messages.length - 1];
+    if (tail && !this.sentMessages.has(tail) && !tail.contextNote && (tail.role === "tool" || tail.role === "user")) {
+      const state = this.compose().dynamic.trim();
+      const last = this.lastContextNote;
+      const lastGone = last !== null && !this.messages.includes(last.message);
+      if (last === null || last.key !== state || lastGone || tail.role === "user") {
+        const datetime = `# Current datetime\n${formatLocalDatetime(now)}`;
+        tail.contextNote = state.length > 0 ? `${datetime}\n\n${state}` : datetime;
+        this.lastContextNote = { key: state, message: tail };
+        attached = true;
+      }
+    }
+    for (const m of this.messages) this.sentMessages.add(m);
+    return attached;
   }
 
   getRawMessages(): Message[] {
