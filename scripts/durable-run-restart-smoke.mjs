@@ -43,8 +43,8 @@ function makeLoop(llm, registry) {
     "restart-smoke-7b",
     registry,
     new PermissionManager(securityConfig(registry.getToolNames())),
-    32_000,
-    0.8,
+    // T3 の枠の下限 (固定部分 + 直近のツール結果 + 会話の最小限 + 予約。 docs/config-reference.md の context) より大きくする
+    65_536,
   );
   loop.setLiveBinding(ENDPOINT);
   return loop;
