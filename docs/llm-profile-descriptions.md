@@ -1,5 +1,7 @@
 # LLMプロファイル説明機能
 
+> **2026-10-25 docs 整理の注記**: `second_llm_consult` ツールは 2026-06-08 に `second_llm_agent` へ統合した (道具の要らない単発の相談は `second_llm_agent({ task, no_tools: true })`。 内部は `SecondLLMManager.consult()`)。 本文の `second_llm_consult` / `second_llm_evaluator` はツール名としては存在しない (evaluator は `SecondLLMManager.runAsEvaluator()` の内部呼び出し)。 `/second ...` は `/model second ...` に、 `/switch` は `/swap` に一本化済み。
+
 ## 目的
 
 メインLLMとセカンドLLMそれぞれに「モデル特性」の自由記述フィールド（100〜300文字推奨）を持たせ、システムプロンプトに注入する。メインLLMが `task` / `second_llm_agent` / `second_llm_consult` のどれで委任すべきかを、両モデルの特性を比較して判断できるようにする。

@@ -1,6 +1,6 @@
 # 内部設計書 (Internal Design)
 
-> **バージョン**: 統合版 (2026-03-15)
+> **バージョン**: 統合版 (2026-03-15) / 2026-10-25 docs 整理で実装と照合し直した
 
 本ドキュメントでは、LocalLLM Agent の内部アーキテクチャ、コンポーネント間の連携構造、モジュール設計、データの流れについて定義します。
 
@@ -71,7 +71,6 @@ graph TD
     TE --> |Execute Web| Play
 
     AL --> RL
-    AL --> CMM
     MCP --> TR
 ```
 
@@ -95,8 +94,19 @@ src/
 ├── plugins/        - PluginLoader（manifest・path検証、component source統合）
 ├── loop/           - session-scoped LoopManager（/loop + schedule tools）
 ├── tenacious/      - TenaciousRunner（試行錯誤モード: /try コマンド）
-├── utils/          - http-client, discord, non-tty-reader, platform
-└── index.ts        - エントリポイント・初期化
+├── second-llm/     - SecondLLMManager (consult / agent / evaluator への委任)、 連続委任ガード
+├── goal-loop/      - /goal-loop (決定的な検証コマンドの終了コード 0 まで反復)
+├── checkpoint/     - 自動チェックポイント (シャドウ Git)
+├── git/            - git 呼び出し、 sub-agent の managed worktree (WorktreeManager)
+├── cost/           - トークン・コストの記録と集計 (/cost)、 予算ガード
+├── image/          - 画像生成 (Azure GPT Images / SD WebUI / ComfyUI)
+├── computer-use/   - Native Computer Use の OS 別ドライバ (Windows / macOS / Linux X11)
+├── discord/        - Discord の受信 (Gateway 方式) と /ask の登録
+├── slack/          - Slack bot (Socket Mode)
+├── unity/          - `localllm unity setup|doctor` (Unity スキル bundle の導入)
+├── types/          - 外部ライブラリの型定義の補い
+├── utils/          - http-client, discord, slack, non-tty-reader, platform, logger, atomic-file 等
+└── index.ts        - エントリポイント・初期化 (起動オプションは docs/external_design.md §2.5)
 ```
 
 ---
@@ -105,16 +115,17 @@ src/
 
 ### 2.1 AgentLoop の実行フロー
 
-メインとなる思考ループ（推論とツール実行のサイクル）のフローを以下に示します。LLMからの複数のTool Callsを `Promise.allSettled` で **並列処理** している点が特徴です。
+メインとなる思考ループ（推論とツール実行のサイクル）のフローを以下に示します。
 
-**最大イテレーション数 (`MAX_TOOL_ITERATIONS = 100`) の設計根拠:**
+**ツールの実行は既定で 1 件ずつ (逐次)**: `maxParallelTools` の既定は 1 で、 1 回の応答に複数のツール呼び出しがあっても順番に実行し、
+停止の結果 (中断・レート制限など) が出たら残りは未実行として履歴に残します。 `maxParallelTools` を 2 以上にした場合 (`/parallel <N>`) だけ、
+その数まで同時に実行します (`executeToolsParallel`)。 逐次のときはバックグラウンドの `task` 委任も実行前に断ります。 経緯は `docs/sequential-execution.md`。
 
-| 観点 | 理由 |
-|---|---|
-| **無限ループ防止** | LLMがツール呼び出しを繰り返してループ状態になった場合に強制終了するセーフガード |
-| **実用的な上限** | 一般的なエージェントタスク（コード変更・調査・デバッグ）で100回を超えることは稀 |
-| **応答時間の保証** | ローカルLLM（27B等）では1イテレーションに数十秒かかる場合があり、上限がないと数時間動き続ける可能性がある |
-| **ユーザーによる設定変更** | 現在は定数のため設定ファイルから変更不可。複雑タスクが多い場合は `src/agent/agent-loop.ts` の `MAX_TOOL_ITERATIONS` を直接変更してください |
+**作業回数の上限は無い (ループ点検)**: 以前の `MAX_TOOL_ITERATIONS` (固定の上限 100) は 2026-10-14 に廃止しました。
+代わりに、 能力ティアごとの `loopCheckInterval` 回 (T1 30 / T2 20 / T3 15) ごとに直近の区間を点検します (`judgeLoopWindow`)。
+ToDo の完了やファイルの変更があれば進んでいるとみなし、 進捗が無く呼び出しの半分以上が同じ (名前 + 引数) の繰り返しなら「ループの疑い」 とします。
+1 回目はやり方を見直すよう促す揮発メッセージを入れ、 続けて 2 回目も疑いなら、 終わったこと / 残りを並べた報告 (`buildLoopStopReport`) を出して止めます。
+止めた後は「続けて」 で再開できます。 経緯は `docs/archive/todo-request-elaboration.md` 第 4 段。
 
 ```mermaid
 sequenceDiagram
@@ -128,7 +139,7 @@ sequenceDiagram
     Loop->>Loop: 入力の検査 (入らなければ断る)・新しい依頼の区切り (規則 2)
     Loop->>Loop: Historyに追加
 
-    loop Max Iterations
+    loop 回数の上限なし (loopCheckInterval 回ごとにループ点検)
         Loop->>Loop: 予熱の終わりを待つ・ToDo/Goal の区切り (規則 2)
         Loop->>Loop: P を測る (直前の usage + その後の推定)
         alt P + R > W (規則 1)
@@ -146,8 +157,8 @@ sequenceDiagram
         Note over Loop: ✔ スピナー停止
 
         alt ToolCallsあり
-            Loop->>Exec: execute(ToolCall 1) (Parallel)
-            Loop->>Exec: execute(ToolCall 2) (Parallel)
+            Loop->>Exec: execute(ToolCall 1)
+            Loop->>Exec: execute(ToolCall 2) (既定は 1 の後。 maxParallelTools ≥ 2 なら同時)
             Exec-->>Loop: 実行結果 1 & 2
             Loop->>Loop: 1 件の上限と合計 T で切って Historyに追加 -> (次ループへ)
         else ToolCallsなし (完了)
@@ -273,6 +284,10 @@ AgentLoop との組み込み:
 - 応答のたびの履歴の書き換え (揮発メッセージ・思考の除去) はしない。 揮発の印は `Message.ephemeral` に持ち、 送る前に外す (セッションに保存される)。
   除くのは次の整理イベントの前処理 (`docs/ephemeral-context-design.md` の 2026-10-25 改訂)。
 - 段階 3 の要約に失敗したときは設定 `context.summaryFailure` (`continue` / `stop`) に従う。
+- 脇の呼び出しの思考: 意図の分類・完了判定 (`intent-classifier.ts`)、 進み具合の判定 (`progress-judge.ts`)、 Goal 昇格 (`goal-promotion.ts`)、 入力圧縮 (`compress-text.ts`) は
+  `disableThinking: true` で呼ぶ (送るのは llamacpp / vllm のときだけで、 `chat_template_kwargs.enable_thinking=false`。 商用 API には送らない)。
+  段階 3 の要約・予熱は本体と同じ並びを使うので思考の設定も本体と同じ (オフにすると前方一致が崩れる)。 引き継ぎメモ (`docs/handoff-design.md`) も思考を残す。
+  経緯は `docs/archive/context-reduction-reasoning-model-fix.md`。
 - 状態は `getReductionStatus()` / `getLastReductionEvent()` で `/context` / `/compact` の表示 (`src/cli/reduction-view.ts`) に渡す。 モデルには残量を伝えない。
 - 旧設定キーは `src/config/context-keys-removal.ts` が起動時に 1 回だけ削除する (バックアップ・告知の仕組みは `one-time-migration.ts` で権限の移行と共通)。
 
@@ -318,7 +333,7 @@ sequenceDiagram
 
 - **Windows対応**: `normalizeWindowsPath()` によりパスの大文字・小文字統一、8.3短縮パス解決、UNCパス正規化を実施
 - **Linux/macOS対応**: `fs.realpathSync()` によりシンボリックリンクを実体パスに解決
-- **テストカバレッジ**: `tests/security/sandbox.test.ts` に20テスト
+- **テスト**: `tests/security/sandbox.test.ts`
 
 ---
 
@@ -785,7 +800,7 @@ ToolHandler { name: "mcp__filesystem__read_file" }
 |:---|:---|:---|
 | `httpGet` | 接続確認（モデル一覧等） | 10秒 |
 | `httpPost` | 非ストリーミングPOST | 5分 |
-| `httpPostStream` (接続) | ストリーミング接続確立 | 1時間 |
+| `httpPostStream` (接続) | ストリーミング接続確立 | 2時間 |
 | `httpPostStream` (アイドル) | ストリーム読み取り | 60分 |
 
 ### ストリーミングのタイムアウトアーキテクチャ
@@ -796,7 +811,7 @@ sequenceDiagram
     participant Undici as Node.js fetch (undici)
     participant LLM as ローカルLLMサーバー
 
-    Note over App: 接続タイマー開始（1時間）
+    Note over App: 接続タイマー開始（2時間）
     App->>Undici: fetch(url, {dispatcher: streamAgent})
     Note over Undici: undici Agent:<br/>bodyTimeout=0<br/>headersTimeout=0
     Undici->>LLM: POST /v1/chat/completions
@@ -820,7 +835,7 @@ sequenceDiagram
 
 **3層アーキテクチャ:**
 1. **undici bodyTimeout の無効化**: `bodyTimeout: 0` / `headersTimeout: 0` のカスタム `Agent` を `dispatcher` として注入し、undici のデフォルト5分タイムアウトを無効化
-2. **接続タイムアウト**: `fetch()` からレスポンスヘッダー受信までの最大待機時間（デフォルト1時間）
+2. **接続タイムアウト**: `fetch()` からレスポンスヘッダー受信までの最大待機時間（デフォルト2時間。 `DEFAULT_STREAM_CONNECT_TIMEOUT`）
 3. **アイドルタイムアウト**: `wrapWithIdleTimeout()` がチャンク受信ごとにタイマーをリセット。60分間データが受信されない場合のみ中断
 
 | 設計判断 | 理由 |
@@ -835,11 +850,11 @@ sequenceDiagram
 
 ### 概要
 
-LLMの応答生成完了時に、応答内容を自動的にDiscordへ通知する機能です。ユーザーはターミナルを監視し続けることなく、別作業をしながら応答結果を受け取れます。
+LLMの応答生成完了時に、完了報告を自動的にDiscord / Slack の Webhook へ通知する機能です。ユーザーはターミナルを監視し続けることなく、別作業をしながら応答結果を受け取れます。
 
 ### アーキテクチャ
 
-通知処理は、エージェントループが完了してREPLに制御が戻るタイミング（`src/cli/repl.ts`）で実行されます。これにより、AgentCoreやProviderに影響を与えず、オプショナルな機能として疎結合に保たれています。
+通知処理は、エージェントループが完了してREPLに制御が戻るタイミング（`src/cli/repl.ts`）で実行されます。 報告の形 (変更ファイル・コスト・所要時間) は `docs/task-report-notification-design.md`。これにより、AgentCoreやProviderに影響を与えず、オプショナルな機能として疎結合に保たれています。
 
 ```mermaid
 sequenceDiagram
@@ -853,10 +868,10 @@ sequenceDiagram
     REPL->>Loop: run(userMessage)
     Loop-->>REPL: 実行完了 (History 更新)
 
-    REPL->>Config: Discord設定の確認 (enabled && webhookUrl)
-    alt 設定有効
-        REPL->>REPL: Historyから最後のAssistantメッセージを抽出
-        REPL->>Discord: sendDiscordNotification() HTTP POST
+    REPL->>Config: Discord / Slack 設定の確認 (enabled && webhookUrl)、 notifications.minDurationSec
+    alt 設定有効 かつ 応答本文かツール実行がある
+        REPL->>REPL: task_complete イベントから完了報告を組み立てる (formatTaskReport)
+        REPL->>Discord: sendDiscordNotification() HTTP POST (Slack は sendSlackNotification)
     end
 ```
 
@@ -1039,9 +1054,9 @@ LM Studio は thinking コンテンツを `reasoning_content` ではなく `reas
 
 ---
 
-## 11. 試行錯誤モード（TenaciousRunner）
+## 14. 試行錯誤モード（TenaciousRunner）
 
-### 11.1 概要
+### 14.1 概要
 
 `src/tenacious/tenacious-runner.ts` が `/try` コマンドのオーケストレーションを担います。
 
@@ -1049,7 +1064,7 @@ LM Studio は thinking コンテンツを `reasoning_content` ではなく `reas
 - [Karpathy/autoresearch](https://github.com/karpathy/autoresearch): 固定試行予算、スコアによる保持/破棄
 - [Anthropic harness design](https://www.anthropic.com/engineering/harness-design-long-running-apps): Generator/Evaluator 分離、コンテキストリセット
 
-### 11.2 アーキテクチャ
+### 14.2 アーキテクチャ
 
 ```
 /try コマンド (repl.ts)
@@ -1071,13 +1086,13 @@ LM Studio は thinking コンテンツを `reasoning_content` ではなく `reas
                     → 合格 → 終了、不合格 → フィードバックを次の Generator へ
 ```
 
-### 11.3 コンテキストリセットの実装
+### 14.3 コンテキストリセットの実装
 
 各サブエージェントは `SubAgentManager.launchForeground()` で独立インスタンスとして起動します。これにより:
 - Generator は前回試行の失敗パターンに引きずられない（Anthropic 推奨のコンテキストリセット）
 - Evaluator は Generator の自己評価バイアスなしに客観的評価できる（Generator/Evaluator 分離）
 
-### 11.4 主要定数・インターフェース
+### 14.4 主要定数・インターフェース
 
 ```typescript
 const PASS_SCORE = 7;  // 合格ライン（10点満点）
@@ -1096,7 +1111,7 @@ interface AttemptResult {
 }
 ```
 
-### 11.5 評価スコアのパース
+### 14.5 評価スコアのパース
 
 Evaluator が出力する `TOTAL_SCORE: X.X` を正規表現で抽出します。見つからない場合はデフォルト 4 点（低め）として扱い、不必要な早期終了を防ぎます。
 
@@ -1106,7 +1121,7 @@ const scoreMatch = text.match(/TOTAL_SCORE:\s*(\d+(?:\.\d+)?)/i);
 
 ---
 
-## 12. PluginLoader アーキテクチャ
+## 15. PluginLoader アーキテクチャ
 
 `src/plugins/plugin-loader.ts`は、明示されたplugin rootについてmanifest候補、1 MiB上限、fatal UTF-8、
 JSON、kebab-case名、重複名、component path containmentをLLM/provider初期化前に検証する。
@@ -1124,3 +1139,20 @@ fail-loudし、部分ロード状態で起動しない。
 
 plugin自体はコードとしてimportしない。hookとstdio MCPはlocal commandを実行できるため明示指定を信頼境界とし、
 既存のHookManager/MCP lifecycleを変更しない。
+
+---
+
+## 16. ハーネスの介入 (モデルへの促し・関門)
+
+モデルの振る舞いを整える仕組みの今の形。 経緯は `docs/harness-engineering.md` (Phase 1〜4) と `docs/archive/harness-engineering-phase5*.md` (Phase 5)。
+
+- **原則は先に伝える**: 行動原則は system prompt (`system-prompt.ts` / `shared-principles.ts`)・ツールの説明・サブエージェントの prompt
+  (`buildSubAgentStrategyPrompt`) で伝える。 ツールの説明の詳細は初回使用時に足す (`tool-guides.ts`。 `docs/system-prompt-redesign.md`)。
+- **ツール結果への後付けの警告は入れない**: Phase 5 の第 1〜7 ラウンドで入れた警告の挿入 (同じ失敗の繰り返し・Read→Edit 契約・連続委任など) は
+  第 8 ラウンドで全廃した。 `HarnessState` / `enrichToolResult` (`harness-intervention.ts`) は将来の関門のための何もしない足場として残っている。
+- **前提条件はツールが断る (関門)**: 例 `second_llm_agent` は reason が無いと断る。 `response_complete` は受け入れ条件の ToDo に未完了があると警告を返す (強制する引数あり)。
+- **ループ点検**: §2.1。 作業回数の上限ではなく、 `loopCheckInterval` 回ごとの点検で止める。
+- **応答の終わりの点検**: 自己点検の促し (`self-check-messages.ts`)、 思考と本文の食い違いの検出 (`coherence-check.ts`)、
+  進み具合の判定 (`progress-judge.ts`。 脇の呼び出し) がある。 促しは揮発メッセージ (`Message.ephemeral`。 `docs/ephemeral-context-design.md`) として入れる。
+- **ToDo / Goal**: 戦略 ToDo (`docs/strategic-todo-design.md`)、 Goal Seek (`docs/goal-seek-mode-design.md`)、 依頼から Goal への昇格 (`docs/goal-promotion-design.md`)。
+

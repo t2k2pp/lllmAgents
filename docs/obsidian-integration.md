@@ -1,6 +1,6 @@
 # Obsidian連携設計書 — ナレッジベース統合
 
-> **ステータス**: 設計レビュー中
+> **ステータス**: implemented (`knowledge_save` / `knowledge_search` ツール、 `/knowledge`、 設定 `obsidian.*`。 2026-10-25 docs 整理で「設計レビュー中」 から更新)
 
 ## 目的
 

@@ -1,6 +1,6 @@
 # 非同期サーフェス（Discord/Slack）権限・配信・観測性 再設計
 
-実装エージェント向けの作業仕様。状態: ドラフト・未実装（本書合意後に着手）。
+実装エージェント向けの作業仕様。状態: implemented (2026-10-25 docs 整理で更新。 当初は「ドラフト・未実装」。 実装は `src/agent/agent-loop.ts` / `src/discord/interaction-server.ts` / `src/config/types.ts` / `src/agent/llm-logger.ts` が本書を参照している)。 本文の `file:行` は起票時点のもの。
 再現/H-1切り分け用ログ: `~/.localllm/logs/sessions/2026-06-14T00-18-05_main.jsonl` / セッション `mqci53z7-cg4k.json`(room=B)。
 関連: `room-model-design.md` `channel-interaction-bridge-design.md` `goal-seek-mode-design.md`。
 

@@ -1,6 +1,6 @@
 # 反応的介入レイヤーの整合 — 「成果物形状の単一前提」是正 設計書
 
-> **ステータス**: ドラフト (レビュー前)
+> **ステータス**: implemented (2026-10-25 docs 整理で「ドラフト」 から更新。 `src/agent/agent-loop.ts` が本書を参照)。 本文の `file:行` は起票時点のもの
 > **作成日**: 2026-06-07
 > **位置づけ**: ハーネス設計の第3の対称ピース。`strategic-todo-design.md`（過小納品＝計画蒸発を防ぐ／proactive）と `lightweight-register-anchors-design.md`（過剰プランを防ぐ／proactive）に続き、本書は **reactive（自己点検・空応答・諦め）介入レイヤーを proactive と同じ思想に一本化**する
 > **関連**:

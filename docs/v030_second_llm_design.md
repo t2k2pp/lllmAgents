@@ -1,5 +1,7 @@
 # v0.3.0 セカンドLLM機能 設計書
 
+> **2026-10-25 docs 整理の注記**: `second_llm_consult` ツールは 2026-06-08 に `second_llm_agent` へ統合した (道具の要らない単発の相談は `second_llm_agent({ task, no_tools: true })`。 内部は `SecondLLMManager.consult()`)。 本文の `second_llm_consult` / `second_llm_evaluator` はツール名としては存在しない (evaluator は `SecondLLMManager.runAsEvaluator()` の内部呼び出し)。 `/second ...` は `/model second ...` に、 `/switch` は `/swap` に一本化済み。
+
 > **ステータス**: 実装済み（2026-03-15）/ **2026-04-30 改訂** (本ドキュメントは現状を反映するため後続改訂が入っている。 §更新履歴 参照)
 > **作成日**: 2026-03-15
 > **関連**: 外部仕様の概要は `external_design.md` §12 を参照

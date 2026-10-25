@@ -1,6 +1,6 @@
 # Goal Seek Mode — paradigm 切替型自律実行モード 設計書
 
-> **ステータス**: ドラフト (レビュー前)
+> **ステータス**: implemented (Phase 1。 `/goal-seek` / `/exit-goal-seek`。 2026-10-25 docs 整理で「ドラフト」 から更新)。 §4 の Phase 2 以降 (`/grade` など) は未実装
 > **作成日**: 2026-05-11
 > **タグ**: `pre-goal-seek-mode` (実装開始前の最終地点)
 > **関連**:

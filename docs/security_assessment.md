@@ -1,6 +1,6 @@
 # セキュリティ評価と対策 (Security Assessment)
 
-> **バージョン**: 統合版 (2026-03-15)
+> **バージョン**: 統合版 (2026-03-15) / 2026-10-25 docs 整理で設定値・テスト数の記述を実装に合わせた
 
 本プロジェクト（LocalLLM Agent）は「ユーザーのPC上でファイル操作やコマンド実行を自律的に行う」という性質上、本質的なセキュリティリスクを抱えています。本ドキュメントでは脅威モデル・防御設計・既知リスク・運用指針を定義します。
 
@@ -65,7 +65,7 @@ graph TD
 
 ```
 config.security.processSandbox.enabled = true  （デフォルト: false）
-config.security.processSandbox.level   = "network" | "full"
+config.security.processSandbox.level   = "none" | "fs" | "network" | "full"   (fs は書き込みだけ隔離・通信は allowlist のプロキシ経由。 docs/wsl-sandbox-design.md §7)
 ```
 
 | レベル | Linux | macOS | Windows |
@@ -100,7 +100,7 @@ config.security.processSandbox.level   = "network" | "full"
 - `fs.realpathSync()` によりチェック時点で実パスを解決するため、シンボリックリンク経由のTOCTOUは緩和
 - ただし、チェック後にファイルが差し替えられるレースコンディションの完全な排除にはOSレベルの隔離（chroot/eBPF等）が必要
 
-**テストカバレッジ**: `tests/security/sandbox.test.ts` に20テスト（symlink回避、Windowsパス正規化、トラバーサル、prefix誤マッチ防止等）
+**テスト**: `tests/security/sandbox.test.ts`（symlink回避、Windowsパス正規化、トラバーサル、prefix誤マッチ防止等）
 
 ---
 
@@ -171,15 +171,15 @@ graph LR
 
 ---
 
-## 5. セカンドLLM（クラウドLLM）利用時のデータプライバシーリスク
+## 5. クラウドLLM利用時のデータプライバシーリスク
 
-LocalLLM Agent の主要な設計目標の1つは「データプライバシーの絶対的な保護」です。しかし v0.3.0 でセカンドLLMとしてクラウドLLM（Vertex AI / Azure AI）を利用できる機能が追加されています。このオプション機能を利用する場合、以下のリスクを十分に理解した上で使用してください。
+LocalLLM Agent の主要な設計目標の1つは「データプライバシーの絶対的な保護」です。しかしメイン / セカンド / vision のどのスロットにもクラウドLLM (Vertex AI / Azure / Anthropic / Gemini / Claude CLI・Agent SDK など 10 種。 docs/external_design.md §5.1) を設定できます。 クラウドをメインにした場合は会話・ツール結果のすべてが外部へ送信されます。 以下のリスクを十分に理解した上で使用してください。
 
-### ⚠️ 注意: セカンドLLMにクラウドを設定した場合
+### ⚠️ 注意: クラウドLLMを設定した場合 (セカンドの例)
 
 | リスク項目 | 内容 |
 |---|---|
-| **コード・ファイルの外部送信** | `second_llm_consult` や `second_llm_agent` ツール経由でクラウドLLMに渡したプロンプトは、**インターネット経由で外部サーバーに送信**されます |
+| **コード・ファイルの外部送信** | `second_llm_agent` / `federated_delegate` ツール (と `@second` での直接委任) 経由でクラウドLLMに渡したプロンプトは、**インターネット経由で外部サーバーに送信**されます |
 | **機密情報の漏洩** | APIキー、パスワード、個人情報、企業秘密などがプロンプトに含まれている場合、クラウドプロバイダーのサーバーに送信されます |
 | **ログ・学習データへの利用** | クラウドプロバイダーのポリシーによっては、送信データがログに記録・学習に利用される場合があります |
 
@@ -200,5 +200,5 @@ LocalLLM Agent の主要な設計目標の1つは「データプライバシー�
 |---|---|
 | **AST解析の導入** | 単なる正規表現ではなくシェルのASTをパースし、難読化された危険コマンドを検知する機能 |
 | ~~Chroot / eBPF 等による隔離~~ | ~~アプリケーションレイヤーのサンドボックスではなく、OSレベルでのアクセス制限の実装~~ → **実装済み** (`ProcessSandbox`: Linux `unshare`/`bwrap`, macOS `sandbox-exec`, 設定で有効化) |
-| **Git等との自動連携** | 破壊的な変更が行われる前に自動でコミット/スタッシュの退避スナップショットを作成する「Undo機能」の組み込み |
+| ~~Git等との自動連携~~ | ~~破壊的な変更の前に退避スナップショットを作る「Undo機能」~~ → **一部実装済み** (自動チェックポイント = シャドウ Git、 opt-in。 `/checkpoint restore` で戻す。 docs/checkpoint-and-smoke-design.md) |
 | ~~web_fetch のURLスキーム制限~~ | ~~`file://` 等のプロトコルハンドラを明示的にブロック~~ → **実装済み** (`http://` / `https://` のみ許可) |

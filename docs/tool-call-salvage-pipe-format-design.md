@@ -1,6 +1,6 @@
 # ツール呼び出しサルベージ — `<|tool|>call:` 形式の追加 設計書
 
-> **ステータス**: ドラフト → 実装
+> **ステータス**: implemented (`src/agent/tool-call-normalizer.ts`)。 本文の `second_llm_consult` は当時のセッションのツール名 (現在は `second_llm_agent` に統合)
 > **作成日**: 2026-06-07
 > **位置づけ**: `docs/multi-tier-harness-roadmap.md §4 Phase D-1`（tool-call format 正規化）の拡張。新subsystemではなく既存 `normalizeToolCalls` への 1 形式追加
 > **経緯**: じゃんけんセッション `~/.localllm/sessions/mq2inppm-z0lh.json`（2026-06-06、gemma-4-12B-it）で露呈

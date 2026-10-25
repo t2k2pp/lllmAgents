@@ -238,7 +238,7 @@ OpenAI公式のモデル移行ガイドでも、GPT-5系のreasoning設定や新
 
 ## secondLLM
 
-メインLLMとは別のモデルにタスクを委任する機能。`/delegate` コマンドまたは `second_llm` ツールで使用。不要なら `null`。
+メインLLMとは別のモデルにタスクを委任する機能。メインLLMが `second_llm_agent` / `federated_delegate` ツールで、利用者は入力の先頭の `@second ` で使う。ファイル書き込み後の自動レビュー (Evaluator) にも使う。設定は `/model second <sub>` または `/models`。不要なら `null`。
 
 | キー | 型 | 必須 | 説明 |
 |------|-----|------|------|
@@ -246,6 +246,8 @@ OpenAI公式のモデル移行ガイドでも、GPT-5系のreasoning設定や新
 | `endpoint` | SecondLLMEndpoint | Yes | 接続先の設定 |
 | `budget` | BudgetConfig \| null | No | クラウドLLM利用時の予算制限。ローカルLLMなら `null` |
 | `cost` | CostConfig | No | コスト計算の参考モデル |
+| `samplingDefaults.consultTemperature` / `agentTemperature` / `evaluatorTemperature` | number | No | 用途別の既定温度 (`endpoint.temperature` があればそちらが優先。未指定は 0.2 / 0.2 / 0.1) |
+| `iterationLimits.maxAgentIterations` / `maxEvaluatorIterations` | number | No | セカンドのツール呼び出しループの上限 (既定 15 / 10) |
 
 ### SecondLLMEndpoint
 
@@ -378,9 +380,14 @@ REPL からは `/permission` の設定画面 (すべての面 / CLI / Discord / 
 | キー | 型 | 説明 |
 |------|-----|------|
 | `enabled` | boolean | サンドボックスの有効/無効 (デフォルト: false) |
-| `level` | `"none"` \| `"network"` \| `"full"` | 隔離レベル |
+| `level` | `"none"` \| `"fs"` \| `"network"` \| `"full"` | 隔離レベル (FS 書き込みとネットワークの 2 軸。 docs/wsl-sandbox-design.md §7) |
+| `allowedHosts` | string[] | `fs` レベルでプロキシ経由の通信を許すドメイン (`*.example.com` 可)。 省略 = 既定プリセット (npm / pip / GitHub 等)、 `[]` = 全部不許可、 指定 = その配列だけ |
+| `autoAllowBashWhenContained` | boolean | 封じ込め (macOS の fs + proxy 強制) のとき bash の実行確認を自動許可するか (既定 true)。 破壊的コマンド・CWD 外参照・allowlist 外の通信は確認が残る |
+
+`/sandbox` (on / off / allow / deny / status) で変更できる。 ネイティブ Windows では OS 封じ込めは無い (WSL2 の中で起動すると Linux として効く)。
 
 - `none`: OSレベル隔離なし
+- `fs`: ファイルシステムの書き込みだけ隔離し、 ネットワークは許可 (npm / pip を止めない開発向け)
 - `network`: ネットワーク名前空間隔離 (Linux: unshare --net, macOS: sandbox-exec)
 - `full`: ネットワーク + ファイルシステム隔離 (Linux: bwrap, macOS: sandbox-exec)
 
@@ -500,7 +507,7 @@ CLIコマンド `/knowledge vault <path>` でも設定可能。設定すると�
 | キー | 型 | デフォルト | 説明 |
 |------|-----|----------|------|
 | `streamingDisplay` | boolean | false | LLM応答を逐次本文として表示するか。`false` でも受信中は1行previewを表示し、完了後にMarkdownを確定レンダリング |
-| `maxParallelTools` | number | 3 | ツールの最大同時実行数。vLLMのKVキャッシュやリソースに合わせて調整 |
+| `maxParallelTools` | number | 1 | ツールの最大同時実行数。既定 1 は 1 件ずつ順に実行し、停止の結果が出たら残りを未実行にする (逐次のときはバックグラウンドの `task` 委任も断る。docs/sequential-execution.md)。2 以上で同時実行。vLLMのKVキャッシュやリソースに合わせて調整 |
 | `notifications.minDurationSec` | number | 0 | この秒数未満で完了したタスクは webhook 完了通知を送らない（docs/task-report-notification-design.md） |
 | `goalSeek.autoPropose` | boolean | true | 複雑なタスクで Goal Seek 昇格を自動提案する（docs/goal-promotion-design.md） |
 | `logging.retention.logMaxAgeDays` | number | 30 | 起動時にこの日数より古い ops / LLM I/O ログを削除する。`0` で無制限（docs/archive/production-readiness.md PR-15） |
@@ -508,6 +515,21 @@ CLIコマンド `/knowledge vault <path>` でも設定可能。設定すると�
 | `logging.retention.sessionMaxCount` | number | 100 | セッション履歴を新しい順にこの件数まで保持し、超過分を起動時に削除する。`0` で無制限 |
 | `updateCheck.enabled` | boolean | true | 起動時に GitHub の最新リリースを確認する (TTY のみ)。通信不能は起動を妨げないが、新版releaseのtag/配布物不整合は表示する。明示診断は`--check-update [--json]`。`false`でbackground確認をオフ |
 | `pluginDirs` | string[] | `[]` | 明示的に信頼して読み込むローカルplugin bundle directory。相対pathは起動時CWD基準。`--plugin-dir <path>`でも追加可能。自動探索しない（docs/plugin-bundle-design.md） |
+| `jpyPerUsd` | number | なし | コスト表示の日本円換算レート (1 ドルあたりの円)。設定すると `/cost` とセッション終了サマリが円表示になる。`/cost rate <数値>` / `/cost rate off` で変更 |
+| `autorunMode` | boolean | false | 自律実行モード (`/autorun` の状態。再起動後も維持) |
+| `inputCompression` | boolean | false | opt-in 入力圧縮モード (`/compress-input` の状態。docs/input-compression-design.md) |
+| `chatLog.enabled` / `chatLog.vaultPath` | boolean / string | false / なし | 会話ログを Obsidian Vault に保存する (`/integrations` → 会話ログの保存。docs/chat-log.md) |
+| `logging.ops.enabled` / `level` / `path` | boolean / string / string | true / なし / `~/.localllm/logs/ops/<sid>.jsonl` | 運用ログ。level は trace/debug/info/warn/error (`/loglevel` で変更。docs/llm-logging.md) |
+| `modelCapabilities.<モデル名>` | object | なし | 能力ティアの上書き: `tier` (T1/T2/T3) / `contextWindow` / `promptStyle` / `supportsToolCalling` / `supportsParallelTools` / `reliableInstructionFollowing`。 context の O / T / M / S は上書きできない (docs/multi-tier-harness-roadmap.md §3.3) |
+| `mcpEnabled` | boolean | true | MCP サーバー全体の on/off (`/mcp on|off` の保存先。`--no-mcp` は今回だけ) |
+| `disabledMcpServers` | string[] | `[]` | `/mcp toggle` で外したサーバー名 (mcp-servers.json の `disabled: true` とは別) |
+| `skillsEnabled` | boolean | true | スキル機能全体の on/off (`/skills on|off` の保存先。`--no-skills` は今回だけ) |
+| `disabledSkills` | string[] | `[]` | `/skills toggle <name>` で外したスキル名 |
+| `checkpoints.enabled` / `workTreeDir` / `maxFileSizeMb` / `retention.maxSessions` / `retention.maxAgeDays` | — | 下記 | 自動チェックポイント (シャドウ Git)。enabled 未設定時は成果物フォルダ (`<cwd>/sandbox/output` 等) に絞れたときだけ有効。maxFileSizeMb 既定 25、retention 既定 20 セッション / 60 日 (`/checkpoint on|off`。docs/checkpoint-and-smoke-design.md) |
+| `roomConfig.bindings` / `roomConfig.autoResume` | object | REPL=A / Discord=B / Slack=C、自動再開 A=false / B=C=true | Room の割り当てと自動再開 (`/room` の保存先。docs/room-model-design.md) |
+| `imageGen` | object | なし | 画像生成の機能トグルとプロファイル (`/image` で設定。docs/image-generation.md) |
+| `features.browser` | `"auto"` \| `"on"` \| `"off"` | `"auto"` | ブラウザ機能 (`browser_*` / `game_smoke`)。auto は起動時に playwright + chromium を確かめて有効化 (docs/exe-playwright-externalization.md) |
+| `features.promptCache.enabled` / `ttl` | boolean / `"5m"` \| `"1h"` | true / `"5m"` | Anthropic 系 (anthropic / azure-anthropic) で cache_control を付ける (docs/prompt-cache-cost-reduction.md) |
 | `features.computerUse` | `"on"` \| `"off"` | `"off"` | Native Computer Useを明示有効化する。利用不能時はbrowserへ代替せず起動を停止する。session限定なら`--computer-use`を使用（docs/native-computer-use.md） |
 
 CLIコマンド `/parallel <N>` で実行時に変更可能。
@@ -523,8 +545,16 @@ CLIコマンド `/parallel <N>` で実行時に変更可能。
 | `~/.localllm/sessions/` | セッション履歴 |
 | `~/.localllm/memory/MEMORY.md` | 永続メモリ |
 | `~/.localllm/plans/` | プランモードの計画書 |
-| `~/.localllm/hooks/` | ユーザーグローバルフック |
+| `~/.localllm/hooks.json` | ユーザーグローバルフック (プロジェクトは `.claude/hooks.json` / `.localllm/hooks.json`) |
 | `~/.localllm/rules/` | ユーザーグローバルルール |
 | `~/.localllm/logs/sessions/` | LLM I/Oログ (JSONL形式) |
 | `~/.localllm/logs/ops/` | 運用ログ (JSONL形式) |
 | `~/.localllm/logs/crash/` | クラッシュログ |
+| `~/.localllm/model-registry.json` | 登録モデルとスロットの割り当て (docs/model-registry.md) |
+| `~/.localllm/mcp-servers.json` | ユーザーグローバルの MCP サーバー定義 |
+| `~/.localllm/skills/` / `agents/` | スキル (組み込みと利用者の同居) / 利用者のエージェント定義 |
+| `~/.localllm/history.jsonl` | 入力欄の ↑↓ 履歴 (作業フォルダごと。docs/prompt-history-resume.md) |
+| `~/.localllm/usage/` | `/cost` の使用量の記録 |
+| `~/.localllm/pricing.json` / `image-pricing.json` | 単価の追加・上書き (未登録のモデルは cost 0 で計上) |
+| `~/.localllm/checkpoints/` | 自動チェックポイントのシャドウ Git |
+| `~/.localllm/worktrees/` | sub-agent の managed worktree |

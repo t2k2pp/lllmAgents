@@ -48,4 +48,4 @@ Claude Codeがこのプロジェクトで作業する際のルール。
 
 ### 長時間タスク
 - 長時間タスクはScheduled Tasks（`mcp__scheduled-tasks__`）で30分ごとにログ確認・追加指示を自動化する
-- 確認間隔は処理時間に関わらず30分以下に保つ（詳細: docs/internal_design.md §10）
+- 確認間隔は処理時間に関わらず30分以下に保つ（詳細: docs/internal_design.md §12「長時間タスクの推奨実行パターン」）

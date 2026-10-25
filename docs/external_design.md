@@ -1,7 +1,7 @@
 # 外部設計書 (External Design)
 
-> **バージョン**: 統合版 (2026-03-15)
-> **対象**: LocalLLM Agent v0.2.x 実装済み機能 + v0.3.0 設計中機能
+> **バージョン**: 統合版 (2026-03-15) / 2026-10-25 docs 整理で実装と照合し直した
+> **対象**: LocalLLM Agent の実装済み機能 (package.json の version 0.5.3 時点)。 未実装の構想は docs/README.md の「構想・計画」 を見る
 
 本ドキュメントでは、LocalLLM Agent の外部仕様（ユーザー向け機能・インターフェース・動作要件）について定義します。
 
@@ -74,8 +74,8 @@ graph TD
 | **推論基盤** | クラウド (Claude 3.x 等) | **ローカルオンプレミス** (Ollama, LM Studio等) |
 | **運用コスト** | 従量課金 (APIトークン消費) | **無料** (マシンの電気代のみ) |
 | **プライバシー** | ソースコードが外部APIサーバに送信される | **完全オフライン動作可能** |
-| **ツール数** | 30以上 | **30種以上** (§3参照、設定に応じて登録) |
-| **サブエージェント** | 4タイプ (Task tool) | **4タイプ** を独自実装 |
+| **ツール数** | 30以上 | **約 50 種** (§3参照、設定・機能トグルに応じて登録。 数の正はソース `src/tools/definitions/`) |
+| **サブエージェント** | 4タイプ (Task tool) | **組み込み 5 種** (explore / plan / general-purpose / bash / code-reviewer) + 利用者定義 (§9) |
 | **プランモード** | 組み込み | **組み込み** (idle→planning→awaiting_approval) |
 | **スキルシステム** | Skill tool + `/command` | **対応** (builtin + ユーザー定義) |
 | **コンテキスト管理** | 大容量コンテキスト (200K+) | **自動整理** (次の呼び出しが必ず入る予約で時期を決め、 決まった規則で消してから足りないときだけ要約。 書き換えは 1 回の整理で 1 回。 §2.3) |
@@ -121,7 +121,7 @@ stateDiagram-v2
 | `/clear` | 現在の会話履歴とコンテキストをクリアします |
 | `/context` | 現在のコンテキスト（トークン）使用状況と整理の状態・今 `/compact` した場合の見込みを表示します |
 | `/compact` | コンテキストを今すぐ整理します（段階 0〜3 を最後まで。結果の内訳を表示） |
-| `/handoff` | 引き継ぎメモを残してコンテキストをリセットします（手動のリセット。 `/handoff dry` はメモを表示するだけ） |
+| `/handoff` | 引き継ぎメモを残してコンテキストをリセットします（手動のリセット。 `/handoff dry` はメモを表示するだけ、 `/handoff from-file <path>` は保存済みメモで LLM を呼ばずにリセット。 docs/handoff-design.md） |
 | `/model` | 現在のスロット (main / second / vision) 状況を表示します。 編集は `/models` (登録レジストリ) または `/model <slot> <verb>` |
 | `/models` | 登録モデルの一覧 → アクション (Set as main/second/vision / Edit / Duplicate / Delete / Add new) |
 | `/swap` | main ⇔ second のスロット入れ替え |
@@ -139,8 +139,28 @@ stateDiagram-v2
 | `/stream` | 表示モード (ストリーミング / スピナー+Markdown) を toggle |
 | `/loop` | プロンプトを定期実行 (例: `/loop 5m /pr-review`)。 一覧 + 停止は `/loop status` |
 | `/autorun` | 自律実行モードの toggle |
+| `/fork` | 現在の会話を新しいセッションへ分岐します (元のセッションは変えない。 `latest` も可) |
+| `/room` | Room (A/B/C) の一覧・切り替え・自動再開の設定。 サーフェスごとの会話の分離 (docs/room-model-design.md) |
+| `/queue` | 受信順キューの待ち状況の表示 (`clear` で待ちを消す) |
+| `/tasks` | バックグラウンドの task / worktree の一覧 |
+| `/cost` | LLM 使用量とコスト (計測窓 / today / month / models / providers / export / rate / reset)。 docs/cost-token-command-design.md |
+| `/parallel` | ツールの同時実行数の確認・変更 (既定 1 = 逐次) |
+| `/try` | 試行錯誤モード (§13) |
+| `/goal-loop` | 決定的な検証コマンド (`--check`) の終了コード 0 まで反復 (docs/goal-loop-deterministic-check-design.md) |
+| `/goal-seek` / `/exit-goal-seek` | Goal Seek mode の開始 / 終了 (docs/goal-seek-mode-design.md) |
+| `/checkpoint` | 自動チェックポイント (シャドウ Git) の on/off・一覧・差分・復元 (docs/checkpoint-and-smoke-design.md) |
+| `/sandbox` | bash の OS 封じ込めの状態・on/off・allow/deny (docs/wsl-sandbox-design.md) |
+| `/mcp` | MCP サーバーの状態・全体の on/off・個別の toggle・再読み込み |
+| `/knowledge` | Obsidian ナレッジベースの検索・最近のノート・タグ (docs/obsidian-integration.md) |
+| `/image` | 画像生成の状態・プロファイル設定・生成 (`/image gen`)。 docs/image-generation.md |
+| `/compress-input` | opt-in 入力圧縮モードの切り替え (docs/input-compression-design.md) |
+| `/learn` | 操作学習の状態 (docs/workflow-learning.md) |
+| `/doctor` | 環境診断 (LLM 接続 / Playwright / Discord / Slack / 画像生成 / ディスク使用量) |
+| `/loglevel` | 運用ログのレベルの確認・変更 (docs/llm-logging.md) |
+| `/tui` | TUI 表示と mouse capture の状態・切り替え (docs/tui-alternate-screen.md) |
 | `/run` | 実行中の作業の一時停止と再開。 `/run pause` は進行中の応答と tool を完了させ、 次の LLM API 直前で会話と再開地点を保存して止める (アプリ・PC を終了しても `/resume <id>` → `/run resume` で続けられる)。 `status` / `resume` / `inspect` / `discard`。 docs/durable-run-resume-design.md |
 
+※ 一覧の正は補完の定義 (`src/cli/completer.ts` の `BUILTIN_COMMAND_DEFS` と `src/cli/commands/` のレジストリ)。 スキルは `/<スキル名>` (または frontmatter の `trigger`) でも呼べる (§10)。 `@second <依頼>` で始めた入力はセカンド LLM に直接委任する (§12)。
 ※ `/setup` は REPL コマンドではなく、 CLI 起動時のフラグ `--setup` で実行します。
 ※ 起動時にセッションを復元するフラグは REPL の `/resume` と同じ書き方: `--resume <id>` / `--resume latest`。 引数なし `--resume` (REPL では picker) は起動前に picker を出せないため使い方エラー、 見つからない ID・保存セッション無しもエラー終了 (終了コード 1) で、 黙って新規セッションで始めない。 旧 `--continue` は削除済み (→ `--resume latest`)
 ※ 同じことをするコマンドは 1 つだけにしている (docs/archive/todo-legacy-ways-cleanup.md)。 次の旧コマンドは削除済みで、 入力しても動かない:
@@ -242,6 +262,44 @@ stateDiagram-v2
 旧設定 (`context.reduction` / `context.forgetting` / `context.strategy` / `context.compressionThreshold` / `context.maxHistoryMessages`、
 `modelCapabilities.<モデル名>.compressionThreshold` / `keepRecentMessages`) は起動時に 1 回だけ削除し (元の config.json はバックアップに残す)、 削除したキーを告知する。
 
+### 2.4 キー操作と表示
+
+| 操作 | 動作 |
+|---|---|
+| Enter | 送信 |
+| Shift+Enter / Ctrl+J (代替: ` ``` ` で囲む) | 改行 (マルチライン入力) |
+| Shift+Tab | モードの循環: 通常 → autorun → plan → 通常 (`src/cli/interaction-mode.ts`。 編集中の入力は保持) |
+| ↑ / ↓ | 入力の履歴。 作業フォルダごとに `~/.localllm/history.jsonl` へ保存し、 再起動後も使える (docs/prompt-history-resume.md) |
+| Esc | 処理中の作業をソフト中断 (`src/cli/interrupt-watcher.ts`) |
+| Ctrl+C | 処理中は 1 回でソフト中断、 2 回で終了 |
+| `@<パス>` | ファイル・フォルダを参照して内容をコンテキストに展開 |
+| 処理中の入力 | 処理中も入力欄 (`[処理中・追加入力]`) を出す。 通常の文は次の LLM 応答 / ツール完了の境界で今の turn に渡し (foreground steering)、 スラッシュコマンドは turn の後に実行する (`/run` の操作は即時)。 docs/stdin-ownership.md |
+
+表示は既定で inline (端末の選択・コピーとホイールの scrollback がそのまま使える)。 `--alt-screen` で全画面 TUI、 `--mouse` / `/tui mouse on` でその中のホイール履歴 (docs/tui-alternate-screen.md)。
+`streamingDisplay: false` (既定) でも受信中は 1 行のプレビューを出し、 完了後に Markdown を確定表示する。 応答の色分けは docs/spinner-mode-response-coloring-design.md。
+
+### 2.5 起動オプション
+
+`localllm --help` の内容 (正は `src/index.ts` の `HELP_TEXT`)。
+
+| オプション | 説明 |
+|---|---|
+| `-h`, `--help` / `--version` | ヘルプ / バージョンを表示して終了 |
+| `--check-update [--json]` | GitHub のリリース・バージョン・配布物を確かめて終了 (docs/release-workflow.md) |
+| `--setup` | セットアップウィザード |
+| `--resume <id>` / `--resume latest` | 保存セッションを再開 (§2.2 の注記) |
+| `--safe-mode` | カスタマイズを読まずに起動 (§15) |
+| `--no-mcp` / `--no-skills` | MCP / スキルを読まずに起動 (今回だけ。 `/skills off` は設定を変える) |
+| `--plugin-dir <path>` | 明示的に信頼するローカル plugin bundle を追加 (繰り返し可。 §14) |
+| `--background` | REPL を出さずにチャットボットの受信だけを動かす (先に `/integrations` で設定) |
+| `--slack` | REPL の代わりに Slack bot を動かす |
+| `--alt-screen` / `--no-alt-screen` | 全画面 TUI を使う / 今回は inline 表示 (既定は inline)。 環境変数 `LLLMAGENT_ENABLE_ALTERNATE_SCREEN` より優先 |
+| `--mouse` / `--no-mouse` | 全画面 TUI のマウスホイール履歴を使う (`--alt-screen` を含む) / 今回は使わない。 環境変数 `LLLMAGENT_ENABLE_MOUSE` より優先 |
+| `--install-browser` / `--check-browser` | ブラウザの実行環境を入れる / 確かめる (docs/exe-playwright-externalization.md) |
+| `--computer-use` / `--check-computer-use` | このセッションだけ Native Computer Use を有効にする / 依存と見える window を確かめる (docs/native-computer-use.md) |
+
+サブコマンド: `localllm unity setup --project <path> [--revision <SHA>] [--command <executable>]` / `localllm unity doctor --project <path>` (docs/unity-integration.md)。
+
 ---
 
 ## 3. 提供機能とツール群
@@ -328,7 +386,7 @@ graph TD
 ツールの権限は2種類あります。
 
 - **`auto`（自動許可）**: 常にユーザー確認なしで実行されます。以下の2層で決定されます。
-  - `INHERENTLY_SAFE_TOOLS`（コード定数）: `ask_user`, `todo_append`, `todo_mark`, `todo_delete`, `enter_plan_mode`, `exit_plan_mode`, `task_output`, `task_list`, `task_send`, `task_cancel`, `task_diff`, `schedule_create`, `schedule_list`, `schedule_delete`, `current_datetime`, `sandbox_info` — 設定に関わらず **常に** auto
+  - `INHERENTLY_SAFE_TOOLS`（コード定数 `src/security/inherently-safe-tools.ts`）: `ask_user`, `todo_append`, `todo_mark`, `todo_delete`, `enter_plan_mode`, `exit_plan_mode`, `task_output`, `task_list`, `task_send`, `task_cancel`, `task_diff`, `schedule_create`, `schedule_list`, `schedule_delete`, `current_datetime`, `sandbox_info`, `response_complete` — 設定に関わらず **常に** auto (ask / deny ルールに一致した場合を除く)
   - ツール名だけの allow ルール（設定ファイル `security.rules.allow`）: デフォルトは `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`, `web_search`, `web_fetch`。 サンドボックス外のパス・bash の CWD 外参照は確認が残る
 - **`ask`（要確認）**: 実行前にインタラクティブな承認ダイアログを表示します。明示的に指定されていないツールはすべて `ask` にフォールバックします。
 
@@ -344,8 +402,8 @@ graph TD
 | | `glob` | auto | 指定パターン（例: `src/**/*.ts`）に一致するファイル一覧を取得します。 |
 | | `grep` | auto | 高速文字列検索。`ripgrep (rg)` があれば利用し、なければNode.jsネイティブ実装で検索します。 |
 | **ファイル更新** | `file_write` | ask | ファイルを新規作成または全体上書きします。親ディレクトリが存在しない場合は **自動で `mkdir -p`** を実行します。 |
-| | `file_edit` | ask | 既存ファイルの一部を書き換えます。`target_string` がファイル内に一意に存在する場合のみ `replacement_string` に置換します。 |
-| **システム** | `bash` | ask | シェルコマンドを実行し、標準出力/標準エラーを取得します。タイムアウト標準120秒。 |
+| | `file_edit` | ask | 既存ファイルの一部を書き換えます。`old_string` がファイル内に一意に存在する場合のみ `new_string` に置換します。改行コードは LF で照合し、ファイルの改行コードを保って書きます (docs/file-tools-line-endings.md)。 |
+| **システム** | `bash` | ask | シェルコマンドを実行し、標準出力/標準エラーを取得します。既定は無通信監視 60 秒 (`idleTimeout`) と総時間の上限 10 分 (`timeout`)。`timeout` を明示すると無通信監視は外れます。対話入力を待つコマンドが固まらないよう非対話の環境変数を入れます (docs/fix-plan-process-and-timeout-management.md)。 |
 | | `current_datetime` | auto (常時) | 現在の日時を取得します。ISO 8601形式、ローカルタイムゾーン形式、タイムゾーンオフセット情報を返します。 |
 | | `sandbox_info` | auto (常時) | 現在のサンドボックス設定（許可ディレクトリ、ブロックコマンド等）を返します。 |
 | **Web** | `web_search` | auto | SearXNG／DuckDuckGoで検索。SearXNGの並列burstを直列化し、engine障害下の0件を不存在扱いしません。必要時は1回だけproviderを明示overrideできます。 |
@@ -382,6 +440,14 @@ graph TD
 | | `exit_plan_mode` | auto (常時) | プランモードを終了し、計画内容を `~/.localllm/plans/` に保存してユーザー承認を待ちます。 |
 | | `skill` | ask | ユーザーが配置した独自Markdownスキルを実行します。`disable-model-invocation: true`のskillはモデルから実行できず、ユーザーのslash入力だけを受け付けます。 |
 | | `ask_user` | auto (常時) | エージェントが単独で判断できない問題が発生した場合、コンソール経由でユーザーに直接質問します。 |
+| | `response_complete` | auto (常時) | 依頼の完了を宣言します。受け入れ条件の ToDo に未完了があると警告を返します。呼ばずにテキストだけで終えると、ハーネスが最大 3 回まで自己点検を促します。 |
+| **セカンドLLM** | `second_llm_agent` | ask | セカンドLLMをサブエージェントとして使います。`reason` 必須。`no_tools: true` で道具を使わない単発の相談 (§12)。 |
+| | `federated_delegate` | ask | 期待出力 (ファイル生成と中身のパターン) を明示してセカンドLLMへ委譲し、結果を自動で検証します。 |
+| **ナレッジ** | `knowledge_save` / `knowledge_search` | ask | Obsidian Vault へのナレッジノートの保存 / 検索 (Obsidian 連携の設定時のみ。 docs/obsidian-integration.md) |
+| **画像生成** | `image_generate` | ask | 設定した画像生成バックエンドで画像を生成します (機能トグル有効時のみ。 docs/image-generation.md) |
+| **スモーク** | `game_smoke` | ask | ブラウザ成果物を headless で起動し、未捕捉例外・console error・空 canvas・入力後フリーズを検知します (ブラウザ機能が有効なときのみ。 docs/checkpoint-and-smoke-design.md) |
+
+※ 上表の「ask」は既定 (allow ルールに無い) の場合。 権限は `security.rules` で変えられる (§4.2)。 登録条件 (機能トグル・設定の有無) はツールごとに異なる。
 
 ---
 
@@ -474,12 +540,14 @@ sequenceDiagram
 
 | 設定キー | 説明 |
 |---|---|
-| `providerType` | `ollama`, `lmstudio`, `llamacpp`, `vllm`（4種のローカルLLMプロバイダ、すべてOpenAI互換APIで通信）。各プロバイダーのセットアップ要件は §5.2 を参照 |
-| `contextWindow` | トークン上限。 整理の時期はこの値と能力ティアから決まる (次の呼び出しが入らなくなる手前で整理。 §2.3)。 整理を早めたいときはこの値を小さくする。 小さすぎる値は起動時に止まる |
-| `allowedDirectories` | サンドボックスでアクセスを許可する追加のディレクトリリスト |
-| `rules` | 権限ルール（`allow` / `deny` / `ask` の3種。 先頭の `cli:` / `discord:` / `slack:` で面を限定）。 権限の設定はこれだけ |
-| `discord` | Discord連携の設定（`enabled` フラグと `webhookUrl`）|
-| `secondLLM` | セカンドLLM設定（v0.3.0、§12参照）|
+| `mainLLM.providerType` | ローカル 4 種 (`ollama`, `lmstudio`, `llamacpp`, `vllm`。 OpenAI 互換 API) と、 クラウド 10 種 (`vertex-ai`, `azure-openai`, `azure-gpt`, `azure-claude`, `azure-foundry`, `azure-anthropic`, `anthropic`, `claude-cli`, `claude-agent-sdk`, `gemini`)。 メイン / セカンド / vision とも同じ型。 ローカルのセットアップ要件は §5.2。 接続の登録は `/models` (docs/model-registry.md) |
+| `mainLLM.contextWindow` | トークン上限。 整理の時期はこの値と能力ティアから決まる (次の呼び出しが入らなくなる手前で整理。 §2.3)。 整理を早めたいときはこの値を小さくする。 小さすぎる値は起動時に止まる |
+| `security.allowedDirectories` | サンドボックスでアクセスを許可する追加のディレクトリリスト |
+| `security.rules` | 権限ルール（`allow` / `deny` / `ask` の3種。 先頭の `cli:` / `discord:` / `slack:` で面を限定）。 権限の設定はこれだけ |
+| `discord` / `slack` | Discord / Slack 連携の設定 (通知の Webhook・受信の Bot)。 `/integrations` の画面で設定 |
+| `secondLLM` | セカンドLLM設定（§12参照）|
+
+全キーの正本は `docs/config-reference.md`。
 
 > **権限ルールと既定値**: `security.rules` が保存されていればそれがすべてで、 既定ルールとは混ぜない (画面で外した既定ルールが起動のたびに戻らない)。 旧キー `autoApproveTools` 等が残っている config.json は起動時に 1 回だけルールへ移行する (docs/archive/todo-legacy-ways-cleanup.md T4)。
 
@@ -696,7 +764,7 @@ You are a codebase exploration specialist. Your job is to quickly find files, se
 
 ## 10. スキルシステム
 
-スキルは Markdown 形式のプロンプトファイルで定義され、`/skill-name` スラッシュコマンドとしてトリガーされる **事前定義された操作フロー** です。
+スキルは Markdown 形式のプロンプトファイルで定義され、`/skill-name` スラッシュコマンド (利用者) または `skill` ツール (モデル) で呼び出される **事前定義された操作フロー** です。
 
 ### 10.1 スキルファイル形式 (SKILL.md)
 
@@ -716,8 +784,10 @@ You are a codebase exploration specialist. Your job is to quickly find files, se
 ---
 name: skill-name     # 必須: スキル名 (/skill-name コマンドとして機能)
 description: ...     # 必須: スキルの説明とトリガー条件
-context: fork        # 任意: "fork" を指定するとフォークコンテキストで実行
-tools: [bash, file_read, glob, grep]  # 任意: context:fork 時に許可するツール（未指定時は全ツール）
+trigger: /name       # 任意: 呼び出しのコマンド名 (既定は /<name>。 小文字・数字・ハイフン)
+context: fork        # 任意: "fork" を指定するとフォークコンテキストで実行 (それ以外の値は読み込まない)
+tools: [bash, file_read, glob, grep]  # 任意: context:fork 時に許可するツール（未指定時は全ツール。 Claude 互換の allowed-tools も可）
+disable-model-invocation: true  # 任意: true ならモデルの skill ツールからは呼べず、 利用者の slash 入力だけ
 ---
 ```
 
@@ -734,15 +804,15 @@ tools: [bash, file_read, glob, grep]  # 任意: context:fork 時に許可する�
 
 ### 10.2 スキルのロードパスと優先順位
 
-後からロードされるものが同名スキルを上書きします。
+後からロードされるものが同名スキルを上書きします (`src/skills/skill-loader.ts` の `loadAllSkills`)。
 
 | 優先順位 | パス | 用途 |
 |----------|------|------|
-| 1（低） | `src/skills/builtin/` | アプリ同梱の基本スキル |
-| 2 | `builtin/` (プロジェクトルート) | `.skill` パッケージとしてインストールされたスキル |
-| 3 | `~/.localllm/skills/` | ユーザーグローバルスキル |
-| 4 | `.claude/skills/` (CWD) | プロジェクト固有スキル |
-| 5（高） | `.localllm/skills/` (CWD) | プロジェクト固有スキル（代替パス） |
+| 1（低） | `~/.localllm/skills/` | 組み込みスキルと利用者のスキルの同居先。 組み込みは配布物の `skills/` を install 時に展開し、 開発時は Stop フックが `src/skills/builtin/` から同期する (docs/workspace-separation.md) |
+| 2 | `.claude/skills/` (CWD) | プロジェクト固有スキル (Claude Code 互換) |
+| 3（高） | `.localllm/skills/` (CWD) | プロジェクト固有スキル（アプリ独自） |
+
+このほか、 明示した plugin bundle のスキルが `plugin名:スキル名` で加わる (§14)。 `--safe-mode` / `--no-skills` では読まない。
 
 ### 10.3 スクリプトエンジンの選択基準（ハイブリッド設計）
 
@@ -755,14 +825,13 @@ tools: [bash, file_read, glob, grep]  # 任意: context:fork 時に許可する�
 
 ### 10.4 組み込みスキル一覧
 
-| スキル名 | 説明 | context |
-|---|---|---|
-| `commit` | Gitコミットメッセージ作成・コミット実行 | インライン |
-| `pr-review` | プルリクエストのレビュー | **fork** |
-| `tdd` | テスト駆動開発フロー | インライン |
-| `build-fix` | ビルドエラーの修正 | インライン |
-| `skill-creator` | 新規スキルの雛形生成・バリデーション | インライン |
-| `code-stats` | コードベースの統計情報収集・報告 | **fork** |
+正は `src/skills/builtin/` (20 種、 2026-10-25 時点)。 `pr-review` と `code-stats` が **fork**、 他はインライン。
+
+| 分類 | スキル |
+|---|---|
+| 開発作業 (lllmAgents 向けを含む) | `dev-workflow`, `commit`, `code-review`, `pr-review`, `tdd`, `build-fix`, `refactoring`, `add-repl-command`, `code-stats`, `research`, `project`, `product-quality-cycle` |
+| 成果物の作成 | `excel`, `powerpoint`, `business-book-writing`, `game-development`, `ascii-art`, `unity-production` |
+| その他 | `skill-creator` (スキルの雛形生成・検証), `claude-code-driver` (Claude Code CLI を下請けとして駆動。 docs/claude-code-driver-skill.md) |
 
 ---
 
@@ -825,40 +894,32 @@ MCPサーバーが提供するツールは起動時に自動検出され、`mcp_
 
 ---
 
-## 12. セカンドLLM機能（v0.3.0 設計中）
+## 12. セカンドLLM機能
 
-> **ステータス**: 設計フェーズ。未実装。実装完了後にこのノートを削除すること。
-
-メインLLM（ローカルLLM）を補完する **セカンドLLM** として、別のローカルLLMまたはクラウドLLM（Vertex AI / Azure AI）を利用可能にします。
+メインLLMを補完する **セカンドLLM** として、別のローカルLLMまたはクラウドLLMを使えます (実装済み。 詳細設計は `docs/v030_second_llm_design.md`、 入れ替えは `docs/main_second_swap_design.md`)。
 
 ### 12.1 基本方針
 
 | 項目 | 方針 |
 |---|---|
-| メインLLM | **ローカルLLMのみ**。変更なし |
-| セカンドLLM | **ローカルLLM または クラウドLLM**。オプション機能 |
-| 起動条件 | セカンドLLM設定が有効 **かつ** ユーザーが明示的に利用を指示 |
-| 動作モード | ① メインLLMへの相談（consult） ② サブエージェントとしてタスク実行（agent） |
-| コスト管理 | クラウドLLM: トークン使用量を記録し、予算上限で自動停止。ローカルLLM: 予算不要 |
+| メインLLM | ローカル・クラウドのどちらも可 (§5.1 の `providerType`) |
+| セカンドLLM | ローカル・クラウドのどちらも可。オプション機能。 設定は `/model second <sub>` または `/models` → Set as second |
+| 入れ替え | `/swap` でメイン ⇔ セカンドのスロットを入れ替える |
+| 動作モード | ① 道具を使わない単発の相談 (`second_llm_agent` の `no_tools: true`。 内部は consult) ② サブエージェントとしてタスク実行 (agent) ③ 成果物のレビュー (evaluator。 評価ループ `docs/evaluation-loop.md`) |
+| 委任の判断 | メインLLMが `second_llm_agent` (理由 `reason` 必須) / `federated_delegate` を呼ぶ。 モデル特性の説明 (`description`) を判断材料としてシステムプロンプトに入れる (docs/llm-profile-descriptions.md) |
+| コスト管理 | クラウドLLM: トークン使用量を記録し、予算 (`secondLLM.budget`) の上限で自動停止。ローカルLLM: 予算不要 |
 
 ### 12.2 対応プロバイダ
 
-| プラットフォーム | 利用可能モデル | 認証方式 |
-|---|---|---|
-| **Vertex AI** | Gemini (3 Pro, 3 Flash, 2.5系), Claude (Opus, Sonnet, Haiku) | Google Cloud サービスアカウント / ADC |
-| **Azure OpenAI** | GPT (5.x系, 4o系) | API Key / Azure AD |
-| **Azure AI Foundry** | Claude (Opus, Sonnet, Haiku) | API Key |
-| **Ollama / LM Studio 等** | 任意のローカルモデル | なし |
+§5.1 の `providerType` と同じ 14 種。 クラウド系の個別設計は `docs/azure-gpt-provider.md` / `docs/gemini-aistudio-provider.md` / `docs/claude-providers.md` / `docs/claude-agent-sdk-provider-design.md`。
 
-### 12.3 セカンドLLMの呼び出し方法
+### 12.3 利用者からの直接委任
 
-ユーザーは `@second` プレフィックスを使ってセカンドLLMへのタスク委任を指示します。
+入力を `@second ` で始めると、 メインLLMを通さずセカンドLLMにエージェントとして直接委任し、 結果を表示します (`src/cli/repl.ts`)。
 
 ```
 @second この関数のアルゴリズムを改善してください
 ```
-
-詳細設計は `v030_second_llm_design.md` を参照してください。
 
 ---
 

@@ -2,7 +2,7 @@
 
 作成日: 2026-06-12
 対応提案: docs/autonomy-improvement-proposal.md §4.1 A-5
-ステータス: 実装済み
+ステータス: superseded (→ [room-model-design.md](../room-model-design.md))。 本書の `ConversationStore` / `ChannelRunQueue` (`channel-sessions.ts`) は Room モデル (`room-manager.ts` / `room-run-queue.ts`) に置き換えて削除済み。 記録として残す
 
 ## 1. 背景と目的
 

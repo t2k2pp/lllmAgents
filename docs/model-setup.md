@@ -1,11 +1,11 @@
 ---
 title: メインLLM 接続セットアップの統一
-status: 2026-05-04 提案 / 同日実装 (2026-05-27 — `/models` への統合予定)
+status: 2026-05-04 提案 / 同日実装 / implemented — `/models` の Add new から呼ぶ形に統合済み (2026-10-25 docs 整理で確認。 `/model setup` も残る)
 ---
 
 > **後継設計**: `docs/model-registry.md` (2026-05-27 提案)
-> 本書で定義した setup wizard は今後 `/models` の "Add new..." アクションから呼ばれる
-> 形に統合される。 プロバイダ別の `/model setup azure-*` 等は補完候補から外し、 wizard
+> 本書で定義した setup wizard は `/models` の "Add new..." アクションから呼ばれる
+> 形に統合した。 プロバイダ別の `/model setup azure-*` 等は補完候補から外し、 wizard
 > 内でプロバイダを選ばせる構成に集約。
 
 # メインLLM接続セットアップ - REPL とウィザードの統一

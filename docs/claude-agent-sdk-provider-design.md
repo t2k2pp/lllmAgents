@@ -1,6 +1,6 @@
 ---
 title: claude-agent-sdk プロバイダ設計 + claude-cli の Fail loud 修正
-status: 2026-05-19 提案 (実装前)
+status: 2026-05-19 提案 / implemented (src/providers/claude-agent-sdk.ts。 2026-10-25 docs 整理で更新)
 related: docs/claude-providers.md
 ---
 

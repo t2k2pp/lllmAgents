@@ -1,7 +1,7 @@
 # 中断手段と進捗表示の改善 設計書
 
 作成日: 2026-05-23
-ステータス: 設計レビュー中
+ステータス: implemented (2026-10-25 docs 整理で「設計レビュー中」 から更新。 Esc 中断は `src/cli/interrupt-watcher.ts`。 後続の堅牢化は docs/repl-io-robustness.md / docs/stdin-ownership.md)
 
 ## 背景
 

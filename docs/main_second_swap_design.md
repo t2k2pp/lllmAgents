@@ -1,6 +1,8 @@
 # メイン⇔セカンド LLM 入れ替え機能 設計書
 
-> **ステータス**: 実装済み (2026-04-29) — **2026-05-27: slot 表現への移行を予定**
+> **2026-10-25 docs 整理の注記**: `second_llm_consult` ツールは 2026-06-08 に `second_llm_agent` へ統合した (道具の要らない単発の相談は `second_llm_agent({ task, no_tools: true })`。 内部は `SecondLLMManager.consult()`)。 本文の `second_llm_consult` / `second_llm_evaluator` はツール名としては存在しない (evaluator は `SecondLLMManager.runAsEvaluator()` の内部呼び出し)。 `/second ...` は `/model second ...` に、 `/switch` は `/swap` に一本化済み。
+
+> **ステータス**: 実装済み (2026-04-29)。 2026-05-27 に予定した slot 表現への移行は docs/model-registry.md (Phase 1〜5 実装済み) で行った
 > **作成日**: 2026-04-29
 > **関連**:
 > - **上位 (新)**: `docs/model-registry.md` (registry + slot 二層モデル。 `/swap` は slot 入替として位置付け直し)

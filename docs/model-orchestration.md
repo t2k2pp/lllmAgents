@@ -17,8 +17,8 @@ LLM の使い分けは **メイン / セカンド の 2 択に固定**されて�
 |----------|-----------|--------|
 | メインループ (`AgentLoop`) | main slot | 固定 |
 | サブエージェント (`task` ツール) | **main slot** | 固定 (`SubAgentManager` が main の provider を持つ) |
-| セカンド委任 (`second_llm_agent` / `second_llm_consult`) | second slot | 固定 |
-| Evaluator (`/try` の評価役) | second slot | 固定 |
+| セカンド委任 (`second_llm_agent` / `federated_delegate`。 単発相談は `no_tools: true`) | second slot | 固定 |
+| Evaluator (ファイル書き込み後の自動レビュー。 docs/evaluation-loop.md。 `/try` の評価役は main slot の plan サブエージェント) | second slot | 固定 |
 | Vision | vision slot → 無ければ main | 固定 |
 
 つまり **「どのモデルを使うか」 はコード側が決めており、 モデル自身が選ぶ余地がない**。

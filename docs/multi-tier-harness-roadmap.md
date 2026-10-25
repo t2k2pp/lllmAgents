@@ -1,5 +1,7 @@
 # lllmAgents 100 点超えロードマップ — マルチティア・ハーネス戦略
 
+> **2026-10-25 docs 整理の注記**: 本書はロードマップ (構想を含む)。 `/capability` `/metrics` は `/status` に集約済み (コマンドとしては存在しない)、 `src/agent/decision-tree.ts` と `tests/benchmark/` は作られていない。 作業回数の上限 (maxIterations) は `loopCheckInterval` のループ点検に置き換え済み (docs/internal_design.md §2.1)。 実装済みの事実は docs/internal_design.md と docs/config-reference.md を正とする。
+
 > **目的**: ローカル LLM を含むマルチプロバイダ AI エージェントとして、 Claude Code を 100 点としたとき同等以上 (目標 107 点 ※ F-1 訂正反映) を目指す改善設計。
 >
 > **核心原則**: ハーネス工学は LLM の能力ティアに適応する。 賢い LLM (Claude/GPT-5) のための工夫が、 弱い LLM (7B ローカル) の足枷になってはいけない。 逆に弱い LLM 向けの scaffolding が、 賢い LLM を萎縮させてもいけない。

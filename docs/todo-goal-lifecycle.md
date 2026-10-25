@@ -1,6 +1,6 @@
 # ToDo / Goal Slot ライフサイクル設計
 
-> **ステータス**: 実装中
+> **ステータス**: implemented (2026-10-25 docs 整理で「実装中」 から更新)。 その後の変更: ToDo / Goal は会話ごとの状態 (`ConversationState`。 Room モデル) に持ち、 モデルへは system prompt ではなく履歴の末尾に添える (docs/prompt-prefix-stability.md の `attachDynamicContext`)。 §5 の `docs/goal-features-comparison.md` は存在しない
 > **作成日**: 2026-05-17
 > **位置づけ**: `docs/strategic-todo-design.md` と `docs/goal-seek-mode-design.md` の **slot 単位ライフサイクル** を集約整理した cross-cutting 設計書
 > **動機**: `sandbox/harness-usability-review-2026-05-16.md` §1「既存 ToDo が長く、 現在タスクとの混線」 と、 コード調査で判明した「session 境界で slot がリセットされない」 構造欠陥への対処

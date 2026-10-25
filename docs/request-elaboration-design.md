@@ -1,6 +1,6 @@
 # 依頼の膨らませ方（要件展開）の改善設計
 
-作成: 2026-10-14 / 状態: 設計確定・実装中（進捗は `docs/archive/todo-request-elaboration.md`）
+作成: 2026-10-14 / 状態: implemented (ToDo 23 項目すべて完了。 記録は `docs/archive/todo-request-elaboration.md`)
 
 ## 1. 背景 — goemon 試作で見えた差
 

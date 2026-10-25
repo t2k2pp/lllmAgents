@@ -1,5 +1,5 @@
 /**
- * 引き継ぎメモ + Clear (手動の /handoff。 docs/context-reduction-redesign.md §7。 メモの形は docs/archive/context-strategy.md §2.2)
+ * 引き継ぎメモ + Clear (手動の /handoff。 docs/handoff-design.md)
  *
  * 「次やることの指示を残して、 一度コンテキストをクリア」 を実現する。
  *
@@ -42,7 +42,7 @@ const MIN_NOTE_CHARS = 40;
 /** 履歴に再投入するときの目印。 引き継ぎ由来の user メッセージだと判別できるようにする */
 export const HANDOFF_MARKER = "[引き継ぎメモ]";
 
-/** テンプレートの節見出し。 モデルにはこの形を固定で埋めさせる (docs §2.2) */
+/** テンプレートの節見出し。 モデルにはこの形を固定で埋めさせる (docs/handoff-design.md §4) */
 export const HANDOFF_SECTIONS = [
   "## これまでにやったこと",
   "## 次にやること",

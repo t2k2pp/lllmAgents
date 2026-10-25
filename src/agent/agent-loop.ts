@@ -133,7 +133,7 @@ import {
 } from "../tools/definitions/todo-write.js";
 
 /**
- * チャネル会話スワップ用の会話状態 (A-5: docs/channel-session-queue-design.md §2)。
+ * チャネル会話スワップ用の会話状態 (A-5: docs/archive/channel-session-queue-design.md §2)。
  * 「履歴 + ToDo + Goal slot + mode」 の 4 点セット = session 境界と同じ範囲
  * (docs/todo-goal-lifecycle.md)。 MessageHistory はオブジェクト参照のまま保持する
  * (メッセージ再生ではないため thinking/ephemeral も無劣化)。
@@ -3792,7 +3792,7 @@ export class AgentLoop {
 
   /**
    * A-5: 現用の会話状態への参照を取り出す (チャネル会話スワップ用)。
-   * docs/channel-session-queue-design.md §2
+   * docs/archive/channel-session-queue-design.md §2
    */
   exportConversation(): ConversationState {
     const goal = getGoalSlot();

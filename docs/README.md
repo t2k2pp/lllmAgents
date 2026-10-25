@@ -1,174 +1,156 @@
 # docs 索引 (Documentation Index)
 
-> **作成日**: 2026-07-04 (docs/archive/production-readiness.md PR-11)
-> docs 配下 70+ 本の設計書を分類し、どれが「実装済みの正」でどれが「構想・記録」かを一覧にする。
+> **作成日**: 2026-07-04 / **作り直し**: 2026-10-25 (docs 整理。 記録を `archive/` に分け、 設計書を実装と照合し直した)
 >
 > **運用ルール**:
-> - 新しい設計書を追加したら、この索引に1行追加する (Status 付き)
-> - Status は索引で一元管理する (各ファイルへのヘッダ付与は、そのファイルを触るついでに行う)
-> - Status 凡例: `implemented` = 実装済みの正 / `in-progress` = 実装進行中 / `proposal` = 未実装の構想 / `record` = レビュー・調査の記録 (更新しない) / `reference` = 手順書・参照資料 / `superseded` = 後継 doc に置き換え / `design` = 設計済み・未実装
+> - 新しい設計書を追加したら、 この索引の該当する表に 1 行足す (Status 付き)
+> - 設計と実装が違ったら実装を正として設計書を直す (違和感があれば直す前に利用者へ報告する)
+> - 作業の記録・完了した ToDo・後継に置き換えられた設計は [archive/](archive/README.md) へ移す (`git mv`。 参照も書き換える)
+> - Status 凡例: `implemented` = 実装済みの正 / `in-progress` = 実装の途中 / `proposal` = 未実装の構想・計画 / `reference` = 手順書・参照資料
 
-## 正典 (常に実装と一致させる)
+## まず読むもの (正典。 常に実装と一致させる)
 
 | ドキュメント | 内容 |
 |---|---|
-| [external_design.md](external_design.md) | 外部設計 — 機能一覧・ツール・コマンド・ユーザー視点の仕様 |
-| [internal_design.md](internal_design.md) | 内部設計 — モジュール構成・AgentLoop・データフロー |
-| [security_assessment.md](security_assessment.md) | セキュリティ評価と対策 — 脅威モデル・サンドボックス・クラウド LLM リスク |
-| [config-reference.md](config-reference.md) | 設定リファレンス (`~/.localllm/config.json` / `credentials.json`) |
-| [workspace-separation.md](workspace-separation.md) | ワークスペース構成 (src/dist/deploy/sandbox) と Stop フック |
-| [git-hooks.md](git-hooks.md) | Git フック (commit-msg / pre-commit) — コミット前に CI と同じ型・lint 検査を通す |
-| [release-workflow.md](release-workflow.md) | リリース自動ビルド — tag push / 手動実行で最新パッチ版 Node 24 の exe を Windows runner でビルドし Release へ添付 |
-| [nodejs-security-review-2026-10.md](nodejs-security-review-2026-10.md) | Node.js セキュリティ調査 (2026-10) — 汎用チェックリストと本アプリへの影響・対応状況 |
-| [production-readiness.md](archive/production-readiness.md) | 製品品質改善計画 PR-01〜16 — P1〜P4 の進行管理表 |
-| [issues.md](archive/issues.md) | 設計書レビュー起点の課題一覧 (2026-07-04 棚卸し済み) |
-| [product-review-cycle-1-2026-08-24.md](archive/product-review-cycle-1-2026-08-24.md) | 商品品質レビュー・修正・評価サイクル第1回の記録 |
-| [product-review-cycle-2-2026-08-25.md](archive/product-review-cycle-2-2026-08-25.md) | Codex類似アプリ観点の商品品質レビュー・改善サイクル第2回の記録 |
-| [product-review-closure-2026-08-25.md](archive/product-review-closure-2026-08-25.md) | cycle 1 / 2 の未修正課題を終端状態まで処理する統合クローズ記録 |
-| [product-feature-comparison-2026-08-26.md](archive/product-feature-comparison-2026-08-26.md) | Codex / Claude Code 機能比較マトリックスとサブエージェントskill preload改善記録 |
-| [product-feature-comparison-cycle-2-2026-08-26.md](archive/product-feature-comparison-cycle-2-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第2回とモデル向けschedule改善記録 |
-| [product-feature-comparison-cycle-3-2026-08-26.md](archive/product-feature-comparison-cycle-3-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第3回とbackground task一覧・停止の改善記録 |
-| [product-feature-comparison-cycle-4-2026-08-26.md](archive/product-feature-comparison-cycle-4-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第4回とbackground agent steer改善記録 |
-| [product-feature-comparison-cycle-5-2026-08-26.md](archive/product-feature-comparison-cycle-5-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第5回とlocal plugin bundle改善記録 |
-| [product-feature-comparison-cycle-6-2026-08-26.md](archive/product-feature-comparison-cycle-6-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第6回とsafe mode改善記録 |
-| [product-feature-comparison-cycle-7-2026-08-27.md](archive/product-feature-comparison-cycle-7-2026-08-27.md) | Codex / Claude Code機能比較第7回とTUI session全期間scrollback改善記録 |
-| [product-feature-comparison-cycle-8-2026-08-29.md](archive/product-feature-comparison-cycle-8-2026-08-29.md) | Codex / Claude Code機能比較第8回、日本語IME右端描画・fail-fast・session fork改善記録 |
-| [product-feature-comparison-cycle-9-2026-08-30.md](archive/product-feature-comparison-cycle-9-2026-08-30.md) | Codex / Claude Code機能比較第9回、working-tree実差分とsession命名改善記録 |
-| [product-feature-comparison-cycle-10-2026-08-30.md](archive/product-feature-comparison-cycle-10-2026-08-30.md) | Codex / Claude Computer Use比較第10回、native OS window操作の実装・評価記録 |
-| [product-feature-comparison-cycle-16-foreground-steering-2026-09-02.md](archive/product-feature-comparison-cycle-16-foreground-steering-2026-09-02.md) | Codex / Claude Codeの処理中入力比較とforeground同一turn steering改善記録 |
-| [native-computer-use.md](native-computer-use.md) | Native Computer Useの安全境界、tool/OS driver契約、実機gate |
+| [external_design.md](external_design.md) | 外部設計 — コマンド・キー操作・起動オプション・ツール・権限・設定の概要 (利用者から見た仕様) |
+| [internal_design.md](internal_design.md) | 内部設計 — モジュール構成・AgentLoop・コンテキストの整理・サブエージェント・ハーネスの介入 |
+| [config-reference.md](config-reference.md) | 設定リファレンス (`~/.localllm/config.json` / `credentials.json`) とデータの置き場所 |
+| [security_assessment.md](security_assessment.md) | セキュリティ評価と対策 — 脅威モデル・サンドボックス・クラウド LLM のリスク |
+| [workspace-separation.md](workspace-separation.md) | ワークスペース構成 (src / dist / deploy / sandbox) と Stop フック |
+| [git-hooks.md](git-hooks.md) | Git フック (commit-msg / pre-commit) — コミット前に CI と同じ型・lint 検査 |
+| [release-workflow.md](release-workflow.md) | リリース自動ビルド (最新パッチ版 Node 24 の exe を Windows runner でビルドして Release へ) |
+| [prompt-prefix-stability.md](prompt-prefix-stability.md) | プロンプトの前方一致を壊さない約束 (CLAUDE.md のルール。 送った並びは書き換えず、 変わる情報は末尾に足す) |
+| [context-reduction-redesign.md](context-reduction-redesign.md) | コンテキストの整理 (予約で時期を決め、 決まった段階で 1 回だけ書き換え・予熱・計測)。 実機での確認 §14.3 B が残る |
 
-## アーキテクチャ・ハーネス
+## 機能別の設計書
+
+Status の記載が無いものは `implemented`。
+
+### エージェントループ・プロンプト・ハーネス
 
 | ドキュメント | Status | 内容 |
 |---|---|---|
-| [product-feature-comparison-cycle-11-worktree-design-2026-08-31.md](archive/product-feature-comparison-cycle-11-worktree-design-2026-08-31.md) | implemented | Codex/Claude比較、類似機能監査、sub-agent worktree分離の実装・安全・評価記録 |
-| [product-feature-comparison-cycle-12-workflow-learning-2026-08-31.md](archive/product-feature-comparison-cycle-12-workflow-learning-2026-08-31.md) | implemented | Codex Record & Replay / Claude skills比較と操作学習gapの実装・評価記録 |
-| [product-feature-comparison-cycle-13-response-preview-2026-08-31.md](archive/product-feature-comparison-cycle-13-response-preview-2026-08-31.md) | implemented | Codex/Claude streaming比較と応答preview・実PTY評価記録 |
-| [product-feature-comparison-cycle-14-release-version-2026-09-01.md](archive/product-feature-comparison-cycle-14-release-version-2026-09-01.md) | implemented | Codex/Claude更新機能比較、version単一ソース化と明示更新診断の実装・評価記録 |
-| [product-quality-cycle-15-tui-mouse-scrollback-2026-09-01.md](archive/product-quality-cycle-15-tui-mouse-scrollback-2026-09-01.md) | implemented | Alternate Screenのマウススクロールバック不具合と実PTY評価記録 |
-| [product-feature-comparison-cycle-21-response-copy-api-compat-2026-09-05.md](archive/product-feature-comparison-cycle-21-response-copy-api-compat-2026-09-05.md) | implemented | 応答エラー可視化、copy-friendly mouse mode、OpenAI sampling互換性 |
-| [harness-engineering.md](harness-engineering.md) | implemented | ハーネス改善の起点 (テトリスセッション分析→システムプロンプト再設計ほか) |
-| [harness-engineering-phase5.md](archive/harness-engineering-phase5.md) | in-progress | Phase 5 計画 — Claude Code 比較で見える本質的弱点と段階的改善 |
-| [harness-engineering-phase5-progress.md](archive/harness-engineering-phase5-progress.md) | in-progress | Phase 5 の進捗トラッカー |
-| [multi-tier-harness-roadmap.md](multi-tier-harness-roadmap.md) | in-progress | マルチティア (T1/T2/T3) ハーネス戦略ロードマップ |
-| [system-prompt-redesign.md](system-prompt-redesign.md) | implemented | システムプロンプト再構成 (behavioral/rest 2層+tool-guides 遅延注入) |
-| [prompt-language-policy.md](prompt-language-policy.md) | in-progress | プロンプト言語ポリシー (モデル向け英語正本。Phase 1 済 / 2,3 未) |
-| [prompt-ja-reference.md](archive/prompt-ja-reference.md) | reference | プロンプト日本語リファレンス (参照用スナップショット) |
-| [prompt-optimization.md](prompt-optimization.md) | implemented | システムプロンプト最適化 |
-| [prompt-cache-cost-reduction.md](prompt-cache-cost-reduction.md) | implemented | プロンプトキャッシュによるコスト削減 (§3.1 は下記で改訂) |
-| [prompt-prefix-stability.md](prompt-prefix-stability.md) | implemented | プロンプト前方一致の安定化 (状態通知を末尾へ追記、 KV キャッシュ再利用) |
-| [strategic-todo-design.md](strategic-todo-design.md) | implemented | 準システムプロンプト+戦略 ToDo アーキテクチャ |
-| [lightweight-register-anchors-design.md](lightweight-register-anchors-design.md) | implemented | 軽量タスクの過剰プラン抑制 (軽いアンカー) |
-| [reactive-intervention-coherence-design.md](reactive-intervention-coherence-design.md) | implemented | 反応的介入レイヤーの整合 (成果物形状の単一前提) |
-| [agent-events-design.md](agent-events-design.md) | implemented | AgentLoop イベント化 (AgentEventBus) |
-| [todo-goal-lifecycle.md](todo-goal-lifecycle.md) | implemented | ToDo / Goal Slot のライフサイクル |
-| [ephemeral-context-design.md](ephemeral-context-design.md) | implemented | Ephemeral Context (span スコープの揮発メッセージ) |
-| [context-intelligence.md](context-intelligence.md) | implemented | コンテキストインテリジェンス (A 節の意図の分類が現行。 B 節の階層圧縮は削除済みで記録扱い) |
-| [context-reduction-redesign.md](context-reduction-redesign.md) | implemented | コンテキスト整理の作り直し (次が必ず入る予約で発火・決まった段階で 1 回だけ書き換え・予熱・計測)。 実機での確認 (§13 の T2・T13) が残る |
-| [handover-2026-10-25-context-reduction.md](archive/handover-2026-10-25-context-reduction.md) | record | 上の作り直しの引き継ぎ書 (進め方の約束・実装の状態・実機で確かめる項目) |
-| [context-forgetting.md](archive/context-forgetting.md) | superseded | 忘却機能 (LLM に忘れるものを選ばせる・`/forget`) (→ [context-reduction-redesign.md](context-reduction-redesign.md)) |
-| [context-strategy.md](archive/context-strategy.md) | superseded | 区切りでの圧縮・忘却・Clear の使い分け (→ [context-reduction-redesign.md](context-reduction-redesign.md)。 `/handoff` のメモの形 §2.2 は現行) |
-| [context-reduction-reasoning-model-fix.md](archive/context-reduction-reasoning-model-fix.md) | record | 忘却・圧縮の思考モデル対応と空応答の扱い (対象コードは削除済み。 脇の呼び出しの思考オフの知見は現行) |
-| [evaluation-loop.md](evaluation-loop.md) | implemented | 評価ループ (/try 試行錯誤モード) |
-| [tool-call-salvage-pipe-format-design.md](tool-call-salvage-pipe-format-design.md) | implemented | ツール呼び出しサルベージ (`<\|tool\|>call:` 形式) |
-| [input-compression-design.md](input-compression-design.md) | implemented | opt-in 入力圧縮モード (/compress-input) |
+| [harness-engineering.md](harness-engineering.md) | | ハーネス改善 Phase 1〜4 (テトリスセッション分析が起点)。 今の形は internal_design §16 |
+| [system-prompt-redesign.md](system-prompt-redesign.md) | | システムプロンプト再構成 (behavioral / rest の 2 層 + tool-guides の遅延注入) |
+| [prompt-optimization.md](prompt-optimization.md) | | システムプロンプトの最適化 (段階的開示) |
+| [prompt-language-policy.md](prompt-language-policy.md) | in-progress | モデル向けは英語が正本 (Phase 1 済み / 2・3 未) |
+| [prompt-cache-cost-reduction.md](prompt-cache-cost-reduction.md) | | プロンプトキャッシュでのコスト削減 (§3.1 は prompt-prefix-stability.md で改訂) |
+| [strategic-todo-design.md](strategic-todo-design.md) | | 準システムプロンプト + 戦略 ToDo (`todo_append` / `todo_mark` / `todo_delete`) |
+| [todo-goal-lifecycle.md](todo-goal-lifecycle.md) | | ToDo / Goal の寿命 (`/clear`・session 復元・`/todo all`) |
+| [lightweight-register-anchors-design.md](lightweight-register-anchors-design.md) | | 軽いタスクの過剰プラン抑制 (具体例は次の文書で抽象化) |
+| [reactive-intervention-coherence-design.md](reactive-intervention-coherence-design.md) | | 反応的介入の整合 (成果物の形を 1 つに決めつけない) |
+| [request-elaboration-design.md](request-elaboration-design.md) | | 依頼の膨らませ方 (要件展開)・ループ点検 |
+| [env-info-and-app-basics.md](env-info-and-app-basics.md) | | 実行環境情報の補強 (使える Python・git bash のパス) とデータを扱うアプリの土台 |
+| [agent-events-design.md](agent-events-design.md) | | AgentLoop のイベント化 (AgentEventBus) |
+| [ephemeral-context-design.md](ephemeral-context-design.md) | | 揮発メッセージ (`Message.ephemeral`。 整理イベントでまとめて除く) |
+| [context-intelligence.md](context-intelligence.md) | | 意図の分類 (A 節が現行。 B 節の階層圧縮は削除済みで記録扱い) |
+| [handoff-design.md](handoff-design.md) | | `/handoff` (引き継ぎメモを残してリセット)・メモの形 |
+| [context-inspector.md](context-inspector.md) | | `/context` のドリルダウン |
+| [evaluation-loop.md](evaluation-loop.md) | | 評価ループ (書き込み後の Evaluator・`/try`) |
+| [tool-call-salvage-pipe-format-design.md](tool-call-salvage-pipe-format-design.md) | | ツール呼び出しのサルベージ (`<\|tool\|>call:` 形式) |
+| [input-compression-design.md](input-compression-design.md) | | opt-in 入力圧縮 (`/compress-input`) |
+| [sequential-execution.md](sequential-execution.md) | | ツールの逐次実行 (既定) とレート制限での停止 |
+| [file-tools-line-endings.md](file-tools-line-endings.md) | | file_read / file_edit / file_write の改行コード |
+| [fix-plan-process-and-timeout-management.md](fix-plan-process-and-timeout-management.md) | | bash のプロセス分離・無通信監視・対話待ちの防止 |
+| [model-path-capability-and-startup-error-fix.md](model-path-capability-and-startup-error-fix.md) | | パス付きモデル名の能力ティア解決と起動時の例外の表示 |
 
-## LLM プロバイダ・モデル管理
+### 自律実行
 
 | ドキュメント | Status | 内容 |
 |---|---|---|
-| [model-registry.md](model-registry.md) | implemented | Model Registry (LLM 接続のレジストリ化、main/second/vision slot) |
-| [model-setup.md](model-setup.md) | implemented | /model setup ウィザード |
-| [v030_second_llm_design.md](v030_second_llm_design.md) | implemented | セカンド LLM (consult / agent / evaluator 委任) |
-| [main_second_swap_design.md](main_second_swap_design.md) | implemented | /swap (メイン⇔セカンド入れ替え) |
-| [main-second-subagent-comparison.md](archive/main-second-subagent-comparison.md) | record | メイン / セカンド / サブエージェントの役割比較整理 |
-| [llm-profiles.md](archive/llm-profiles.md) | superseded | 旧 LLM プロファイル (→ [model-registry.md](model-registry.md)) |
-| [llm-profile-descriptions.md](llm-profile-descriptions.md) | implemented | モデル特性説明 (サブエージェント選択の材料) |
-| [azure-gpt-provider.md](azure-gpt-provider.md) | implemented | azure-gpt プロバイダ |
-| [gemini-aistudio-provider.md](gemini-aistudio-provider.md) | implemented | gemini (Google AI Studio) プロバイダ |
-| [claude-providers.md](claude-providers.md) | implemented | Claude 系プロバイダ (anthropic / claude-cli ほか) |
-| [claude-agent-sdk-provider-design.md](claude-agent-sdk-provider-design.md) | implemented | claude-agent-sdk プロバイダ |
+| [goal-seek-mode-design.md](goal-seek-mode-design.md) | | Goal Seek mode (受け入れ条件で駆動。 Phase 1。 Phase 2 以降は未実装) |
+| [goal-loop-deterministic-check-design.md](goal-loop-deterministic-check-design.md) | | `/goal-loop` (決定的な検証の終了コード 0 まで反復) |
+| [goal-promotion-design.md](goal-promotion-design.md) | | 依頼から Goal への昇格の提案 |
+| [checkpoint-and-smoke-design.md](checkpoint-and-smoke-design.md) | | 自動チェックポイント (シャドウ Git) と `game_smoke` |
+| [durable-run-resume-design.md](durable-run-resume-design.md) | | `/run pause` (保存して止める 1 方式。 再起動を跨いで再開・起動時の再開確認) |
+| [loop_feature.md](loop_feature.md) | | `/loop` と schedule ツール (定期実行) |
 
-## REPL / UX
+### LLM プロバイダ・モデル管理
 
 | ドキュメント | Status | 内容 |
 |---|---|---|
-| [repl-io-robustness.md](repl-io-robustness.md) | implemented | REPL I/O 堅牢化 (raw mode 自己修復・Esc 中断) |
-| [interrupt-and-progress-design.md](interrupt-and-progress-design.md) | implemented | 中断手段と進捗表示 |
-| [product-feature-comparison-cycle-17-run-api-pause-2026-09-02.md](archive/product-feature-comparison-cycle-17-run-api-pause-2026-09-02.md) | implemented | Codex / Claude比較とforeground runのLLM API境界pause |
-| [product-feature-comparison-cycle-18-durable-run-resume-2026-09-03.md](archive/product-feature-comparison-cycle-18-durable-run-resume-2026-09-03.md) | implemented | Codex / Claude比較とPC・アプリ再起動を跨ぐdurable run resume |
-| [product-feature-comparison-cycle-20-interactive-resume-2026-09-05.md](archive/product-feature-comparison-cycle-20-interactive-resume-2026-09-05.md) | implemented | 処理中composer・mode切替・session stdout復元 |
-| [product-feature-comparison-cycle-22-resume-preview-integrity-2026-09-05.md](archive/product-feature-comparison-cycle-22-resume-preview-integrity-2026-09-05.md) | implemented | resume会話補完と1行preview継続時の本文欠落修正 |
-| [product-feature-comparison-cycle-23-copy-long-line-integrity-2026-09-05.md](archive/product-feature-comparison-cycle-23-copy-long-line-integrity-2026-09-05.md) | implemented | copy-first既定、長文折り返し、resume論理行正規化 |
-| [product-feature-comparison-cycle-24-native-scroll-selection-2026-09-05.md](archive/product-feature-comparison-cycle-24-native-scroll-selection-2026-09-05.md) | implemented | 既定inline表示で端末nativeの選択・コピーとホイールscrollbackを同時に復元 |
-| [product-feature-comparison-cycle-25-search-recovery-2026-09-05.md](archive/product-feature-comparison-cycle-25-search-recovery-2026-09-05.md) | implemented | 名前訂正後の検索復旧、SearXNG劣化診断、明示provider再検索を強化 |
-| [product-feature-comparison-cycle-26-completion-prompt-handoff-2026-09-06.md](archive/product-feature-comparison-cycle-26-completion-prompt-handoff-2026-09-06.md) | implemented | 応答完了時の処理中composer・診断ログ・通常promptの表示handoffを修復 |
-| [durable-run-resume-design.md](durable-run-resume-design.md) | implemented | foreground run の一時停止と再開 (`/run pause` は保存して止める 1 方式、 PC・アプリ再起動を跨いで再開、 起動時の再開確認) |
-| [todo-legacy-ways-cleanup.md](archive/todo-legacy-ways-cleanup.md) | implemented | 同じことをする複数のやり方 (旧コマンド・別名・旧設定キー・todo_write) の一本化 T1〜T5。 未対応・要判断の別名も記載 |
-| [prompt-history-resume.md](prompt-history-resume.md) | implemented | 入力欄の ↑↓ 履歴を作業フォルダ単位で永続化（Claude Code の history.jsonl 相当） |
-| [spinner-mode-response-coloring-design.md](spinner-mode-response-coloring-design.md) | implemented | 応答テキストの色分け (構造ベース) |
-| [ux-transparency.md](ux-transparency.md) | implemented | UX 透明性+サンプリングパラメータ |
-| [context-inspector.md](context-inspector.md) | implemented | /context ドリルダウン |
-| [cost-token-command-design.md](cost-token-command-design.md) | implemented | /cost (コスト・トークン可視化) |
-| [integrations-command-cleanup.md](archive/integrations-command-cleanup.md) | implemented | /integrations への統合コマンド集約 |
-| [response-latency-improvement.md](response-latency-improvement.md) | implemented | 応答速度改善 |
-| [loop_feature.md](loop_feature.md) | implemented | /loop (定期実行) |
+| [model-registry.md](model-registry.md) | | Model Registry (登録一覧 + main / second / vision のスロット。 `/models`) |
+| [model-setup.md](model-setup.md) | | セットアップ wizard (`/model setup`・`/models` の Add new) |
+| [model-orchestration.md](model-orchestration.md) | | 任意のスロットとサブエージェントの結び付け |
+| [model-apply-immediacy.md](model-apply-immediacy.md) | | モデル設定の即時反映と設定のずれの表示 |
+| [v030_second_llm_design.md](v030_second_llm_design.md) | | セカンド LLM (相談 / エージェント / Evaluator への委任) |
+| [main_second_swap_design.md](main_second_swap_design.md) | | `/swap` (メイン ⇔ セカンドの入れ替え) |
+| [llm-profile-descriptions.md](llm-profile-descriptions.md) | | モデル特性の説明 (委任先を選ぶ材料) |
+| [azure-gpt-provider.md](azure-gpt-provider.md) | | azure-gpt (Responses API) |
+| [gemini-aistudio-provider.md](gemini-aistudio-provider.md) | | gemini (Google AI Studio) |
+| [claude-providers.md](claude-providers.md) | | Claude 系 (anthropic / claude-cli / claude-agent-sdk) |
+| [claude-agent-sdk-provider-design.md](claude-agent-sdk-provider-design.md) | | claude-agent-sdk |
 
-## 自律実行モード
+### REPL / UX
 
 | ドキュメント | Status | 内容 |
 |---|---|---|
-| [goal-seek-mode-design.md](goal-seek-mode-design.md) | implemented | Goal Seek mode (acceptance criteria 駆動の自律実行) |
-| [goal-loop-deterministic-check-design.md](goal-loop-deterministic-check-design.md) | implemented | /goal-loop (決定的検証ゲート型ループ) |
-| [goal-promotion-design.md](goal-promotion-design.md) | implemented | 指示→ゴール昇格の標準パス化 |
-| [checkpoint-and-smoke-design.md](checkpoint-and-smoke-design.md) | implemented | 自動チェックポイント (シャドウ Git) + game_smoke |
+| [repl-io-robustness.md](repl-io-robustness.md) | | REPL I/O の堅牢化 (raw mode の自己修復・Esc 中断) |
+| [interrupt-and-progress-design.md](interrupt-and-progress-design.md) | | 中断の手段と進捗表示 |
+| [stdin-ownership.md](stdin-ownership.md) | | stdin の所有権の一元化・処理中の入力欄・Shift+Tab |
+| [tui-alternate-screen.md](tui-alternate-screen.md) | | 表示 (inline 既定 / 全画面 TUI は明示選択)・マウス・コピー |
+| [prompt-history-resume.md](prompt-history-resume.md) | | 入力欄の ↑↓ 履歴の永続化 |
+| [spinner-mode-response-coloring-design.md](spinner-mode-response-coloring-design.md) | | 応答テキストの色分け (構造ベース) |
+| [ux-transparency.md](ux-transparency.md) | | UX の透明性 + サンプリングパラメータ |
+| [cost-token-command-design.md](cost-token-command-design.md) | | `/cost` (コスト・トークンの可視化) |
+| [response-latency-improvement.md](response-latency-improvement.md) | in-progress | 応答速度の改善 (A1 の live preview は実装済み) |
 
-## チャネル統合 (Discord / Slack / Room)
-
-| ドキュメント | Status | 内容 |
-|---|---|---|
-| [room-model-design.md](room-model-design.md) | implemented | Room モデル (A/B/C のサーフェス別セッション分離) |
-| [room-model-review.md](archive/room-model-review.md) | record | Room モデル実装レビュー記録 |
-| [discord-gateway-design.md](discord-gateway-design.md) | implemented | Discord 受信の Gateway (WS) 方式 |
-| [slack-integration.md](slack-integration.md) | implemented | Slack 統合 (Socket Mode) |
-| [channel-interaction-bridge-design.md](channel-interaction-bridge-design.md) | implemented | チャネル対話ブリッジ (権限確認 / ask_user) |
-| [channel-progress-design.md](channel-progress-design.md) | implemented | チャネル進捗中間報告 |
-| [channel-session-queue-design.md](channel-session-queue-design.md) | implemented | チャネルセッション分離とリクエストキュー |
-| [async-surface-permission-delivery-design.md](async-surface-permission-delivery-design.md) | implemented | 非同期サーフェス権限の配信・観測性 |
-| [task-report-notification-design.md](task-report-notification-design.md) | implemented | 完了報告の構造化と proactive 通知 |
-
-## ツール・スキル・外部連携
+### チャネル統合 (Discord / Slack / Room)
 
 | ドキュメント | Status | 内容 |
 |---|---|---|
-| [file-tools-line-endings.md](file-tools-line-endings.md) | implemented | file_read / file_edit / file_write の改行コード (LF で照合し、ファイルの改行コードを保って書く) |
-| [image-generation.md](image-generation.md) | implemented | 画像生成 (Azure GPT Images / SD WebUI / ComfyUI) |
-| [obsidian-integration.md](obsidian-integration.md) | implemented | Obsidian ナレッジベース連携 |
-| [chat-log.md](chat-log.md) | implemented | チャットログ保存 |
-| [llm-logging.md](llm-logging.md) | implemented | LLM I/O ログ+運用ログ (ops-logger) |
-| [exe-playwright-externalization.md](exe-playwright-externalization.md) | implemented | exe での Playwright 外部化 (--install-browser) |
-| [wsl-sandbox-design.md](wsl-sandbox-design.md) | implemented | bash 封じ込め (Seatbelt / bwrap / WSL2) |
-| [claude-code-driver-skill.md](claude-code-driver-skill.md) | implemented | claude-code-driver スキル |
-| [ascii-art-skill-design.md](ascii-art-skill-design.md) | implemented | ASCII アート化スキル |
-| [product-quality-cycle-skill.md](product-quality-cycle-skill.md) | implemented | 観点指定の商品品質レビュー・改善サイクルスキル |
-| [plugin-bundle-design.md](plugin-bundle-design.md) | implemented | 明示的に信頼したローカルplugin bundleのmanifest・安全境界・loader設計 |
-| [safe-mode-design.md](safe-mode-design.md) | implemented | カスタマイズを一括停止して診断・復旧する`--safe-mode`の境界 |
-| [workflow-learning.md](workflow-learning.md) | implemented | browser/computer操作を秘密値を除いた手動起動skillへ変換する契約と安全境界 |
-| [blender-mcp-integration.md](blender-mcp-integration.md) | implemented | Blender MCP 連携の改修ポイント |
+| [room-model-design.md](room-model-design.md) | | Room モデル (A/B/C のサーフェス別の会話・受信順キュー・foreground steering) |
+| [discord-gateway-design.md](discord-gateway-design.md) | | Discord の受信 (Gateway 方式) |
+| [slack-integration.md](slack-integration.md) | | Slack 統合 (Socket Mode) |
+| [channel-interaction-bridge-design.md](channel-interaction-bridge-design.md) | | チャネルでの権限確認 / ask_user |
+| [channel-progress-design.md](channel-progress-design.md) | | チャネルの進捗中間報告 |
+| [async-surface-permission-delivery-design.md](async-surface-permission-delivery-design.md) | | 非同期サーフェスの権限・配信・観測性 (背景面の autorun) |
+| [task-report-notification-design.md](task-report-notification-design.md) | | 完了報告の構造化と Webhook 通知 |
 
-## 調査・提案 (未実装の構想)
+### ツール・スキル・外部連携
 
 | ドキュメント | Status | 内容 |
 |---|---|---|
-| [openclaw-compat-addon-feasibility.md](openclaw-compat-addon-feasibility.md) | proposal | OpenClaw 互換アドオンの実現性調査・実装設計 |
-| [autonomy-improvement-proposal.md](autonomy-improvement-proposal.md) | proposal | 他エージェントアプリ比較と自律性向上の提案 |
-| [agent-loop-efficiency-review.md](archive/agent-loop-efficiency-review.md) | proposal | Agent Loop 効率レビュー (米国株投資支援アプリのログ分析起点) |
+| [image-generation.md](image-generation.md) | | 画像生成 (Azure GPT Images / SD WebUI / ComfyUI) |
+| [obsidian-integration.md](obsidian-integration.md) | | Obsidian ナレッジベース (`knowledge_save` / `knowledge_search`) |
+| [chat-log.md](chat-log.md) | | 会話ログの保存 |
+| [llm-logging.md](llm-logging.md) | | LLM I/O ログ + 運用ログ (ops-logger) |
+| [exe-playwright-externalization.md](exe-playwright-externalization.md) | | exe での Playwright 外部化 (`--install-browser`。 §A は未実装) |
+| [wsl-sandbox-design.md](wsl-sandbox-design.md) | | bash の封じ込め (Seatbelt / bwrap / WSL2) |
+| [native-computer-use.md](native-computer-use.md) | | Native Computer Use (`computer_*`) の安全境界と OS ドライバ |
+| [workflow-learning.md](workflow-learning.md) | | 操作学習 (browser / computer の操作を手動起動の skill に) |
+| [plugin-bundle-design.md](plugin-bundle-design.md) | | 明示的に信頼したローカル plugin bundle |
+| [safe-mode-design.md](safe-mode-design.md) | | `--safe-mode` (カスタマイズを止めて診断) |
+| [claude-code-driver-skill.md](claude-code-driver-skill.md) | | claude-code-driver スキル |
+| [ascii-art-skill-design.md](ascii-art-skill-design.md) | | ASCII アート化スキル |
+| [product-quality-cycle-skill.md](product-quality-cycle-skill.md) | | 観点を指定した品質レビュー・改善サイクルのスキル |
+| [unity-integration.md](unity-integration.md) | | Unity 連携 (`localllm unity setup / doctor`) |
+| [unity-production-recovery.md](unity-production-recovery.md) | | Unity 制作支援とコンテキストの復旧 |
+
+## 構想・計画 (未実装)
+
+| ドキュメント | Status | 内容 |
+|---|---|---|
+| [todo-local-llm-speed.md](todo-local-llm-speed.md) | proposal | ローカル LLM の処理速度改善の計画 (未着手) |
+| [multi-tier-harness-roadmap.md](multi-tier-harness-roadmap.md) | in-progress | マルチティア (T1/T2/T3) ハーネスのロードマップ (一部実装済み) |
+| [autonomy-improvement-proposal.md](autonomy-improvement-proposal.md) | proposal | 自律性向上の提案 (A-1〜A-6・B-1 は実装済み。 A-7〜A-9・B-2・B-3 が未着手) |
 | [changelog-feature-backlog.md](changelog-feature-backlog.md) | proposal | Claude Code changelog 由来の機能バックログ |
-| [prompt-tech-debt-review.md](archive/prompt-tech-debt-review.md) | record | プロンプト棚卸しレビュー (2026-04-29) |
+| [openclaw-compat-addon-feasibility.md](openclaw-compat-addon-feasibility.md) | proposal | OpenClaw 互換アドオンの実現性調査と設計 |
 
 ## 手順書・参照
 
 | ドキュメント | Status | 内容 |
 |---|---|---|
-| [setup-mac.md](setup-mac.md) | reference | macOS セットアップ手順 |
+| [setup-mac.md](setup-mac.md) | reference | macOS のセットアップ手順 |
+| [blender-mcp-integration.md](blender-mcp-integration.md) | reference | Blender MCP の接続手順 (コード改修なし) |
+| [nodejs-security-review-2026-10.md](nodejs-security-review-2026-10.md) | reference | Node.js のセキュリティ調査 (2026-10-22 時点) と本アプリへの影響 |
+
+## 未解決の判断事項
+
+- 同じ目的のやり方が 2 つ残っているもの (`/quit` と `/exit`、 `/cost model` と `/cost models` など 9 件): [archive/todo-legacy-ways-cleanup.md](archive/todo-legacy-ways-cleanup.md) の末尾「未対応・要判断」
+- config の `mainLLM` / `secondLLM` / `visionLLM` と model-registry のスロットの二重管理: 同書 C4 で「今は触らない」 と決定済み
+- コンテキストの整理の実機での確認 (T2・T13): [context-reduction-redesign.md](context-reduction-redesign.md) §14.3 B
+
+## アーカイブ
+
+過去の比較・品質サイクルの記録、 完了した ToDo、 置き換えられた設計、 レビューの記録 (50 本) は [archive/README.md](archive/README.md)。

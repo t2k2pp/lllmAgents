@@ -1,6 +1,6 @@
 # exe での Playwright 外部化（ブラウザ機能の parity 回復）
 
-/ 設計書。実装と常に整合を保つこと（CLAUDE.md ルール）。
+Status: implemented (`--install-browser` / `--check-browser`、 `features.browser`、 `src/browser/`)。 §A (npm 非依存の有効化) は未実装・先送り。 設計書。実装と常に整合を保つこと（CLAUDE.md ルール）。
 
 ## 1. 背景と問題
 

@@ -1,6 +1,6 @@
 # 軽量タスクの過剰プラン抑制 — レジスター「軽い側アンカー」設計書
 
-> **ステータス**: ドラフト (レビュー前)
+> **ステータス**: implemented → 改訂済み (2026-10-25 docs 整理で更新)。 本書で判定木に列挙した具体例 (じゃんけん・占い等) は、 後続の docs/reactive-intervention-coherence-design.md で抽象的な記述に置き換えた (今の文言は `src/agent/shared-principles.ts` の `buildRegisterRules`)。 ToDo ツールは `todo_append` / `todo_mark` / `todo_delete` (本文の `todo_write` は削除済み)
 > **作成日**: 2026-06-07
 > **位置づけ**: `docs/strategic-todo-design.md` の対称的補完。あちらが「過小・計画蒸発」を防ぐ設計なら、本書は「過剰プラン (trivial タスクへの ToDo/standard エスカレーション)」を防ぐ設計
 > **関連**:

@@ -159,7 +159,7 @@ Components（許可 / 今回のみ / 拒否）にブリッジする。
 
 #### A-5. セッション分離とリクエストキュー
 
-**ステータス: 実装済み (2026-06-12)。個別設計書: [channel-session-queue-design.md](channel-session-queue-design.md)**
+**ステータス: 実装済み (2026-06-12)。個別設計書: [channel-session-queue-design.md](archive/channel-session-queue-design.md)**
 
 - Slack スレッド / Discord チャンネル（またはユーザー）単位に会話コンテキストを分離。
   session-manager の保存・復元を流用し、スレッド ID → セッション ID をマップ
