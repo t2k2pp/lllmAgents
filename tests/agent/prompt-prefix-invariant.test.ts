@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentLoop } from "../../src/agent/agent-loop.js";
+import { checkContextWindowFits } from "../../src/agent/context-budget.js";
+import { MessageHistory } from "../../src/agent/message-history.js";
+import { SUMMARY_HEADINGS } from "../../src/agent/reduction-summary.js";
+import { estimateMessageTokens, estimateToolDefinitionTokens } from "../../src/agent/token-counter.js";
 import type { ChatChunk, ChatWithToolsParams, LLMProvider } from "../../src/providers/base-provider.js";
 import { PermissionManager } from "../../src/security/permission-manager.js";
 import type { SecurityConfig } from "../../src/config/types.js";
@@ -193,5 +197,156 @@ describe("プロンプト前方一致の不変条件 (KV キャッシュ)", () =
 
     expect(requests.length).toBeGreaterThanOrEqual(4);
     expectPrefixExtension(requests);
+  });
+});
+
+// ─── 整理イベント (docs/context-reduction-redesign.md §6。 整理の作り直し タスク 7) ───
+
+/** 直前の送信をそのまま先頭に含まない送信 (= キャッシュが外れる送信) の位置 */
+function prefixBreaks(requests: ChatWithToolsParams[]): number[] {
+  const breaks: number[] = [];
+  for (let i = 1; i < requests.length; i++) {
+    const prev = requests[i - 1];
+    const next = requests[i];
+    const kept =
+      JSON.stringify(next.tools) === JSON.stringify(prev.tools) &&
+      next.messages.length >= prev.messages.length &&
+      prev.messages.every((m, j) => JSON.stringify(next.messages[j]) === JSON.stringify(m));
+    if (!kept) breaks.push(i);
+  }
+  return breaks;
+}
+
+/** 要約の指示から区間の数を読み、 型どおりの要約を返す */
+function summaryReply(instruction: string): ChatChunk[] {
+  const n = Number(/for each of the (\d+) segments/.exec(instruction)?.[1] ?? "0");
+  const segs = Array.from({ length: n }, (_, i) => `<segment n="${i + 1}">区間 ${i + 1} でしたこと</segment>`);
+  const body = SUMMARY_HEADINGS.map((h) => `## ${h}\nNone`).join("\n\n");
+  return textReply(`${segs.join("\n")}\n<summary>\n${body}\n</summary>`);
+}
+
+/**
+ * 本体呼び出しには台本を順に返し、 要約の依頼 (<context-summary-request>) には要約を返す。
+ * 送った内容は順に全部 requests に残す (要約の呼び出しも前方一致の検査に入れる)。
+ */
+function reductionAwareProvider(replies: ChatChunk[][], requests: ChatWithToolsParams[]): LLMProvider {
+  let main = 0;
+  const chatWithTools = async function* (params: ChatWithToolsParams): AsyncGenerator<ChatChunk> {
+    requests.push(JSON.parse(JSON.stringify(params)));
+    const last = String(params.messages.at(-1)?.content ?? "");
+    const reply = last.includes("<context-summary-request>")
+      ? summaryReply(last)
+      : (replies[Math.min(main++, replies.length - 1)] ?? []);
+    for (const chunk of reply) yield chunk;
+  };
+  return {
+    providerType: "openai-compat",
+    testConnection: async () => true,
+    listModels: async () => [],
+    getModelInfo: async () => ({}),
+    chat: chatWithTools,
+    chatWithTools,
+    supportsVision: async () => false,
+    chatWithVision: chatWithTools,
+  } as unknown as LLMProvider;
+}
+
+/** 思考付きでツールを呼ぶ応答 */
+function thinkingToolCall(id: string, name: string): ChatChunk[] {
+  return [{ type: "thinking", text: `${id} について考える` }, ...toolCall(id, name)];
+}
+
+/**
+ * 1 件の依頼の台本: 思考付きで大きな結果のツールを probes 回呼び、 ToDo を片付けてから、 出力上限で切れた応答
+ * (= 揮発の「続きを出力」 の促しが入る) と続きの応答で終える。 依頼の境目には揮発メッセージと思考が残る。
+ */
+function requestScript(tag: string, probes: number, finalPadding = ""): ChatChunk[][] {
+  const script: ChatChunk[][] = [];
+  for (let i = 0; i < probes; i++) script.push(thinkingToolCall(`${tag}-${i}`, "big_probe"));
+  script.push(thinkingToolCall(`${tag}-f`, "finish_probe"));
+  script.push([
+    { type: "thinking", text: `${tag} のまとめを考える` },
+    { type: "text", text: `${tag} の前半` },
+    { type: "done", finishReason: "length" },
+  ]);
+  script.push(textReply(`${tag} の後半 ${finalPadding} です。`));
+  return script;
+}
+
+describe("前方一致の不変条件: 整理イベント (規則 1) と依頼の境目", () => {
+  afterEach(() => clearTodos());
+
+  // 要約あり: 最後の応答の本文を長くする (段階 1 では消えないモデルの発言が溜まり、 段階 3 の要約の範囲ができる)
+  it.each([
+    { label: "要約なし", finalPadding: "", summaryCalls: 0 },
+    { label: "要約あり", finalPadding: "y".repeat(12_000), summaryCalls: 1 },
+  ])("キャッシュが外れる送信は整理イベントごとにちょうど 1 回で、 揮発メッセージ・思考がある依頼の境目では 0 回 ($label)", async ({
+    finalPadding,
+    summaryCalls,
+  }) => {
+    const registry = makeRegistry();
+    // 1 件の上限 (T3 = 2,048 トークン) に収まる大きな結果。 古いものは段階 1 で本文が消える
+    registry.register({
+      name: "big_probe",
+      definition: {
+        type: "function",
+        function: { name: "big_probe", description: "big", parameters: { type: "object", properties: {} } },
+      },
+      execute: async () => ({ success: true, output: "x".repeat(7_000) }),
+    });
+    const requests: ChatWithToolsParams[] = [];
+    const replies = [
+      ...requestScript("q1", 5, finalPadding),
+      ...requestScript("q2", 5, finalPadding),
+      ...requestScript("q3", 5, finalPadding),
+      ...requestScript("q4", 5, finalPadding),
+    ];
+    const provider = reductionAwareProvider(replies, requests);
+    const loop = makeLoop(provider, registry);
+    const outcomes: string[] = [];
+    loop.events.on("task_complete", (e) => outcomes.push(e.outcome));
+    // 起動時の検査に通る最小の W + 2,000 (利用者の入力の分) にする (T3: 固定部分 + 直近 3 回のツール結果 +
+    // 会話の最小限 + 予約 R)。 規則 1 は会話が約 24.5k トークンを超えたところで起きる
+    const fixed =
+      estimateMessageTokens([loop.getHistory().getMessages()[0]]) +
+      estimateToolDefinitionTokens(registry.getDefinitions());
+    const fit = checkContextWindowFits({ contextWindow: 0, tier: "T3", fixedTokens: fixed });
+    loop.setContextWindow(fit.requiredTokens + 2_000);
+
+    // 整理イベントの差し替えが起きた時点 (それまでに送った件数) を控える
+    const reductionsAt: number[] = [];
+    const boundariesAt: number[] = [];
+    const realReplace = MessageHistory.prototype.replaceMessages;
+    const replace = vi.spyOn(MessageHistory.prototype, "replaceMessages");
+    replace.mockImplementation(function (this: MessageHistory, next, reason) {
+      if (String(reason).startsWith("reduction:")) reductionsAt.push(requests.length);
+      realReplace.call(this, next, reason);
+    });
+    try {
+      for (const q of ["1 件目", "2 件目", "3 件目", "4 件目"]) {
+        await loop.run(`${q}を調べてください？`);
+        boundariesAt.push(requests.length);
+        // 依頼の境目には揮発メッセージと思考が残っている (応答の終わりで消していない)
+        const raw = loop.getHistory().getRawMessages();
+        expect(raw.some((m) => m.ephemeral === true)).toBe(true);
+        expect(raw.some((m) => m.role === "assistant" && m.thinking)).toBe(true);
+      }
+    } finally {
+      replace.mockRestore();
+    }
+
+    expect(reductionsAt.length).toBeGreaterThanOrEqual(1);
+    const summaryRequests = requests.filter((r) =>
+      String(r.messages.at(-1)?.content ?? "").includes("<context-summary-request>"),
+    );
+    if (summaryCalls === 0) expect(summaryRequests).toHaveLength(0);
+    else expect(summaryRequests.length).toBeGreaterThanOrEqual(summaryCalls);
+    // 外れるのは整理イベントの直後の送信だけ。 要約の呼び出しは書き換え前の並びに指示を足すだけなので外れない
+    expect(prefixBreaks(requests)).toEqual(reductionsAt);
+    // 依頼の境目 (次の依頼の最初の送信) では外れない
+    for (const b of boundariesAt.slice(0, -1)) expect(prefixBreaks(requests)).not.toContain(b);
+    // 台本どおり 4 件とも正常に終わっている (本体呼び出しは台本の数ちょうど)
+    expect(outcomes).toEqual(["completed", "completed", "completed", "completed"]);
+    expect(requests.length - summaryRequests.length).toBe(replies.length);
   });
 });

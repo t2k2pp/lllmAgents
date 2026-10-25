@@ -5,6 +5,13 @@
 > **位置づけ**: `docs/multi-tier-harness-roadmap.md` Phase B-C / Phase D-4 (短 ctx 最適化) と直交する横串の改善。 思想は「思考と試行錯誤を無駄にしない」。 設計の詳細は `docs/agent-loop-efficiency-review.md` で分析した P0-P3 自己点検メカニズムの上に乗る。
 >
 > **作成日**: 2026-05-10
+>
+> **2026-10-25 改訂 (除く時期と印の置き場所)**: 揮発の印の考えはそのまま残すが、 **除く時期を「応答のたび」 から「整理イベント」 に変えた**
+> (`docs/context-reduction-redesign.md` §5.2 / §6.2 / §6.4)。 応答の終わりで履歴を書き換えると、 混成モデルでは依頼 1 件ごとに
+> KV キャッシュの全部 (12〜16 万トークンで 15〜20 分) を読み直すため。 揮発メッセージと思考は次の依頼にも見えたまま残り、
+> 次の整理イベントの前処理でまとめて除く (許容。 同書 §14.2 の 3)。 あわせて印を WeakSet から `Message.ephemeral` (内部専用の欄。
+> 送る前に外す) に移し、 セッションの保存・再開で失わないようにした。 表示済みの応答には最初から印を付けない (`promoteDisplayedEphemeral` は廃止)。
+> `purgeEphemeralAtSpanEnd` は `recordSpanEnd` (終わり方の記録だけ) に改名、 `purgeEphemeral` / `isEphemeral` は削除。 以下の §3 以降の実装の記述は当時の記録。
 
 ---
 

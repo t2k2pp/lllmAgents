@@ -3,16 +3,14 @@ import type { ChatChunk, LLMProvider, Message } from "../../src/providers/base-p
 import { MessageHistory } from "../../src/agent/message-history.js";
 import {
   ForgettingEngine,
-  TOMBSTONE_MARKER,
   applyPlanToMessages,
   buildManifest,
   buildSegments,
   buildTombstoneText,
-  insertTombstone,
   parseForgetResponse,
   validateChoice,
 } from "../../src/agent/forgetting.js";
-import { THINNED_MARKER } from "../../src/agent/reduction-stages.js";
+import { THINNED_MARKER, TOMBSTONE_MARKER, insertTombstone } from "../../src/agent/reduction-stages.js";
 
 // ─── テスト用の道具 ───
 

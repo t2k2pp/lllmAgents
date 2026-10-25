@@ -63,25 +63,14 @@ describe("MessageHistory.replaceOlderMessages — tool_call/tool_result の分�
   });
 });
 
-describe("MessageHistory.purgeEphemeral — span 境界での揮発メッセージ破棄", () => {
-  it("ephemeral=true のメッセージのみ purge され、 永続メッセージは残る", () => {
+describe("MessageHistory — 揮発の印 (Message.ephemeral。 docs/context-reduction-redesign.md §6.2)", () => {
+  it("ephemeral=true のメッセージに印が付き、 永続メッセージには付かない", () => {
     const history = new MessageHistory("system");
     history.addUserMessage("U1 (永続: ユーザー実発話)");
     history.addAssistantMessage("A1 (永続: 最終応答相当)");
     history.addUserMessage("[ハーネス] nudge", { ephemeral: true });
     history.addAssistantMessage("（空のレスポンス）", undefined, { ephemeral: true });
-    history.addUserMessage("U2 (永続)");
-
-    expect(history.getRawMessages().length).toBe(5);
-    const purged = history.purgeEphemeral();
-    expect(purged).toBe(2);
-    const remaining = history.getRawMessages();
-    expect(remaining.length).toBe(3);
-    expect(remaining.map((m) => m.content)).toEqual([
-      "U1 (永続: ユーザー実発話)",
-      "A1 (永続: 最終応答相当)",
-      "U2 (永続)",
-    ]);
+    expect(history.getRawMessages().map((m) => m.ephemeral === true)).toEqual([false, false, true, true]);
   });
 
   it("tool_call を含む assistant メッセージは ephemeral=true でも揮発化されない (tool ペア保護)", () => {
@@ -99,83 +88,56 @@ describe("MessageHistory.purgeEphemeral — span 境界での揮発メッセー�
         { ephemeral: true },
       );
       history.addToolResult("call_1", "結果");
-
-      const purged = history.purgeEphemeral();
-      expect(purged).toBe(0);
-      expect(history.getRawMessages().length).toBe(2);
+      expect(history.getRawMessages()[0].ephemeral).toBeUndefined();
       expect(warnings.length).toBe(1);
     } finally {
       console.warn = origWarn;
     }
   });
 
-  it("displayed=true の ephemeral は promoteDisplayedEphemeral で永続化され purge を生き残る", () => {
+  it("表示済み (displayed=true) の応答は揮発として渡されても印を付けない (会話記録として残す)", () => {
     // 2026-06-12 の実害: 会話リクエストの実回答 (表示済みテキスト) が self-check 経路で
-    // ephemeral になり、 span 終了の purge で消えてモデルが自分の回答を参照できなくなった
+    // 揮発になり、 除かれてモデルが自分の回答を参照できなくなった
     const history = new MessageHistory("system");
     history.addUserMessage("感動する四字熟語ベスト10を教えて");
     history.addAssistantMessage("1. 一期一会 …", undefined, { ephemeral: true, displayed: true });
-    history.addUserMessage("[ハーネス] self-check nudge", { ephemeral: true });
-    history.addAssistantMessage("確認しました (self-check 応答)");
-
-    const promoted = history.promoteDisplayedEphemeral();
-    expect(promoted).toBe(1);
-    const purged = history.purgeEphemeral();
-    expect(purged).toBe(1); // nudge のみ purge
-    expect(history.getRawMessages().map((m) => m.content)).toEqual([
-      "感動する四字熟語ベスト10を教えて",
-      "1. 一期一会 …",
-      "確認しました (self-check 応答)",
-    ]);
+    history.addAssistantMessage("（空のレスポンス）", undefined, { ephemeral: true, displayed: false });
+    const raw = history.getRawMessages();
+    expect(raw[1].ephemeral).toBeUndefined();
+    expect(raw[2].ephemeral).toBe(true);
   });
 
-  it("displayed=false (未表示 placeholder 等) は promote されず purge される", () => {
-    const history = new MessageHistory("system");
-    history.addAssistantMessage("（空のレスポンス）", undefined, { ephemeral: true });
-    history.addAssistantMessage("表示済み", undefined, { ephemeral: true, displayed: true });
-    expect(history.promoteDisplayedEphemeral()).toBe(1);
-    expect(history.purgeEphemeral()).toBe(1);
-    expect(history.getRawMessages().map((m) => m.content)).toEqual(["表示済み"]);
-  });
-
-  it("複数回 purge 呼んでも 2 回目以降は 0 件 (idempotent)", () => {
-    const history = new MessageHistory("system");
-    history.addUserMessage("nudge", { ephemeral: true });
-    expect(history.purgeEphemeral()).toBe(1);
-    expect(history.purgeEphemeral()).toBe(0);
-  });
-
-  it("purge 後に追加した ephemeral も次の purge で除去される (span をまたいで状態が混じらない)", () => {
-    const history = new MessageHistory("system");
-    history.addUserMessage("nudge1", { ephemeral: true });
-    history.purgeEphemeral();
-    history.addUserMessage("U-permanent");
-    history.addUserMessage("nudge2", { ephemeral: true });
-    const purged = history.purgeEphemeral();
-    expect(purged).toBe(1);
-    expect(history.getRawMessages().map((m) => m.content)).toEqual(["U-permanent"]);
-  });
-
-  it("ephemeral メッセージは provider 用の getMessages() でも他と区別なく見える (in-turn 中は届く)", () => {
+  it("応答の終わりの片付けは無い: 印の付いたメッセージも履歴に残り、 書き換え理由も出ない", () => {
     const history = new MessageHistory("sys");
     history.addUserMessage("U1");
     history.addUserMessage("[ハーネス] nudge", { ephemeral: true });
-    const all = history.getMessages();
-    // [system, U1, nudge]
-    expect(all.length).toBe(3);
-    expect(all[0].role).toBe("system");
-    expect(all[2].content).toBe("[ハーネス] nudge");
-    // ephemeral フィールドはメッセージオブジェクトに載らない (provider にリークしない)
-    expect((all[2] as Record<string, unknown>).ephemeral).toBeUndefined();
+    history.addAssistantMessage("答え", undefined, { thinking: "考え" });
+    expect(history.getRawMessages()).toHaveLength(3);
+    expect(history.takeRewriteReasons()).toEqual([]);
+    expect(history.getRevision()).toBe(0);
   });
 
-  it("isEphemeral() で個別判定可能", () => {
+  it("provider 用の getMessages() には揮発の印が載らない (provider にリークしない)", () => {
     const history = new MessageHistory("sys");
-    history.addUserMessage("permanent");
-    history.addUserMessage("temp", { ephemeral: true });
-    const raw = history.getRawMessages();
-    expect(history.isEphemeral(raw[0])).toBe(false);
-    expect(history.isEphemeral(raw[1])).toBe(true);
+    history.addUserMessage("U1");
+    history.addUserMessage("[ハーネス] nudge", { ephemeral: true });
+    history.addAssistantMessage("（空）", undefined, { ephemeral: true, thinking: "考え" });
+    history.attachDynamicContext();
+    history.addUserMessage("[ハーネス] 2 つ目", { ephemeral: true });
+    history.attachDynamicContext(); // 揮発の user に状態通知が付く (contextNote の描画の分岐)
+    const all = history.getMessages();
+    expect(all.map((m) => m.content)).toHaveLength(5);
+    for (const m of all) expect(m).not.toHaveProperty("ephemeral");
+    expect(all[4].content as string).toContain("<harness-context>");
+    // 内部の履歴には残っている
+    expect(history.getRawMessages().filter((m) => m.ephemeral).length).toBe(3);
+  });
+
+  it("印はメッセージの欄なので JSON にして戻しても失われない (セッションの保存・再開)", () => {
+    const history = new MessageHistory("sys");
+    history.addUserMessage("[ハーネス] nudge", { ephemeral: true });
+    const restored = JSON.parse(JSON.stringify(history.getRawMessages()));
+    expect(restored[0].ephemeral).toBe(true);
   });
 });
 
@@ -269,11 +231,11 @@ describe("MessageHistory — 前方一致の安定化 (docs/prompt-prefix-stabil
     expect(h.getMessages().at(-1)?.content as string).toContain("TODO-2");
   });
 
-  it("前回通知を付けたメッセージが消えたら (揮発除去など) 状態を出し直す", () => {
+  it("前回通知を付けたメッセージが消えたら (整理・圧縮など) 状態を出し直す", () => {
     const h = withState({ value: "TODO-1" });
     h.addUserMessage("nudge", { ephemeral: true });
     h.attachDynamicContext(T0);
-    h.purgeEphemeral();
+    h.replaceMessages([], "reduction:r-test"); // 整理イベントで揮発の促しが消えた
     h.addUserMessage("U2");
     h.attachDynamicContext(T1);
     h.addAssistantMessage("", callA);
@@ -313,12 +275,13 @@ describe("MessageHistory — 前方一致の安定化 (docs/prompt-prefix-stabil
     h.addUserMessage("nudge", { ephemeral: true });
     h.addAssistantMessage("", callA, { thinking: "考え中" });
     h.addToolResult("call_a", "R1");
-    h.purgeEphemeral();
+    h.replaceMessages(h.getRawMessages().slice(1), "reduction:r-1");
     h.clearAllThinking();
     h.updateSystemPrompt("BASE"); // 同じ内容なら書き換えではない
     h.updateSystemPrompt("BASE2");
-    expect(h.takeRewriteReasons()).toEqual(["ephemeral-purge", "thinking-clear", "system-prompt"]);
+    expect(h.takeRewriteReasons()).toEqual(["reduction:r-1", "thinking-clear", "system-prompt"]);
     expect(h.takeRewriteReasons()).toEqual([]);
+    expect(h.getRevision()).toBe(3); // 取り出しても書き換えの回数は戻らない
   });
 
   it("末尾への追加と状態通知の添付は書き換え理由にならない", () => {

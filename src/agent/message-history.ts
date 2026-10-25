@@ -6,18 +6,18 @@ export type AssistantMessageCallback = (content: string, toolCalls?: ToolCall[])
 /**
  * 揮発フラグの設計メモ:
  *
- * harness が in-turn のリトライ・自己点検・nudge のために注入する補助メッセージは、
- * ユーザー応答完了 (response_complete / 最終 assistant 応答) のタイミングで破棄したい。
- * これにより:
- *   - 過去 span の harness ノイズが次 span の判断を引きずらない
- *   - context 圧迫を抑える (短 ctx の T3 で特に効く)
- *   - LLM が思考した内容を span 内では活用しつつ、 span 境界で「消費し終えた」 として捨てる
+ * harness が in-turn のリトライ・自己点検・nudge のために注入する補助メッセージには揮発の印
+ * (Message.ephemeral) を付ける。 終わった依頼の揮発メッセージは次の整理イベントの前処理で除く
+ * (docs/context-reduction-redesign.md §5.2 / §6.2)。 応答のたびには除かない (除くと送信済みの履歴が
+ * 書き換わり、 依頼 1 件ごとに KV キャッシュの全部を読み直すことになる)。
  *
  * 設計上の制約:
  *   - tool_call を含む assistant メッセージと、 対応する tool_result (role=tool) は
  *     OpenAI 互換 API 仕様で必ずペアで存在する必要があるため、 揮発化禁止。
  *   - 揮発対象は「assistant の純テキスト (tool_calls なし)」 と「user 役の harness 注入」 のみ。
- *   - フラグは Message オブジェクトには載せない (provider にリークしないよう WeakSet で外置き)。
+ *   - ユーザーに表示済みの assistant テキストは会話記録なので、 揮発として渡されても印を付けない
+ *     (2026-06-12 の回答消失対策。 以前は応答の終わりに印を外していた)。
+ *   - 印は contextNote と同じ内部専用の欄。 セッションに保存され、 provider へ送る前に toSentMessage() が外す。
  */
 /**
  * 準システムプロンプト composer の signature。
@@ -90,7 +90,7 @@ export function toSentMessage(m: Message): Message {
     return out;
   }
   if (m.contextNote) {
-    const { contextNote, ...rest } = m;
+    const { contextNote, ephemeral: _ephemeral, ...rest } = m;
     const note = renderContextNote(contextNote);
     const content: string | ContentPart[] =
       typeof m.content === "string"
@@ -99,6 +99,11 @@ export function toSentMessage(m: Message): Message {
           : note
         : [...m.content, { type: "text", text: note }];
     return { ...rest, content };
+  }
+  // 揮発の印 (内部専用) は provider に渡さない
+  if (m.ephemeral !== undefined) {
+    const { ephemeral: _ephemeral, ...rest } = m;
+    return rest;
   }
   return m;
 }
@@ -138,17 +143,6 @@ export class MessageHistory {
   private messages: Message[] = [];
   private systemPrompt: string;
   private onAssistantMessage: AssistantMessageCallback | null = null;
-  private ephemeralMessages = new WeakSet<Message>();
-  /**
-   * ユーザーに表示済み (白表示 / ストリーミング出力済み) の assistant メッセージ。
-   * ephemeral でも span 終了時に purge せず永続化する (promoteDisplayedEphemeral)。
-   *
-   * 背景 (2026-06-12): 会話リクエストの実回答 (テキストのみ応答) が自己点検経路で
-   * ephemeral 扱いになり、 span 終了時に purge されて「モデルが自分の直前の回答を
-   * 参照できない」 状態が発生した (ユーザーが回答内容を指摘しても履歴に回答が無い)。
-   * ユーザーが読んだ言葉は会話記録であり、 黙って欠損させてはならない。
-   */
-  private displayedMessages = new WeakSet<Message>();
   /**
    * 動的合成 composer。 注入されていれば getMessages() で毎回呼ばれて準システムプロンプトを作る。
    * 未注入なら従来通り this.systemPrompt をそのまま返す (後方互換)。
@@ -172,6 +166,12 @@ export class MessageHistory {
    * docs/context-reduction-redesign.md §5.6)。 添えたら空にする。
    */
   private pendingStateHandover: string | null = null;
+  /**
+   * 送信済みの部分を書き換えた回数。 書き換え理由を申告するたびに増える。 直前の本体呼び出しの実数を
+   * 次の P の土台にしてよいか (間に書き換えが無いか) を AgentLoop が確かめるのに使う
+   * (docs/context-reduction-redesign.md §4.1 の P)。
+   */
+  private revision = 0;
 
   constructor(systemPrompt: string) {
     this.systemPrompt = systemPrompt;
@@ -264,10 +264,8 @@ export class MessageHistory {
 
   addUserMessage(content: string | ContentPart[], opts?: { ephemeral?: boolean }): void {
     const msg: Message = { role: "user", content };
+    if (opts?.ephemeral) msg.ephemeral = true;
     this.messages.push(msg);
-    if (opts?.ephemeral) {
-      this.ephemeralMessages.add(msg);
-    }
   }
 
   addAssistantMessage(
@@ -276,18 +274,14 @@ export class MessageHistory {
     opts?: { ephemeral?: boolean; thinking?: string; displayed?: boolean },
   ): void {
     const msg: Message = { role: "assistant", content };
-    if (opts?.displayed) {
-      this.displayedMessages.add(msg);
-    }
     if (toolCalls && toolCalls.length > 0) {
       msg.tool_calls = toolCalls;
     }
     // 思考保全 (Phase 2 本実装): thinking がある場合は Message に保存。
-    // span 境界で clearAllThinking() で削除される。
+    // 終わった依頼の思考は次の整理イベントの前処理で消える (docs/context-reduction-redesign.md §5.2)。
     if (opts?.thinking && opts.thinking.trim().length > 0) {
       msg.thinking = opts.thinking;
     }
-    this.messages.push(msg);
     if (opts?.ephemeral) {
       // tool_call を含む assistant メッセージは揮発化禁止 (tool_result とのペアを切ると
       // OpenAI 互換 API で 400 になる)。 開発時に気付けるよう警告だけ出して mark はしない。
@@ -296,10 +290,14 @@ export class MessageHistory {
         console.warn(
           "[message-history] ephemeral=true は tool_calls を含む assistant メッセージには適用できません。 永続化します。",
         );
-      } else {
-        this.ephemeralMessages.add(msg);
+      } else if (!opts.displayed) {
+        // ユーザーに表示済み (白表示 / ストリーミング出力済み) のテキストは会話記録なので印を付けない。
+        // 背景 (2026-06-12): 会話リクエストの実回答が自己点検経路で揮発扱いになり、 除かれて
+        // 「モデルが自分の直前の回答を参照できない」 状態が起きた。 ユーザーが読んだ言葉を黙って欠損させない。
+        msg.ephemeral = true;
       }
     }
+    this.messages.push(msg);
     this.onAssistantMessage?.(content, toolCalls);
   }
 
@@ -321,40 +319,8 @@ export class MessageHistory {
   }
 
   /**
-   * span 境界で呼び出し、 揮発マーク付きメッセージを履歴から除去する。
-   * tool_call/tool_result ペアは揮発化していないので破壊されない。
-   * @returns 除去した件数
-   */
-  purgeEphemeral(): number {
-    const before = this.messages.length;
-    this.messages = this.messages.filter((m) => !this.ephemeralMessages.has(m));
-    const removed = before - this.messages.length;
-    if (removed > 0) this.rewriteReasons.push("ephemeral-purge");
-    return removed;
-  }
-
-  /**
-   * ユーザーに表示済みの ephemeral assistant メッセージを永続化する (purge 前に呼ぶ)。
-   * ユーザーが読んだ言葉 = 会話記録。 purge すると次 span でモデルが「自分が何を
-   * 答えたか」 を参照できず、 指摘への応答が支離滅裂になる (2026-06-12 の実害)。
-   * harness 注入の user nudge / 未表示 placeholder は従来通り purge 対象のまま。
-   * @returns 永続化した件数
-   */
-  promoteDisplayedEphemeral(): number {
-    let promoted = 0;
-    for (const m of this.messages) {
-      if (this.ephemeralMessages.has(m) && this.displayedMessages.has(m)) {
-        this.ephemeralMessages.delete(m);
-        promoted++;
-      }
-    }
-    return promoted;
-  }
-
-  /**
-   * 思考保全 (Phase 2 本実装) — span 境界で残存する thinking を削除する。
-   * tool_call assistant メッセージは永続化されるが、 thinking はユーザー応答時点で
-   * 「消費し終えた scratch」 として落とす (commit c5147fd の意図に整合)。
+   * 履歴の全部の思考をその場で消す。 旧経路の忘却 (forgetting.ts の forgetThinking。 整理の作り直し タスク 8 で削除)
+   * だけが使う。 整理イベントは写しの上で思考を消し、 replaceMessages() で 1 回だけ差し替える。
    * @returns 削除した thinking 数
    */
   clearAllThinking(): number {
@@ -365,13 +331,8 @@ export class MessageHistory {
         cleared++;
       }
     }
-    if (cleared > 0) this.rewriteReasons.push("thinking-clear");
+    if (cleared > 0) this.noteRewrite("thinking-clear");
     return cleared;
-  }
-
-  /** デバッグ・テスト用: 指定メッセージが揮発マークされているか確認 */
-  isEphemeral(msg: Message): boolean {
-    return this.ephemeralMessages.has(msg);
   }
 
   /**
@@ -379,13 +340,15 @@ export class MessageHistory {
    * tool_calls / tool_result のペア整合を検証し、 壊れていれば例外を投げて
    * 呼び出し側にロールバックさせる (壊れた履歴を送ると provider が 400 を返すため)。
    *
-   * 呼び出し側 (ForgettingEngine) は適用前に getRawMessages() の控えを取り、
-   * ここが投げたら控えを渡し直す。 忘却の失敗で会話が壊れることはない。
+   * 呼び出し側は写しに対して変換し、 ここで 1 回だけ差し替える。 ここが投げたら履歴は元のまま。
+   *
+   * @param reason 書き換え理由 (prefix_break / cache_miss の原因欄に出る)。 整理イベントは
+   *   "reduction:<イベント ID>" (docs/context-reduction-redesign.md §6.1)。 旧経路の忘却は既定の "replace"
    */
-  replaceMessages(next: Message[]): void {
+  replaceMessages(next: Message[], reason = "replace"): void {
     MessageHistory.assertToolPairing(next);
     this.messages = [...next];
-    this.rewriteReasons.push("replace");
+    this.noteRewrite(reason);
   }
 
   /** ツールの対が壊れていれば例外を投げる (中身は findToolPairingError) */
@@ -417,7 +380,7 @@ export class MessageHistory {
 
     const recent = this.messages.slice(boundary);
     this.messages = [{ role: "system", content: `[会話履歴の要約]\n${summary}` }, ...recent];
-    this.rewriteReasons.push("compress");
+    this.noteRewrite("compress");
   }
 
   /** 直近 N 往復の会話テキストを返す（意図分類の文脈提供用） */
@@ -441,8 +404,19 @@ export class MessageHistory {
   }
 
   updateSystemPrompt(prompt: string): void {
-    if (prompt !== this.systemPrompt) this.rewriteReasons.push("system-prompt");
+    if (prompt !== this.systemPrompt) this.noteRewrite("system-prompt");
     this.systemPrompt = prompt;
+  }
+
+  /** 送信済みの部分を書き換えたことを申告する (理由をためて、 書き換えの回数を進める) */
+  private noteRewrite(reason: string): void {
+    this.rewriteReasons.push(reason);
+    this.revision++;
+  }
+
+  /** 送信済みの部分を書き換えた回数 (増えていれば、 その間に書き換えがあった) */
+  getRevision(): number {
+    return this.revision;
   }
 
   /** 前回取り出して以降の書き換え理由を返し、 空にする。 送信の直前に呼ぶ。 */
@@ -454,10 +428,7 @@ export class MessageHistory {
 
   clear(): void {
     this.messages = [];
-    this.rewriteReasons.push("clear");
+    this.noteRewrite("clear");
     this.pendingStateHandover = null;
-    // WeakSet は参照消失で自動 GC されるので明示クリア不要だが、 防御的に新規化
-    this.ephemeralMessages = new WeakSet<Message>();
-    this.displayedMessages = new WeakSet<Message>();
   }
 }

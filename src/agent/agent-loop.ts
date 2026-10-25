@@ -18,21 +18,17 @@ import type { ToolRegistry, ToolResult } from "../tools/tool-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager, RequestSource } from "../security/permission-manager.js";
 import type { HookManager } from "../hooks/hook-manager.js";
-import { MessageHistory } from "./message-history.js";
-import { ContextManager, formatReduceOutcome, type StrategyOutcome } from "./context-manager.js";
+import { MessageHistory, toSentMessage } from "./message-history.js";
+import { ContextManager, type StrategyOutcome } from "./context-manager.js";
 import type { ForgetDryRunReport, ForgetResult } from "./forgetting.js";
 import {
   ContextStrategy,
-  formatDowngradeNotice,
-  formatStrategyReport,
-  needsConfirmation,
-  pickStrongest,
   type BreakSignalId,
   type PendingBreak,
   type StrategyDecision,
   type StrategyMode,
 } from "./context-strategy.js";
-import { generateHandoffNote, type HandoffResult } from "./handoff.js";
+import { generateHandoffNote } from "./handoff.js";
 import type { ReductionMode } from "../config/types.js";
 import {
   resolveCapability,
@@ -44,9 +40,21 @@ import {
 import {
   checkContextWindowFits,
   checkUserInputFits,
+  computeContextBudget,
+  exceedsForcedLimit,
   formatContextWindowTooSmall,
   formatUserInputTooLarge,
+  measurePromptSize,
+  type PromptSize,
+  RequestGrowthTracker,
 } from "./context-budget.js";
+import {
+  formatReductionEventLine,
+  type ReductionEventResult,
+  type ReductionTrigger,
+  runReductionEvent,
+} from "./reduction-event.js";
+import type { MainCallRequest } from "./reduction-summary.js";
 import { ToolResultBatch } from "./tool-result-limit.js";
 import { estimateMessageTokens, estimateTokens, estimateToolDefinitionTokens } from "./token-counter.js";
 import { normalizeToolCalls } from "./tool-call-normalizer.js";
@@ -85,7 +93,7 @@ import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
 import { formatBufferedResponseStatus } from "../cli/response-preview.js";
 import { writeRuntimeError } from "../cli/runtime-diagnostic.js";
 import { getFirstUseGuide, getFailureGuide, resetPerRequestGuides } from "./tool-guides.js";
-import { IntentClassifier, type CompletionType } from "./intent-classifier.js";
+import { IntentClassifier } from "./intent-classifier.js";
 import { Evaluator } from "./evaluator.js";
 import { judgeProgress, buildRecentSummary } from "./progress-judge.js";
 import { checkCoherence, buildCoherenceNudge } from "./coherence-check.js";
@@ -305,6 +313,30 @@ export class AgentLoop {
   /** 本体呼び出しの間に起きた整理イベント・脇の呼び出しをためる箱 (cache_miss の原因欄) */
   private readonly cacheMissCauses = new CacheMissCauseCollector();
   /**
+   * 直前の本体呼び出しの実数 (入力の全体と出力) と、 送った時点の履歴の位置。 次の P の土台にする
+   * (docs/context-reduction-redesign.md §4.1)。 間に履歴の書き換え (revision の変化)・履歴の載せ替えがあったら使わない。
+   * サーバが usage を返さなかったら null。
+   */
+  private lastMainCall: {
+    history: MessageHistory;
+    revision: number;
+    sentCount: number;
+    promptTokens: number;
+    outputTokens: number;
+  } | null = null;
+  /**
+   * 依頼 1 件ごとの増分 G の記録 (docs/context-reduction-redesign.md §4.5)。 依頼の始まり・本体呼び出し・依頼の終わりと
+   * セッションへの保存の組み込みはタスク 8。 今は整理イベントが noteReduction() を呼び、 G は既定値で決まる。
+   */
+  private readonly requestGrowth = new RequestGrowthTracker();
+  /** 整理イベント ID の通し番号 */
+  private reductionSeq = 0;
+  /**
+   * いま処理中の依頼を始めた利用者の発言 (run() の間だけ)。 整理イベントの前処理で
+   * 「これより前が終わった依頼」 の境目にする。 依頼の外では null。
+   */
+  private currentRequestMessage: Message | null = null;
+  /**
    * P0-A: 直近 FAILURE_WINDOW 反復内のツール失敗履歴。 同じ (signature, error) が
    * 2 回以上出たら「同じ轍を踏んでいる」 と判定し self-check を注入する。
    * 既存の MAX_REPEAT_TOOL=3 (連続検出) では grep/read を間に挟まれると無効化されるため、
@@ -391,12 +423,11 @@ export class AgentLoop {
    * 「捨てられるものが多い瞬間」 に整理する。
    */
   private contextStrategy: ContextStrategy;
-  /** 検出済みの区切りシグナル待ち行列。 反復の先頭と span 終了で消費する */
+  /**
+   * 検出済みの区切りシグナル待ち行列。 消費していた区切りでの整理 (ContextStrategy の自動経路) は外したので、
+   * 依頼の始まりで捨てている。 区切りは規則 2 としてタスク 8 で作り直す (docs/context-reduction-redesign.md §4.4)
+   */
   private pendingBreaks: PendingBreak[] = [];
-  /** span 終了フックが記録した理由 (B5 の判定に使う) */
-  private lastSpanEndReason: string | null = null;
-  /** 直近の完了判定 (IntentClassifier の既存呼び出し結果を流用。 追加の LLM 呼び出しはしない) */
-  private lastCompletionType: CompletionType | null = null;
   /** 直前の反復で plan mode だったか (P2: 計画 → 実装の移行検出用) */
   private wasInPlanMode = false;
   /** 直前のユーザー発話 (B6: 話題転換の検出用) */
@@ -829,6 +860,15 @@ export class AgentLoop {
         beginTodoRound();
         this.history.addUserMessage(userMessage);
       }
+      // 整理イベントの前処理の境目 (これより前が終わった依頼)。 再開では履歴にある最後の利用者の発言
+      this.currentRequestMessage =
+        this.history
+          .getRawMessages()
+          .filter((m) => m.role === "user" && m.ephemeral !== true)
+          .at(-1) ?? null;
+      // 区切りの待ち行列は、 消費していた区切りでの整理 (ContextStrategy の自動経路) を外したので依頼ごとに捨てる。
+      // 区切りでの整理は規則 2 (docs/context-reduction-redesign.md §4.4) としてタスク 8 で作り直す
+      this.pendingBreaks = [];
       // チャットログ記録
       if (this.chatLogger && !durableResume) {
         const userText =
@@ -884,7 +924,6 @@ export class AgentLoop {
       // 区切り / 山場シグナル B6・P3 (docs/context-strategy.md §3.3)。
       // ユーザー発話を受けた時点で判定する。 山場の直前に先回りして枠を空けるのが狙い。
       try {
-        this.lastCompletionType = null;
         if (classifyTaskComplexity(userMessageText) === "complex") {
           this.queueBreak("P3", `P3:${++this.breakSeq}`);
         }
@@ -1017,20 +1056,19 @@ export class AgentLoop {
             this.history.addAssistantMessage(report);
             this.runStats.finalText = report;
             this.events.emit("assistant_text", { text: report, final: true });
-            this.purgeEphemeralAtSpanEnd("circuit_break");
+            this.recordSpanEnd("circuit_break");
             return;
           }
           console.log(chalk.yellow("\n  (処理を中断しました)"));
           // 中断ターンを履歴上で可視化する。 これが無いと「応答の無い user メッセージ」 が
           // 残り、 再送信のたびに同文が重複蓄積してモデルを混乱させる (2026-06-12 ログで実証)。
           this.appendAbortMarker("");
-          this.purgeEphemeralAtSpanEnd("user_abort");
+          this.recordSpanEnd("user_abort");
           return;
         }
         // 一時停止は、前のAPI応答と開始済みtool resultが履歴へ確定した後、
         // 次のmain LLM APIを開始する直前だけでcheckpointする。
         if (!(await pauseAtBoundaryIfRequested(iteration))) return;
-        // Context reduction check — mode に応じて忘却 / 圧縮を選ぶ (docs/context-forgetting.md §6)
         this.contextManager.noteTurn();
         this.contextStrategy.noteTurn();
         // P2: plan mode を抜けた = 計画から実装への移行 (docs/context-strategy.md §3.2)。
@@ -1042,29 +1080,6 @@ export class AgentLoop {
         } catch (e) {
           logger.warn(`[strategy] plan mode 退出の検出に失敗しました: ${e}`);
         }
-        // 区切りシグナルによる整理。 閾値超過による下の安全網とは独立した経路
-        await this.runContextStrategy(true);
-        if (this.contextManager.shouldReduce(this.history)) {
-          const reduceSpinner = createSpinner("コンテキストを整理中...").start();
-          try {
-            const outcome = await this.contextManager.reduce(this.history);
-            reduceSpinner.succeed(formatReduceOutcome(outcome));
-            // 何を忘却したかは silent にしない。 検証で弾いた内容も含めて可視化する
-            if (outcome.forget?.applied) {
-              this.notice("info", formatReduceOutcome(outcome));
-              for (const w of outcome.forget.plan?.warnings ?? []) {
-                logger.warn(`[forget] ${w}`);
-              }
-            }
-            // チャットログのパート分割 (圧縮が走ったときのみ)
-            if (outcome.compressed) this.chatLogger?.onCompressed();
-          } catch (e) {
-            reduceSpinner.fail("コンテキストの整理に失敗しました");
-            logger.error("Context reduction failed:", e);
-            throw e;
-          }
-        }
-
         // Call LLM with retry
         let textContent = "";
         let thinkingContent = "";
@@ -1088,6 +1103,10 @@ export class AgentLoop {
         while (!success) {
           // context整理中やconnection retry待ちにpause要求が届いた場合も、次のmain APIを出す前に保存する。
           if (!(await pauseAtBoundaryIfRequested(iteration))) return;
+          // 規則 1 (docs/context-reduction-redesign.md §4.4): 本体呼び出しの直前に P + R > W なら、 先に整理イベントを行う。
+          // 失敗したら入らない呼び出しは送らずに止める。 状態通知の添付 (attachDynamicContext) より前に判定する
+          // (要約の呼び出しは、 前回の本体呼び出しの並びをそのまま先頭に含める必要があるため)。
+          if (!(await this.enforceForcedLimit())) return;
           try {
             const toolDefs = this.getFilteredToolDefs();
             // 状態通知 (現在日時 / Goal / ToDo) を末尾の未送信メッセージに添付する。
@@ -1115,29 +1134,17 @@ export class AgentLoop {
             // contextWindow そのものは渡さない (input + max_tokens > context で 400 を返すサーバがある。
             // 例: Kimi-K2 で 13991 input + 256000 max_tokens > 262144)。 O で切れたときは finish_reason="length" になり、
             // 下の「続きを出力」 の処理が次の本体呼び出しとして続ける。
-            const maxTokens = TIER_CONTEXT_BUDGETS[this.capability.tier].outputTokenLimit;
             // 呼び出しごとに AbortController を作り直す。 abort() がこれを切断することで
             // Esc 中断が HTTP 層まで届く (ストリーム待機中でも即座に reject される)。
             this.llmAbortController = new AbortController();
+            const request = this.buildMainCallRequest(toolDefs, this.llmAbortController.signal);
+            // 次の P の土台 (送った時点の履歴の位置と書き換えの回数)。 応答の usage と組にして lastMainCall に残す
+            const sentCount = this.history.getMessageCount();
+            const sentRevision = this.history.getRevision();
             const gen =
-              toolDefs.length > 0
-                ? this.provider.chatWithTools({
-                    model: this.model,
-                    messages: this.history.getMessages(),
-                    tools: toolDefs,
-                    stream: true,
-                    signal: this.llmAbortController.signal,
-                    ...this.samplingParams,
-                    maxTokens,
-                  })
-                : this.provider.chat({
-                    model: this.model,
-                    messages: this.history.getMessages(),
-                    stream: true,
-                    signal: this.llmAbortController.signal,
-                    ...this.samplingParams,
-                    maxTokens,
-                  });
+              request.method === "chatWithTools"
+                ? this.provider.chatWithTools(request.params)
+                : this.provider.chat(request.params);
 
             // LLM待機スピナー: リクエスト送信〜最初のチャンク受信まで
             // 文脈情報（msg数 / 直前ターンの送信トークン / contextWindow）も併記してブラックボックス化を防ぐ
@@ -1248,7 +1255,7 @@ export class AgentLoop {
                 console.log(chalk.yellow("\n  (処理を中断しました)"));
                 // 部分テキストごと中断マーカーを履歴に残す (重複 user メッセージ蓄積の防止)
                 this.appendAbortMarker(textContent);
-                this.purgeEphemeralAtSpanEnd("user_abort");
+                this.recordSpanEnd("user_abort");
                 return;
               }
               switch (chunk.type) {
@@ -1404,6 +1411,13 @@ export class AgentLoop {
                     });
                     if (miss) this.llmLogger.logCacheMiss(miss);
                     this.previousMainPromptTokens = recordedInput;
+                    this.lastMainCall = {
+                      history: this.history,
+                      revision: sentRevision,
+                      sentCount,
+                      promptTokens: recordedInput,
+                      outputTokens,
+                    };
                     globalTokenTracker.record({
                       timestamp: new Date().toISOString(),
                       provider: this.provider.providerType,
@@ -1422,6 +1436,7 @@ export class AgentLoop {
                   } else {
                     // 入力の数が分からない呼び出しを挟んだら、 その前の数とは比べない
                     this.previousMainPromptTokens = undefined;
+                    this.lastMainCall = null;
                   }
                   stopWaitingSpinner();
                   stopThinkingSpinner();
@@ -1507,21 +1522,21 @@ export class AgentLoop {
               // _aborted を立てることで /try などの呼び出し元もループを抜けられる
               this._aborted = true;
               this.appendAbortMarker("", "LLM 呼び出しエラーにより中止");
-              this.purgeEphemeralAtSpanEnd("llm_error_abort");
+              this.recordSpanEnd("llm_error_abort");
               return;
             }
           }
         }
 
         if (!success) {
-          this.purgeEphemeralAtSpanEnd("llm_call_unsuccessful");
+          this.recordSpanEnd("llm_call_unsuccessful");
           return;
         }
         // API境界pause中のESC/Ctrl+Cはresume待ちを解放する。応答に含まれたtoolを
         // 中断後に実行しないよう、provider streamを抜けた直後に再確認する。
         if (this._aborted) {
           this.appendAbortMarker(textContent);
-          this.purgeEphemeralAtSpanEnd("user_abort");
+          this.recordSpanEnd("user_abort");
           return;
         }
 
@@ -1569,8 +1584,8 @@ export class AgentLoop {
           flushAssistantText(false);
           console.log(chalk.dim(`\n  (${reason}のため、続きを生成します...)`));
           // 部分応答を一旦履歴に積んで「続き」 を促す。 部分テキストは最終回答の前半部分
-          // (ユーザーに見える言葉) なので、実際に表示できた場合はdisplayedとしてspan終了後も保全する。
-          // これを purge すると履歴に残る最終回答が「続き」 の後半だけになり欠損する。
+          // (ユーザーに見える言葉) なので、実際に表示できた場合はdisplayedとして揮発の印を付けずに残す。
+          // これを除くと履歴に残る最終回答が「続き」 の後半だけになり欠損する。
           this.history.addAssistantMessage(textContent, toolCalls.length > 0 ? toolCalls : undefined, {
             ephemeral: toolCalls.length === 0,
             thinking: thinkingContent,
@@ -1757,7 +1772,7 @@ export class AgentLoop {
           }
 
           if (shouldAbort) {
-            this.purgeEphemeralAtSpanEnd("tool_abort");
+            this.recordSpanEnd("tool_abort");
             return;
           }
 
@@ -1902,7 +1917,7 @@ export class AgentLoop {
             // 過去 span のノイズを次 span に持ち込まない。 docs/ephemeral-context-design.md 参照。
             // progress judge中に追加入力が届いた場合も完了で取りこぼさず、同じrunを継続する。
             if (applyPendingSteering("reply") > 0) continue;
-            this.purgeEphemeralAtSpanEnd("response_complete");
+            this.recordSpanEnd("response_complete");
             return;
           }
 
@@ -1914,7 +1929,7 @@ export class AgentLoop {
         if (toolCalls.length === 0 && textContent.trim().length > 0 && isGarbageResponse(textContent)) {
           console.log(chalk.yellow("\n  モデルの応答が解析できない形式です。プロンプトを変えて再度お試しください。"));
           this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
-          this.purgeEphemeralAtSpanEnd("garbage_response");
+          this.recordSpanEnd("garbage_response");
           return;
         }
 
@@ -1930,7 +1945,7 @@ export class AgentLoop {
           const fileList = pendingVerification.map((f) => `    - ${f}`).join("\n");
           console.log(chalk.dim(`  [自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] 検証未実施`));
           this.notice("info", `[自己点検 ${selfCheckRounds}/${MAX_SELF_CHECK_ROUNDS}] 検証未実施`);
-          // self-check nudge は in-turn 専用 (応答完了時に purge)。 thinking も保全。
+          // self-check nudge は in-turn 専用 (終わった依頼の分は次の整理イベントで除く)。 thinking も保全。
           // 表示済みテキストは会話記録として保全する (displayed)。
           this.history.addAssistantMessage(textContent, undefined, {
             ephemeral: true,
@@ -2023,8 +2038,6 @@ export class AgentLoop {
           const completion = await this.intentClassifier.classifyCompletion(textContent);
           isTask = intent === "task";
           isCompleted = completion === "completed";
-          // B5 の判定材料として控える。 ここで既に呼んでいる分を流用し、 追加の LLM 呼び出しはしない
-          this.lastCompletionType = completion;
         }
 
         if (shouldReprompt && isTask && !isCompleted) {
@@ -2037,7 +2050,7 @@ export class AgentLoop {
               ),
             );
             this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
-            this.purgeEphemeralAtSpanEnd("self_check_limit");
+            this.recordSpanEnd("self_check_limit");
             return;
           }
 
@@ -2129,7 +2142,7 @@ export class AgentLoop {
               };
               shouldAbort = await this.executeSingleTool(syntheticCall, batch);
               if (shouldAbort) {
-                this.purgeEphemeralAtSpanEnd("synthetic_write_abort");
+                this.recordSpanEnd("synthetic_write_abort");
                 return;
               }
             }
@@ -2167,19 +2180,19 @@ export class AgentLoop {
             const nudgeIntent = rephrasedIntent.length > 200 ? rephrasedIntent.slice(0, 200) + "..." : rephrasedIntent;
             // Phase 2: 思考保全 — thinking が出ていた場合は完全保全して placeholder にする。
             // モデルは次イテレーションで自分の前思考を読めるので、 同じ digestion を再生成
-            // する無駄を避けられる。 ephemeral なので応答完了時に purge され次 span に漏れない。
+            // する無駄を避けられる。 ephemeral なので次の整理イベントで除かれる。
             //
             // 機械的な文字カット (slice) は中途半端な切り取りで意味を壊しノイズになるため避ける。
             // ctx 圧迫の懸念は以下で十分に抑えられている:
             //   - MAX_EMPTY_RETRIES=3 で span 内の積み増し回数が上限固定
             //   - ContextManager (capability.compressionThreshold) が閾値到達で要約圧縮
-            //   - 応答完了時の purgeEphemeral で span 境界を越えて残らない
+            //   - ephemeral なので次の整理イベントの前処理で除かれる
             // docs/ephemeral-context-design.md §7.1 参照。
             const placeholder =
               thinkingContent.trim().length > 0
                 ? `[前回の思考 ${thinkingContent.length}字 — 形式不一致で吐き出せず、 ハーネスが保全]\n${thinkingContent}`
                 : "（空のレスポンス）";
-            // empty-response placeholder と nudge は in-turn 専用 (応答完了時に purge)。
+            // empty-response placeholder と nudge は in-turn 専用 (終わった依頼の分は次の整理イベントで除く)。
             // ユーザーへの最終応答が出れば、 これらの中間ノイズは過去 span から除去される。
             this.history.addAssistantMessage(placeholder, undefined, { ephemeral: true });
             // 2026-05-15: 空応答 retry の意味反転 (docs/strategic-todo-design.md §3.3)。
@@ -2225,7 +2238,7 @@ export class AgentLoop {
           );
           this.notice("error", `結果を出力できませんでした: ${reason}`);
           // 偽の回答は履歴に入れない (捏造しない)。 honest failure は上記でユーザーに提示済み。
-          this.purgeEphemeralAtSpanEnd("empty_response_giveup");
+          this.recordSpanEnd("empty_response_giveup");
           return;
         }
         // ToDo 未完了ゲート (final_text_response 経路)。
@@ -2296,7 +2309,7 @@ export class AgentLoop {
         }
         flushAssistantText(true);
         this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
-        this.purgeEphemeralAtSpanEnd("final_text_response");
+        this.recordSpanEnd("final_text_response");
         return;
       }
 
@@ -2308,15 +2321,16 @@ export class AgentLoop {
       this.history.addAssistantMessage(report);
       this.runStats.finalText = report;
       this.events.emit("assistant_text", { text: report, final: true });
-      this.purgeEphemeralAtSpanEnd("max_iterations");
+      this.recordSpanEnd("max_iterations");
     } finally {
       const pauseBeforeFinish = this.runApiGate.finishRun();
       if (pauseBeforeFinish.state === "pause_requested") {
         console.log(chalk.dim("  ✓ runが次のAPIを必要とせず完了したため、一時停止の予約を終了しました。"));
       }
       this.isProcessing = false;
+      this.currentRequestMessage = null;
       // task_complete は finally で必ず発火する (例外・全 return 経路を含む)。
-      // outcome は purgeEphemeralAtSpanEnd() の reason マッピングで設定済み。
+      // outcome は recordSpanEnd() の reason マッピングで設定済み。
       // 未設定 (incomplete) のまま中断フラグが立っていれば aborted に倒す。
       if (this.runStats.outcome === "incomplete" && this._aborted) {
         this.runStats.outcome = "aborted";
@@ -2351,9 +2365,8 @@ export class AgentLoop {
         tokensOut: this.runStats.tokensOut,
         costUsd: this.runStats.costUsd,
       });
-      // span 終了の区切り (B5) を評価してコンテキストを整理する。
-      // ここは「ユーザーへの応答が済んだ直後」 = 捨てられるものが最も多い瞬間。
-      await this.runSpanEndStrategy();
+      // 応答の終わりでは履歴を書き換えない (docs/context-reduction-redesign.md §6.2)。
+      // 依頼の終わりでの整理は規則 2 としてタスク 8 で入れる。
     }
   }
 
@@ -2435,158 +2448,6 @@ export class AgentLoop {
     for (const g of b) if (a.has(g)) shared++;
     const jaccard = shared / (a.size + b.size - shared);
     return jaccard < 0.12;
-  }
-
-  /** clear の確認を取れる経路か (TTY かつ CLI 発話のときだけ) */
-  private canConfirmInteractively(): boolean {
-    return process.stdin.isTTY === true && this.currentSource === "cli";
-  }
-
-  /** span 終了時の区切り評価 (B5) と待ち行列の消費 */
-  private async runSpanEndStrategy(): Promise<void> {
-    try {
-      const reason = this.lastSpanEndReason;
-      this.lastSpanEndReason = null;
-      // B5: span が完了で終わったときだけ弱い区切りとみなす。
-      // response_complete はモデル自身の完了宣言なのでそれ自体を完了判定として扱い、
-      // final_text_response は既存の IntentClassifier の判定結果を流用する。
-      const completed =
-        reason === "response_complete" || (reason === "final_text_response" && this.lastCompletionType === "completed");
-      if (completed) this.queueBreak("B5", `B5:${++this.breakSeq}`);
-    } catch (e) {
-      logger.debug(`[strategy] span 終了の区切り検出に失敗 (無視): ${e}`);
-    }
-    await this.runContextStrategy(false);
-  }
-
-  /**
-   * 待ち行列の区切りシグナルを 1 件消費してコンテキストを整理する。
-   *
-   * 全体を try/catch で囲む。 コンテキスト整理は付加機能であって本業ではないので、
-   * ここで失敗しても会話は止めない (docs/context-strategy.md §8)。
-   *
-   * @param midSpan span の途中 (ツール実行の合間) なら true。 途中では履歴を消さない
-   */
-  private async runContextStrategy(midSpan: boolean): Promise<void> {
-    try {
-      if (!this.contextStrategy.isEnabled()) {
-        this.pendingBreaks = [];
-        return;
-      }
-      const pending = pickStrongest(this.pendingBreaks);
-      this.pendingBreaks = [];
-      if (!pending) return;
-
-      const todos = getTodosCurrent();
-      const decision = this.contextStrategy.decide({
-        signal: pending.signal,
-        fingerprint: pending.fingerprint,
-        usageRatio: this.contextManager.getUsageRatio(this.history),
-        hasInProgressTodo: todos.some((t) => t.status === "in_progress"),
-        goalActive: hasGoalSlot(),
-        canConfirm: this.canConfirmInteractively(),
-        midSpan,
-      });
-
-      // 格下げは黙って起こさない (docs §4.3)
-      const downgradeNotice = formatDowngradeNotice(decision);
-      if (downgradeNotice) {
-        console.log(chalk.yellow(`  ${downgradeNotice}`));
-        this.notice("warn", downgradeNotice);
-      }
-      if (decision.skipped || decision.action === "none") return;
-
-      let action = decision.action;
-      if (needsConfirmation(action, this.contextStrategy.getMode())) {
-        const choice = await this.confirmClear(decision);
-        if (choice === "skip") {
-          // 同じ区切りでは二度と聞かない (docs §5.2)
-          this.contextStrategy.decline(pending.fingerprint);
-          console.log(chalk.dim("  コンテキストはそのままにしました。"));
-          return;
-        }
-        if (choice === "forget") action = "forget";
-      }
-
-      const outcome = await this.contextManager.applyStrategy(this.history, action, {
-        saveSession: () => {
-          return this.saveHandoffArchive();
-        },
-      });
-
-      // 引き継ぎメモの生成に失敗した場合、履歴には触れず失敗を明示する。
-      if (!outcome.applied && action === "clear") {
-        const msg = `コンテキスト戦略: clear を適用できなかったため履歴を保持しました (${outcome.note ?? "引き継ぎメモを生成できませんでした"})`;
-        console.log(chalk.yellow(`  ${msg}`));
-        this.notice("warn", msg);
-        return;
-      }
-      this.reportStrategyOutcome(decision, outcome);
-    } catch (e) {
-      logger.warn(`[strategy] 区切りでのコンテキスト整理に失敗しました (会話は継続): ${e}`);
-    }
-  }
-
-  /** clear の確認 (docs §5.2)。 TTY のときだけ呼ばれる */
-  private async confirmClear(decision: StrategyDecision): Promise<"clear" | "forget" | "skip"> {
-    console.log(
-      chalk.cyan(
-        `\n  区切りを検出しました (${decision.signalLabel} / 使用率 ${Math.round(decision.usageRatio * 100)}%)。`,
-      ),
-    );
-    try {
-      return await select<"clear" | "forget" | "skip">({
-        message: "引き継ぎメモを残してコンテキストをリセットしますか?",
-        choices: [
-          { name: "リセットする (推奨)", value: "clear" },
-          { name: "忘却だけにする", value: "forget" },
-          { name: "何もしない", value: "skip" },
-        ],
-      });
-    } catch {
-      // Esc / 中断は「何もしない」 に倒す (勝手に消さない)
-      return "skip";
-    }
-  }
-
-  /**
-   * アクションの結果をユーザーに報告する (docs §6)。
-   * 黙って履歴が変わることがあってはならないので、 走ったら必ず 1 行出す。
-   * clear のときは引き継ぎメモを全文表示する (何が引き継がれたかを見せずに履歴を消すのは論外)。
-   */
-  private reportStrategyOutcome(decision: StrategyDecision, outcome: StrategyOutcome): void {
-    if (!outcome.applied) {
-      const msg =
-        `区切りを検出 (${decision.signalLabel}) — 整理は見送りました ` +
-        `(${outcome.note ?? "削減できる情報がありませんでした"})`;
-      console.log(chalk.dim(`  ${msg}`));
-      this.notice("info", msg);
-      return;
-    }
-    this.contextStrategy.noteApplied();
-    if (outcome.action === "compress") this.chatLogger?.onCompressed();
-
-    const line = formatStrategyReport({
-      signalLabel: decision.signalLabel,
-      action: outcome.action,
-      freedTokens: outcome.freedTokens,
-      beforeRatio: outcome.beforeRatio,
-      afterRatio: outcome.afterRatio,
-    });
-    console.log(chalk.dim(`  ${line}`));
-    this.notice("info", line);
-    this.printHandoffNote(outcome.handoff);
-  }
-
-  /** 引き継ぎメモの全文表示。 メモが不十分ならユーザーがその場で補足できる */
-  private printHandoffNote(handoff: HandoffResult | null): void {
-    if (!handoff?.applied || !handoff.note) return;
-    console.log(chalk.bold("\n  === 引き継ぎメモ (これだけが履歴に残ります) ==="));
-    for (const l of handoff.note.split("\n")) console.log(`  ${l}`);
-    if (handoff.savedSessionId) {
-      console.log(chalk.dim(`\n  リセット前の完全な履歴: /resume ${handoff.savedSessionId}`));
-    }
-    console.log("");
   }
 
   /** Get tool definitions, filtered by plan mode or Discord source */
@@ -2748,38 +2609,152 @@ export class AgentLoop {
   }
 
   /**
-   * span 境界 (= ユーザー応答完了 / abort / 上限到達) で in-turn 専用のメッセージを破棄する。
-   * 詳細は docs/ephemeral-context-design.md を参照。
+   * span 境界 (= ユーザー応答完了 / abort / 上限到達) で、 終わり方を記録する。
    *
-   * 思想: ハーネスの自己点検・nudge・空応答 placeholder・stuck-loop 介入は span 内では
-   * モデルに必要だが、 ユーザー応答が出た後は「消費し終えた scratch space」 として捨てる。
-   * これにより過去 span の harness ノイズが次 span の判断を引きずらない。
+   * 揮発メッセージ (ハーネスの自己点検・nudge・空応答 placeholder・stuck-loop 介入) と思考は、 ここでは消さない
+   * (docs/context-reduction-redesign.md §6.2)。 消すと送信済みの履歴が書き換わり、 依頼 1 件ごとに KV キャッシュの全部を
+   * 読み直すことになる (12〜16 万トークンで 15〜20 分)。 消すのは「借り」 として次の整理イベントの前処理 (§5.2) に回す。
+   * 借りは履歴そのもの (Message.ephemeral の印と assistant.thinking) に残っているので、 別に控えは持たない。
+   * 表示済みの応答テキストは、 履歴に入れるときに揮発の印を付けない (MessageHistory.addAssistantMessage)。
    *
    * @param reason ログ用の理由タグ (response_complete / user_abort / etc.)
    */
-  private purgeEphemeralAtSpanEnd(reason: string): void {
+  private recordSpanEnd(reason: string): void {
     // span 終了点はほぼすべてここを通るため、 task_complete イベント用の outcome を
     // reason から決定する (docs/agent-events-design.md §3.1)。 発火自体は run() の finally。
     this.runStats.outcome = AgentLoop.SPAN_END_OUTCOMES[reason] ?? "incomplete";
-    // 区切りシグナル B5 の判定材料 (docs/context-strategy.md §3.3)。
-    // ここは同期メソッドなので記録だけ行い、 実際の整理は run() の finally で実行する。
-    this.lastSpanEndReason = reason;
-    // ユーザーに表示済みの応答テキストは purge せず会話記録として保全する
-    // (docs/ephemeral-context-design.md §displayed 参照。 2026-06-12 の回答消失対策)。
-    const promoted = this.history.promoteDisplayedEphemeral();
-    if (promoted > 0) {
-      console.log(chalk.dim(`  [ephemeral-promote] 表示済み応答 ${promoted} 件を履歴に保全 (${reason})`));
+  }
+
+  // ─── 整理イベント (docs/context-reduction-redesign.md §6.1) ───
+
+  /**
+   * 本体呼び出しの送り方 (method と params) を作る。 本体呼び出しと段階 3 の要約の呼び出しが同じものを使う
+   * (思考・サンプリング・ツール定義の差で前方が変わるとキャッシュが使えない。 §5.8 の申し送り)。
+   * 出力上限 O (ティアの outputTokenLimit) を必ず渡す (§4.2 / §4.3)。 役割は (1) 同じ文を繰り返し続ける
+   * 生成の暴走の歯止め、 (2) 予約 R の計算。 contextWindow そのものは渡さない (input + max_tokens > context で
+   * 400 を返すサーバがある。 例: Kimi-K2 で 13991 input + 256000 max_tokens > 262144)。 O で切れたときは
+   * finish_reason="length" になり、 「続きを出力」 の処理が次の本体呼び出しとして続ける。
+   */
+  private buildMainCallRequest(toolDefs: ToolDefinition[], signal: AbortSignal): MainCallRequest {
+    const maxTokens = TIER_CONTEXT_BUDGETS[this.capability.tier].outputTokenLimit;
+    const params = {
+      model: this.model,
+      messages: this.history.getMessages(),
+      stream: true,
+      signal,
+      ...this.samplingParams,
+      maxTokens,
+    };
+    return toolDefs.length > 0
+      ? { method: "chatWithTools", params: { ...params, tools: toolDefs } }
+      : { method: "chat", params };
+  }
+
+  /**
+   * 次に送るプロンプトの大きさ P (§4.1)。 直前の本体呼び出しの実数 (入力の全体 + 出力) に、 その後に足したもの
+   * (ツール結果・促し) の推定を足す。 間に履歴の書き換え (整理・忘却・圧縮)・載せ替えがあった、 または usage が
+   * 返らなかったときは全体を推定する。 これから添付する状態通知は数えない (小さいので余白 M で吸収する)。
+   */
+  private measureNextPrompt(toolDefs: ToolDefinition[]): PromptSize {
+    const last = this.lastMainCall;
+    const raw = this.history.getRawMessages();
+    const usable =
+      last !== null &&
+      last.history === this.history &&
+      last.revision === this.history.getRevision() &&
+      raw.length >= last.sentCount;
+    let added: Message[] = [];
+    if (usable) {
+      added = raw.slice(last.sentCount);
+      // 送った直後に足した assistant はその呼び出しの出力 (outputTokens で数えた)
+      if (added[0]?.role === "assistant") added = added.slice(1);
     }
-    const purged = this.history.purgeEphemeral();
-    if (purged > 0) {
-      console.log(chalk.dim(`  [ephemeral-purge] ${purged} 件の in-turn 補助メッセージを破棄 (${reason})`));
+    return measurePromptSize({
+      lastMainCall: usable ? { promptTokens: last.promptTokens, outputTokens: last.outputTokens } : null,
+      addedSinceLastCall: added.map(toSentMessage),
+      messages: this.history.getMessages(),
+      tools: toolDefs,
+    });
+  }
+
+  /**
+   * 規則 1 (§4.4): 本体呼び出しの直前に P + R > W なら、 整理イベント (forced) を行う。
+   * @returns 本体を呼んでよければ true。 整理に失敗した (入らない呼び出しは送らない) ・中断されたら false
+   *   (終わり方の記録と履歴上の印は済ませてある)
+   */
+  private async enforceForcedLimit(): Promise<boolean> {
+    const budget = computeContextBudget(this.contextWindow, this.capability.tier);
+    const size = this.measureNextPrompt(this.getFilteredToolDefs());
+    if (!exceedsForcedLimit(size.tokens, budget)) return true;
+    const result = await this.runReductionEvent("forced", size);
+    if (result.ok) return true;
+    if (this._aborted) {
+      console.log(chalk.yellow("\n  (処理を中断しました)"));
+      this.appendAbortMarker("");
+      this.recordSpanEnd("user_abort");
+      return false;
     }
-    // 思考保全 (Phase 2 本実装): span 境界で残存する thinking も削除する。
-    // 「span 内では活用、 ユーザー応答後に破棄」 の原則を実装に反映 (commit c5147fd の意図)。
-    const clearedThinking = this.history.clearAllThinking();
-    if (clearedThinking > 0) {
-      console.log(chalk.dim(`  [thinking-purge] ${clearedThinking} 件の thinking を破棄 (${reason})`));
+    this.appendAbortMarker("", "コンテキストの整理に失敗したため送れませんでした");
+    this.recordSpanEnd("context_reduction_failed");
+    return false;
+  }
+
+  /**
+   * 整理イベントを 1 回行う (§6.1)。 写しに前処理・段階 0〜2 (足りなければ段階 3 の要約) を当てはめ、
+   * 履歴を 1 回だけ差し替える。 失敗したら履歴は元のまま。 成功・失敗とも reduction_event を記録し、 1 行で利用者に示す。
+   *
+   * 呼ぶ側: 規則 1 (本体呼び出しの直前。 enforceForcedLimit)。 規則 2 (区切り) はタスク 8、 /compact (manual) はタスク 10。
+   * 要約の呼び出しの前に attachDynamicContext() を呼んでいないこと (呼び出し側の約束)。
+   *
+   * @param size 整理前の P。 省略時はいま測る
+   */
+  async runReductionEvent(trigger: ReductionTrigger, size?: PromptSize): Promise<ReductionEventResult> {
+    const toolDefs = this.getFilteredToolDefs();
+    const promptSize = size ?? this.measureNextPrompt(toolDefs);
+    const budget = computeContextBudget(this.contextWindow, this.capability.tier);
+    const raw = this.history.getRawMessages();
+    const requestStart = this.currentRequestMessage ? raw.indexOf(this.currentRequestMessage) : -1;
+    const id = `r-${++this.reductionSeq}-${Date.now().toString(36)}`;
+    const spinner = createSpinner("コンテキストを整理中...").start();
+    // 要約の呼び出しも Esc で切れるようにする (本体呼び出しと同じ AbortController)
+    this.llmAbortController = new AbortController();
+    const signal = this.llmAbortController.signal;
+    let result: ReductionEventResult;
+    try {
+      result = await runReductionEvent({
+        id,
+        trigger,
+        history: this.history,
+        provider: this.provider,
+        budget,
+        keepRecentToolUses: TIER_CONTEXT_BUDGETS[this.capability.tier].keepRecentToolUses,
+        promptSize,
+        growthTokens: this.requestGrowth.resolve(budget).tokens,
+        // 依頼の外 (または依頼の始まりの発言が既に履歴に無い) なら全部を終わった依頼として扱う。
+        // 依頼の始まりが旧方式の圧縮で要約に入った場合は、 残っている全部を今の依頼として扱う (何も返済しない側に倒す)
+        currentRequestStart: this.currentRequestMessage === null ? raw.length : Math.max(0, requestStart),
+        buildMainCallRequest: () => this.buildMainCallRequest(toolDefs, signal),
+        cacheMissCauses: this.cacheMissCauses,
+        growth: this.requestGrowth,
+      });
+    } finally {
+      this.llmAbortController = null;
     }
+    this.llmLogger.logReductionEvent(result.record);
+    const line = formatReductionEventLine(result);
+    if (result.ok) {
+      spinner.succeed(line);
+      this.notice("info", line);
+      this.chatLogger?.onCompressed();
+    } else if (result.reason === "nothing-to-reduce" && trigger !== "forced") {
+      spinner.info(line);
+      this.notice("info", line);
+    } else {
+      spinner.fail(line);
+      logger.error(`[reduction] ${line}`);
+      this.notice("error", line);
+    }
+    return result;
   }
 
   /**
@@ -2798,6 +2773,7 @@ export class AgentLoop {
     empty_response_giveup: "error",
     llm_call_unsuccessful: "error",
     circuit_break: "error",
+    context_reduction_failed: "error",
     max_iterations: "max_iterations",
   };
 
@@ -2872,7 +2848,7 @@ export class AgentLoop {
       ),
     );
     this.notice("warn", `stuck-loop 検出: ${toolCall.function.name} の同一エラー再発`);
-    // stuck-loop 介入は in-turn の方向修正なので応答完了時に purge
+    // stuck-loop 介入は in-turn の方向修正なので揮発 (次の整理イベントで除く)
     this.history.addUserMessage(intervention, { ephemeral: true });
   }
 
@@ -3668,13 +3644,17 @@ export class AgentLoop {
     this.history = new MessageHistory(systemPrompt);
     // 戦略 ToDo Phase 1: 新しい MessageHistory にも composer を注入
     this.history.setSystemPromptComposer((base) => this.composeQuasiSystemPrompt(base));
+    // 揮発の印と思考は「借り」 として次の整理イベントで返すので、 保存・再開で失わない (docs/context-reduction-redesign.md §6.2)
     for (const msg of sessionData.messages) {
       if (msg.role === "user") {
-        this.history.addUserMessage(typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content));
+        this.history.addUserMessage(typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content), {
+          ephemeral: msg.ephemeral === true,
+        });
       } else if (msg.role === "assistant") {
         this.history.addAssistantMessage(
           typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
           msg.tool_calls,
+          { ephemeral: msg.ephemeral === true, thinking: msg.thinking },
         );
       } else if (msg.role === "tool") {
         this.history.addToolResult(

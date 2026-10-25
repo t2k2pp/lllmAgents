@@ -48,7 +48,7 @@ run() 内のローカル制御フローと密結合しており、一括移設�
 
 ### 3.1 outcome の決定
 
-span 終了点はすべて `purgeEphemeralAtSpanEnd(reason)` を通る（中断の一部を除く）ため、
+span 終了点はすべて `recordSpanEnd(reason)` (2026-10-25 に `purgeEphemeralAtSpanEnd` から改名。 終わり方の記録だけを行う) を通る（中断の一部を除く）ため、
 reason → outcome のマッピングをそこで行い、finally で読む:
 
 | purge reason | outcome |

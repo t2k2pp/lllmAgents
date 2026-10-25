@@ -9,8 +9,8 @@ export interface Message {
    * 思考保全 (Phase 2 本実装): モデルが reasoning/thinking で返した内部思考。
    * 内部ストレージ専用フィールドで、 provider への送信時は MessageHistory.getMessages() が
    * content に inline 化して送る (provider に未対応フィールドを渡さないため)。
-   * span 境界で破棄される (purgeEphemeralAtSpanEnd → clearAllThinking)。
-   * docs/ephemeral-context-design.md §7 参照。
+   * 終わった依頼の思考は、 次の整理イベントの前処理で消す (応答のたびには消さない。
+   * docs/context-reduction-redesign.md §5.2 / §6.2)。 docs/ephemeral-context-design.md §7 参照。
    */
   thinking?: string;
   /**
@@ -20,6 +20,13 @@ export interface Message {
    * docs/prompt-prefix-stability.md 参照。
    */
   contextNote?: string;
+  /**
+   * ハーネスが入れた揮発メッセージ (依頼の中だけで使う促し・点検の催促・空応答の置き場など) の印。
+   * 内部ストレージ専用フィールドで、 provider への送信時は toSentMessage() (message-history.ts) が外す。
+   * 終わった依頼の揮発メッセージは、 次の整理イベントの前処理で除く (docs/context-reduction-redesign.md §6.2)。
+   * セッションに保存されるので、 保存・再開をはさんでも印は残る。
+   */
+  ephemeral?: boolean;
 }
 
 export interface ContentPart {

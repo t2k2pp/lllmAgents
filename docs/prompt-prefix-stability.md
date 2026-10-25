@@ -41,7 +41,7 @@ llama.cpp は **保存済みチェックポイントの位置** にしか戻れ�
 | 事象 | 頻度 | 扱い |
 |---|---|---|
 | 忘却 (tool 結果のトゥームストーン化) / 圧縮 | 文脈が溢れた時だけ | 文脈を減らすこと自体が目的。 キャッシュが一度外れるのは許容 |
-| span 境界での揮発メッセージ除去・思考の破棄 | ユーザー依頼 1 件につき 1 回 | 許容。 必要なら別途 |
+| span 境界での揮発メッセージ除去・思考の破棄 | ユーザー依頼 1 件につき 1 回 | ~~許容~~ → 2026-10-25 廃止。 混成モデルでは 1 回ごとに全部の読み直し (15〜20 分) になるため、 応答の終わりでは消さず、 次の整理イベントの前処理でまとめて除く (`context-reduction-redesign.md` §6.2 / §6.4) |
 | ツール定義の変化 | 774 リクエスト中 3 回 | 許容 |
 | 前回生成した思考 (`<think>`) を送り返さない | 毎回 | 食い違いは **前回プロンプトの末尾** なので、 llama.cpp の末尾チェックポイントで戻れる。 対応不要 |
 
@@ -137,7 +137,8 @@ AgentLoop を台本プロバイダで実際に回し、 各送信が直前の送
 
 ### 7.3 実行時に見つける (`prefix_break` レコード)
 - `MessageHistory` は送信済みの部分を書き換える操作のたびに理由を記録する
-  (`ephemeral-purge` / `thinking-clear` / `replace` (忘却) / `compress` / `system-prompt` / `clear`)。
+  (`reduction:<イベント ID>` (整理イベント。 `context-reduction-redesign.md` §6.4) / `thinking-clear` / `replace` (旧経路の忘却) / `compress` / `system-prompt` / `clear`)。
+  応答の終わりの `ephemeral-purge` は 2026-10-25 に無くなった (揮発メッセージは整理イベントで除く)。
 - AgentLoop は送信時に `llmLogger.logRequest()` の結果 (最初に食い違った位置) と `takeRewriteReasons()` を照合し、
   前方が変わっていれば `prefix_break` を記録する。 理由の申告が無ければ `unexpected: true` とし、 警告ログを出す。
 - tools 定義の変化も `toolsChanged: true` で記録する (ツール定義は system より前に描画されるので、 変われば全体が外れる)。

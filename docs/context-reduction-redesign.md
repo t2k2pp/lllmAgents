@@ -1,6 +1,6 @@
 # コンテキスト整理の作り直し 設計書
 
-> **ステータス**: design (2026-10-25 設計 / 未実装)
+> **ステータス**: design (2026-10-25 設計 / 実装中。 §13 のタスク 1・3〜7 済み)
 > **置き換える設計**: `docs/context-forgetting.md` (忘却) / `docs/context-strategy.md` (区切りでの使い分け)。
 > 実装が済んだら両書の先頭に「現行は本書」 の注記を入れる (§12)。
 > **前提**: `docs/prompt-prefix-stability.md` (一度送ったメッセージは書き換えない) が実装済みであること。
@@ -334,7 +334,7 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
 `applyReductionStages(input)` (`src/agent/reduction-stages.ts`) が前処理と段階 0〜2 を写しに最後まで当てはめる純粋な関数。
 入力の配列もメッセージも書き換えず、 変えないメッセージは同じ参照のまま返す。 履歴の差し替え・忘却の記録の挿入はしない (タスク 7)。
 
-- 入力: `messages` (getRawMessages() の形。 固定の system は含まない)、 `isEphemeral(m)` (表示済みの応答を外した後の判定)、
+- 入力: `messages` (getRawMessages() の形。 固定の system は含まない。 揮発は各メッセージの `ephemeral` の印で判定する。 タスク 7 で `isEphemeral(m)` の引数から移した)、
   `currentRequestStart` (今の依頼の始まりの添字。 依頼の終わりで整理するときは `messages.length`)、 `keepRecentToolUses` (K)、
   `promptTokens` (整理前の P)、 `goal` (`computeReductionGoal` の結果)、 `caseInsensitivePaths` (省略時は Windows なら true)。
 - 出力: `messages` (対の検証済み)、 `freedTokens` {preprocess, stage0, stage1, stage2, total}、 `repaid` {ephemeral, thinking}、
@@ -364,7 +364,7 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
 
 `src/agent/reduction-summary.ts`。 1・3・4 は写しに対する純粋な関数、 2 だけが LLM を呼ぶ。 履歴の差し替え・発火はしない (タスク 7・8)。
 
-1. **範囲** `selectSummaryRange({ messages, originalIndices, originalLength, isEphemeral, keepRecentToolUses, shortfall })`
+1. **範囲** `selectSummaryRange({ messages, originalIndices, originalLength, keepRecentToolUses, shortfall })` (揮発は `m.ephemeral` で判定)
    (`messages` / `originalIndices` / `shortfall` は `applyReductionStages` の結果) → `{ ok: true, range }` か
    `{ ok: false, reason: "not-needed" | "nothing-to-summarize" }`。
    - 範囲の中で原文のまま残すもの: 揮発でない利用者の発言、 system ノート、 保護するツール (§5.1) を含む応答の組。
@@ -416,7 +416,8 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
    (引数 `file_path`、 新しい順・重複なし・20 件まで、 超えた分は件数) / 要約の Current work)。 `MessageHistory.queueStateHandover(文面)` で預けると、
    次の `attachDynamicContext` が状態通知 (日時・ToDo・Goal) の後ろに **1 回だけ** 添える。 預かりがあることは添付の条件 (§3.2 の 4 番目) になり、
    状態が前回と同じでも添える。 末尾が assistant・送信済みなら待たせたまま次で添える。 変化の判定 (key) には含めない。 `clear()` で捨てる。
-   預かりはセッションに保存しない (差し替えの直後に次の本体呼び出しで添えるため。 保存・再開をはさむ場合はタスク 7 で要確認)。
+   預かりはセッションに保存しない (差し替えの直後に次の本体呼び出しで添えるため。 タスク 7 で確認: 規則 1 はそのとおりなので保存しない。
+   依頼の境目・`/compact` で保存・再開をはさむかはタスク 8・10 で決める。 §6.4)。
 
 タスク 7 への申し送り: 要約の呼び出しの `request` は本体呼び出しと同じ組み立て (同じ関数) から作ること (思考・サンプリングの差で前方が変わる)。
 要約を呼ぶ前に `attachDynamicContext()` を呼ばないこと (末尾が送信済みになり、 当てはめ後の写しにも通知が残る。 通知は差し替えの後の本体呼び出しで付ける)。
@@ -470,6 +471,84 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
   T3 = 11,000 + 3 × 2,048 + 16,384 + 17,408 = **50,936** (64K 枠で起動できる)。 目安の値のままで 3 つとも入ったので調整はしていない。
   (タスク 3 の最悪値の換算では T1 約 236k、 T2 約 164k、 T3 約 66k で、 200K / 128K / 64K 枠が起動できなかった。)
   既存テストの 8,192 / 32,768 の枠は 128,000 / 262,144 に上げたまま (検査に合っているので戻していない)。
+
+### 6.4 実装 (タスク 7、 2026-10-25)
+
+**整理イベント** `runReductionEvent(input)` (`src/agent/reduction-event.ts`) が §6.1 の 1〜5 を行う。 AgentLoop からは
+`AgentLoop.runReductionEvent(trigger, size?)` (public。 タスク 8 の規則 2・タスク 10 の `/compact` もこれを呼ぶ) を通す。
+
+- 入力: `id`、 `trigger` (`"forced" | "boundary:<種類>" | "manual"`)、 `history`、 `provider` (本体と同じ)、 `budget`、 `keepRecentToolUses` (K)、
+  `promptSize` (整理前の P)、 `growthTokens` (G)、 `currentRequestStart`、 `buildMainCallRequest` (本体呼び出しと同じ組み立て関数)、
+  `cacheMissCauses`、 `growth` (RequestGrowthTracker)。
+- 出力: `{ ok: true, record }` か `{ ok: false, reason, detail, record }`。 reason は `stages-error` / `summary-failed` / `summary-error` /
+  `nothing-to-reduce` / `still-too-large` / `apply-error`。 記録 `record` は §10.1 の欄 (下) で、 成功・失敗のどちらも返す。
+  `formatReductionEventLine(result)` が利用者向けの 1 行。
+- 成功したときだけ `replaceMessages(写し, "reduction:<id>")` を 1 回呼び、 続けて `cacheMissCauses.noteReductionEvent(id)`、
+  `growth.noteReduction(減った量)`、 要約があれば `queueStateHandover()`。 失敗したら写しを捨てるだけで、 履歴・書き換え理由・
+  書き換えの回数 (`getRevision()`)・渡し直しの預かりは元のまま。
+- AgentLoop 側 (`runReductionEvent`): ID は `r-<通し番号>-<時刻の 36 進>` (プロセスをまたいで同じセッションのログに書いても重ならない)。
+  `reduction_event` をセッションログに書き、 成功は 1 行 (✔) と `harness_notice` (info)、 失敗は赤の 1 行と `harness_notice` (error)。
+  ただし規則 1 以外で `nothing-to-reduce` のときは情報 (ℹ) にする (書き換えないだけで害はない)。 要約の呼び出しも Esc で切れるよう
+  本体と同じ `llmAbortController` を使う。 成功したらチャットログのパートを分ける (`onCompressed`)。
+
+決めたこと:
+- **要約に失敗したら、 イベント全体を失敗にする** (段階 0〜2 だけで差し替えて進めることはしない。 §6.1 の「途中で失敗したら写しを捨てる」
+  どおり。 別の手段への切り替えをしない)。 要約の範囲が取れない (`nothing-to-summarize`。 要約しても減らない) のは失敗ではなく、
+  段階 0〜2 の分だけで進める。 規則 1 の発火なら、 そのあと「整理後の P + R ≤ W」 を確かめ、 満たさなければ `still-too-large` で失敗。
+- 差し替え前後の送る形の推定の差 (`freedTokens.total`。 忘却の記録の分を差し引く) が 0 以下なら `nothing-to-reduce` で書き換えない。
+- 忘却の記録の本文は `[忘却の記録] 整理 <id>: 古いツール結果などを履歴から削除しました。` + 段階 0〜2 の行 (§5.7) + 読み直しの案内。
+  行が無い (前処理・要約だけ) ときは記録を入れない (要約は自分の目印 `<summary-of-earlier-turns>` を持つ)。 置く位置は
+  `firstForgottenIndex` を要約の当てはめ (`newIndexOf`) で置き直した位置。 既存の記録があれば追記して 1 件にする。
+  `TOMBSTONE_MARKER` / `insertTombstone` は `reduction-stages.ts` に移し、 旧 `forgetting.ts` もそれを使う。
+- `currentRequestStart` (前処理の境目) は、 `run()` の始めに控える「依頼を始めた利用者の発言」 (再開 `durableResume` では履歴の最後の
+  揮発でない利用者の発言) の位置。 依頼の外 (待ち受け中) なら全部が終わった依頼 (`length`)。 控えた発言が履歴に無い (旧方式の圧縮で
+  要約に入った) ときは 0 (残っている全部を今の依頼とみなし、 返済しない側に倒す)。
+- 記録 (§10.1) の欄: `id` / `trigger` / `ok` / `failureReason` / `failureDetail` / `promptTokensBefore` / `promptBasis` (usage | estimate) /
+  `targetPromptTokens` / `minimumReductionTokens` / `growthTokens` / `reachedStage` (2 | 3。 段階 0〜2 の前に失敗したら null) /
+  `freedTokens` {preprocess, stage0, stage1, stage2, stage3, total} / `repaid` {ephemeral, thinking} / `forgottenCalls` / `clearedCurrentThinking` /
+  `promptTokensAfter` (推定) / `summary` {status: not-needed | nothing-to-summarize | done | failed | error, failureReason, segments, attempts,
+  maxTokens, tokensIn, tokensCached, tokensOut (全試行の合計), durationMs, extraTextChars} / `prewarm` (タスク 9 用。 今は常に null) / `durationMs`。
+
+**規則 1 の組み込み** (`AgentLoop.enforceForcedLimit`): 本体呼び出しの再試行ループの中で、 一時停止の確認の後、 状態通知の添付
+(`attachDynamicContext`) の前に P を測り、 `exceedsForcedLimit` なら `runReductionEvent("forced", P)`。 失敗したら本体を呼ばずに止める:
+履歴に「この応答はコンテキストの整理に失敗したため送れませんでした」 の印 (`appendAbortMarker`) を足し、 終わり方 `context_reduction_failed`
+(outcome error)。 Esc で要約が切れたときは従来の中断 (`user_abort`)。 接続の再試行で送り直すときも同じ判定を通る (整理済みなら入る)。
+- **P の求め方** (`AgentLoop.measureNextPrompt`): 本体呼び出しの応答に usage があれば、 入力の全体 (Anthropic 系はキャッシュ分を足す)・出力・
+  送った時点の履歴の件数と書き換えの回数 (`MessageHistory.getRevision()`。 書き換え理由を申告するたびに増える) を `lastMainCall` に残す。
+  次の測定で、 同じ履歴オブジェクト・同じ書き換えの回数なら、 実数 + 送った後に足したもの (送った直後の assistant はその呼び出しの出力なので除く)
+  の送る形の推定。 間に書き換え・履歴の載せ替え (`restoreSession` / `importConversation`) があった、 usage が無かったときは全体の推定。
+  これから添付する状態通知は数えない (小さいので余白 M で吸収する)。
+- 本体呼び出しの送り方は `buildMainCallRequest(toolDefs, signal)` の 1 つにまとめ、 本体呼び出しと要約の呼び出しが同じものを使う。
+- `RequestGrowthTracker` は AgentLoop に 1 つ持ち、 今は整理イベントの `noteReduction` だけ呼ぶ (G は既定値 80,000 と頭打ち)。
+  依頼の始まり・本体呼び出し・依頼の終わり・セッションへの保存の組み込みはタスク 8。
+
+**外した旧経路の呼び出し** (本体の削除はタスク 8): 反復の先頭の `runContextStrategy(true)` (区切りでの整理) と
+`contextManager.shouldReduce() → reduce()` (割合の閾値での整理)、 依頼の終わり (`run()` の finally) の `runSpanEndStrategy()`。
+使われなくなった AgentLoop の `runContextStrategy` / `runSpanEndStrategy` / `confirmClear` / `reportStrategyOutcome` / `printHandoffNote` /
+`lastSpanEndReason` / `lastCompletionType` は消した (tsc の未使用の検査に掛かるため)。 区切りの検出 (`queueBreak` と ToDo・git commit・
+話題の切り替わりの検出) は規則 2 の作り直しまで残し、 待ち行列は依頼の始まりで捨てる。 `ContextManager.shouldReduce` / `reduce` /
+`applyStrategy`、 `ContextStrategy`、 `ForgettingEngine`、 `HierarchicalCompressor` は手動コマンド (`/compact` / `/forget` / `/handoff` /
+`/context strategy`) からだけ使われている (タスク 8・10 で消す・作り直す)。
+
+**借りの延期** (§6.2): `purgeEphemeralAtSpanEnd` は `recordSpanEnd(reason)` に名前を変え、 終わり方 (task_complete の outcome) の記録だけにした。
+借りは履歴そのもの (揮発の印と思考) に残るので別に控えない。 応答の終わりで履歴を書き換えていた経路は、 これと `runSpanEndStrategy` の 2 つで、
+どちらも無くなった (grep で確認。 残る書き換えは手動コマンド・システムプロンプトの更新・`/clear`)。
+- **表示済みの応答**: 以前は揮発の印を付けておき、 応答の終わりに `promoteDisplayedEphemeral()` で外していた。 応答の終わりの片付けが無くなったので、
+  `addAssistantMessage(..., { ephemeral: true, displayed: true })` は最初から印を付けない (同じ結果。 保存・再開で「表示済み」 の控えを持たなくてよい)。
+  `promoteDisplayedEphemeral` と表示済みの WeakSet は消した。
+- **揮発の印** は WeakSet から `Message.ephemeral` (内部専用の欄) に移した。 `toSentMessage()` が送る前に外す (`getMessages()` と送る形の推定)。
+  `MessageHistory.purgeEphemeral()` / `isEphemeral()` と WeakSet は消した。 段階 0〜3 の入力の `isEphemeral` も無くし、 `m.ephemeral` を見る。
+- **保存・再開**: 印は Message の欄なのでセッションの JSON に乗る。 `restoreSession` は揮発の印と思考 (`thinking`) を戻すようにした
+  (以前は思考を捨てていた。 思考も次の整理イベントで返す借りなので戻す)。 状態通知 (`contextNote`) は以前どおり戻さない (再開後の最初の送信で出し直す)。
+- `MessageHistory.replaceMessages(next, reason = "replace")` は書き換え理由を受け取る (整理イベントは `reduction:<id>`、 旧経路の忘却は既定の `replace`)。
+  `clearAllThinking()` は旧経路の忘却 (`forgetThinking`) だけが使う。
+- 要約の後の渡し直しの預かりは今もセッションに保存しない。 規則 1 は差し替えの直後に本体を呼んで添えるため。 タスク 8 (依頼の境目) と
+  タスク 10 (`/compact`) で、 差し替えの後に本体を呼ぶ前の保存・再開をはさむなら、 保存するかを決める。
+
+試験: `tests/agent/reduction-event.test.ts` (要約なし・あり、 失敗で履歴が元のまま、 書き換え理由、 記録の欄、 忘却の記録の追記、 前処理の返済、
+G への足し戻し、 揮発の印の保存・復元と送る形から外れること、 規則 1 の失敗で本体を呼ばないこと)、 `tests/agent/prompt-prefix-invariant.test.ts`
+(台本 provider で 4 件の依頼を回し、 起動時検査の最小 + 2,000 の W で規則 1 を起こす。 要約なし・ありの 2 通りで、 直前の送信を先頭に含まない送信が
+整理イベントの直後の送信とちょうど一致し、 揮発メッセージと思考が残る依頼の境目では外れない)。
 
 ---
 
@@ -533,6 +612,7 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
 `id`、 発火 (`forced` / `boundary:<種類>` / `manual`)、 整理前の P (実数か推定か)、 目標、 最低量、
 到達した段階、 段階ごとの減った量 (前処理・0・1・2・3)、 返した借り (揮発 N 件・思考 N 件)、 整理後の P (推定)、
 段階 3 の要約呼び出しの `tokensIn` / `tokensCached` / `tokensOut` / 所要時間、 予熱の有無と所要時間。
+実装の欄の名前と形は §6.4 (タスク 7)。
 
 ### 10.2 キャッシュが外れた原因の特定 (`cache_miss`)
 

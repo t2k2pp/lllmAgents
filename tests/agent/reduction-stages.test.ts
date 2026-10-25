@@ -38,7 +38,6 @@ function tail(): Message[] {
 function run(messages: Message[], overrides: Partial<ReductionStagesInput> = {}) {
   return applyReductionStages({
     messages,
-    isEphemeral: () => false,
     currentRequestStart: messages.length,
     keepRecentToolUses: 1,
     promptTokens: 200_000,
@@ -285,8 +284,8 @@ describe("段階 2 今の依頼の思考", () => {
 
 describe("前処理 (借りの返済)", () => {
   it("終わった依頼の揮発メッセージを除き思考を消す。 今の依頼の揮発メッセージは残す", () => {
-    const nudgeOld: Message = { role: "user", content: "点検してください (ハーネス)" };
-    const nudgeNow: Message = { role: "user", content: "続けてください (ハーネス)" };
+    const nudgeOld: Message = { role: "user", content: "点検してください (ハーネス)", ephemeral: true };
+    const nudgeNow: Message = { role: "user", content: "続けてください (ハーネス)", ephemeral: true };
     const msgs: Message[] = [
       user("前の依頼"),
       { role: "assistant", content: "前の答え", thinking: BIG },
@@ -295,8 +294,7 @@ describe("前処理 (借りの返済)", () => {
       nudgeNow,
       { role: "assistant", content: "今の途中", thinking: "今の考え" },
     ];
-    const ephemeral = new Set([nudgeOld, nudgeNow]);
-    const r = run(msgs, { currentRequestStart: 3, isEphemeral: (m) => ephemeral.has(m) });
+    const r = run(msgs, { currentRequestStart: 3 });
     expect(r.messages).not.toContain(nudgeOld);
     expect(r.messages).toContain(nudgeNow);
     expect(r.messages[1]).toEqual({ role: "assistant", content: "前の答え" });
@@ -406,9 +404,9 @@ describe("ツールの対の検証", () => {
 describe("純粋さと減った量", () => {
   it("入力の配列もメッセージも書き換えない", () => {
     const msgs = mixedHistory();
+    msgs[5] = { ...msgs[5], ephemeral: true };
     const snapshot = structuredClone(msgs);
-    const ephemeral = new Set([msgs[5]]);
-    run(msgs, { currentRequestStart: 6, isEphemeral: (m) => ephemeral.has(m) });
+    run(msgs, { currentRequestStart: 6 });
     expect(msgs).toEqual(snapshot);
   });
 

@@ -117,6 +117,27 @@ export function forgottenResultText(call: ToolCall, resultText: string, reason: 
   );
 }
 
+/** 忘却の記録 (system ノート) の目印。 これで既存の記録を見つけて追記する */
+export const TOMBSTONE_MARKER = "[忘却の記録]";
+
+/**
+ * 忘却の記録を写しに入れる (docs/context-forgetting.md §4.4)。 既存の記録があればそこへ追記して 1 件にまとめ、
+ * 無ければ「最初に忘却した位置」 に 1 件だけ挿入する (履歴中に散乱させない)。 入力の配列は書き換えない。
+ */
+export function insertTombstone(next: Message[], text: string, insertAt: number): Message[] {
+  const existing = next.findIndex((m) => m.role === "system" && contentToText(m.content).startsWith(TOMBSTONE_MARKER));
+  if (existing >= 0) {
+    const merged = [...next];
+    merged[existing] = {
+      role: "system",
+      content: `${contentToText(merged[existing].content)}\n\n${text}`,
+    };
+    return merged;
+  }
+  const at = Math.max(0, Math.min(insertAt, next.length));
+  return [...next.slice(0, at), { role: "system", content: text }, ...next.slice(at)];
+}
+
 /** 呼び出しと結果の対ごと外したときの、 忘却の記録の 1 行 */
 export function describeRemovedCall(call: ToolCall, result: Message | undefined): string {
   const argTokens = estimateTokens(call.function.arguments);
@@ -196,11 +217,6 @@ const FILE_READ_DEFAULT_LIMIT = 2000;
 export interface ReductionStagesInput {
   /** 履歴の写し (getRawMessages() の形)。 変更しない */
   messages: readonly Message[];
-  /**
-   * 揮発メッセージか (ハーネスが入れた促し・点検の催促など)。 表示済みの応答は揮発から外した後の判定を渡す
-   * (今は MessageHistory.promoteDisplayedEphemeral() の後の isEphemeral。 タスク 7 で Message.ephemeral に移す)。
-   */
-  isEphemeral: (message: Message) => boolean;
   /**
    * 今の依頼が始まる位置 (messages の添字)。 これより前が終わった依頼。
    * 依頼の終わりで整理するときは messages.length (全部が終わった依頼) を渡す。
@@ -302,7 +318,8 @@ export function applyReductionStages(input: ReductionStagesInput): ReductionStag
       pre.push(e);
       continue;
     }
-    if (input.isEphemeral(e.message)) {
+    // 揮発の印 (Message.ephemeral) は、 ハーネスが入れた促し・点検の催促など。 表示済みの応答には付かない
+    if (e.message.ephemeral === true) {
       repaidEphemeral++;
       continue;
     }

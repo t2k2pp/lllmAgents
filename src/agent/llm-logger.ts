@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { CacheMissDiagnosis } from "./cache-miss.js";
+import type { ReductionEventRecord } from "./reduction-event.js";
 import type { SideCallRecord } from "./side-call.js";
 
 /**
@@ -124,6 +125,16 @@ export interface LLMCacheMissLog extends LogContext, CacheMissDiagnosis {
   type: "cache_miss";
 }
 
+/**
+ * 整理イベント 1 件の記録 (成功・失敗のどちらも)。 docs/context-reduction-redesign.md §10.1。
+ */
+export interface LLMReductionEventLog extends LogContext, ReductionEventRecord {
+  ts: string;
+  turn: number;
+  agentId: string;
+  type: "reduction_event";
+}
+
 /** logRequest() の返り値。 前方一致が保たれたかを呼び出し側が判定するのに使う。 */
 export interface RequestPrefixInfo {
   messageOffset: number;
@@ -137,7 +148,8 @@ export type LLMLogEntry =
   | LLMToolResultLog
   | LLMPrefixBreakLog
   | LLMSideCallLog
-  | LLMCacheMissLog;
+  | LLMCacheMissLog
+  | LLMReductionEventLog;
 
 export interface LLMLoggerOptions {
   logsDir?: string;
@@ -305,6 +317,17 @@ export class LLMLogger {
       agentId: this.agentId,
       type: "cache_miss",
       ...diagnosis,
+    });
+  }
+
+  /** 整理イベントを記録する (turn は直前の本体呼び出しの番号)。 */
+  logReductionEvent(record: ReductionEventRecord): void {
+    this.write({
+      ts: new Date().toISOString(),
+      turn: this.turn,
+      agentId: this.agentId,
+      type: "reduction_event",
+      ...record,
     });
   }
 

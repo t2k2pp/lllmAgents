@@ -22,6 +22,7 @@ import * as logger from "../utils/logger.js";
 import { sideCall } from "./side-call.js";
 import {
   REMOVED_CALLS_LISTED,
+  TOMBSTONE_MARKER,
   THIN_TEXT_CHARS,
   THINNED_MARKER,
   type ToolCallAction,
@@ -29,6 +30,7 @@ import {
   describeRemovedCall,
   forgottenResultText,
   hasBulkyArguments,
+  insertTombstone,
   oneLine,
   summarizeToolNames,
   transformToolBatch,
@@ -46,9 +48,6 @@ export const DEFAULT_KEEP_RECENT_SEGMENTS = 6;
 
 /** digest に載せる本文の文字数 (マニフェスト 1 行に収める) */
 const DIGEST_CHARS = 60;
-
-/** トゥームストーンの目印。 これで system_note を再識別する */
-export const TOMBSTONE_MARKER = "[忘却の記録]";
 
 // ─── 型 ───
 
@@ -485,24 +484,6 @@ export function buildTombstoneText(params: {
   }
   lines.push("必要になった情報は再度ツールで取得してください。");
   return lines.join("\n");
-}
-
-/**
- * トゥームストーンを挿入する。 既存のトゥームストーンがあれば追記統合し、
- * 無ければ「最初に忘却した位置」 に 1 件だけ挿入する (履歴中に散乱させない)。
- */
-export function insertTombstone(next: Message[], text: string, insertAt: number): Message[] {
-  const existing = next.findIndex((m) => m.role === "system" && contentToText(m.content).startsWith(TOMBSTONE_MARKER));
-  if (existing >= 0) {
-    const merged = [...next];
-    merged[existing] = {
-      role: "system",
-      content: `${contentToText(merged[existing].content)}\n\n${text}`,
-    };
-    return merged;
-  }
-  const at = Math.max(0, Math.min(insertAt, next.length));
-  return [...next.slice(0, at), { role: "system", content: text }, ...next.slice(at)];
 }
 
 // ─── forget-thinking (決定論版・LLM 不使用) ───

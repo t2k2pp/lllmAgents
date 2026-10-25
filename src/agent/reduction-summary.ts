@@ -96,8 +96,6 @@ export interface SummaryRangeInput {
   originalIndices: readonly number[];
   /** 元の履歴 (getRawMessages()) の件数 */
   originalLength: number;
-  /** 揮発メッセージか (段階 0〜2 に渡したものと同じ)。 ハーネスの促しは利用者の発言として残さない */
-  isEphemeral: (message: Message) => boolean;
   /** K (TIER_CONTEXT_BUDGETS[tier].keepRecentToolUses)。 直近 K 回のツール呼び出しより後ろは範囲に入れない */
   keepRecentToolUses: number;
   /** 段階 0〜2 の後に足りない量 (ReductionStagesResult.shortfall) */
@@ -150,7 +148,7 @@ function hasToolCalls(m: Message | undefined): boolean {
  * 写しの各メッセージを、 範囲の中で原文のまま残すもの (kept) と要約に置き換えるもの (summarizable) に分ける。
  * 残すもの: 利用者の発言 (揮発でないもの)、 system ノート (圧縮要約・忘却の記録)、 保護するツール (§5.1) を含む応答の組。
  */
-function classify(messages: readonly Message[], isEphemeral: (m: Message) => boolean): Kind[] {
+function classify(messages: readonly Message[]): Kind[] {
   const kinds: Kind[] = [];
   let i = 0;
   while (i < messages.length) {
@@ -163,7 +161,8 @@ function classify(messages: readonly Message[], isEphemeral: (m: Message) => boo
       i = end;
       continue;
     }
-    const kept = m.role === "system" || (m.role === "user" && !isEphemeral(m));
+    // ハーネスの促し (揮発の印 Message.ephemeral) は利用者の発言として残さない
+    const kept = m.role === "system" || (m.role === "user" && m.ephemeral !== true);
     kinds.push(kept ? "kept" : "summarizable");
     i++;
   }
@@ -220,7 +219,7 @@ export function selectSummaryRange(input: SummaryRangeInput): SummaryRangeResult
     return { ok: false, reason: "not-needed", detail: "段階 0〜2 で目標と最低量を満たしています" };
   }
 
-  const kinds = classify(messages, input.isEphemeral);
+  const kinds = classify(messages);
   const limit = protectedTailStart(messages, input.keepRecentToolUses);
   let start = 0;
   for (let i = limit - 1; i >= 0; i--) {

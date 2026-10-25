@@ -67,16 +67,11 @@ function read(path: string): Message[] {
 }
 
 /** 段階 0〜2 を通さない写し (元の履歴と 1 対 1) で範囲を決める */
-function rangeOf(
-  messages: Message[],
-  required: number,
-  opts: { keep?: number; isEphemeral?: (m: Message) => boolean } = {},
-) {
+function rangeOf(messages: Message[], required: number, opts: { keep?: number } = {}) {
   return selectSummaryRange({
     messages,
     originalIndices: messages.map((_, i) => i),
     originalLength: messages.length,
-    isEphemeral: opts.isEphemeral ?? (() => false),
     keepRecentToolUses: opts.keep ?? 1,
     shortfall: { toTarget: required, toMinimum: 0 },
   });
@@ -194,7 +189,7 @@ describe("selectSummaryRange (要約の範囲)", () => {
   });
 
   it("利用者の発言・system ノート・保護するツールの組は区間を分け、 揮発の促しは区間に入る", () => {
-    const nudge = user("(ハーネスの促し)");
+    const nudge: Message = { ...user("(ハーネスの促し)"), ephemeral: true };
     const messages = [
       user("U1"),
       ...read("/a"),
@@ -206,7 +201,7 @@ describe("selectSummaryRange (要約の範囲)", () => {
       ...read("/d"),
       ...read("/e"),
     ];
-    const range = okRange(rangeOf(messages, 100_000, { isEphemeral: (m) => m === nudge }));
+    const range = okRange(rangeOf(messages, 100_000));
     // [/a, 促し, /b] | ask_user は残す | [/c] | system | [/d]
     expect(range.segments.map((s) => [s.start, s.end])).toEqual([
       [1, 6],
@@ -216,12 +211,11 @@ describe("selectSummaryRange (要約の範囲)", () => {
   });
 
   it("段階 0〜2 で消えたメッセージがあっても、 元の履歴の位置に対応させる", () => {
-    const nudge = user("(前の依頼の促し)");
+    const nudge: Message = { ...user("(前の依頼の促し)"), ephemeral: true };
     // 段階 1 がツール結果の本文を消すので、 大きいのはモデルの発言にする
     const raw = [user("U1"), reply(BIG), nudge, reply(BIG), user("U2"), reply(BIG), ...read("/d")];
     const stages = applyReductionStages({
       messages: raw,
-      isEphemeral: (m) => m === nudge,
       currentRequestStart: 4, // U2 から今の依頼
       keepRecentToolUses: 1,
       promptTokens: 100_000,
@@ -233,7 +227,6 @@ describe("selectSummaryRange (要約の範囲)", () => {
         messages: stages.messages,
         originalIndices: stages.originalIndices,
         originalLength: raw.length,
-        isEphemeral: (m) => m === nudge,
         keepRecentToolUses: 1,
         shortfall: { toTarget: 0, toMinimum: 50_000 },
       }),
