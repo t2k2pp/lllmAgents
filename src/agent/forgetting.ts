@@ -20,6 +20,19 @@ import { estimateTokens, estimateMessageTokens } from "./token-counter.js";
 import type { MessageHistory } from "./message-history.js";
 import * as logger from "../utils/logger.js";
 import { sideCall } from "./side-call.js";
+import {
+  REMOVED_CALLS_LISTED,
+  THIN_TEXT_CHARS,
+  THINNED_MARKER,
+  type ToolCallAction,
+  contentToText,
+  describeRemovedCall,
+  forgottenResultText,
+  hasBulkyArguments,
+  oneLine,
+  summarizeToolNames,
+  transformToolBatch,
+} from "./reduction-stages.js";
 
 // ─── 定数 ───
 
@@ -34,26 +47,8 @@ export const DEFAULT_KEEP_RECENT_SEGMENTS = 6;
 /** digest に載せる本文の文字数 (マニフェスト 1 行に収める) */
 const DIGEST_CHARS = 60;
 
-/**
- * thin したテキストで残す先頭文字数。 tool_call 引数ではこれを超える文字列を「本文」 とみなし、
- * その呼び出しを対ごと履歴から外す (docs §3.1)
- */
-const THIN_TEXT_CHARS = 200;
-
-/**
- * 本文とみなさない tool_call 引数。 「何に対して何をしたか」 の識別子なので、
- * 長くても呼び出しを残す理由になる (パスが長いだけの file_read を記録へ移さない)。
- */
-const THIN_KEEP_ARG_KEYS = new Set(["file_path", "path", "url"]);
-
-/** トゥームストーンに 1 行ずつ列挙する「呼び出しごと外した tool_call」 の上限 (超過分は件数で示す) */
-const REMOVED_CALLS_LISTED = 10;
-
 /** トゥームストーンの目印。 これで system_note を再識別する */
 export const TOMBSTONE_MARKER = "[忘却の記録]";
-
-/** thin 済み tool_result の目印 */
-export const THINNED_MARKER = "[忘却済み]";
 
 // ─── 型 ───
 
@@ -119,16 +114,6 @@ export interface ForgetDryRunReport {
 
 // ─── セグメント化 ───
 
-function contentToText(content: Message["content"]): string {
-  return typeof content === "string" ? content : JSON.stringify(content);
-}
-
-/** 改行・連続空白を潰して 1 行に収める */
-function oneLine(text: string, max: number): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length <= max ? flat : `${flat.slice(0, max)}…`;
-}
-
 /**
  * パスを末尾優先で 1 行に収める。 先頭から切ると同じプロジェクト内のファイルが
  * `C:\Users\…\src\g…` のように全部同じ表示になり、 モデルが区別できない。
@@ -154,13 +139,6 @@ function pickRepresentativeArg(msg: Message): string | undefined {
     }
   }
   return undefined;
-}
-
-/** ツール名を `名前×回数` に集計する */
-function summarizeToolNames(names: string[]): string {
-  const counts = new Map<string, number>();
-  for (const n of names) counts.set(n, (counts.get(n) ?? 0) + 1);
-  return [...counts.entries()].map(([n, c]) => `${n}×${c}`).join(", ");
 }
 
 /**
@@ -378,20 +356,6 @@ export function validateChoice(
 
 // ─── 適用 ───
 
-/** tool_call の引数から「何をしたか」 を 1 行で復元する (thin 後の代替テキスト用) */
-function describeToolCall(name: string, argsJson: string): string {
-  try {
-    const args = JSON.parse(argsJson || "{}") as Record<string, unknown>;
-    for (const key of ["file_path", "path", "pattern", "command", "url", "query"]) {
-      const v = args[key];
-      if (typeof v === "string" && v.trim().length > 0) return `${name} ${oneLine(v, 80)}`;
-    }
-  } catch {
-    // best-effort
-  }
-  return name;
-}
-
 /**
  * プランを適用した新しいメッセージ列を作る (元配列は変更しない)。
  * 適用位置は範囲の重複が起きないよう segment.range をそのまま使う。
@@ -438,29 +402,6 @@ function shrinkText(text: string): string {
   );
 }
 
-/**
- * tool_call 引数に「本文」 (file_write の content、 file_edit の old/new 文字列、 長い bash の command など) が
- * 含まれるか。 書込系セッションではコンテキストの大半がここに乗り、 結果本文だけ落としても減らない
- * (2026-10-17 myppt セッションで未保護 158 セグメント中 80 が thin しても削減 0)。
- * 旧方式で切り詰め済みの引数 (`[忘却済み]` を含む) も本文ありとして扱い、 次の thin で記録へ移す。
- * 引数が JSON として読めないときは本文なしとして触らない (壊すと provider が 400 を返す)。
- */
-function hasBulkyArguments(argsJson: string): boolean {
-  let args: unknown;
-  try {
-    args = JSON.parse(argsJson || "{}");
-  } catch {
-    return false;
-  }
-  if (!args || typeof args !== "object" || Array.isArray(args)) return false;
-  return Object.entries(args as Record<string, unknown>).some(
-    ([key, value]) =>
-      typeof value === "string" &&
-      !THIN_KEEP_ARG_KEYS.has(key) &&
-      (value.length > THIN_TEXT_CHARS || value.includes(THINNED_MARKER)),
-  );
-}
-
 /** 1 セグメント分の messages に thin を適用する (元配列は変更しない) */
 function thinSlice(
   kind: SegmentKind,
@@ -479,53 +420,25 @@ function thinSlice(
     // 書き換えて残すと、 モデルがそれを自分の呼び出しの書き方として真似し、
     // 途中で切れたコマンドや本文を実際に出力する (2026-10-18〜19 myppt セッションで 12 件:
     // git commit の引用符が閉じず bash が構文エラー、 切れたスクリプトを file_write 等)。
+    // 呼び出しごとの変換と組への当てはめは段階 1 (reduction-stages.ts) と共通。
     const head = slice[0];
-    const calls = head.tool_calls ?? [];
     const resultById = new Map(slice.slice(1).map((m) => [m.tool_call_id, m]));
-    const keptCalls = calls.filter((c) => !hasBulkyArguments(c.function.arguments));
-    const keptIds = new Set(keptCalls.map((c) => c.id));
-    for (const c of calls) {
-      if (keptIds.has(c.id)) continue;
+    const actions = new Map<string, ToolCallAction>();
+    for (const c of head.tool_calls ?? []) {
       const result = resultById.get(c.id);
-      const argTokens = estimateTokens(c.function.arguments);
-      const resultTokens = result ? estimateTokens(contentToText(result.content)) : 0;
-      removedCalls.push(
-        `${describeToolCall(c.function.name, c.function.arguments)} ` +
-          `(引数 約 ${argTokens.toLocaleString("en-US")} / 結果 約 ${resultTokens.toLocaleString("en-US")} トークン)`,
-      );
-    }
-
-    if (keptCalls.length === calls.length) {
-      messages.push(head);
-    } else if (keptCalls.length > 0) {
-      messages.push({ ...head, tool_calls: keptCalls });
-    } else {
-      // 呼び出しが 1 つも残らないときは本文だけの assistant にする (本文も無ければ消す)
-      const { tool_calls: _removed, ...rest } = head;
-      if (contentToText(head.content).trim().length > 0) messages.push(rest);
-    }
-
-    for (const m of slice.slice(1)) {
-      const call = keptCalls.find((c) => c.id === m.tool_call_id);
-      // 除去した呼び出しの結果は対ごと外す (記録は removedCalls に移した)
-      if (!call) continue;
-      const text = contentToText(m.content);
-      if (text.startsWith(THINNED_MARKER)) {
-        // thin 済み。 再変換しても縮まらない
-        messages.push(m);
+      if (hasBulkyArguments(c.function.arguments)) {
+        actions.set(c.id, { kind: "remove" });
+        removedCalls.push(describeRemovedCall(c, result));
         continue;
       }
-      const tokens = estimateTokens(text);
-      thinnedTools.push(call.function.name);
-      messages.push({
-        role: "tool",
-        content:
-          `${THINNED_MARKER} ${describeToolCall(call.function.name, call.function.arguments)} の結果 (約 ${tokens.toLocaleString("en-US")} トークン) は履歴から削除しました。 ` +
-          `必要なら再度実行して取得してください。`,
-        tool_call_id: m.tool_call_id,
-      });
+      if (!result) continue;
+      const text = contentToText(result.content);
+      // thin 済み。 再変換しても縮まらない
+      if (text.startsWith(THINNED_MARKER)) continue;
+      thinnedTools.push(c.function.name);
+      actions.set(c.id, { kind: "replace-result", content: forgottenResultText(c, text, "thin") });
     }
-    return { messages, thinnedTools, removedCalls };
+    return { messages: transformToolBatch(slice, actions), thinnedTools, removedCalls };
   }
 
   // user / assistant_text: 先頭 THIN_TEXT_CHARS 文字 + 省略注記に切り詰める

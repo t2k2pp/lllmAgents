@@ -64,6 +64,76 @@ function renderContextNote(note: string): string {
   );
 }
 
+/**
+ * 履歴の 1 件を provider へ送る形に描画する (思考の inline 化・状態通知の連結)。
+ * getMessages() と、 送る形で大きさを数える整理の段階 (reduction-stages.ts) が同じものを使う。
+ * 描画が要らないメッセージはそのまま返す (同じ参照)。
+ */
+export function toSentMessage(m: Message): Message {
+  // 思考保全: assistant.thinking がある場合は content の先頭に inline 化して送信。
+  // provider に未対応フィールドを渡さないために thinking フィールド自体は除外。
+  //
+  // 2026-05-15 — 命令付きフォーマットに変更 (user 指摘):
+  // 旧 `[内部思考 ...]` は単なるラベルで model が「この形式で出力せよ」 と誤解し
+  // [/内部思考] を repeat するループに陥った (T12/T13 で観測)。
+  // model は自分の過去出力を「自分のもの」 と認識する meta-awareness が無いため、
+  // 入力に置かれたタグは template として解釈される。
+  // 修正: 標準 <thinking> タグ + 明示的命令 (**以下を踏まえ答えを出す**) で
+  // 「これは consume するもの、 出力は新規生成」 を model に伝える。
+  if (m.role === "assistant" && m.thinking) {
+    const baseContent = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+    const inlined =
+      `<thinking>\n` + `**以下を踏まえ答えを出す**\n` + `${m.thinking}\n` + `</thinking>\n\n` + `${baseContent}`;
+    const out: Message = { role: m.role, content: inlined };
+    if (m.tool_calls) out.tool_calls = m.tool_calls;
+    if (m.tool_call_id) out.tool_call_id = m.tool_call_id;
+    return out;
+  }
+  if (m.contextNote) {
+    const { contextNote, ...rest } = m;
+    const note = renderContextNote(contextNote);
+    const content: string | ContentPart[] =
+      typeof m.content === "string"
+        ? m.content.length > 0
+          ? `${m.content}\n\n${note}`
+          : note
+        : [...m.content, { type: "text", text: note }];
+    return { ...rest, content };
+  }
+  return m;
+}
+
+/**
+ * ツールの対の検証 (docs/context-forgetting.md §2.1)。 tool_calls を持つ assistant の直後に、
+ * その全 tool_call_id に対応する role="tool" が揃っていること、 孤立した tool 結果が無いことを確かめる。
+ * @returns 壊れていればその内容、 揃っていれば null
+ */
+export function findToolPairingError(messages: readonly Message[]): string | null {
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === "tool") {
+      // ここに来る tool は直前の assistant(tool_calls) に回収されていないもの = 孤立
+      return `孤立した tool_result があります (index=${i})`;
+    }
+    if (m.role !== "assistant" || !Array.isArray(m.tool_calls) || m.tool_calls.length === 0) continue;
+
+    const pending = new Set(m.tool_calls.map((c) => c.id));
+    let j = i + 1;
+    while (j < messages.length && messages[j].role === "tool") {
+      const id = messages[j].tool_call_id;
+      if (!id || !pending.delete(id)) {
+        return `対応する tool_call の無い tool_result です (index=${j}, tool_call_id=${id ?? "なし"})`;
+      }
+      j++;
+    }
+    if (pending.size > 0) {
+      return `tool_result が欠落しています (assistant index=${i}, 未対応 id=${[...pending].join(", ")})`;
+    }
+    i = j - 1; // 回収した tool 群は再走査しない
+  }
+  return null;
+}
+
 export class MessageHistory {
   private messages: Message[] = [];
   private systemPrompt: string;
@@ -125,42 +195,7 @@ export class MessageHistory {
     // (docs/prompt-prefix-stability.md)。 状態通知は attachDynamicContext() が添付した
     // contextNote として、 添付先メッセージの本文の後ろに描画する。
     const { stable } = this.compose();
-    return [
-      { role: "system", content: stable },
-      // 思考保全: assistant.thinking がある場合は content の先頭に inline 化して送信。
-      // provider に未対応フィールドを渡さないために thinking フィールド自体は除外。
-      //
-      // 2026-05-15 — 命令付きフォーマットに変更 (user 指摘):
-      // 旧 `[内部思考 ...]` は単なるラベルで model が「この形式で出力せよ」 と誤解し
-      // [/内部思考] を repeat するループに陥った (T12/T13 で観測)。
-      // model は自分の過去出力を「自分のもの」 と認識する meta-awareness が無いため、
-      // 入力に置かれたタグは template として解釈される。
-      // 修正: 標準 <thinking> タグ + 明示的命令 (**以下を踏まえ答えを出す**) で
-      // 「これは consume するもの、 出力は新規生成」 を model に伝える。
-      ...this.messages.map((m) => {
-        if (m.role === "assistant" && m.thinking) {
-          const baseContent = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-          const inlined =
-            `<thinking>\n` + `**以下を踏まえ答えを出す**\n` + `${m.thinking}\n` + `</thinking>\n\n` + `${baseContent}`;
-          const out: Message = { role: m.role, content: inlined };
-          if (m.tool_calls) out.tool_calls = m.tool_calls;
-          if (m.tool_call_id) out.tool_call_id = m.tool_call_id;
-          return out;
-        }
-        if (m.contextNote) {
-          const { contextNote, ...rest } = m;
-          const note = renderContextNote(contextNote);
-          const content: string | ContentPart[] =
-            typeof m.content === "string"
-              ? m.content.length > 0
-                ? `${m.content}\n\n${note}`
-                : note
-              : [...m.content, { type: "text", text: note }];
-          return { ...rest, content };
-        }
-        return m;
-      }),
-    ];
+    return [{ role: "system", content: stable }, ...this.messages.map(toSentMessage)];
   }
 
   /**
@@ -329,37 +364,10 @@ export class MessageHistory {
     this.rewriteReasons.push("replace");
   }
 
-  /**
-   * tool_calls を持つ assistant の直後に、 その全 tool_call_id に対応する
-   * role="tool" が揃っていることを検証する。 孤立した tool 結果も弾く。
-   */
+  /** ツールの対が壊れていれば例外を投げる (中身は findToolPairingError) */
   private static assertToolPairing(messages: Message[]): void {
-    for (let i = 0; i < messages.length; i++) {
-      const m = messages[i];
-      if (m.role === "tool") {
-        // ここに来る tool は直前の assistant(tool_calls) に回収されていないもの = 孤立
-        throw new Error(`[message-history] 孤立した tool_result があります (index=${i})`);
-      }
-      if (m.role !== "assistant" || !Array.isArray(m.tool_calls) || m.tool_calls.length === 0) continue;
-
-      const pending = new Set(m.tool_calls.map((c) => c.id));
-      let j = i + 1;
-      while (j < messages.length && messages[j].role === "tool") {
-        const id = messages[j].tool_call_id;
-        if (!id || !pending.delete(id)) {
-          throw new Error(
-            `[message-history] 対応する tool_call の無い tool_result です (index=${j}, tool_call_id=${id ?? "なし"})`,
-          );
-        }
-        j++;
-      }
-      if (pending.size > 0) {
-        throw new Error(
-          `[message-history] tool_result が欠落しています (assistant index=${i}, 未対応 id=${[...pending].join(", ")})`,
-        );
-      }
-      i = j - 1; // 回収した tool 群は再走査しない
-    }
+    const error = findToolPairingError(messages);
+    if (error) throw new Error(`[message-history] ${error}`);
   }
 
   replaceOlderMessages(summary: string, keepRecent: number): void {

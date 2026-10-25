@@ -13,7 +13,8 @@ import {
   type GuardInput,
   type StrategyAction,
 } from "../../src/agent/context-strategy.js";
-import { forgetThinking, selectThinkingTargets, buildSegments, THINNED_MARKER } from "../../src/agent/forgetting.js";
+import { forgetThinking, selectThinkingTargets, buildSegments } from "../../src/agent/forgetting.js";
+import { THINNED_MARKER } from "../../src/agent/reduction-stages.js";
 import {
   buildTranscript,
   buildHandoffMessage,

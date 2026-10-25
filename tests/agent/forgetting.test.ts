@@ -4,7 +4,6 @@ import { MessageHistory } from "../../src/agent/message-history.js";
 import {
   ForgettingEngine,
   TOMBSTONE_MARKER,
-  THINNED_MARKER,
   applyPlanToMessages,
   buildManifest,
   buildSegments,
@@ -13,6 +12,7 @@ import {
   parseForgetResponse,
   validateChoice,
 } from "../../src/agent/forgetting.js";
+import { THINNED_MARKER } from "../../src/agent/reduction-stages.js";
 
 // ─── テスト用の道具 ───
 

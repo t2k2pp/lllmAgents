@@ -247,7 +247,9 @@ T2 も T1 と同じ O・T にする (2026-10-25。 当初案の T2 O=16,384 で�
   ハーネスが入れた促し (揮発メッセージ) は利用者の言葉ではないので保護しない (§5.2 で除く)
 - 直近 K 回のツール呼び出し (K: T1=6 / T2=5 / T3=3。 `keepRecentMessages` を置き換えるティア既定値 `keepRecentToolUses`)
 - 結果に利用者の言葉や状態を持つツール: `ask_user`、 `todo_append` / `todo_mark` などの ToDo ツール、
-  `exit_plan_mode`、 `response_complete` (一覧は要確認)
+  `exit_plan_mode`、 `response_complete`。 タスク 5 で `todo_delete` と `enter_plan_mode` を足して確定
+  (`PROTECTED_TOOL_NAMES` = ask_user / todo_append / todo_mark / todo_delete / enter_plan_mode / exit_plan_mode / response_complete。
+  名前は `src/tools/definitions/` で確かめた。 §5.7)
 - ツール呼び出しと結果の対 (片方だけ消さない。 `context-forgetting.md` §2.1)
 
 ### 5.2 前処理: 書き換えの借りを返す
@@ -326,6 +328,35 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
 **状態の渡し直し**: 要約の後、 既存の状態通知 (`attachDynamicContext`) で ToDo・Goal に加えて
 「最近触ったファイル (パス一覧)」 と「いまの作業 (要約の 8)」 を 1 回だけ添える。
 前回の通知を付けたメッセージが消えたときに出し直す既存の規則 (`prompt-prefix-stability.md` §3.2 の 2) にそのまま乗る。
+
+### 5.7 実装 (タスク 5、 2026-10-25)
+
+`applyReductionStages(input)` (`src/agent/reduction-stages.ts`) が前処理と段階 0〜2 を写しに最後まで当てはめる純粋な関数。
+入力の配列もメッセージも書き換えず、 変えないメッセージは同じ参照のまま返す。 履歴の差し替え・忘却の記録の挿入はしない (タスク 7)。
+
+- 入力: `messages` (getRawMessages() の形。 固定の system は含まない)、 `isEphemeral(m)` (表示済みの応答を外した後の判定)、
+  `currentRequestStart` (今の依頼の始まりの添字。 依頼の終わりで整理するときは `messages.length`)、 `keepRecentToolUses` (K)、
+  `promptTokens` (整理前の P)、 `goal` (`computeReductionGoal` の結果)、 `caseInsensitivePaths` (省略時は Windows なら true)。
+- 出力: `messages` (対の検証済み)、 `freedTokens` {preprocess, stage0, stage1, stage2, total}、 `repaid` {ephemeral, thinking}、
+  `clearedCurrentThinking`、 `forgotten` (規則・ツール名・呼び出し id・説明・減った量)、 `recordLines` (忘却の記録に入れる行)、
+  `firstForgottenIndex` (最初に消した応答の組の先頭の位置。 ここに記録を置いても対の間に挟まらない)、
+  `promptTokensAfter` (= P − total)、 `needsSummary` と `shortfall` {toTarget, toMinimum} (段階 3 が要るか)。
+- 減った量は送る形 (`toSentMessage`。 思考の inline 化・状態通知を含む) の `estimateMessageTokens` の差。
+  `toSentMessage` と対の検証 `findToolPairingError` は `message-history.ts` から切り出し、 `getMessages()` / `replaceMessages()` と共用する。
+- 段階 1 の変換 (`transformToolBatch`・本文ありの判定・`[忘却済み]` の文面) は reduction-stages.ts に移し、 旧 `forgetting.ts` の
+  `thinSlice` もこれを使う (タスク 8 で旧経路を消してもこちらが残る)。
+- 決めたこと:
+  - 保護 (§5.1) は呼び出し 1 件ごと。 直近 K 回は呼び出しの件数で数え、 最新の応答の組は K が 0 でも保護する。 結果の無い呼び出しも触らない。
+  - 段階 0 の成功・失敗は結果の先頭 `Error: ` で判定。 本文が文字列でないもの・既に `[忘却済み]` にしたものは判定せず、 手本 (後の成功) にもしない。
+  - 規則は 1 つの呼び出しに 0-d → 0-a → 0-b → 0-c の順で 1 つだけ。 引数に本文を持つ呼び出しは 0-d 以外の対象にしない (段階 1 が対ごと外すため)。
+  - 0-a の範囲は file_read の既定 (offset 1・limit 2000) で補って比べる。 offset / limit が数でなければ判定しない。
+    パスは Windows では `\` と `/`・大小文字を区別しない (それ以上の正規化はしない。 違って見えるものは別物として残す)。
+  - 0-c の「同じ対象」: file_edit / file_write / file_read はパス、 bash はコマンド、 ほかのツールは引数の全体。
+    短縮した結果 (途中の行が `[忘却済み] ` で始まる) は段階 1 でも消さない (何で失敗したかを残す)。
+  - 段階 0・1 は減る量が 0 以下になる変換を選ばない。
+  - 忘却の記録の行は、 結果の本文を消したものを規則ごとにツール名と件数で、 対ごと外したもの (0-d・段階 1) を 1 件 1 行
+    (10 件まで。 残りは件数)、 段階 2 の思考を件数で出す。 前処理 (揮発メッセージ・終わった依頼の思考) は行にせず `repaid` の件数で返す
+    (応答のたびに黙って消していたハーネスの一時的なものなので。 件数は整理イベントの記録 §10.1 に出す)。
 
 ---
 
@@ -584,6 +615,8 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
   起動時検査も同じ値をそのまま使う。 固定部分 11k で T1 は 200K、 T2 は 128K、 T3 は 64K の枠で起動できる。 全角の多い結果は以前より短く切られる (許容済み)
 - ツール結果の合計の最低量 256 トークンと、 書き込み系を切らないことで T を少し超えうる分 (§4.3) が余白 M に収まるか。 計測で見直す
 - 保護するツールの一覧と、 `file_edit` だけでは前の `file_read` を古いとみなさない規則 (§5.1, §5.3)
-- 今の依頼の思考を何件残すか (案: 直近 3 件。 §5.5)
+  (タスク 5 で決めたこと: 一覧は ask_user / todo_append / todo_mark / todo_delete / enter_plan_mode / exit_plan_mode / response_complete。
+  file_edit の規則は案のまま実装。 実機で読み直しの繰り返しが出ないかを見る)
+- 今の依頼の思考を何件残すか (案: 直近 3 件。 §5.5。 タスク 5 は 3 件で実装 `KEEP_RECENT_THINKING`)
 - 要約を利用者の発言ごとの区間に置くときの置き方 (§5.6)
 - git commit を弱い区切りにすること (§4.4)
