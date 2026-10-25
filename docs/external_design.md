@@ -185,17 +185,18 @@ stateDiagram-v2
 
 引数なしで対話 picker:
 
-| カテゴリ | 内容 |
+権限は `security.rules` のルールだけで表す (旧ツール名一覧は廃止。 docs/todo-legacy-ways-cleanup.md T4)。 範囲を選んでその範囲のルールを編集する:
+
+| 範囲 | 内容 |
 |---|---|
-| Pattern rules | `allow` / `deny` / `ask` パターン (例: `bash(npm *)` / `bash(rm -rf *)` / `bash(git push *)`) |
-| Auto-approve tools (CLI) | CLI 経由で自動承認するツール |
-| Require-approval tools (CLI) | CLI 経由で常に確認するツール |
-| Discord auto-approve tools | Discord 経由のリクエストで自動承認するツール |
-| Slack auto-approve tools | Slack 経由のリクエストで自動承認するツール |
+| すべての面に効くルール | 面の指定なしのルール (例: `file_read` / `bash(rm -rf *)`) |
+| CLI だけのルール | `cli:` 付きのルール (例: `cli:file_write`) |
+| Discord だけのルール | `discord:` 付きのルール |
+| Slack だけのルール | `slack:` 付きのルール |
 
-各カテゴリ → Add / Remove のサブ picker → ツール picker。 権限の設定方法はこの画面だけ (旧サブコマンド `auto-add` / `rule-add` 等は削除。 引数を付けると「引数を取りません」と表示)。 画面からの変更は `src/cli/permission-settings.ts` の関数で行う。
+各範囲 → 操作 (ツール全体を許可する [ツール picker] / 引数パターンで許可する / 常に確認するルール / 常に拒否するルール / 削除)。 権限の設定方法はこの画面だけ (旧サブコマンド `auto-add` / `rule-add` 等は削除。 引数を付けると「引数を取りません」と表示)。 画面からの変更は `src/cli/permission-settings.ts` の関数で行う。
 
-対話できる端末 (TTY) が無いときは、 端末が必要なことと、 代わりに `~/.localllm/config.json` で直接編集するキー (`security.rules.*` / `security.autoApproveTools` / `security.requireApprovalTools` / `security.discordAutoApproveTools` / `security.slackAutoApproveTools`) を表示して終わる。
+対話できる端末 (TTY) が無いときは、 端末が必要なことと、 代わりに `~/.localllm/config.json` で直接編集するキー (`security.rules.allow` / `deny` / `ask`) と面の指定 (`cli:` / `discord:` / `slack:`) の書き方を表示して終わる。
 
 ---
 
@@ -284,10 +285,10 @@ graph TD
 
 - **`auto`（自動許可）**: 常にユーザー確認なしで実行されます。以下の2層で決定されます。
   - `INHERENTLY_SAFE_TOOLS`（コード定数）: `ask_user`, `todo_append`, `todo_mark`, `todo_delete`, `enter_plan_mode`, `exit_plan_mode`, `task_output`, `task_list`, `task_send`, `task_cancel`, `task_diff`, `schedule_create`, `schedule_list`, `schedule_delete`, `current_datetime`, `sandbox_info` — 設定に関わらず **常に** auto
-  - `autoApproveTools`（設定ファイル）: デフォルトは `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`, `web_search`, `web_fetch`
+  - ツール名だけの allow ルール（設定ファイル `security.rules.allow`）: デフォルトは `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`, `web_search`, `web_fetch`。 サンドボックス外のパス・bash の CWD 外参照は確認が残る
 - **`ask`（要確認）**: 実行前にインタラクティブな承認ダイアログを表示します。明示的に指定されていないツールはすべて `ask` にフォールバックします。
 
-`computer_*`は通常の`ask`より厳しく、local CLIで呼出しごとの一回許可だけを選択できます。autorun、`autoApproveTools`、allow rule、保存済み許可で省略できず、Discord/Slackからは常に拒否されます。
+`computer_*`は通常の`ask`より厳しく、local CLIで呼出しごとの一回許可だけを選択できます。autorun、allow ルール (ツール名だけ・引数パターン付きとも)、保存済み許可で省略できず、Discord/Slackからは常に拒否されます。
 
 `workflow_learn_*`はlocal CLI限定で、sub-agent worktreeとDiscord/Slackからは拒否されます。記録中の成功した直列`browser_*` / `computer_*`だけを対象とし、失敗・並列実行を含む記録は`finish`できません。入力値と一時識別子をplaceholder化し、`.localllm/skills/<name>/SKILL.md`へ既存fileを上書きせず保存します。
 
@@ -342,34 +343,36 @@ graph TD
 
 ## 4. セキュリティ・権限モデルのUXフロー
 
-### 4.1 権限ソース（CLI / Discord）の分離
+### 4.1 権限ソース（CLI / Discord / Slack）の分離
 
-リクエストの発生元によって権限評価フローが異なります。
+権限は `security.rules` のルールだけで表し、 ルールの先頭の `cli:` / `discord:` / `slack:` で効く面を限定する (指定なしはすべての面)。
+リクエストの発生元によって、 見るルールと確認の手段が異なります。
 
-| 評価項目 | CLI（チャット） | Discord |
+| 評価項目 | CLI（チャット） | Discord / Slack |
 |---|---|---|
-| パターンルール deny | ✅ 適用 | ✅ 適用（セキュリティ強制） |
-| パターンルール allow | ✅ 適用 | ❌ 無視 |
-| パターンルール ask | ✅ 確認ダイアログ表示 | ❌ 無視 |
-| `autoApproveTools` | ✅ 自動許可 | ❌ 無視 |
-| `discordAutoApproveTools` | ❌ 無視 | ✅ 自動許可 |
+| deny ルール | ✅ 適用 | ✅ 適用（セキュリティ強制） |
+| 引数パターン付き allow ルール | ✅ 確認なしで許可 | ✅ 許可（サンドボックス判定の後） |
+| ask ルール | ✅ 確認ダイアログ表示 | ✅ autorun を使わず対話確認へ（確認手段が無ければ拒否） |
+| ツール名だけの allow ルール | ✅ 自動許可（安全確認つき） | ✅ 自動許可 |
 | `INHERENTLY_SAFE_TOOLS` | ✅ 常に自動許可 | ✅ 常に自動許可 |
-| インタラクティブ確認ダイアログ | ✅ あり | ❌ なし（headless） |
+| インタラクティブ確認ダイアログ | ✅ あり | 対話ブリッジがある場合のみ（無ければ headless） |
 
-Discord ではインタラクティブ確認が不可能なため、`discordAutoApproveTools` + `INHERENTLY_SAFE_TOOLS` に含まれるツールのみ実行可能です。許可されていないツールはLLMに提示されないため（フィルタリング）、Discord側で使えない旨をLLMがユーザーに伝えます。
+いずれも、 その面に効くルール (指定なし、 または同じ面の指定) だけを見る。
+確認手段が無い (headless) ときは、 `INHERENTLY_SAFE_TOOLS` とその面に効く allow ルールのツールだけをLLMに提示し（フィルタリング）、使えない旨をLLMがユーザーに伝えます。
 
-### 4.2 パターンベース権限ルール
+### 4.2 権限ルール
 
-Claude Code 互換のパターンルールで、ツール名リストより高い優先度で評価されます。
+Claude Code 互換のパターンルール。 書き方・評価順の正本は docs/config-reference.md の「rules — 権限ルール」。
 
-**ルール評価順序: deny → allow → ask → ツール名リスト**
+**ルール評価順序 (CLI): deny → 引数パターン付き allow → ask → autorun → ツール名だけの allow → 確認**
 
 ルール形式:
 ```
-bash(npm *)                   # bash ツール、コマンドが "npm *" にマッチ
+bash(npm *)                   # bash ツール、コマンドが "npm *" にマッチ (その形だけ確認なしで許可)
 file_write(./src/**)          # file_write ツール、パスが "./src/**" にマッチ
 web_fetch(domain:github.com)  # web_fetch ツール、URLが github.com ドメイン
-bash                          # bash ツール（引数問わず全マッチ）
+bash                          # bash ツール全体（allow では安全確認が残る）
+discord:web_fetch             # Discord 経由のときだけ
 ```
 
 Claude Code エイリアス対応: `Bash`→`bash`、`Read`→`file_read`、`Write`→`file_write`、`Edit`→`file_edit`、`WebFetch`→`web_fetch`
@@ -386,13 +389,13 @@ sequenceDiagram
     U->>CLI: 「package.jsonを書き換えて」
     CLI->>PM: 対象ツールのディスパッチ (file_edit, source=cli)
 
-    PM->>PM: パターンルール評価 (deny/allow/ask)
+    PM->>PM: ルール評価 (deny / 引数パターン付き allow / ask)
     alt denyルールにマッチ
         PM-->>CLI: Action Blocked
         CLI-->>U: エラーメッセージ表示
-    else allowルールにマッチ
+    else 引数パターン付き allow ルールにマッチ
         PM->>Tool: 自動実行
-    else askルール または requireApprovalTools
+    else askルール または どの allow にも無いツール
         PM->>PM: サンドボックス判定
         PM-->>U: 実行を許可しますか？（5択）
         U->>PM: ユーザー応答
@@ -405,10 +408,10 @@ sequenceDiagram
             PM->>PM: alwaysAllowTools に追加
             PM->>Tool: 実行
         else 許可 (設定に保存して常に)
-            PM->>PM: autoApproveTools に追加 + config.json保存
+            PM->>PM: allow ルール cli:<ツール名> を追加 + config.json保存
             PM->>Tool: 実行
         end
-    else autoApproveTools
+    else ツール名だけの allow ルール
         PM->>PM: サンドボックス判定
         PM->>Tool: 自動実行
     end
@@ -430,14 +433,11 @@ sequenceDiagram
 | `providerType` | `ollama`, `lmstudio`, `llamacpp`, `vllm`（4種のローカルLLMプロバイダ、すべてOpenAI互換APIで通信）。各プロバイダーのセットアップ要件は §5.2 を参照 |
 | `contextWindow` | トークン上限。この80%（デフォルト）に達すると自動圧縮 |
 | `allowedDirectories` | サンドボックスでアクセスを許可する追加のディレクトリリスト |
-| `autoApproveTools` | CLI経由で自動許可するツールのリスト |
-| `requireApprovalTools` | CLI経由で確認必須なツールのリスト |
-| `discordAutoApproveTools` | Discord経由で自動許可するツールのリスト（インタラクティブ確認なし）|
-| `rules` | パターンベース権限ルール（`allow` / `deny` / `ask` の3種） |
+| `rules` | 権限ルール（`allow` / `deny` / `ask` の3種。 先頭の `cli:` / `discord:` / `slack:` で面を限定）。 権限の設定はこれだけ |
 | `discord` | Discord連携の設定（`enabled` フラグと `webhookUrl`）|
 | `secondLLM` | セカンドLLM設定（v0.3.0、§12参照）|
 
-> **設定の自動マージ**: バージョンアップで新しいデフォルトツールが追加された場合、既存の `config.json` と新デフォルトの和集合が使用されるため、再設定は不要です。
+> **権限ルールと既定値**: `security.rules` が保存されていればそれがすべてで、 既定ルールとは混ぜない (画面で外した既定ルールが起動のたびに戻らない)。 旧キー `autoApproveTools` 等が残っている config.json は起動時に 1 回だけルールへ移行する (docs/todo-legacy-ways-cleanup.md T4)。
 
 ### 5.2 プロバイダー別セットアップ要件
 

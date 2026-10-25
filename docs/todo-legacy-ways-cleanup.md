@@ -1,6 +1,6 @@
 # ToDo: 同じことをする複数のやり方 (旧方式の残り) を一本化する
 
-> 作成日: 2026-10-25 / ステータス: **実施中** (洗い出し・判断済み。 T1〜T3 完了、 T4 を実装)
+> 作成日: 2026-10-25 / ステータス: **実施中** (洗い出し・判断済み。 T1〜T4 完了、 T5 が残り)
 
 ## 背景
 `/run pause` と `/run pause --durable` のように、同じ目的に 2 つのやり方が残っていると、
@@ -67,7 +67,7 @@ config.json のシークレット分離移行、 llm-profiles.json → registry 
 - [x] T1: A の削除 (コマンド別名・何もしない残骸・`/help` を補完と同じ一覧に・`todo_write`・ツール名別名表の統合・コード上だけの互換) + C5 (2026-10-25、 下記「T1 実施内容」)
 - [x] T2: C2 起動フラグ + T1 で見えた入力検査 (`/model <名前>`・`/loop`) (2026-10-25、 下記「T2 実施内容」)
 - [x] T3: C3 設定コマンドを対話画面に一本化 (2026-10-25、 下記「T3 実施内容」)
-- [ ] T4: C1 権限を rules に一本化
+- [x] T4: C1 権限を rules に一本化 (2026-10-25、 下記「T4 実施内容」)
 - [ ] T5: ドキュメントの最終確認 — README / docs (履歴の cycle-* 等を除く) / 組み込みスキル / `/help`・`--help` / モデル向けツール説明に、 T1〜T4 で削除・変更したコマンド・フラグ・ツール・設定キーが旧い書き方で残っていないか、 同じことに 2 つのやり方があるように読める説明が無いかを確認して直す。 履歴文書で現行仕様への注記が必要なものには注記を足す
 
 ## T1 実施内容 (2026-10-25)
@@ -163,3 +163,71 @@ config.json のシークレット分離移行、 llm-profiles.json → registry 
 - tests/cli/help-consistency.test.ts: 4 コマンドの case が無いこと、 `/permission` 旧サブコマンドの分岐が無いこと、 画面が削除コマンドを `handleCommand` で呼ばないこと
 - tests/cli/integrations-settings.test.ts / permission-settings.test.ts: 画面が呼ぶ関数の動作と非TTY の案内文
 - tests/cli/completer.test.ts: `/permission` は 1 件だけで旧サブコマンドのツール名補完が無いこと
+
+
+## T4 実施内容 (2026-10-25)
+
+### ルールの表し方 (security.rules だけ)
+- 形は従来の `{ allow, deny, ask }` のまま。 ルール文字列の先頭に **面の指定** `cli:` / `discord:` / `slack:` を付けられるようにした (無ければすべての面)。
+  別キー (面ごとの rules) にしなかったのは、 1 つの一覧で全部が見え、 既存のルール文字列の書き方 (`bash(npm *)`) をそのまま延長できるため
+- allow は書き方で意味が決まる (新しい種類は足していない):
+  - ツール名だけ (`file_read` / `bash`): ツール全体の許可 = 旧ツール名一覧と同じ扱い。 ask ルールより弱く、 安全確認が残る
+    (サンドボックス外のパスは拒否、 bash の CWD 外参照・広域スキャンは確認、 autorun 中は autorun の判定が先)
+  - 引数パターン付き (`bash(npm test)`): その形に限った明示許可。 確認なしで通す (ask より強い。 従来の allow ルールと同じ)
+- 評価順 (CLI): deny → 引数パターン付き allow → ask → autorun / 封じ込め下の bash → 本質的に安全なツール・ツール名だけの allow・セッション許可 → 確認。
+  旧コードの「パターンルール → autorun → ツール名一覧」 の順をそのまま保ち、 一覧の位置にツール名だけの allow が入った
+- 評価順 (Discord / Slack): deny → サンドボックス → 引数パターン付き allow → ask (autorun を使わずブリッジ確認へ。 確認手段が無ければ拒否) →
+  本質的に安全なツール・ツール名だけの allow・セッション許可 → autorun → ブリッジ確認。 その面に効くルールだけを見る
+- 実装: `src/security/rule-engine.ts` (parseRule / formatRule / evaluateRules(…, surface) / isDeniedByRule / isToolAllowedByRule / allowRuleToolNames)、
+  INHERENTLY_SAFE_TOOLS は `src/security/inherently-safe-tools.ts` に分けた (移行処理からも使うため)
+- 既定ルール (getDefaultConfig): `allow: ["file_read", "glob", "grep", "browser_snapshot", "vision_analyze", "web_search", "web_fetch"]` (面の指定なし)。
+  旧既定の 3 つの一覧から本質的に安全なツールを除くと同じ 7 つだったため
+- 保存されたルールは既定ルールと混ぜない (旧一覧は「既定 ∪ 保存値」 だったため、 画面で既定ツールを外しても起動のたびに戻っていた)。 `security.rules` が無いときだけ既定
+
+### requireApprovalTools の実際の意味 (コードで確認)
+- 判定に使われていなかった: getPermissionLevel は autoApproveTools を先に見て auto を返し、 requireApprovalTools に当たっても返すのは既定と同じ ask。
+  autorun・封じ込め下の bash 自動許可・Discord/Slack の判定も見ていない。 使われていたのは /permission 画面の表示だけ
+- そのため対応するルールは作らない。 ask ルールにすると autorun や封じ込め下の bash 自動許可を止めてしまい判定が変わる (既定値 `["file_write", "file_edit", "bash", ...]` だと autorun が実質無効になる)
+
+### 移行 (起動時に 1 回だけ。 `src/config/permission-migration.ts`、 loadConfig から呼ぶ)
+旧キーがどれか 1 つでも config.json に残っていたら、 旧コードの判定 (一覧は「旧既定 ∪ 保存値」) を計算してルールに直し、 旧キーを消して保存する。
+先に元のファイルを `config.json.before-rules-migration.bak` にコピーし (既にあれば時刻付きの別名。 権限は自ユーザーのみ)、 告知を 1 行出す。
+バックアップに失敗したときは config.json を書き換えない (今回の起動だけ変換結果で判定し、 次回また試みる)。 2 回目以降は旧キーが無いので何もしない。
+
+| 旧キー / 旧ルール | 新しいルール |
+|---|---|
+| `autoApproveTools` (CLI) のツール T | `cli:T` (allow、 ツール名だけ) |
+| `discordAutoApproveTools` のツール T | `discord:T` |
+| `slackAutoApproveTools` のツール T | `slack:T` |
+| 上の 3 つすべてにあるツール T | `T` (面の指定なし) 1 本 |
+| 本質的に安全なツール (ask_user / todo_* / current_datetime 等) | 書かない (どの面でも常に許可のため) |
+| `requireApprovalTools` | なし (判定に未使用。 上記)。 告知で移さなかったことを伝える |
+| autoApproveTools と requireApprovalTools の両方にあるツール | 旧コードでは autoApproveTools が勝つので `cli:T` |
+| 既存 `rules.allow` / `rules.ask` の面の指定なしルール R | `cli:R` (旧コードは CLI でしか評価していなかった) |
+| 既存 `rules.deny` | そのまま (旧コードもすべての面で強制) |
+
+旧既定のままの config は `allow` が既定ルールと同じ 7 本になる。 旧キーは型・スキーマ・画面・案内文から削除し、 移行処理以外では読まない。
+
+### 判定が変わるところ (旧コードの不整合。 意図的に直した)
+- **既存の `rules.allow` に書かれていたツール名だけのルール** (例 `"bash"`): 旧コードでは確認なしで即許可 (サンドボックス外のパス・CWD 外参照も素通り、 ask ルールより強い) だった。
+  同じツール名を autoApproveTools に入れた場合は安全確認が残っていたので、 同じ「ツール全体の許可」 が 2 通りの強さを持っていた。
+  一本化後はツール全体の allow は常に安全確認つき・ask より弱い。 引数パターン付き (`bash(npm *)`) の allow は従来どおり即許可
+- 画面で既定ルールを外すと外れたままになる (旧一覧は再起動で戻っていた)
+- それ以外 (旧キーだけの config、 rules の deny / パターン付き allow / ask) は移行後も同じ判定になることをテストで確かめた
+
+### 呼び出し側
+- PermissionManager: 一覧用の API (getAutoApproveList / addAutoApprove / getDiscordAllowedToolNames 等) を削除し、 getAllowedToolNames(source) にした
+- 確認ダイアログ 2 (セッション中常に許可) は従来どおり起動中だけ (設定は変えない)。 3 (設定に保存して常に許可) は allow ルール `cli:<ツール名>` を追加して保存
+- /permission 画面: 範囲 (すべての面 / CLI / Discord / Slack) → 操作 (ツール全体を許可する [ツール picker] / 引数パターンで許可 / ask / deny / 削除)。
+  関数は `src/cli/permission-settings.ts` (scopedRule / ruleScope / rulesForScope / addPatternRule / removePatternRule)
+- 非TTY の案内、 Discord/Slack の拒否理由 (「/permission → Discord のルールで許可ルール "discord:bash" を追加」)、 /help・補完の説明を新しい書き方に直した
+- docs: config-reference (「rules — 権限ルール」 を正本に)・external_design・slack-integration・README・image-generation・blender-mcp-integration、
+  履歴の記述がある channel-interaction-bridge-design・security_assessment・async-surface-permission-delivery-design は注記を追加
+
+### 検査
+- tests/config/permission-migration.test.ts: 一覧だけ / rules だけ / 両方 (重なり・既存 allow・ask・deny) / 面ごとの一覧 / 不正な型 / loadConfig でのバックアップ・保存・告知 1 回・2 回目は何もしない / 既定ルールと混ぜない
+- tests/security/permission-rules.test.ts: 面の指定の解釈、 CLI 既定・autorun・ツール全体の allow の安全確認・deny / ask の優先・パターン allow、 Discord/Slack の headless 許可/拒否、
+  確認ダイアログ 2 / 3、 移行前後で判定が変わらないこと
+- tests/cli/permission-settings.test.ts: 画面の関数 (範囲とルール文字列の対応・範囲ごとの一覧・追加/削除と保存)
+- 既存の権限テストは同じ期待値のまま新しい表し方 (rules.allow) に書き換えた
+

@@ -45,6 +45,8 @@ graph TD
 
 **評価順序**: `deny` → `allow` → `ask` → ツール名リスト（autoApproveTools/requireApprovalTools）
 
+> **2026-10-25 更新**: ツール名リストは廃止し security.rules に一本化した。 現行の評価順は deny → 引数パターン付き allow → ask → ツール名だけの allow で、 先頭の `cli:` / `discord:` / `slack:` で面を限定できる (docs/config-reference.md「rules — 権限ルール」、 docs/todo-legacy-ways-cleanup.md T4)。 本書の以下の記述は評価当時のもの。
+
 | ルールタイプ | 動作 | 適用チャネル |
 |---|---|---|
 | `deny` | 強制ブロック（ユーザー確認なし） | CLI + Discord |

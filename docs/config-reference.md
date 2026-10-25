@@ -39,8 +39,7 @@
   "visionLLM": null,
   "secondLLM": null,
   "security": {
-    "allowedDirectories": [],
-    "autoApproveTools": ["file_read", "glob", "grep"]
+    "allowedDirectories": []
   }
 }
 ```
@@ -63,8 +62,7 @@
   "visionLLM": null,
   "secondLLM": null,
   "security": {
-    "allowedDirectories": [],
-    "autoApproveTools": ["file_read", "glob", "grep", "web_search", "web_fetch"]
+    "allowedDirectories": []
   }
 }
 ```
@@ -100,8 +98,7 @@
     }
   },
   "security": {
-    "allowedDirectories": [],
-    "autoApproveTools": ["file_read", "glob", "grep", "web_search", "web_fetch"]
+    "allowedDirectories": []
   }
 }
 ```
@@ -127,10 +124,8 @@
   "secondLLM": null,
   "security": {
     "allowedDirectories": [],
-    "autoApproveTools": ["file_read", "glob", "grep", "web_search", "web_fetch"],
-    "requireApprovalTools": ["file_write", "file_edit", "bash"],
     "rules": {
-      "allow": ["bash(npm *)"],
+      "allow": ["file_read", "glob", "grep", "web_search", "web_fetch", "bash(npm *)", "discord:image_generate"],
       "deny": ["bash(rm -rf *)"],
       "ask": ["bash(git push *)"]
     }
@@ -333,29 +328,50 @@ API キー不要 (claude CLI 側の `claude login` 済みセッションを再�
 |------|-----|------|
 | `allowedDirectories` | string[] | アクセスを許可する追加ディレクトリ（CWDは常に許可） |
 | `blockedCommands` | string[] | 実行を禁止するコマンドパターン |
-| `autoApproveTools` | string[] | 確認なしで自動実行を許可するツール名 |
-| `requireApprovalTools` | string[] | 実行前に必ず確認を求めるツール名 |
-| `discordAutoApproveTools` | string[] | Discord経由リクエストで自動許可するツール |
-| `slackAutoApproveTools` | string[] | Slack経由リクエストで自動許可するツール |
+| `rules` | object | 権限ルール (下記)。 権限の設定はこれだけで表す |
+| `discordAutorun` / `slackAutorun` | boolean | Discord / Slack 経由で、 安全確認を通った非破壊操作を自動許可するか (デフォルト: true) |
 | `streamCommandOutput` | boolean | bash実行中の標準出力をリアルタイム表示するか (デフォルト: true) |
 
-### rules — パターンベース権限ルール
+### rules — 権限ルール
 
-ツール名リストより細かい粒度で権限を制御する。`ツール名(引数パターン)` の形式で記述し、ワイルドカード (`*`) が使える。
+権限 (確認なしで実行する / 確認する / 拒否する) はこのルールだけで設定する。
+`ツール名` または `ツール名(引数パターン)` の形式で記述し、ワイルドカード (`*`) が使える。
+Claude Code 風のツール名 (`Bash` / `Read` / `Write` 等) も使える。
 
 ```json
 {
   "rules": {
-    "allow": ["bash(npm *)", "bash(node *)"],
+    "allow": ["file_read", "grep", "bash(npm *)", "discord:web_fetch", "cli:file_write"],
     "deny": ["bash(rm -rf *)"],
     "ask": ["bash(git push *)"]
   }
 }
 ```
 
-評価順: deny → ask → allow → autoApproveTools/requireApprovalTools
+**効く面 (surface)**: 先頭に `cli:` / `discord:` / `slack:` を付けるとその経路だけに効く。 付けなければすべての経路に効く。
+例: `discord:web_fetch` は Discord 経由のときだけ許可、 `cli:file_write` はローカルの端末のときだけ許可。
 
-REPL からは `/permission` の設定画面で追加・削除する (旧サブコマンド `auto-add` / `rule-add` 等は削除済み。 docs/todo-legacy-ways-cleanup.md T3)。 対話できる端末が無いときは本節と基本設定のキーを config.json で直接編集する。
+**allow の 2 種類**:
+- ツール名だけ (`file_read` / `bash`): ツール全体の許可。 安全確認は残る — サンドボックス外のパスは拒否、
+  bash の CWD 外参照・広域スキャン (`find` / `ls -R` 等) は確認、 autorun 中は autorun の判定が先。 ask ルールより弱い
+- 引数パターン付き (`bash(npm test)`): その形に限った明示許可。 確認なしでそのまま通す (ask ルールより強い)
+
+評価順 (CLI): deny → 引数パターン付き allow → ask → (autorun / 封じ込め下の bash) → 本質的に安全なツール・ツール名だけの allow・セッション中の許可 → 確認
+
+評価順 (Discord / Slack): deny → サンドボックス → 引数パターン付き allow → ask (一致したら autorun を使わず確認へ) →
+本質的に安全なツール・ツール名だけの allow・セッション中の許可 → autorun → 対話確認 (確認手段が無ければ拒否)。
+確認手段が無いときにモデルへ見せるツールは、 本質的に安全なツールとその面に効く allow ルールのツールだけ。
+
+**既定値**: `config.json` に `security.rules` が無いときは `allow: ["file_read", "glob", "grep", "browser_snapshot", "vision_analyze", "web_search", "web_fetch"]`。
+`security.rules` を書いた場合はそれがすべて (既定ルールとは混ぜない)。 本質的に安全なツール (`ask_user` / ToDo 操作 / `current_datetime` 等) は書かなくても常に許可。
+
+**確認ダイアログの選択肢**: 「セッション中常に許可」 は今回の起動中だけ (設定は変えない)。 「設定に保存して常に許可」 は `cli:<ツール名>` の allow ルールを追加して保存する。
+
+**旧キーからの移行**: 以前の `autoApproveTools` / `requireApprovalTools` / `discordAutoApproveTools` / `slackAutoApproveTools` は廃止。
+config.json に残っていると、 起動時に 1 回だけ同じ判定になるルールへ変換し (元の内容は `config.json.before-rules-migration.bak` に残す)、 旧キーを消して保存する。
+対応表は docs/todo-legacy-ways-cleanup.md 「T4 実施内容」。
+
+REPL からは `/permission` の設定画面 (すべての面 / CLI / Discord / Slack ごとのルール) で追加・削除する。 対話できる端末が無いときは config.json の `security.rules` を直接編集する。
 
 ### processSandbox — OSレベルサンドボックス
 

@@ -222,7 +222,7 @@ export interface ImageProvider {
   LLM がそのまま HTML/PPTX 等へ組み込めるようパスを明示
 - 失敗時: API エラー本文をそのまま返す（silent 欠損禁止ルール）
 - セキュリティ: `output_path` は `PermissionManager` の書込確認対象
-  （file_write と同等の扱い。autoApproveTools に `image_generate` を追加すれば自動許可）
+  （file_write と同等の扱い。`security.rules.allow` に `image_generate` を追加すれば自動許可。 Discord だけなら `discord:image_generate`）
 
 ### 5.1 Discord への自動添付
 

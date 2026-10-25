@@ -135,7 +135,7 @@ Blenderが別マシンで動作している場合:
 
 **⚠️ 重要**: Blender MCP の `execute_blender_code` ツールは **Blender内で任意のPythonコードを実行** します。
 本アプリの `PermissionManager` による権限確認が適用されるため、初回実行時にユーザー承認が求められますが、
-`autoApproveTools` に追加した場合は無確認で実行されるため注意が必要です。
+`security.rules.allow` に追加した場合 (例: `execute_blender_code`) は無確認で実行されるため注意が必要です。
 
 ### 推奨セキュリティ設定
 

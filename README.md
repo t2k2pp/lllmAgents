@@ -197,7 +197,7 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/compress-input` | 入力圧縮モード切替（project指示/メモが閾値超過時に意図保持で圧縮、縮まなければ原文、既定OFF） |
 | `/parallel` | 並列ツール実行数の設定 |
 | `/stream` | ストリーミング表示の現状表示と切替（引数なし） |
-| `/permission` | 権限の設定画面 (パターンルール / CLI・Discord・Slack のツール名一覧)。対話できる端末専用で、端末が無いときは `~/.localllm/config.json` の `security.*` を直接編集 |
+| `/permission` | 権限の設定画面 (権限ルール `security.rules`。 すべての面 / CLI・Discord・Slack ごと)。対話できる端末専用で、端末が無いときは `~/.localllm/config.json` の `security.rules` を直接編集 |
 | `/loop` | 反復実行モード (`/loop <間隔> <プロンプト>` / `/loop status` で一覧と停止 / `/loop stop [id\|all]`) |
 | `/goal-seek <goal>` | Goal Seek mode 開始（acceptance criteria を立て合格まで自律実行）。複雑なタスクは通常入力でも自動提案される（`goalSeek.autoPropose: false` で無効化） |
 | `/exit-goal-seek` | Goal Seek mode を抜ける |
@@ -510,8 +510,7 @@ Markdownファイルで定義するコーディング規約・ガイドライン
   "visionLLM": null,
   "secondLLM": null,
   "security": {
-    "allowedDirectories": [],
-    "autoApproveTools": ["file_read", "glob", "grep"]
+    "allowedDirectories": []
   }
 }
 ```

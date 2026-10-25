@@ -11,7 +11,7 @@ follow-up) は受信経路に依存しないため設計はそのまま有効。
 ## 1. 背景と目的
 
 現状の Discord / Slack は headless モード: 確認 UI が無いため、許可リスト
-(discord/slackAutoApproveTools + INHERENTLY_SAFE_TOOLS) 外のツールは即拒否され、
+(discord/slackAutoApproveTools + INHERENTLY_SAFE_TOOLS。 2026-10-25 以降はその面に効く allow ルール + INHERENTLY_SAFE_TOOLS) 外のツールは即拒否され、
 ツール定義自体もモデルから隠される。書き込み系タスクをチャネルから頼めず、
 ask_user も使えないため「聞かずに進むか、止まるか」の二択になっていた。
 
@@ -60,6 +60,7 @@ ask_user ツール (context.source=slack)
   （リモートからの永続的な権限昇格を防ぐ）
 - autorun / 封じ込め自動許可の分岐はチャネルフローには適用しない（保守的に倒す）
 - allow ルール (rules.allow) もチャネルでは従来どおり評価しない（denyのみ強制）
+  - **2026-10-25 更新 (docs/todo-legacy-ways-cleanup.md T4)**: 権限は security.rules に一本化し、 ルールの先頭 `discord:` / `slack:` (指定なしはすべての面) でチャネルにも効くようにした。 旧コードで CLI でだけ評価していた既存の allow / ask ルールは移行時に `cli:` を付けたので、 移行した設定の判定は変わらない
 
 ## 4. ask_user ブリッジ (A-3)
 

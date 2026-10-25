@@ -1,6 +1,6 @@
 # Slack統合 設計書
 
-> **2026-10-25 更新**: REPL からの設定は `/integrations` → Slack 連携 の画面だけで行う。 直接コマンド `/slack` は削除した (docs/todo-legacy-ways-cleanup.md T3)。 Slack 経由で自動許可するツールは `/permission` の画面 → "Slack auto-approve tools" で編集する。 対話できる端末が無いときは `~/.localllm/config.json` の `slack.*` / `security.slackAutoApproveTools` を直接編集する。
+> **2026-10-25 更新**: REPL からの設定は `/integrations` → Slack 連携 の画面だけで行う。 直接コマンド `/slack` は削除した (docs/todo-legacy-ways-cleanup.md T3)。 Slack 経由で自動許可するツールは `/permission` の画面 → "Slack だけのルール" (または "すべての面に効くルール") で allow ルールとして編集する。 対話できる端末が無いときは `~/.localllm/config.json` の `slack.*` / `security.rules` (`slack:<ツール名>`) を直接編集する。 旧 `security.slackAutoApproveTools` は廃止し、 起動時にルールへ移行する (docs/todo-legacy-ways-cleanup.md T4)。
 
 ## 概要
 
@@ -35,7 +35,7 @@ Discord統合と同様の2系統（通知送信 + メッセージ受信）を提
     → Socket Mode (WebSocket)
     → SlackBot.handleMessage()
     → AgentLoop.run(prompt, { source: "slack" })
-    → PermissionManager: slackAutoApproveTools のみ許可
+    → PermissionManager: Slack に効く allow ルールのみ許可
     → LLM応答
     → Slack スレッド返信
 ```
@@ -75,12 +75,15 @@ interface SlackConfig {
 
 ### SecurityConfig 拡張
 
-```typescript
-slackAutoApproveTools: string[]  // Slack経由で自動許可するツール
+Slack 専用の設定キーは無く、 権限ルール `security.rules` で表す (旧 `slackAutoApproveTools` は廃止。 docs/todo-legacy-ways-cleanup.md T4):
+
+```json
+"rules": { "allow": ["file_read", "slack:image_generate"] }
 ```
 
-デフォルト: `file_read, glob, grep, web_search, web_fetch, browser_snapshot, vision_analyze, current_datetime, sandbox_info`
-（Discord と同一リスト）
+指定なしのルールはすべての面、 `slack:` 付きは Slack だけに効く。
+デフォルト (security.rules が無いとき): `file_read, glob, grep, browser_snapshot, vision_analyze, web_search, web_fetch` (すべての面)。
+`current_datetime` / `sandbox_info` 等は本質的に安全なツールとして常に許可。
 
 ## CLIコマンド
 
@@ -160,12 +163,12 @@ npm run start -- --slack
 Slack経由のリクエストはDiscordと同じheadlessモデル:
 
 1. `INHERENTLY_SAFE_TOOLS` は常に許可
-2. `slackAutoApproveTools` に含まれるツールは自動許可
+2. Slack に効く allow ルール (指定なし、 または `slack:` 付き) のツールは自動許可
 3. `deny` ルールは強制適用（セキュリティ）
 4. 上記以外のツールは拒否（インタラクティブ確認不可のため）
 5. ファイル操作はサンドボックスチェック適用
 
-`/permission` の画面 → "Slack auto-approve tools" → "Add tool" でツールを追加する (権限の設定方法はこの画面だけ)。
+`/permission` の画面 → "Slack だけのルール" → "ツール全体を許可する" でツールを追加する (権限の設定方法はこの画面だけ)。
 
 ## 制限事項・将来拡張
 
