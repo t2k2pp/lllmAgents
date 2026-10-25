@@ -20,7 +20,15 @@ import {
 import { formatTodos, formatTodosActive, clearTodos, archiveCompletedTodos } from "../tools/definitions/todo-write.js";
 import type { GoalDefinition } from "../agent/goal-slot.js";
 import { getGoal as getGoalSlot } from "../agent/goal-slot.js";
-import { listSessions, loadSession, getLatestSession, forkSession, saveSession } from "../agent/session-manager.js";
+import {
+  listSessions,
+  loadSession,
+  getLatestSession,
+  forkSession,
+  saveSession,
+  findPausedSessionForCwd,
+} from "../agent/session-manager.js";
+import { currentCwdRealpath } from "../agent/durable-run-checkpoint.js";
 import { normalizeRoomId } from "../agent/room-types.js";
 import { loadMemory, saveMemory } from "../agent/memory.js";
 import { resolveAtMentions, printMentionFeedback } from "./input-resolver.js";
@@ -339,6 +347,7 @@ export class REPL {
     if (this.config.discord?.listenEnabled && this.config.discord.botToken) {
       await this.startInteractionServer();
     }
+    await this.offerPausedRunResume();
     try {
       while (true) {
         // モデル設定が実行中に反映されていない間は、 入力を受け付ける前に毎ターン警告する
@@ -4350,6 +4359,50 @@ export class REPL {
   }
 
   /**
+   * 一時停止したまま終了した作業が同じフォルダにあれば、 起動時に再開するか確認する
+   * (docs/durable-run-resume-design.md)。 「はい」 なら会話を復元し、 /run resume と同じ経路で続ける。
+   * 対話できない (非TTY) 時は確認せず、 再開方法だけを案内する。
+   */
+  private async offerPausedRunResume(): Promise<void> {
+    let target = null as ReturnType<typeof findPausedSessionForCwd>;
+    if (this.agent.getDurableRunCheckpoint().status !== "durable_paused") {
+      try {
+        target = findPausedSessionForCwd(currentCwdRealpath());
+      } catch (error) {
+        console.error(chalk.dim(`  [warn] 一時停止した作業の確認に失敗: ${String(error).slice(0, 100)}`));
+        return;
+      }
+      if (!target) return;
+    }
+    const id = target?.meta.id ?? this.agent.getCurrentSessionId();
+    const title = (target?.meta.title ?? "").replace(/s+/g, " ").slice(0, 50);
+    const label = title ? `${id} 「${title}」` : id;
+    const later = `  あとで再開する場合: /resume ${id} → /run resume (再開地点だけ捨てる場合は /run discard)`;
+    if (!process.stdin.isTTY) {
+      console.log(chalk.cyan(`  ⏸ 一時停止した作業があります: ${label}`));
+      console.log(chalk.dim(later));
+      return;
+    }
+    let ok: boolean;
+    try {
+      ok = await confirm({ message: `一時停止した作業があります: ${label}。再開しますか?`, default: true });
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      console.log(chalk.dim(later));
+      return;
+    }
+    if (target) {
+      this.agent.restoreSession(target);
+      console.log(chalk.dim(`  セッション ${chalk.cyan(id)} を復元しました (${target.meta.messageCount} messages)`));
+    }
+    const feedback = executeRunControl(this.agent, ["resume"]);
+    printRunControlFeedback(feedback);
+    if (feedback.continuation) await this.awaitRunContinuation(feedback.continuation);
+  }
+
+  /**
    * `/run resume`が再起動後に開始したrunにも、通常入力と同じEsc・type-ahead・busy管理を付ける。
    * これが無いとresume後のrunだけ再pauseやsteeringができず、操作契約が非対称になる。
    */
@@ -4479,7 +4532,9 @@ export class REPL {
         printRunControlFeedback(feedback);
         void feedback.continuation?.catch((error: unknown) => {
           console.error(
-            chalk.red(`  durable run再開に失敗しました: ${error instanceof Error ? error.message : String(error)}`),
+            chalk.red(
+              `  一時停止したrunの再開に失敗しました: ${error instanceof Error ? error.message : String(error)}`,
+            ),
           );
         });
       } else if (/^\/parallel(?:\s|$)/i.test(text) && this.agent.getRunPauseSnapshot().state === "paused") {

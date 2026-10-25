@@ -70,7 +70,7 @@ async function phase1() {
   });
   let loop;
   const llm = provider(async function* () {
-    loop.requestRunPause("durable");
+    loop.requestRunPause();
     yield {
       type: "tool_call",
       toolCall: { id: "restart-call", type: "function", function: { name: "restart_probe", arguments: "{}" } },
@@ -81,7 +81,7 @@ async function phase1() {
   void loop.run("processを跨いで続ける");
   const started = Date.now();
   while (loop.getRunPauseSnapshot().state !== "paused") {
-    if (Date.now() - started > 10_000) throw new Error("durable pause timeout");
+    if (Date.now() - started > 10_000) throw new Error("pause timeout");
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   const status = loop.getDurableRunCheckpoint();

@@ -79,7 +79,6 @@ import { renderEditDiff, renderWriteDiff } from "../cli/diff-display.js";
 import {
   gateLLMProvider,
   RunApiGate,
-  type RunPauseMode,
   type RequestRunPauseResult,
   type ResumeRunResult,
   type RunPauseSnapshot,
@@ -443,29 +442,20 @@ export class AgentLoop {
     llmProfiles?: LLMProfiles,
     private readonly safeMode: boolean = false,
   ) {
-    this.runApiGate = new RunApiGate((snapshot) => {
+    this.runApiGate = new RunApiGate(() => {
       screen.clearTransientStatus();
-      if (snapshot.mode === "durable") {
-        console.log(
-          chalk.cyan(
-            `\n  ⏸ durable_paused: session ${this.session.meta.id} を次のLLM API直前で保存しました。アプリ・PCを停止できます。`,
-          ),
-        );
-        console.log(chalk.dim(`  再起動後: /resume ${this.session.meta.id} → /run inspect → /run resume`));
-        this.notice("info", "foreground runをdurable checkpointで一時停止");
-        return;
-      }
       console.log(
         chalk.cyan(
-          "\n  ⏸ runをLLM API境界で一時停止しました。アプリは終了せず、ローカルLLMの再起動・並列数変更後に /run resume で再開してください。",
+          `
+  ⏸ 一時停止しました。会話と再開地点を session ${this.session.meta.id} に保存済みです。アプリ・PCを終了しても再開できます。`,
         ),
       );
       console.log(
         chalk.dim(
-          "  ※ 開始済みtool群は完了する場合があります。background task / second LLMは対象外です。必要なら /tasks で個別に停止してください。",
+          "  再開: このまま /run resume。終了した場合は、次回同じフォルダで起動すると再開するか確認します。background task / second LLMは対象外です (/tasks)。",
         ),
       );
-      this.notice("info", "foreground runがLLM API境界で一時停止");
+      this.notice("info", "foreground runを一時停止 (再開地点を保存済み)");
     });
     this.rawProvider = provider;
     this.provider = gateLLMProvider(provider, this.runApiGate);
@@ -650,23 +640,21 @@ export class AgentLoop {
   }
 
   /** 現在のCLI foreground runを、進行中APIの完了後に協調停止する。 */
-  requestRunPause(
-    mode: RunPauseMode = "process",
-  ): RequestRunPauseResult | { status: "durable_unavailable"; snapshot: RunPauseSnapshot; reason: string } {
-    if (mode === "durable" && !this.liveBinding) {
+  requestRunPause(): RequestRunPauseResult | { status: "unavailable"; snapshot: RunPauseSnapshot; reason: string } {
+    if (!this.liveBinding) {
       return {
-        status: "durable_unavailable",
+        status: "unavailable",
         snapshot: this.runApiGate.snapshot(),
         reason: "model/provider bindingが未確定です。/model apply後に再試行してください",
       };
     }
-    return this.runApiGate.requestPause(mode);
+    return this.runApiGate.requestPause();
   }
 
   /** pause予約を取り消す、またはAPI境界で停止中のrunを再開する。 */
   resumeRun(): ResumeRunResult | { status: "checkpoint_save_failed"; snapshot: RunPauseSnapshot; reason: string } {
     const snapshot = this.runApiGate.snapshot();
-    if (snapshot.state === "paused" && snapshot.mode === "durable") {
+    if (snapshot.state === "paused") {
       const parsed = parseDurableRunCheckpoint(this.session.runCheckpoint);
       if (!parsed.ok) {
         return { status: "checkpoint_save_failed", snapshot, reason: parsed.reason };
@@ -717,7 +705,7 @@ export class AgentLoop {
     }
     const current = this.getDurableRunCheckpoint();
     if (current.status === "none")
-      return { status: "not_found", reason: "復元済みsessionにdurable checkpointがありません" };
+      return { status: "not_found", reason: "復元済みsessionに一時停止の再開地点がありません" };
     if (current.status === "invalid") return { status: "invalid", reason: current.reason };
     if (current.status === "resuming") {
       return {
@@ -750,7 +738,7 @@ export class AgentLoop {
   discardDurableRunCheckpoint(): { status: "discarded" | "not_found" | "busy"; reason?: string } {
     if (this.isProcessing) return { status: "busy", reason: "foreground run実行中はdiscardできません" };
     if (this.session.runCheckpoint === undefined)
-      return { status: "not_found", reason: "durable checkpointがありません" };
+      return { status: "not_found", reason: "一時停止の再開地点がありません" };
     delete this.session.runCheckpoint;
     this.saveCurrentSession();
     return { status: "discarded" };
@@ -950,15 +938,13 @@ export class AgentLoop {
       /** 点検区間内のツール呼び出し (名前 + 引数)。 繰り返しの割合を見る */
       const windowCalls: string[] = [];
       let loopStrikes = 0;
-      const pauseDurablyIfRequested = async (nextIteration: number): Promise<boolean> => {
-        if (!this.runApiGate.isDurablePauseRequested()) return true;
+      const pauseAtBoundaryIfRequested = async (nextIteration: number): Promise<boolean> => {
+        if (!this.runApiGate.isPauseRequested()) return true;
         applyPendingSteering("tool");
         const liveBinding = this.liveBinding;
         if (!liveBinding) {
           this.runApiGate.resume();
-          throw new Error(
-            "durable pauseに必要なmodel/provider bindingが未確定です。/model apply後に再試行してください",
-          );
+          throw new Error("一時停止に必要なmodel/provider bindingが未確定です。/model apply後に再試行してください");
         }
         this.session.runCheckpoint = createDurableRunCheckpoint({
           sessionId: this.session.meta.id,
@@ -983,10 +969,10 @@ export class AgentLoop {
         } catch (error) {
           this.runApiGate.resume();
           throw new Error(
-            `durable checkpointを保存できません: ${error instanceof Error ? error.message : String(error)}`,
+            `一時停止の再開地点を保存できません: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
-        return await this.runApiGate.pauseAtDurableBoundary();
+        return await this.runApiGate.pauseAtBoundary();
       };
       for (let iteration = startIteration; ; iteration++) {
         if (iteration > startIteration && (iteration - startIteration) % loopCheckInterval === 0) {
@@ -1039,9 +1025,9 @@ export class AgentLoop {
           this.purgeEphemeralAtSpanEnd("user_abort");
           return;
         }
-        // durable pauseは、前のAPI応答と開始済みtool resultが履歴へ確定した後、
+        // 一時停止は、前のAPI応答と開始済みtool resultが履歴へ確定した後、
         // 次のmain LLM APIを開始する直前だけでcheckpointする。
-        if (!(await pauseDurablyIfRequested(iteration))) return;
+        if (!(await pauseAtBoundaryIfRequested(iteration))) return;
         // Context reduction check — mode に応じて忘却 / 圧縮を選ぶ (docs/context-forgetting.md §6)
         this.contextManager.noteTurn();
         this.contextStrategy.noteTurn();
@@ -1097,7 +1083,7 @@ export class AgentLoop {
 
         while (!success) {
           // context整理中やconnection retry待ちにpause要求が届いた場合も、次のmain APIを出す前に保存する。
-          if (!(await pauseDurablyIfRequested(iteration))) return;
+          if (!(await pauseAtBoundaryIfRequested(iteration))) return;
           try {
             const toolDefs = this.getFilteredToolDefs();
             // 状態通知 (現在日時 / Goal / ToDo) を末尾の未送信メッセージに添付する。
@@ -2304,13 +2290,7 @@ export class AgentLoop {
     } finally {
       const pauseBeforeFinish = this.runApiGate.finishRun();
       if (pauseBeforeFinish.state === "pause_requested") {
-        console.log(
-          chalk.dim(
-            pauseBeforeFinish.mode === "durable"
-              ? "  ✓ runが次のAPIを必要とせず完了したためdurable pause予約を終了しました。"
-              : "  ✓ runが完了したためpause予約を終了しました。現在、foreground LLM APIは実行されていません。",
-          ),
-        );
+        console.log(chalk.dim("  ✓ runが次のAPIを必要とせず完了したため、一時停止の予約を終了しました。"));
       }
       this.isProcessing = false;
       // task_complete は finally で必ず発火する (例外・全 return 経路を含む)。

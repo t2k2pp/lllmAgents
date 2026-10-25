@@ -2,13 +2,11 @@ import type { ChatParams, ChatWithToolsParams, LLMProvider, VisionChatParams } f
 import type { RequestSource } from "../security/permission-manager.js";
 
 export type RunPauseState = "idle" | "running" | "pause_requested" | "paused";
-export type RunPauseMode = "process" | "durable";
 
 export type RunPauseSnapshot = {
   state: RunPauseState;
   source: RequestSource | null;
   inFlight: number;
-  mode: RunPauseMode | null;
 };
 
 export type RequestRunPauseResult =
@@ -22,14 +20,17 @@ export type ResumeRunResult =
 type RequestToken = { tracked: boolean; epoch: number };
 
 /**
- * foreground run が発行する main LLM API を、リクエスト間の境界で協調停止する。
- * 進行中のHTTP接続は切らず、新しい接続だけを gate で待たせる。
+ * foreground run の一時停止 (docs/durable-run-resume-design.md)。
+ *
+ * 一時停止は 1 方式だけ: pause を予約すると、 進行中の main LLM API の応答と、 その応答が頼んだ tool 群を
+ * 完了させ、 AgentLoop が次の main LLM API を始める直前 (pauseAtBoundary) で停止する。
+ * AgentLoop はその境界で会話と再開地点を保存するので、 停止後はアプリ・PC を終了してもよい。
+ * 進行中の HTTP 接続は切らず、 停止中は新しい API 接続だけを待たせる。
  */
 export class RunApiGate {
   private state: RunPauseState = "idle";
   private source: RequestSource | null = null;
   private inFlight = 0;
-  private mode: RunPauseMode | null = null;
   private epoch = 0;
   private pausePromise: Promise<void> | null = null;
   private releasePause: (() => void) | null = null;
@@ -42,7 +43,6 @@ export class RunApiGate {
     this.state = "running";
     this.source = source;
     this.inFlight = 0;
-    this.mode = null;
   }
 
   finishRun(): RunPauseSnapshot {
@@ -52,31 +52,24 @@ export class RunApiGate {
     this.state = "idle";
     this.source = null;
     this.inFlight = 0;
-    this.mode = null;
     return previous;
   }
 
   abortRun(): void {
     if (this.state === "pause_requested" || this.state === "paused") {
       this.state = "running";
-      this.mode = null;
       this.releaseWaiters();
     }
   }
 
-  requestPause(mode: RunPauseMode = "process"): RequestRunPauseResult {
+  requestPause(): RequestRunPauseResult {
     if (this.state === "idle") return { status: "not_running", snapshot: this.snapshot() };
     if (this.source !== "cli") return { status: "not_cli", snapshot: this.snapshot() };
     if (this.state === "paused") return { status: "already_paused", snapshot: this.snapshot() };
     if (this.state === "pause_requested") return { status: "already_requested", snapshot: this.snapshot() };
 
-    this.mode = mode;
-    if (mode === "process" && this.inFlight === 0) {
-      this.reachPause();
-    } else {
-      this.state = "pause_requested";
-      this.ensurePausePromise();
-    }
+    this.state = "pause_requested";
+    this.ensurePausePromise();
     return { status: "requested", snapshot: this.snapshot() };
   }
 
@@ -87,22 +80,20 @@ export class RunApiGate {
 
     const status = this.state === "paused" ? "resumed" : "request_cancelled";
     this.state = "running";
-    this.mode = null;
     this.releaseWaiters();
     return { status, snapshot: this.snapshot() };
   }
 
   snapshot(): RunPauseSnapshot {
-    return { state: this.state, source: this.source, inFlight: this.inFlight, mode: this.mode };
+    return { state: this.state, source: this.source, inFlight: this.inFlight };
   }
 
   async enterRequest(signal?: AbortSignal): Promise<RequestToken | null> {
     if (this.state === "idle") return { tracked: false, epoch: this.epoch };
 
     const requestEpoch = this.epoch;
-    if (this.state === "paused" || (this.state === "pause_requested" && this.mode === "process")) {
-      const pause = this.ensurePausePromise();
-      const resumed = await this.waitForResume(pause, signal);
+    if (this.state === "paused") {
+      const resumed = await this.waitForResume(this.ensurePausePromise(), signal);
       if (!resumed || !this.isActiveEpoch(requestEpoch)) return null;
     }
     if (signal?.aborted) return null;
@@ -114,36 +105,28 @@ export class RunApiGate {
   leaveRequest(token: RequestToken): void {
     if (!token.tracked || token.epoch !== this.epoch) return;
     this.inFlight = Math.max(0, this.inFlight - 1);
-    if (this.inFlight === 0 && this.state === "pause_requested" && this.mode === "process") this.reachPause();
-  }
-
-  /** API完了後の制御を境界上で止め、tool実行などrunの後続処理もresumeまで進めない。 */
-  async waitAfterRequest(token: RequestToken, signal?: AbortSignal): Promise<boolean> {
-    if (!token.tracked || token.epoch !== this.epoch) return false;
-    if (this.state === "running" || (this.state === "pause_requested" && this.mode === "durable")) return true;
-    return await this.waitForResume(this.ensurePausePromise(), signal);
   }
 
   /**
-   * durable pause はAgentLoopが会話とtool resultを確定した境界でだけ到達させる。
-   * provider完了直後には止めず、次のLLM APIを開始する直前で呼ぶ。
+   * AgentLoop が会話と tool result を確定し、 再開地点を保存した境界でだけ停止させる。
+   * 次の main LLM API を開始する直前で呼ぶ。 予約が無ければ何もせず true を返す。
    */
-  async pauseAtDurableBoundary(): Promise<boolean> {
-    if (this.state !== "pause_requested" || this.mode !== "durable" || this.inFlight !== 0) return true;
+  async pauseAtBoundary(): Promise<boolean> {
+    if (this.state !== "pause_requested" || this.inFlight !== 0) return true;
     const waitEpoch = this.epoch;
     this.reachPause();
     await this.ensurePausePromise();
     return this.isActiveEpoch(waitEpoch);
   }
 
-  isDurablePauseRequested(): boolean {
-    return this.mode === "durable" && this.state === "pause_requested";
+  isPauseRequested(): boolean {
+    return this.state === "pause_requested";
   }
 
   /** API以外のrun後続処理もpause中に新規開始しないための共通checkpoint。 */
   async waitUntilRunning(): Promise<boolean> {
     if (this.state === "idle") return false;
-    if (this.state === "running" || (this.state === "pause_requested" && this.mode === "durable")) return true;
+    if (this.state !== "paused") return true;
     const waitEpoch = this.epoch;
     await this.ensurePausePromise();
     return this.isActiveEpoch(waitEpoch);
@@ -204,15 +187,12 @@ export function gateLLMProvider(provider: LLMProvider, gate: RunApiGate): LLMPro
         return async function* gatedChat(params: GatedChatParams) {
           const token = await gate.enterRequest(params.signal);
           if (!token) return;
-          let completed = false;
           try {
             const invoke = target[method] as (value: GatedChatParams) => AsyncGenerator<unknown>;
             yield* invoke.call(target, params);
-            completed = true;
           } finally {
             gate.leaveRequest(token);
           }
-          if (completed) await gate.waitAfterRequest(token, params.signal);
         };
       }
       const value = Reflect.get(target, property, receiver) as unknown;

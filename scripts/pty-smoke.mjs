@@ -255,8 +255,8 @@ try {
       }
       if (!sentSteer && output.includes(driver.steerSentMarker)) sentSteer = true;
       if (!sentPause && output.includes(driver.pauseSentMarker)) sentPause = true;
-      if (!pauseAcceptedSeen && output.includes("pause予約を受理しました")) pauseAcceptedSeen = true;
-      if (!pauseReachedSeen && output.includes("runをLLM API境界で一時停止しました")) pauseReachedSeen = true;
+      if (!pauseAcceptedSeen && output.includes("一時停止を予約しました")) pauseAcceptedSeen = true;
+      if (!pauseReachedSeen && output.includes("一時停止しました。会話と再開地点")) pauseReachedSeen = true;
       if (!sentParallel && driver.parallelSentMarker && output.includes(driver.parallelSentMarker)) {
         sentParallel = true;
       }

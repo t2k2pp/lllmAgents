@@ -22,7 +22,7 @@
 - **マルチライン入力**: Shift+Enter / Ctrl+J で改行、@path でファイル参照
 - **処理中の追加入力**: 応答中も固定入力欄で文字を編集でき、Enterで次の応答／tool完了境界の同じturnへ反映
 - **キーボードmode切替**: `Shift+Tab`で通常→Autorun→Plan→通常を循環（編集中の文字は保持）
-- **LLM API境界pause**: `/run pause`はアプリを起動したままlocal LLMを保守でき、`/run pause --durable`は安全境界を保存してアプリ・PC再起動後も`/resume <id>`→`/run resume`で継続
+- **LLM API境界pause**: `/run pause`は進行中の応答とtoolを完了させ、次のLLM API直前で会話と再開地点を保存して止める。そのまま`/run resume`で続けるか、アプリ・PCを終了しても次回同じフォルダで起動すると再開を確認する
 - **インタラクティブUI**: `/`コマンドと`@`ファイルパスの補完ドロップダウン
 - **スキルベースワークフロー**: 開発・レビュー・調査等のワークフローをスキルとして定義、LLMが必要に応じて選択
 - **ローカルplugin bundle**: 明示したbundleからskills・agents・hooks・MCPを一括ロード（Codex / Claude manifestの最小互換）
@@ -83,7 +83,7 @@ $ npm start
 | `@path` | ファイル/フォルダの内容をプロンプトに添付 |
 | `/command` | スラッシュコマンド（補完ドロップダウン付き） |
 | 応答中に文字 + `Enter` | `[処理中・追加入力]`欄で編集し、通常メッセージは次の応答／tool完了境界で現在のturnへ反映。`/run pause\|resume\|status`は即時、その他の`/command`はturn完了後に実行 |
-| `/run pause` / `/run pause --durable` | 通常pauseはプロセス内で即時性を優先。durableは進行中APIと開始済みtool結果を確定し、次API直前をatomic保存。`durable_paused`表示後はアプリ・PCを停止可能 |
+| `/run pause` | 進行中APIとその応答のtoolを完了させ、次API直前をatomic保存して停止。「⏸ 一時停止しました」表示後はアプリ・PCを停止可能。次回同じフォルダで起動すると再開を確認 |
 | `/resume <id>` → `/run inspect` → `/run resume` | 再起動後にconversationと過去の確定済み標準出力を復元し、cwd/model/provider差分を確認して保存済みrunを明示再開。旧sessionは会話履歴から画面を再構成し、resume途中の異常終了は自動再実行せずblocked表示 |
 | マウスドラッグ | 既定のinline表示で端末本来の範囲選択・コピー（LLM・ツール実行中も有効） |
 | マウスホイール | 既定のinline表示では端末本来のscrollbackを上下する |
@@ -169,7 +169,7 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/room` | 会話 Room (A/B/C) の表示・移動・再開。`/room A\|B\|C` で移動、`/room resume [A\|B\|C]` で再開、`/room autoresume <on\|off> [A\|B\|C]`。既定 REPL=A / Discord=B / Slack=C（docs/room-model-design.md） |
 | `/queue` | 受信順キューの待ち状況を表示（`/queue clear` でturn後に実行するtype-ahead command等を破棄） |
 | `/tui mouse <on\|off\|status>` | 全画面TUIのmouse captureを実行中に切替。`off`はnative選択・コピー、`on`はホイール内部履歴を優先 |
-| `/run [status\|pause [--durable]\|resume\|inspect\|discard]` | foreground runの状態表示・通常/永続pause・再開・checkpoint診断/破棄。durableはPC再起動を跨ぐ。background taskとsecond LLMは対象外 |
+| `/run [status\|pause\|resume\|inspect\|discard]` | foreground runの状態表示・一時停止 (再開地点を保存)・再開・再開地点の診断/破棄。PC再起動を跨ぐ。background taskとsecond LLMは対象外 |
 | `/context` | コンテキスト使用状況の内訳（トークン数・進捗バー）。`/context <system\|memory\|skills\|tools\|messages>` で各カテゴリの中身をダンプ。`/context strategy [off\|auto\|aggressive]` で区切り整理のモード表示・切替（既定 auto、詳細: docs/context-strategy.md） |
 | `/compact` | コンテキストを手動圧縮 |
 | `/forget` | コンテキストを忘却で整理（要約せず捨てる）。`/forget dry` で何が消えるか事前確認、`/forget mode <compress\|forget\|hybrid>` で自動縮約の手段を切替（既定 hybrid）、`/forget status` で実績確認。詳細: docs/context-forgetting.md |

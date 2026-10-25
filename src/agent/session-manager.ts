@@ -6,6 +6,7 @@ import type { Message } from "../providers/base-provider.js";
 import type { TodoItem } from "../tools/definitions/todo-write.js";
 import type { GoalDefinition, EvaluationRecord } from "./goal-slot.js";
 import type { RoomId } from "./room-types.js";
+import { parseDurableRunCheckpoint } from "./durable-run-checkpoint.js";
 
 const SESSION_DIR = path.join(os.homedir(), ".localllm", "sessions");
 const MAX_SESSION_TITLE_LENGTH = 80;
@@ -200,6 +201,36 @@ export function listSessions(limit = 20, room?: RoomId): SessionMeta[] {
 export function latestSessionMetaOfRoom(room: RoomId): SessionMeta | null {
   const list = listSessions(1, room);
   return list.length > 0 ? list[0] : null;
+}
+
+/**
+ * 指定フォルダで一時停止したまま終了したセッション (再開地点 = durable_paused) のうち、 最も新しく保存したものを返す。
+ * 起動時に「再開しますか?」 と確認するために使う (docs/durable-run-resume-design.md)。
+ * セッションは 1 件数 MB になるため、 再開地点の文字列を含むファイルだけを解析する。
+ */
+export function findPausedSessionForCwd(cwdRealpath: string): SessionData | null {
+  ensureDir();
+  let found: { data: SessionData; savedAt: string } | null = null;
+  for (const file of fs.readdirSync(SESSION_DIR).filter((f) => f.endsWith(".json"))) {
+    let raw: string;
+    try {
+      raw = fs.readFileSync(path.join(SESSION_DIR, file), "utf-8");
+    } catch {
+      continue;
+    }
+    if (!raw.includes('"durable_paused"')) continue;
+    let data: SessionData;
+    try {
+      data = JSON.parse(raw) as SessionData;
+    } catch {
+      continue;
+    }
+    const parsed = parseDurableRunCheckpoint(data.runCheckpoint);
+    if (!parsed.ok || parsed.checkpoint.state !== "durable_paused") continue;
+    if (parsed.checkpoint.cwdRealpath !== cwdRealpath) continue;
+    if (!found || parsed.checkpoint.savedAt > found.savedAt) found = { data, savedAt: parsed.checkpoint.savedAt };
+  }
+  return found?.data ?? null;
 }
 
 export function getLatestSession(): SessionData | null {

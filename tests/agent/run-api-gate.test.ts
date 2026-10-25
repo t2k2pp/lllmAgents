@@ -34,7 +34,9 @@ describe("RunApiGate", () => {
     );
     gate.beginRun("cli");
 
-    expect(gate.requestPause().snapshot.state).toBe("paused");
+    expect(gate.requestPause().snapshot.state).toBe("pause_requested");
+    void gate.pauseAtBoundary();
+    expect(gate.snapshot().state).toBe("paused");
     expect(reached).toHaveBeenCalledOnce();
     const calls = [
       collectResponse(provider.chat(params)),
@@ -57,7 +59,7 @@ describe("RunApiGate", () => {
     gate.finishRun();
   });
 
-  it("進行中APIを切断せず完了後にpausedへ遷移し、次のAPIを待たせる", async () => {
+  it("pause予約は進行中APIを切断せず、API完了だけでは停止しない (停止は境界で)", async () => {
     let releaseFirst!: () => void;
     const firstHold = new Promise<void>((resolve) => {
       releaseFirst = resolve;
@@ -79,14 +81,8 @@ describe("RunApiGate", () => {
     await vi.waitFor(() => expect(starts).toBe(1));
     expect(gate.requestPause().snapshot.state).toBe("pause_requested");
     releaseFirst();
-    await vi.waitFor(() => expect(gate.snapshot().state).toBe("paused"));
-
-    const second = collectResponse(provider.chat(params));
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(starts).toBe(1);
-    expect(gate.resume().status).toBe("resumed");
-    await Promise.all([first, second]);
-    expect(starts).toBe(2);
+    await first;
+    expect(gate.snapshot()).toMatchObject({ state: "pause_requested", inFlight: 0 });
     gate.finishRun();
   });
 
@@ -107,7 +103,7 @@ describe("RunApiGate", () => {
     gate.finishRun();
   });
 
-  it("durable pauseはAPI完了だけでは停止せず、AgentLoopが宣言した安全境界で停止する", async () => {
+  it("AgentLoopが宣言した境界で停止し、停止中は次のAPIを開始しない", async () => {
     const gate = new RunApiGate();
     const provider = gateLLMProvider(
       makeProvider(() => undefined),
@@ -115,19 +111,26 @@ describe("RunApiGate", () => {
     );
     gate.beginRun("cli");
 
-    expect(gate.requestPause("durable").snapshot.state).toBe("pause_requested");
+    expect(gate.requestPause().snapshot.state).toBe("pause_requested");
     await collectResponse(provider.chat(params));
-    expect(gate.snapshot()).toMatchObject({ state: "pause_requested", inFlight: 0, mode: "durable" });
+    expect(gate.snapshot()).toMatchObject({ state: "pause_requested", inFlight: 0 });
 
     let passed = false;
-    const boundary = gate.pauseAtDurableBoundary().then(() => {
+    const boundary = gate.pauseAtBoundary().then(() => {
       passed = true;
     });
     await vi.waitFor(() => expect(gate.snapshot().state).toBe("paused"));
     expect(passed).toBe(false);
+    let secondStarted = false;
+    const second = collectResponse(provider.chat(params)).then(() => {
+      secondStarted = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(secondStarted).toBe(false);
     expect(gate.resume().status).toBe("resumed");
-    await boundary;
+    await Promise.all([boundary, second]);
     expect(passed).toBe(true);
+    expect(secondStarted).toBe(true);
     gate.finishRun();
   });
 
@@ -186,7 +189,9 @@ describe("RunApiGate", () => {
         }
       })();
       await new Promise((r) => setTimeout(r, 0));
-      gate.requestPause("process");
+      gate.requestPause();
+
+      void gate.pauseAtBoundary();
       expect(gate.snapshot().state).toBe("paused");
       expect(reached).toHaveBeenCalled();
       gate.finishRun();

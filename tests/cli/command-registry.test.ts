@@ -150,7 +150,7 @@ describe("コマンドレジストリ (PR-10)", () => {
     expect(getCommandRegistry().get("/continue")).toBeUndefined();
   });
 
-  it("/runは通常pauseとdurable pauseを分離し、再起動後はsession復元を先に案内する", () => {
+  it("/run pauseは1方式 (保存して止める) で、再起動後はsession復元を先に案内する", () => {
     const pauseAgent = {
       requestRunPause: () => ({
         status: "requested",
@@ -158,7 +158,7 @@ describe("コマンドレジストリ (PR-10)", () => {
       }),
     } as unknown as ReplCommandContext["agent"];
     const pause = executeRunControl(pauseAgent, ["pause"]);
-    expect(pause.message).toContain("アプリは終了せず");
+    expect(pause.message).toContain("アプリ・PCを終了できます");
 
     const idleAgent = {
       resumeRun: () => ({
@@ -170,15 +170,12 @@ describe("コマンドレジストリ (PR-10)", () => {
     const resume = executeRunControl(idleAgent, ["resume"]);
     expect(resume.message).toContain("/resume <session-id>");
 
-    const durableAgent = {
-      requestRunPause: vi.fn(() => ({
-        status: "requested",
-        snapshot: { state: "pause_requested", source: "cli", inFlight: 1, mode: "durable" },
-      })),
-    } as unknown as ReplCommandContext["agent"];
-    const durable = executeRunControl(durableAgent, ["pause", "--durable"]);
-    expect(durableAgent.requestRunPause).toHaveBeenCalledWith("durable");
-    expect(durable.message).toContain("durable_paused表示後");
+    // 旧 --durable は受け付けない (同じことをする別のやり方を残さない)
+    const withArg = vi.fn();
+    const argAgent = { requestRunPause: withArg } as unknown as ReplCommandContext["agent"];
+    expect(executeRunControl(argAgent, ["pause", "--durable"]).level).toBe("warn");
+    expect(withArg).not.toHaveBeenCalled();
+    expect(mustGet("/run").completions?.some((c) => c.command.includes("--durable"))).toBe(false);
   });
 
   it("再起動後の/run resumeは通常turnと同じ入力captureでcontinuationを待つ", async () => {
@@ -187,7 +184,7 @@ describe("コマンドレジストリ (PR-10)", () => {
     const agent = {
       resumeRun: () => ({
         status: "not_running",
-        snapshot: { state: "idle", source: null, inFlight: 0, mode: null },
+        snapshot: { state: "idle", source: null, inFlight: 0 },
       }),
       beginDurableRunResume: () => ({ status: "started", continuation }),
     } as unknown as ReplCommandContext["agent"];

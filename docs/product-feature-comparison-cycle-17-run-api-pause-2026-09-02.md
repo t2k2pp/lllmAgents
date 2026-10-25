@@ -1,5 +1,7 @@
 # Codex / Claude Code 機能比較・商品品質改善 cycle 17
 
+> **2026-10-25 改訂**: 本書のプロセス内 pause (`/run pause` が API 応答直後に止まり保存しない方式) は廃止し、 一時停止は「保存して止める」 1 方式に統合した。 現在の仕様は [durable-run-resume-design.md](durable-run-resume-design.md)。 本書は当時の記録として残す。
+
 - 実施日: 2026-09-02
 - 基準commit: `87274f0`
 - 対象gap: `GAP-PAUSE-01`

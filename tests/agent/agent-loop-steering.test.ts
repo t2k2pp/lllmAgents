@@ -107,7 +107,7 @@ describe("AgentLoop foreground steering", () => {
         ],
       ],
       requests,
-      () => expect(firstRef.loop?.requestRunPause("durable").status).toBe("requested"),
+      () => expect(firstRef.loop?.requestRunPause().status).toBe("requested"),
     );
     const firstLoop = makeLoop(firstProvider, registry);
     firstRef.loop = firstLoop;
@@ -202,7 +202,7 @@ describe("AgentLoop foreground steering", () => {
     expect(loop.beginDurableRunResume()).toMatchObject({ status: "blocked_unknown_progress" });
   });
 
-  it("進行中APIの完了後にpauseし、resumeまで次のAPI要求を開始しない", async () => {
+  it("進行中APIとその応答のtoolを完了させてから次API直前でpauseし、resumeまで次のAPI要求を開始しない", async () => {
     const requests: ChatWithToolsParams[] = [];
     let releaseFirst!: () => void;
     const firstHold = new Promise<void>((resolve) => {
@@ -242,6 +242,7 @@ describe("AgentLoop foreground steering", () => {
       chatWithVision: chatWithTools,
     } as unknown as LLMProvider;
     const loop = makeLoop(provider, registry);
+    loop.setLiveBinding({ providerType: "openai-compat", model: "test-model-7b", baseUrl: "http://127.0.0.1:8080/v1" });
 
     const running = loop.run("pauseしてください");
     await vi.waitFor(() => expect(requests).toHaveLength(1));
@@ -250,16 +251,16 @@ describe("AgentLoop foreground steering", () => {
     releaseFirst();
     await vi.waitFor(() => expect(loop.getRunPauseSnapshot().state).toBe("paused"));
     expect(requests).toHaveLength(1);
-    expect(toolExecuted).toBe(false);
+    expect(toolExecuted).toBe(true); // 応答が頼んだ tool は完了させてから止まる
+    expect(loop.getDurableRunCheckpoint().status).toBe("durable_paused"); // 止まった時点で再開地点を保存済み
 
     expect(loop.resumeRun().status).toBe("resumed");
     await running;
-    expect(toolExecuted).toBe(true);
     expect(requests).toHaveLength(2);
     expect(loop.getRunPauseSnapshot().state).toBe("idle");
   });
 
-  it("pause中のhard interruptは待機を解除し、応答内toolや次APIを実行しない", async () => {
+  it("pause中のhard interruptは待機を解除し、次APIを実行しない", async () => {
     const requests: ChatWithToolsParams[] = [];
     let releaseFirst!: () => void;
     const firstHold = new Promise<void>((resolve) => {
@@ -270,8 +271,11 @@ describe("AgentLoop foreground steering", () => {
       requests.push(request);
       if (call++ === 0) {
         await firstHold;
-        yield { type: "text", text: "境界到達前の応答" };
-        yield { type: "done", finishReason: "stop" };
+        yield {
+          type: "tool_call",
+          toolCall: { id: "call_interrupt", type: "function", function: { name: "interrupt_probe", arguments: "{}" } },
+        };
+        yield { type: "done", finishReason: "tool_calls" };
         return;
       }
       yield* textReply("開始してはいけない応答");
@@ -282,7 +286,21 @@ describe("AgentLoop foreground steering", () => {
       chatWithTools,
       chatWithVision: chatWithTools,
     } as unknown as LLMProvider;
-    const loop = makeLoop(provider);
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "interrupt_probe",
+      definition: {
+        type: "function",
+        function: {
+          name: "interrupt_probe",
+          description: "interrupt test",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+      execute: async () => ({ success: true, output: "probe completed" }),
+    });
+    const loop = makeLoop(provider, registry);
+    loop.setLiveBinding({ providerType: "openai-compat", model: "test-model-7b", baseUrl: "http://127.0.0.1:8080/v1" });
 
     const running = loop.run("pause後に中断");
     await vi.waitFor(() => expect(requests).toHaveLength(1));

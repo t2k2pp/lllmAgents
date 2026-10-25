@@ -63,7 +63,7 @@ describe("PTY smoke driver", () => {
     expect(driver.args.join("\n")).toContain('send -- "STEER_REQUEST"');
     expect(driver.args.join("\n")).toContain("expect -re {STEER_REQUEST}");
     expect(driver.args.join("\n")).toContain('send -- "\\r"');
-    expect(driver.args.join("\n")).toContain("runをLLM API境界で一時停止しました");
+    expect(driver.args.join("\n")).toContain("一時停止しました。会話と再開地点");
     expect(driver.args.join("\n")).toContain('send -- "/parallel 4\\r"');
     expect(driver.args.join("\n")).toContain("並列実行上限を 4 に設定しました");
     expect(driver.args.join("\n")).toContain('send -- "/run resume\\r"');
@@ -82,7 +82,7 @@ describe("PTY smoke driver", () => {
     const steerVisibleAt = driver.args.join("\n").lastIndexOf("expect -re {STEER_REQUEST}");
     const steerResponseAt = driver.args.join("\n").lastIndexOf("expect -re {STEER_OK}");
     const pauseAt = driver.args.join("\n").lastIndexOf('send -- "/run pause\\r"');
-    const pausedAt = driver.args.join("\n").lastIndexOf("expect -re {runをLLM API境界で一時停止しました}");
+    const pausedAt = driver.args.join("\n").lastIndexOf("expect -re {一時停止しました。会話と再開地点}");
     const parallelAt = driver.args.join("\n").lastIndexOf('send -- "/parallel 4\\r"');
     const resumeAt = driver.args.join("\n").lastIndexOf('send -- "/run resume\\r"');
     const quitAt = driver.args.join("\n").lastIndexOf('send -- "/quit\\r"');

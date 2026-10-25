@@ -75,7 +75,7 @@ expect -re {処理中・追加入力}
 puts "${EXPECT_PROCESSING_INPUT_MARKER}"
 send -- "/run pause\\r"
 puts "${EXPECT_PAUSE_MARKER}"
-expect -re {pause予約を受理}
+expect -re {一時停止を予約しました}
 send -- "\\033\\[Z"
 puts "${EXPECT_MODE_CYCLE_SENT_MARKER}"
 expect -re {モード: Autorun}
@@ -86,8 +86,8 @@ puts "${EXPECT_STEER_VISIBLE_MARKER}"
 send -- "\\r"
 puts "${EXPECT_STEER_MARKER}"
 set timeout 30
-# /help の「LLM API境界で一時停止・再開」へ誤一致させず、実到達だけを待つ。
-expect -re {runをLLM API境界で一時停止しました}
+# /help の説明文へ誤一致させず、実到達の表示だけを待つ。
+expect -re {一時停止しました。会話と再開地点}
 puts "${EXPECT_PAUSED_MARKER}"
 send -- "/parallel 4\\r"
 puts "${EXPECT_PARALLEL_MARKER}"

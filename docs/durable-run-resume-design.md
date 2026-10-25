@@ -1,25 +1,47 @@
-# PC再起動を跨ぐ durable run resume 設計
+# foreground run の一時停止と再開 (PC再起動を跨ぐ) 設計
 
 - 課題ID: `GAP-DURABLE-RUN-01`
 - 優先度: P1
 - 実装cycle: 18
 - 状態: 実装・対象回帰済み
+- 改訂: 2026-10-25 — 一時停止を 1 方式に統合 (`--durable` とプロセス内 pause を廃止)、 起動時の再開確認を追加 (§一時停止の一本化 / §起動時の再開確認)
 
 ## 目的
 
-`/run pause --durable`が安全境界へ到達したことをatomic保存し、アプリ・PC再起動後に次の操作で同じforeground runを続ける。
+`/run pause`が安全境界へ到達したことをatomic保存し、アプリを閉じずにそのまま、 またはアプリ・PC再起動後に、同じforeground runを続ける。
 
 ```text
-/run pause --durable
-  → durable_paused表示を待つ
-  → アプリ・PC停止
-  → アプリ起動
-  → /resume <session-id>
-  → /run inspect
-  → /run resume
+/run pause
+  → 「⏸ 一時停止しました」 表示を待つ (会話と再開地点を保存済み)
+  ├─ そのまま: /run resume
+  └─ アプリ・PC停止 → 同じフォルダでアプリ起動 → 「再開しますか?」 → はい
+       (いいえ / 非TTY の場合: /resume <session-id> → /run resume)
 ```
 
-既存の`/resume`は会話sessionの選択・復元、`/run resume`は選択済みsession内の実行継続であり、役割を混ぜない。従来の`/run pause`も高速なプロセス内pauseとして維持し、durableへ暗黙変換しない。
+既存の`/resume`は会話sessionの選択・復元、`/run resume`は選択済みsession内の実行継続であり、役割を混ぜない。
+
+## 一時停止の一本化 (2026-10-25)
+
+旧仕様は 2 方式だった: `/run pause` (プロセス内。API 応答の直後に止め、保存しない) と `/run pause --durable` (tool 完了後、 次 API 直前で保存して止める)。
+同じ目的に 2 つのやり方があると使い分けを誤る。 実際に myppt で `/run pause` を先に出したため後の `--durable` が「予約済み」 で無視され、
+保存されないまま終了しかけた。 違いは「tool の完了を待たずに止まる」 点だけで、 ローカル LLM の 1 応答 (数十分) に比べて得るものが小さい。
+
+- `/run pause` は常に「応答と tool を完了 → 次 API 直前で保存 → 停止」。 `--durable` は廃止 (受け付けない)
+- 同じプロセスでの `/run resume` は接続先の照合をしない (停止中に llama-server の再起動・並列数変更・モデル入替をする用途のため)。
+  照合は再起動を跨ぐ再開 (`/resume` 後の `/run resume`、 起動時の再開確認) だけで行う
+- 停止中も `/parallel` は即時に反映できる (従来どおり)
+- 要求後に run が次の API を必要とせず完了した場合は、 再開地点を作らず予約終了を表示する
+
+## 起動時の再開確認 (2026-10-25)
+
+一時停止したまま終了した作業は、 次に同じフォルダで起動した時に REPL の入力待ちの前で確認する。
+
+- 対象: `~/.localllm/sessions/` のうち、 再開地点が `durable_paused` で `cwdRealpath` が現在のフォルダと一致するもの。 複数あれば保存時刻が最も新しいもの
+  (`findPausedSessionForCwd`。 セッションは 1 件数 MB あるため、 `"durable_paused"` を含むファイルだけを解析する)
+- `--resume <id>` で既に再開地点付きのセッションを開いている場合は、 そのセッションについて確認する
+- 「はい」: 会話を復元し、 `/run resume` と同じ経路 (互換性照合 → resuming 保存 → 再開) で続ける。 照合で差分があれば理由を表示して止まる (`/run inspect` で確認)
+- 「いいえ」: 何もしない。 あとで再開する方法 (`/resume <id>` → `/run resume`、 不要なら `/run discard`) を表示する
+- 非TTY (パイプ) では確認せず、 同じ案内だけを表示する
 
 ## 比較から確認した境界
 
@@ -66,13 +88,17 @@ endpoint URLやAPI key値は診断表示しない。endpoint signatureも平文�
 
 ```text
 running
-  └─ /run pause --durable
-       → durable_pause_requested
+  └─ /run pause
+       → pause_requested
        → current API + tool group complete
        → atomic save
        → durable_paused
 
+same process
+  └─ /run resume → resuming → running → checkpoint削除 (照合なし)
+
 new process
+  起動時に同じフォルダの durable_paused を検出 → 「再開しますか?」 (はい = 下の /run resume と同じ)
   /resume <id> → durable_pausedをrehydrate（自動実行しない）
   ├─ /run inspect
   ├─ /run resume → compatibility check → resuming → running → checkpoint削除
@@ -89,7 +115,8 @@ resuming中にprocess終了
 - cwd/model/provider/endpoint/unknown schemaを明示的に拒否する。
 - `resuming`を自動再実行しない。
 - forkはrun checkpointを引き継がない。
-- 通常`/run pause`、steering、Esc中断、session`/resume`を回帰させない。
+- steering、Esc中断、session`/resume`を回帰させない。
+- `/run pause --durable` は不明な引数として拒否する (旧方式を残さない)。
 - Windows/Linux/macOS、実PTY、配布exe smokeを最新push SHAで完了する。
 
 ## 制約

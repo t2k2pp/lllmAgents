@@ -10,19 +10,19 @@ function stateLabel(snapshot: RunPauseSnapshot): string {
   const state = {
     idle: "idle (runなし)",
     running: "running",
-    pause_requested: "pause予約済み",
-    paused: "paused (プロセス内・API停止中)",
+    pause_requested: "一時停止を予約済み (応答とtoolの完了待ち)",
+    paused: "一時停止中 (再開地点を保存済み)",
   }[snapshot.state];
-  return `${state} / source=${snapshot.source ?? "none"} / API実行中=${snapshot.inFlight} / pause=${snapshot.mode ?? "none"}`;
+  return `${state} / source=${snapshot.source ?? "none"} / API実行中=${snapshot.inFlight}`;
 }
 
 function durableStatus(agent: AgentLoop): string {
   const current = agent.getDurableRunCheckpoint();
-  if (current.status === "none") return "durable checkpoint=none";
-  if (current.status === "invalid") return `durable checkpoint=invalid (${current.reason})`;
+  if (current.status === "none") return "保存された再開地点: なし";
+  if (current.status === "invalid") return `保存された再開地点: 壊れています (${current.reason})`;
   const compatibility =
     current.differences.length === 0 ? "compatible" : `blocked (${current.differences.join(" / ")})`;
-  return `durable checkpoint=${current.status} / saved=${current.checkpoint.savedAt} / boundary=${current.checkpoint.boundary} / ${compatibility}`;
+  return `保存された再開地点: ${current.status} / saved=${current.checkpoint.savedAt} / boundary=${current.checkpoint.boundary} / ${compatibility}`;
 }
 
 export function executeRunControl(agent: AgentLoop, args: string[]): Feedback {
@@ -34,30 +34,20 @@ export function executeRunControl(agent: AgentLoop, args: string[]): Feedback {
     };
   }
   if (action === "pause") {
-    const durable = args.slice(1).some((arg) => arg.toLowerCase() === "--durable");
-    const invalid = args.slice(1).filter((arg) => arg.toLowerCase() !== "--durable");
-    if (invalid.length > 0)
-      return { level: "warn", message: `不明な引数: ${invalid.join(" ")}。使い方: /run pause [--durable]` };
-    const result = agent.requestRunPause(durable ? "durable" : "process");
+    if (args.length > 1)
+      return { level: "warn", message: `不明な引数: ${args.slice(1).join(" ")}。使い方: /run pause` };
+    const result = agent.requestRunPause();
     switch (result.status) {
       case "requested":
-        if (durable) {
-          return {
-            level: "info",
-            message:
-              "durable pause予約を受理しました。進行中APIの応答と開始済みtool結果を確定し、次のLLM API直前でatomic保存します。durable_paused表示後はアプリ・PCを停止できます。",
-          };
-        }
-        return result.snapshot.state === "paused"
-          ? { level: "success", message: "foreground runはLLM API境界で停止中です。再開: /run resume" }
-          : {
-              level: "info",
-              message: `pause予約を受理しました。アプリは終了せず、現在のLLM API ${result.snapshot.inFlight}件の完了後に停止します。`,
-            };
+        return {
+          level: "info",
+          message:
+            "一時停止を予約しました。進行中のLLM応答と、その応答が頼んだtoolを完了させ、次のLLM API直前で会話と再開地点を保存して止まります。「⏸ 一時停止しました」の表示後はアプリ・PCを終了できます。",
+        };
       case "already_requested":
-        return { level: "info", message: "pauseは予約済みです。現在のLLM API完了を待っています。" };
+        return { level: "info", message: "一時停止は予約済みです。進行中のLLM応答とtoolの完了を待っています。" };
       case "already_paused":
-        return { level: "info", message: "foreground runは既に停止中です。再開: /run resume" };
+        return { level: "info", message: "foreground runは既に一時停止中です。再開: /run resume" };
       case "not_cli":
         return {
           level: "warn",
@@ -65,8 +55,8 @@ export function executeRunControl(agent: AgentLoop, args: string[]): Feedback {
         };
       case "not_running":
         return { level: "warn", message: "停止できるforeground runはありません。" };
-      case "durable_unavailable":
-        return { level: "warn", message: `durable pauseを開始できません: ${result.reason}` };
+      case "unavailable":
+        return { level: "warn", message: `一時停止を開始できません: ${result.reason}` };
     }
   }
   if (action === "resume") {
@@ -88,7 +78,7 @@ export function executeRunControl(agent: AgentLoop, args: string[]): Feedback {
         if (durable.status === "started") {
           return {
             level: "success",
-            message: "durable checkpointを検証し、保存済みの次のLLM API境界からrunを再開します。",
+            message: "保存された再開地点を検証し、次のLLM APIからrunを再開します。",
             continuation: durable.continuation,
           };
         }
@@ -96,19 +86,19 @@ export function executeRunControl(agent: AgentLoop, args: string[]): Feedback {
           level: "warn",
           message:
             durable.status === "not_found"
-              ? "再開できるforeground runはありません。再起動後は先に /resume <session-id> でdurable checkpoint付きsessionを復元してください。"
-              : `durable runを再開できません: ${durable.reason}`,
+              ? "再開できるforeground runはありません。一時停止したsessionは /resume <session-id> で先に復元してください。"
+              : `一時停止したrunを再開できません: ${durable.reason}`,
         };
       }
       case "checkpoint_save_failed":
-        return { level: "warn", message: `durable resume開始状態を保存できないため再開しません: ${result.reason}` };
+        return { level: "warn", message: `再開開始の状態を保存できないため再開しません: ${result.reason}` };
     }
   }
   if (action === "inspect") {
     const current = agent.getDurableRunCheckpoint();
-    if (current.status === "none") return { level: "warn", message: "durable checkpointはありません。" };
+    if (current.status === "none") return { level: "warn", message: "保存された再開地点はありません。" };
     if (current.status === "invalid")
-      return { level: "warn", message: `durable checkpointが壊れています: ${current.reason}` };
+      return { level: "warn", message: `保存された再開地点が壊れています: ${current.reason}` };
     return {
       level: current.differences.length === 0 && current.status === "durable_paused" ? "info" : "warn",
       message:
@@ -122,11 +112,11 @@ export function executeRunControl(agent: AgentLoop, args: string[]): Feedback {
   if (action === "discard") {
     const result = agent.discardDurableRunCheckpoint();
     if (result.status === "discarded") {
-      return { level: "success", message: "durable checkpointだけを破棄しました。会話履歴は保持しています。" };
+      return { level: "success", message: "再開地点だけを破棄しました。会話履歴は保持しています。" };
     }
-    return { level: "warn", message: result.reason ?? "durable checkpointを破棄できません。" };
+    return { level: "warn", message: result.reason ?? "再開地点を破棄できません。" };
   }
-  return { level: "warn", message: "使い方: /run [status|pause [--durable]|resume|inspect|discard]" };
+  return { level: "warn", message: "使い方: /run [status|pause|resume|inspect|discard]" };
 }
 
 export function printRunControlFeedback(feedback: Feedback): void {
@@ -139,11 +129,10 @@ export const runControlCommand: ReplCommandDef = {
   summary: "foreground runをLLM API境界で一時停止・再開",
   completions: [
     { command: "/run", description: "foreground runのpause状態を表示" },
-    { command: "/run pause", description: "次のLLM API境界でrunを一時停止" },
-    { command: "/run pause --durable", description: "次のLLM API前を保存し、アプリ・PC再起動後も再開" },
+    { command: "/run pause", description: "次のLLM API前で会話と再開地点を保存して一時停止 (終了しても再開可)" },
     { command: "/run resume", description: "一時停止中の同じrunを再開" },
-    { command: "/run inspect", description: "durable checkpointと互換性差分を表示" },
-    { command: "/run discard", description: "会話を残してdurable checkpointだけ破棄" },
+    { command: "/run inspect", description: "保存された再開地点と互換性差分を表示" },
+    { command: "/run discard", description: "会話を残して再開地点だけ破棄" },
   ],
   async handler(ctx, args) {
     const feedback = executeRunControl(ctx.agent, args);
