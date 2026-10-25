@@ -17,7 +17,7 @@ description: リファクタリング・機能廃止・リネームのワーク�
 
 ## ドキュメントの同期
 - コード変更と同じコミットで関連ドキュメントも更新する
-- 対象: README.md, DESIGN.md, docs/ 配下の設計書, CLAUDE.md
+- 対象: README.md, docs/ 配下の設計書 (docs/archive/ は更新しない記録), CLAUDE.md
 - 新機能追加時は設計書を作成、廃止時は設計書から該当セクションを削除
 
 ## 検証

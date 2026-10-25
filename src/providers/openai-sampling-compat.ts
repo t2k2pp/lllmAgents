@@ -56,7 +56,7 @@ export function warnOmittedSamplingParameters(
   warned.add(key);
   console.warn(
     `  ⚠ model=${model} (${providerType}) では ${omitted.join(", ")} が非対応のため送信しません。` +
-      " 設定を消す場合は /model temperature auto のように指定してください。",
+      " 設定を消す場合は /models → Edit で該当の値を空にしてください。",
   );
 }
 

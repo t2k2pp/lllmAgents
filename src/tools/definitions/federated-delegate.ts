@@ -143,7 +143,7 @@ export const federatedDelegateTool: ToolHandler = {
         success: false,
         output: "",
         error:
-          "Error: federated_delegate は second LLM が必要ですが未設定/未起動です。 /model second setup で構成するか、 supervisor 自身でタスクを実行してください。",
+          "Error: federated_delegate は second LLM が必要ですが未設定/未起動です。 /models → Add new で構成するか、 supervisor 自身でタスクを実行してください。",
       };
     }
     const task = String(params.task ?? "").trim();

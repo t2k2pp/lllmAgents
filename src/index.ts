@@ -81,7 +81,7 @@ import { installOutputRouter, uninstallOutputRouter } from "./cli/output-router.
 import { withPrompt } from "./cli/prompt-gate.js";
 import { PROVIDER_LABELS } from "./config/types.js";
 import { buildLLMProfiles } from "./agent/llm-profiles.js";
-import { DiscordInteractionServer } from "./discord/interaction-server.js";
+import { DiscordBot } from "./discord/discord-bot.js";
 import { CredentialVault } from "./security/credential-vault.js";
 import { getLatestSession, loadSession } from "./agent/session-manager.js";
 import { RoomManager } from "./agent/room-manager.js";
@@ -121,9 +121,8 @@ Options:
   --background        Run the chat bot receiver only, without the REPL (set up via /integrations first)
   --slack             Run the Slack bot instead of the REPL (set up via /integrations first)
   --alt-screen        Enable the full-screen TUI (inline native scrollback is the default)
-  --no-alt-screen     Keep the inline display for this run (overrides LLLMAGENT_ENABLE_ALTERNATE_SCREEN)
   --mouse             Enable full-screen TUI mouse-wheel history (implies --alt-screen)
-  --no-mouse          Keep mouse capture off for this run (overrides LLLMAGENT_ENABLE_MOUSE)
+                      (to override LLLMAGENT_ENABLE_* for one run, set LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1 / LLLMAGENT_DISABLE_MOUSE=1)
   --install-browser   Install the browser runtime
   --check-browser     Verify the browser runtime
   --computer-use      Enable native OS window capture/input for this session
@@ -336,7 +335,7 @@ async function main(): Promise<void> {
   } catch (e) {
     console.error(
       `\nメインLLMの初期化に失敗しました: ${e instanceof Error ? e.message : String(e)}\n` +
-        `  /model setup または config.json で設定を確認してください。\n` +
+        `  /models → Add new または config.json で設定を確認してください。\n` +
         `  暗号化キーの場合、合言葉が間違っている可能性があります。\n`,
     );
     process.exit(1);
@@ -797,7 +796,7 @@ async function main(): Promise<void> {
     }
     // Room モデル: --background は REPL なしで Discord(Room B) を resting room とする。
     roomManager.initBackgroundSurface("discord");
-    const server = new DiscordInteractionServer(discord, agent, roomManager, roomQueue, skillRegistry, mcpManager, () =>
+    const server = new DiscordBot(discord, agent, roomManager, roomQueue, skillRegistry, mcpManager, () =>
       saveConfig(config),
     );
     try {
@@ -896,7 +895,7 @@ async function main(): Promise<void> {
   // Room モデル: REPL の現セッション (新規 or resume 済み) を Room A にバインドする。
   roomManager.initReplSession();
 
-  // Start REPL (sharedPassphrase は /swap や /model second setup 後の Provider 再生成で使い回す)
+  // Start REPL (sharedPassphrase は /swap や /models Add new 後の Provider 再生成で使い回す)
   const loopManager = new LoopManager();
   const repl = new REPL(
     agent,

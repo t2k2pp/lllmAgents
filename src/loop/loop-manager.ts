@@ -216,8 +216,7 @@ export const LOOP_USAGE_LINES = [
   "  例: /loop 5m /pr-review",
   "  例: /loop 30m デプロイ状況を確認",
   "  間隔: 10s, 5m, 2h, 1d (数値 + s/m/h/d)",
-  "/loop status       - 一覧 + 停止 picker",
-  "/loop stop [id|all] - ループを停止",
+  "/loop status       - 一覧 + 停止 picker (端末が無いときはエージェントに停止を頼む)",
 ];
 
 export type LoopArgsParse =

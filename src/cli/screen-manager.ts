@@ -94,8 +94,6 @@ export interface AlternateScreenEnv {
   disable?: string;
   /** 起動引数 --alt-screen */
   enableByCli?: boolean;
-  /** 起動引数 --no-alt-screen */
-  disableByCli?: boolean;
   /** process.stdout.isTTY */
   isTTY?: boolean;
   /** TERM */
@@ -123,7 +121,6 @@ export interface AlternateScreenEnv {
  * 原因と解除方法を示してfail-fastする。
  */
 export function shouldUseAlternateScreen(env: AlternateScreenEnv): boolean {
-  if (env.disableByCli) return false;
   if (isTruthyEnv(env.disable)) return false;
   if (!env.isTTY) return false;
   if (env.enableByCli !== true && !isTruthyEnv(env.enable)) return false;
@@ -131,7 +128,7 @@ export function shouldUseAlternateScreen(env: AlternateScreenEnv): boolean {
   if (term === "dumb") {
     throw new Error(
       "TUIを開始できません: TERM=dumb はAlternate Screenに対応していません。" +
-        "端末設定を修正するか、classic stream表示を意図する場合だけ --no-alt-screen を指定してください。",
+        "端末設定を修正するか、inline表示で起動する場合は --alt-screen / LLLMAGENT_ENABLE_ALTERNATE_SCREEN を外すか、LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1 を設定してください。",
     );
   }
 
@@ -141,7 +138,7 @@ export function shouldUseAlternateScreen(env: AlternateScreenEnv): boolean {
     if (!known) {
       throw new Error(
         "TUIを開始できません: Windows端末のANSI/Alternate Screen対応を判定できません。" +
-          "Windows Terminal等を使うか、classic stream表示を意図する場合だけ --no-alt-screen を指定してください。",
+          "Windows Terminal等を使うか、inline表示で起動する場合は --alt-screen / LLLMAGENT_ENABLE_ALTERNATE_SCREEN を外すか、LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1 を設定してください。",
       );
     }
     return true;
@@ -149,7 +146,7 @@ export function shouldUseAlternateScreen(env: AlternateScreenEnv): boolean {
   if (term === "") {
     throw new Error(
       "TUIを開始できません: TTYですがTERMが未設定のため端末能力を判定できません。" +
-        "TERMを正しく設定するか、classic stream表示を意図する場合だけ --no-alt-screen を指定してください。",
+        "TERMを正しく設定するか、inline表示で起動する場合は --alt-screen / LLLMAGENT_ENABLE_ALTERNATE_SCREEN を外すか、LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1 を設定してください。",
     );
   }
   return true;
@@ -162,22 +159,19 @@ export interface MouseTrackingEnv {
   disable?: string;
   /** 起動引数 --mouse */
   enableByCli?: boolean;
-  /** 起動引数 --no-mouse */
-  disableByCli?: boolean;
 }
 
 function isTruthyEnv(value: string | undefined): boolean {
   return value !== undefined && value !== "" && value !== "0" && value.toLowerCase() !== "false";
 }
 
-/** --mouseは内部履歴を使う明示操作なので、後方互換としてfull-screen TUIも要求する。 */
+/** --mouseは全画面TUI内のホイール履歴を使う明示操作なので、全画面TUIも要求する (Claude Codeもマウス捕捉は全画面表示のときだけ)。 */
 export function requestsAlternateScreen(args: readonly string[]): boolean {
   return args.includes("--alt-screen") || args.includes("--mouse");
 }
 
 /** Native selection/copy is the default. Mouse wheel capture requires an explicit opt-in. */
 export function shouldEnableMouseTracking(env: MouseTrackingEnv): boolean {
-  if (env.disableByCli) return false;
   if (isTruthyEnv(env.disable)) return false;
   return env.enableByCli === true || isTruthyEnv(env.enable);
 }
@@ -187,7 +181,6 @@ function readMouseTrackingEnv(): MouseTrackingEnv {
     enable: process.env.LLLMAGENT_ENABLE_MOUSE,
     disable: process.env.LLLMAGENT_DISABLE_MOUSE,
     enableByCli: process.argv.slice(2).includes("--mouse"),
-    disableByCli: process.argv.slice(2).includes("--no-mouse"),
   };
 }
 
@@ -197,7 +190,6 @@ function readAlternateScreenEnv(): AlternateScreenEnv {
     enable: process.env.LLLMAGENT_ENABLE_ALTERNATE_SCREEN,
     disable: process.env.LLLMAGENT_DISABLE_ALTERNATE_SCREEN,
     enableByCli: requestsAlternateScreen(process.argv.slice(2)),
-    disableByCli: process.argv.slice(2).includes("--no-alt-screen"),
     isTTY: !!process.stdout.isTTY,
     term: process.env.TERM,
     platform: process.platform,

@@ -138,14 +138,15 @@ describe("createCommandMenuProvider", () => {
     expect(labels).toContain("/model list");
   });
 
-  it("/model 系の主要サブコマンドが補完候補に出る (list/context/setup)", () => {
+  it("/model 系の主要サブコマンドが補完候補に出る (list/context)", () => {
     // Phase 4 (2026-05-27): /model info は重複だったので削除済み
     const provider = createCommandMenuProvider();
     const items = provider("model ");
     const labels = items.map((i) => i.label);
     expect(labels).toContain("/model list");
     expect(labels).toContain("/model context");
-    expect(labels).toContain("/model setup");
+    // 新規追加は /models Add new に一本化 (2026-10-25)
+    expect(labels).not.toContain("/model setup");
     // /model info は廃止
     expect(labels).not.toContain("/model info");
   });
@@ -158,12 +159,13 @@ describe("createCommandMenuProvider", () => {
     expect(labels).toContain("/model second");
     expect(labels).toContain("/model second enable");
     expect(labels).toContain("/model second disable");
-    expect(labels).toContain("/model second setup");
+    expect(labels).not.toContain("/model second setup");
     expect(labels).toContain("/model second list");
     expect(labels).toContain("/model second context");
     expect(labels).toContain("/model second host");
     expect(labels).toContain("/model second port");
-    expect(labels).toContain("/model second description");
+    // description・temperature 等の編集は /models Edit に一本化 (2026-10-25)
+    expect(labels).not.toContain("/model second description");
     // second 側も main と同じく url ではなく host / port で接続先を変える
     expect(labels).not.toContain("/model second url");
   });
@@ -173,10 +175,10 @@ describe("createCommandMenuProvider", () => {
     const items = provider("model vision");
     const labels = items.map((i) => i.label);
     expect(labels).toContain("/model vision");
-    expect(labels).toContain("/model vision setup");
+    expect(labels).not.toContain("/model vision setup");
     expect(labels).toContain("/model vision list");
     expect(labels).toContain("/model vision context");
-    expect(labels).toContain("/model vision description");
+    expect(labels).not.toContain("/model vision description");
     expect(labels).toContain("/model vision clear");
   });
 
@@ -230,22 +232,16 @@ describe("createCommandMenuProvider", () => {
     }
   });
 
-  it("main-slot /model 編集系サブコマンドは補完候補に出る (2026-06-21 discoverability 復活)", () => {
-    // dispatcher は元から処理しているのに second/vision だけ補完に出ていた非対称を解消。
-    // bare で現在値表示・引数で更新できる編集系を補完に載せる (docs/model-registry.md)。
+  it("main-slot /model の接続先の変更は補完候補に出る (needsArg)", () => {
+    // temperature 等・description は /models Edit に一本化した (2026-10-25)。 接続先 (host / port / provider) は /model に残る。
     const provider = createCommandMenuProvider();
     const allLabels = provider("").map((i) => i.label);
-    expect(allLabels).toContain("/model description");
-    expect(allLabels).toContain("/model temperature");
-    expect(allLabels).toContain("/model top_p");
-    expect(allLabels).toContain("/model top_k");
-    expect(allLabels).toContain("/model rep_penalty");
     expect(allLabels).toContain("/model provider");
     expect(allLabels).toContain("/model host");
     expect(allLabels).toContain("/model port");
-    // 編集系は needsArg: true (選択後に引数入力を続けるため末尾スペース付与)
-    const desc = provider("model description").find((i) => i.label === "/model description");
-    expect(desc?.value).toBe("/model description ");
+    // 選択後に引数入力を続けるため末尾スペース付与
+    const host = provider("model host").find((i) => i.label === "/model host");
+    expect(host?.value).toBe("/model host ");
   });
 
   it("プロバイダ別 setup バリアントは補完候補に出さない (wizard 内で選ぶ)", () => {
@@ -302,14 +298,36 @@ describe("createCommandMenuProvider", () => {
   });
 
   it("/loop の主要サブコマンドは引き続き補完候補に出る (B-2 統合後)", () => {
-    // /loop status (一覧 + 停止 picker) と /loop stop (id 指定 / 全停止、 picker 不要) を載せる。
-    // 旧 /loop list は /loop status に一本化して削除済み。
+    // 停止は /loop status (一覧 + 停止 picker) だけ。 旧 /loop list と /loop stop は削除済み
+    // (端末が無いときはエージェントに頼んで schedule_delete で止める。 Claude Code と同じ)。
     const provider = createCommandMenuProvider();
     const loopItems = provider("loop").map((i) => i.label);
     expect(loopItems).toContain("/loop");
     expect(loopItems).toContain("/loop status");
-    expect(loopItems).toContain("/loop stop");
+    expect(loopItems).not.toContain("/loop stop");
     expect(loopItems).not.toContain("/loop list");
+  });
+
+  it("モデルの新規追加・個別編集は /models に一本化し、 /model の setup・description・temperature 等は補完に出ない", () => {
+    const provider = createCommandMenuProvider();
+    const items = provider("model").map((i) => i.label);
+    for (const removed of [
+      "/model setup",
+      "/model description",
+      "/model temperature",
+      "/model top_p",
+      "/model top_k",
+      "/model rep_penalty",
+      "/model second setup",
+      "/model second description",
+      "/model vision setup",
+      "/model vision description",
+    ]) {
+      expect(items).not.toContain(removed);
+    }
+    expect(items).toContain("/model second list");
+    expect(items).toContain("/model second model");
+    expect(items).toContain("/model host");
   });
 
   it("スキルトリガーも候補に含む", () => {

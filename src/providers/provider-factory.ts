@@ -124,7 +124,7 @@ function createProviderFromEndpoint(endpoint: LLMEndpoint | SecondLLMEndpoint, p
         const token = CredentialVault.resolve(raw, passphrase);
         if (!token) {
           throw new Error(
-            "ANTHROPIC_API_KEY が見つかりません。/model setup anthropic で設定するか、 環境変数 ANTHROPIC_API_KEY をセットしてください。",
+            "ANTHROPIC_API_KEY が見つかりません。/models → Add new (Anthropic API) で設定するか、 環境変数 ANTHROPIC_API_KEY をセットしてください。",
           );
         }
         return new AnthropicProvider({
@@ -163,7 +163,7 @@ function createProviderFromEndpoint(endpoint: LLMEndpoint | SecondLLMEndpoint, p
         const token = CredentialVault.resolve(raw, passphrase);
         if (!token) {
           throw new Error(
-            "GEMINI_API_KEY が見つかりません。 /model setup gemini で設定するか、 環境変数 GEMINI_API_KEY をセットしてください。",
+            "GEMINI_API_KEY が見つかりません。 /models → Add new (Google AI Studio) で設定するか、 環境変数 GEMINI_API_KEY をセットしてください。",
           );
         }
         return new GeminiProvider({

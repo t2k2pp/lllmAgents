@@ -468,7 +468,7 @@ export interface Config {
    * REPL `/cost rate <数値>` で設定、`/cost rate off` でリセット。
    */
   jpyPerUsd?: number;
-  /** ツールの最大並列実行数（デフォルト: 3）。vLLM KVキャッシュやリソースに合わせて調整 */
+  /** ツールの最大並列実行数（デフォルト: 1 = 逐次。docs/sequential-execution.md）。vLLM KVキャッシュやリソースに合わせて調整 */
   maxParallelTools?: number;
   /** 自律実行モード（再起動後も維持） */
   autorunMode?: boolean;
@@ -668,7 +668,7 @@ export const PROVIDER_LABELS: Record<SecondLLMProviderType, string> = {
 
 /**
  * Google AI Studio (Gemini API) のモデルハードコード一覧。
- * `gemini` プロバイダの /model list / /model setup gemini で選択肢として使う。
+ * `gemini` プロバイダの /model list / /models Add new で選択肢として使う。
  * 動的取得 (generativelanguage.googleapis.com/v1beta/openai/models) もフォールバック可能だが、
  * 主要モデルはここに固定で持ち、 オフラインでも切替できるようにする。
  */

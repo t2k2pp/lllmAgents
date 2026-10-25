@@ -273,10 +273,10 @@ describe("E2E smoke — 非TTYパイプモード起動", () => {
         expect(r.timedOut, diag(r)).toBe(false);
         expect(r.code, diag(r)).toBe(0);
         expect(r.stdout, diag(r)).toContain("Usage:");
-        expect(r.stdout, diag(r)).toContain("--no-alt-screen");
         expect(r.stdout, diag(r)).toContain("--alt-screen");
-        expect(r.stdout, diag(r)).toContain("--no-mouse");
+        expect(r.stdout, diag(r)).not.toContain("--no-alt-screen");
         expect(r.stdout, diag(r)).toContain("--mouse");
+        expect(r.stdout, diag(r)).not.toContain("--no-mouse");
         expect(r.stdout, diag(r)).toContain("--computer-use");
         expect(r.stdout, diag(r)).toContain("--check-computer-use");
         expect(r.stdout, diag(r)).toContain("--check-update");

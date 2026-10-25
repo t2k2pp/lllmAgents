@@ -297,9 +297,7 @@ ${skillLines}`);
   if (llmProfiles) {
     const mainDesc = llmProfiles.main.description?.trim();
     const mainLine = `You (main LLM): ${llmProfiles.main.model} (${llmProfiles.main.providerType}${llmProfiles.main.baseUrl ? ` @ ${llmProfiles.main.baseUrl}` : ""})`;
-    const mainCharLine = mainDesc
-      ? `Traits: ${mainDesc}`
-      : `Traits: (unset — the user can set it via /model description <text>)`;
+    const mainCharLine = mainDesc ? `Traits: ${mainDesc}` : `Traits: (unset — the user can set it via /models → Edit)`;
 
     const sections: string[] = [`# Available LLM models`, mainLine, mainCharLine];
 
@@ -311,9 +309,7 @@ ${skillLines}`);
         : "  ← same machine (parallel launch contends for the GPU KV cache; sequential execution recommended)";
       sections.push("");
       sections.push(`Second LLM: ${s.model} (${s.providerType}${s.baseUrl ? ` @ ${s.baseUrl}` : ""})${parallelNote}`);
-      sections.push(
-        secDesc ? `Traits: ${secDesc}` : `Traits: (unset — the user can set it via /model second description <text>)`,
-      );
+      sections.push(secDesc ? `Traits: ${secDesc}` : `Traits: (unset — the user can set it via /models → Edit)`);
 
       sections.push("");
       sections.push(`Delegation guidance:`);

@@ -112,7 +112,7 @@ export class ClaudeCliProvider implements LLMProvider {
           `[対処] ツール付きエージェントループには次のいずれかを使ってください:\n` +
           `  - 'anthropic' プロバイダ (API キー必要、 ネイティブ tool 対応)\n` +
           `  - 'claude-agent-sdk' プロバイダ (subscription 再利用、 in-process MCP で tool 対応)\n` +
-          `  → /model setup claude-agent-sdk / /model second setup claude-agent-sdk で切替可能`,
+          `  → /models → Add new で Claude Agent SDK を追加して切替可能`,
       };
       return;
     }

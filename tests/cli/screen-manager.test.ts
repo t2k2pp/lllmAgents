@@ -182,26 +182,22 @@ describe("ScreenManager: TUI / classic stream 判定 (§6.1)", () => {
     expect(shouldUseAlternateScreen({ ...tty, enable: "1" })).toBe(true);
   });
 
-  it("--mouseは後方互換として全画面TUIも明示選択し、--no-mouseだけでは選択しない", () => {
+  it("--mouseは全画面TUIも明示選択する", () => {
     expect(requestsAlternateScreen(["--mouse"])).toBe(true);
     expect(requestsAlternateScreen(["--alt-screen"])).toBe(true);
-    expect(requestsAlternateScreen(["--no-mouse"])).toBe(false);
+    expect(requestsAlternateScreen([])).toBe(false);
   });
 
   it("LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1 なら passthrough", () => {
     expect(shouldUseAlternateScreen({ ...tty, disable: "1" })).toBe(false);
   });
 
-  it("--no-alt-screen なら passthrough", () => {
-    expect(shouldUseAlternateScreen({ ...tty, disableByCli: true })).toBe(false);
-  });
-
-  it("--no-alt-screen の明示指定はTERM=dumbでもclassic stream表示を選べる", () => {
-    expect(shouldUseAlternateScreen({ ...tty, term: "dumb", disableByCli: true })).toBe(false);
+  it("LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1 はTERM=dumbでも inline 表示を選べる", () => {
+    expect(shouldUseAlternateScreen({ ...tty, term: "dumb", enableByCli: true, disable: "1" })).toBe(false);
   });
 
   it("無効化指定は有効化指定より優先する", () => {
-    expect(shouldUseAlternateScreen({ ...tty, enableByCli: true, disableByCli: true })).toBe(false);
+    expect(shouldUseAlternateScreen({ ...tty, enableByCli: true, disable: "1" })).toBe(false);
     expect(shouldUseAlternateScreen({ ...tty, enable: "1", disable: "1" })).toBe(false);
   });
 
@@ -215,19 +211,19 @@ describe("ScreenManager: TUI / classic stream 判定 (§6.1)", () => {
 
   it("明示した全画面TUIでTERM=dumbなら理由を示してfail-fastする", () => {
     expect(() => shouldUseAlternateScreen({ ...tty, term: "dumb", enableByCli: true })).toThrow(
-      /TERM=dumb.*--no-alt-screen/,
+      /TERM=dumb.*LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1/,
     );
   });
 
   it("明示した全画面TUIでTERMが無いPOSIX TTYならfail-fastする", () => {
     expect(() => shouldUseAlternateScreen({ isTTY: true, platform: "linux", enableByCli: true })).toThrow(
-      /TERMが未設定.*--no-alt-screen/,
+      /TERMが未設定.*LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1/,
     );
   });
 
   it("明示した全画面TUIでWindows端末能力が不明ならfail-fastする", () => {
     expect(() => shouldUseAlternateScreen({ isTTY: true, platform: "win32", enableByCli: true })).toThrow(
-      /ANSI\/Alternate Screen対応を判定できません.*--no-alt-screen/,
+      /ANSI\/Alternate Screen対応を判定できません.*LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1/,
     );
   });
 
@@ -255,10 +251,9 @@ describe("ScreenManager: copy-friendly mouse mode", () => {
     expect(shouldEnableMouseTracking({ enable: "1" })).toBe(true);
   });
 
-  it("--no-mouse / LLLMAGENT_DISABLE_MOUSE=1は有効化指定より優先する", () => {
-    expect(shouldEnableMouseTracking({ disableByCli: true })).toBe(false);
+  it("LLLMAGENT_DISABLE_MOUSE=1は有効化指定より優先する", () => {
     expect(shouldEnableMouseTracking({ disable: "1" })).toBe(false);
-    expect(shouldEnableMouseTracking({ enableByCli: true, disableByCli: true })).toBe(false);
+    expect(shouldEnableMouseTracking({ enableByCli: true, disable: "1" })).toBe(false);
   });
 
   it("mouse offでもAlternate ScreenとPgUp/PgDnを維持する", () => {

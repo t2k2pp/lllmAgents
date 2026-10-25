@@ -12,7 +12,7 @@ export class VisionService {
   ) {}
 
   /**
-   * REPL から /model vision setup 等で vision LLM を差し替えた際に呼ぶ。
+   * REPL から /models (Add new / Set as vision) で vision LLM を差し替えた際に呼ぶ。
    * (docs/model-registry.md Phase 5)
    */
   setProvider(provider: LLMProvider, model: string): void {

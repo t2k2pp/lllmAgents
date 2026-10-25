@@ -27,8 +27,8 @@ interface CommandDef {
 
 const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/help", description: "ヘルプ表示" },
-  { command: "/quit", description: "終了" },
   { command: "/exit", description: "終了" },
+  { command: "/quit", description: "終了 (/exit の別名)" },
   { command: "/clear", description: "会話履歴クリア (現在の Room)" },
   { command: "/room", description: "Room 一覧 (A/B/C の状態・現在地)" },
   { command: "/room A", description: "REPL を Room A へ移動" },
@@ -69,55 +69,33 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   },
   { command: "/stream", description: "ストリーミング表示モードの確認/切り替え (引数なしで対話 toggle)" },
   // ── Model / Second LLM コマンド (docs/model-registry.md) ──
-  // Phase 3 (2026-05-27): 個別編集系を /models Edit wizard に集約した。
-  // 2026-06-21: discoverability 優先で main-slot の編集系サブコマンドを補完に復活
-  //   （second/vision は description 等が補完に出るのに main だけ非対称だった漏れの解消）。
-  //   - dispatcher (repl.ts の /model ハンドラ) は元から全サブコマンドを処理している。
-  //   - 補完に出すのは現在値表示も兼ねる編集系: description / temperature / top_p / top_k /
-  //     rep_penalty / host / port / provider（bare で現在値、引数で更新）。
-  //   - 個別編集をまとめて行う集約 UI は引き続き /models Edit。
-  //   - /model setup <provider> の各バリアントは /models Add new... の wizard へ集約 → 補完から除外。
+  // 新規追加は /models Add new、 temperature 等・description の編集は /models Edit だけ
+  // (2026-10-25: /model setup 系・/model description・/model temperature 等の個別編集を削除。 docs/external_design.md §2.2)。
+  // /model に残るのは状態表示・モデル選択・接続先 (host / port / provider / context) の変更。
   { command: "/model", description: "main / second / 他 slot の状態を 1 画面で表示 (詳細編集は /models)" },
   { command: "/model list", description: "main slot の利用可能モデル一覧から選択" },
   { command: "/model apply", description: "main slot の設定値を実行中に反映 (設定と実行中がズレた時)" },
   { command: "/model context", description: "main slot のコンテキスト長を変更 (例: 128k)", needsArg: true },
-  { command: "/model description", description: "main slot の特性説明 (サブエージェント選択の材料)", needsArg: true },
-  { command: "/model temperature", description: "main slot の temperature (0〜2、推論重視は低め)", needsArg: true },
-  { command: "/model top_p", description: "main slot の top_p (0〜1、1.0で無効化)", needsArg: true },
-  { command: "/model top_k", description: "main slot の top_k (整数、Ollama系で有効)", needsArg: true },
-  {
-    command: "/model rep_penalty",
-    description: "main slot の repetition penalty (1.0で中立、>1で繰り返し抑制)",
-    needsArg: true,
-  },
   { command: "/model host", description: "main slot の接続先ホスト/IP を変更", needsArg: true },
   { command: "/model port", description: "main slot の接続先ポートを変更", needsArg: true },
   {
     command: "/model provider",
-    description: "main slot のプロバイダ種別を変更 (ローカル系。クラウドは setup へ誘導)",
+    description: "main slot のプロバイダ種別を変更 (ローカル系。クラウドは /models Add new へ誘導)",
     needsArg: true,
   },
-  { command: "/model setup", description: "main slot の新規セットアップ wizard (プロバイダ選択は wizard 内で)" },
   // /model second 系 (docs/model-registry.md §4.1)
   { command: "/model second", description: "second slot の状態表示・サブコマンド" },
   { command: "/model second enable", description: "second slot を有効化" },
   { command: "/model second disable", description: "second slot を無効化" },
-  { command: "/model second setup", description: "second slot の新規セットアップ wizard" },
   { command: "/model second list", description: "second slot の利用可能モデル一覧から選択" },
+  { command: "/model second model", description: "second slot のモデルを名前で直接指定", needsArg: true },
   { command: "/model second context", description: "second slot のコンテキスト長を変更 (例: 128k)", needsArg: true },
   { command: "/model second host", description: "second slot の接続先ホスト/IP を変更", needsArg: true },
   { command: "/model second port", description: "second slot の接続先ポートを変更", needsArg: true },
-  {
-    command: "/model second description",
-    description: "second slot の特性説明 (サブエージェント選択の材料)",
-    needsArg: true,
-  },
   // /model vision 系 (docs/model-registry.md Phase 5) — 画像認識を含むマルチモーダル言語生成 AI を指定
   { command: "/model vision", description: "vision slot の状態表示 (画像認識を含むマルチモーダル言語生成 AI)" },
-  { command: "/model vision setup", description: "vision slot の新規セットアップ wizard" },
   { command: "/model vision list", description: "vision slot の利用可能モデル一覧から選択 (vision 対応モデル優先)" },
   { command: "/model vision context", description: "vision slot のコンテキスト長を変更 (例: 128k)", needsArg: true },
-  { command: "/model vision description", description: "vision slot の特性説明", needsArg: true },
   { command: "/model vision clear", description: "vision slot を解除 (main LLM が画像を担当)" },
   { command: "/todo", description: "タスクリスト (active のみ / all=全件 / archive=完了済み削除)" },
   {
@@ -219,7 +197,6 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/integrations", description: "外部統合 (Discord / Slack / Chatlog / Search) を 1 画面で設定" },
   { command: "/loop", description: "プロンプトを定期実行 (例: /loop 5m /pr-review)", needsArg: true },
   { command: "/loop status", description: "アクティブなループ一覧 + 停止 picker" },
-  { command: "/loop stop", description: "ループを停止 (id 指定 / all または省略で全停止)", needsArg: true },
   // /permission: 権限の設定画面 (設定方法はこの画面だけ。 docs/archive/todo-legacy-ways-cleanup.md T3)
   { command: "/permission", description: "権限の設定画面 (権限ルール。 すべての面 / CLI・Discord・Slack ごと)" },
 ];

@@ -68,7 +68,7 @@ interface PendingComponent {
   resolve: (value: string) => void;
 }
 
-export class DiscordInteractionServer implements InteractionBridge {
+export class DiscordBot implements InteractionBridge {
   private gateway: DiscordGatewayClient | null = null;
   private current: ConversationContext | null = null;
   /** ボタン押下 / Modal 送信待ち: nonce → resolver */
@@ -236,7 +236,7 @@ export class DiscordInteractionServer implements InteractionBridge {
       return;
     }
 
-    const userId = DiscordInteractionServer.extractUserId(interaction);
+    const userId = DiscordBot.extractUserId(interaction);
     if (!this.isUserAllowed(userId)) {
       const uname = interaction.member?.user?.username ?? interaction.user?.username ?? undefined;
       this.recordPendingUser(userId, uname);
@@ -393,7 +393,7 @@ export class DiscordInteractionServer implements InteractionBridge {
       return;
     }
 
-    const clickerId = DiscordInteractionServer.extractUserId(interaction);
+    const clickerId = DiscordBot.extractUserId(interaction);
     if (clickerId !== pending.requesterId) {
       await this.respondInteraction(interaction, {
         type: 4,
@@ -472,7 +472,7 @@ export class DiscordInteractionServer implements InteractionBridge {
       return;
     }
 
-    const submitterId = DiscordInteractionServer.extractUserId(interaction);
+    const submitterId = DiscordBot.extractUserId(interaction);
     if (submitterId !== pending.requesterId) {
       await this.respondInteraction(interaction, {
         type: 4,

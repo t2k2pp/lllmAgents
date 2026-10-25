@@ -15,7 +15,6 @@ import {
   filterRegistryForAncestors,
   type AncestorTypes,
 } from "./delegation-context.js";
-import { HarnessState, enrichToolResult } from "./harness-intervention.js";
 import { formatSelfCheck, SUB_AGENT_ACTION_HINT } from "./self-check-messages.js";
 import { resolveModelRef } from "../config/model-resolver.js";
 import { getSlot } from "../config/model-registry.js";
@@ -361,9 +360,6 @@ export class SubAgent {
     // ID-012 (2026-04-30): 偽ユーザー発言の代わりに [自己点検] フォーマットを使う際、
     // 委任プロンプトを intent として渡すための保持
     const delegatePrompt = prompt;
-    // D8: SubAgent もメイン / セカンドと同じハーネス介入レイヤを通す。
-    // 壁ドンループ警告 / Read→Edit 契約 / 連続委任ガード / 旧エラーガイダンスが効く。
-    const harnessState = new HarnessState();
     for (let iteration = 0; iteration < this.iterationLimit; iteration++) {
       this.iterationsStarted = iteration + 1;
       if (this.aborted) {
@@ -436,9 +432,7 @@ export class SubAgent {
             }
             const result = await this.toolExecutor.execute(toolCall);
             const raw = result.success ? (result.output ?? "") : `Error: ${result.error ?? ""}\n${result.output ?? ""}`;
-            // D8: ハーネス介入レイヤを通す (壁ドンループ警告 / Read→Edit 契約 等)
-            const enriched = enrichToolResult(toolCall, result.success, raw, harnessState);
-            this.history.addToolResult(toolCall.id, enriched);
+            this.history.addToolResult(toolCall.id, raw);
           }
           if (this.aborted) {
             finalResult = CANCELLED_RESULT;
@@ -502,8 +496,7 @@ export class SubAgent {
               const raw = result.success
                 ? (result.output ?? "")
                 : `Error: ${result.error ?? ""}\n${result.output ?? ""}`;
-              const enriched = enrichToolResult(syntheticCall, result.success, raw, harnessState);
-              this.history.addToolResult(syntheticCall.id, enriched);
+              this.history.addToolResult(syntheticCall.id, raw);
             }
             // ID-012: 偽ユーザー発言ではなく [自己点検] フォーマットでハーネス通知を明示
             this.history.addUserMessage(

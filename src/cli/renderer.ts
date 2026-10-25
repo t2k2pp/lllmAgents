@@ -24,7 +24,7 @@ export function displayWelcome(
   }
   console.log(chalk.dim(`  Context: ${ctxLabel} tokens | Skills: ${skillCount}`));
   console.log(chalk.dim(`  CWD: ${process.cwd()}`));
-  console.log(chalk.dim(`  Type /help for commands, /quit to exit.`));
+  console.log(chalk.dim(`  Type /help for commands, /exit to exit.`));
   if (screen.isAlternate()) {
     console.log(
       chalk.dim(
@@ -58,7 +58,7 @@ export interface RegistryHelpEntry {
  */
 export const BUILTIN_HELP_ENTRIES: ReadonlyArray<{ usage: string; summary: string }> = [
   { usage: "/help", summary: "このヘルプを表示" },
-  { usage: "/quit", summary: "終了 (/exit も同じ)" },
+  { usage: "/exit", summary: "終了 (/quit も同じ)" },
   { usage: "/clear", summary: "会話履歴をクリア" },
   { usage: "/mcp", summary: "MCP サーバ管理 (status/on/off/reload/toggle <name>)" },
   { usage: "/skills", summary: "スキル管理 (引数なし=一覧。 status/on/off/reload/toggle <name>)" },
@@ -66,18 +66,15 @@ export const BUILTIN_HELP_ENTRIES: ReadonlyArray<{ usage: string; summary: strin
   { usage: "/model <name>", summary: "メインLLM のモデルを切り替え" },
   { usage: "/model list", summary: "利用可能なモデル一覧から選択" },
   { usage: "/model apply", summary: "設定値を実行中に反映 (設定と実行中がズレている時)" },
-  { usage: "/model setup", summary: "メインLLM をウィザードで再設定" },
   { usage: "/model host", summary: "接続先のホスト or IP を変更 (ポートは保持)" },
   { usage: "/model port", summary: "接続先のポート番号を変更" },
   { usage: "/model provider", summary: "プロバイダー (ollama/vllm等) を変更" },
   { usage: "/model context", summary: "コンテキスト長を変更 (例: 128k)" },
-  { usage: "/model description", summary: "モデル特性説明" },
-  { usage: "/model temperature", summary: "温度設定 (top_p/top_k/rep_penalty も同様、 各コマンドで)" },
   {
     usage: "/model second",
-    summary: "セカンドLLM 管理 (setup/enable/disable/list/context/host/port/provider/description 等)",
+    summary: "セカンドLLM 管理 (enable/disable/list/model/context/host/port/provider)",
   },
-  { usage: "/model vision", summary: "Vision LLM 管理 (setup/list/context/description/clear)" },
+  { usage: "/model vision", summary: "Vision LLM 管理 (list/context/clear)" },
   { usage: "/swap", summary: "メインLLM ⇔ セカンドLLM を入れ替え (-y で確認スキップ)" },
   { usage: "/models", summary: "Model Registry: 登録済モデル一覧 → main/second に設定・編集・複製・削除・追加" },
   { usage: "/integrations", summary: "外部サービス連携の設定 (Discord / Slack / 会話ログ / Web検索)" },
@@ -115,7 +112,6 @@ export const BUILTIN_HELP_ENTRIES: ReadonlyArray<{ usage: string; summary: strin
   },
   { usage: "/loop <間隔> <プロンプト>", summary: "指定間隔でプロンプトを繰り返し実行" },
   { usage: "/loop status", summary: "アクティブなループ一覧 + 停止 picker" },
-  { usage: "/loop stop [id|all]", summary: "ループを停止" },
 ];
 
 export function displayHelp(skills?: SkillSummary[], registryEntries?: RegistryHelpEntry[]): void {

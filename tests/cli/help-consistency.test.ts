@@ -32,8 +32,8 @@ describe("/help と補完の一致", () => {
 
   it("補完に出るコマンドはすべてヘルプに載る", () => {
     const help = helpRoots();
-    // /exit は /quit と同じ終了コマンドとして /quit の行に併記している
-    help.add("/exit");
+    // /quit は /exit の別名 (Claude Code と同じ) として /exit の行に併記している
+    help.add("/quit");
     for (const r of completionRoots()) {
       expect(help.has(r), `${r} がヘルプに無い`).toBe(true);
     }

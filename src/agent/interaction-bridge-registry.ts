@@ -5,7 +5,7 @@
  * goal-slot / todo-write と同じ思想で、 PermissionManager や ask_user ツールへ
  * bridge をコンストラクタ経由で引き回さずに参照できるようにする。
  *
- * SlackBot / DiscordInteractionServer が start() で自分を登録し、 stop() で解除する。
+ * SlackBot / DiscordBot が start() で自分を登録し、 stop() で解除する。
  */
 
 import type { RequestSource } from "../security/permission-manager.js";

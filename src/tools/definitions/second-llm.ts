@@ -40,9 +40,9 @@ function categoryGuidance(category: SecondLLMFailureCategory): string {
     case "RATE_LIMIT":
       return "TPM/RPM クォータ超過。 数十秒〜数分待ってリトライが第一選択。 連続発生なら別モデルへの切替を検討。";
     case "AUTH":
-      return "API Key が無効/期限切れ/権限不足。 /model second で現在の保存形式を確認、 /model second setup azure-* で再設定。";
+      return "API Key が無効/期限切れ/権限不足。 /model second で現在の保存形式を確認、 /models → Add new で再設定。";
     case "NOT_FOUND":
-      return "endpoint URL の path / deployment 名 / model 名が不一致。 Azure Portal で正確な値を確認、 /model second setup で再設定。";
+      return "endpoint URL の path / deployment 名 / model 名が不一致。 Azure Portal で正確な値を確認、 /models → Add new で再設定。";
     case "BAD_REQUEST":
       return "リクエスト形式の不適合。 model 名や endpoint パスが古い API バージョンの可能性。 /model second で確認。";
     case "SERVER_ERROR":
@@ -81,7 +81,7 @@ function buildSecondLLMFailureError(toolName: string, e: unknown): string {
     `失敗してもメインが独断で経路変更 (= 自分でやる) してはいけない。 必ず ask_user で 3 択を提示:\n` +
     `  (a) リトライする (${category === "RATE_LIMIT" || category === "TIMEOUT" || category === "SERVER_ERROR" ? "推奨" : "効果薄"})\n` +
     `  (b) メイン側で実行 (ユーザーが許可する場合のみ)\n` +
-    `  (c) モデル設定を見直す (/model second / /model second setup azure-* 等)\n` +
+    `  (c) モデル設定を見直す (/model second / /models → Add new 等)\n` +
     `[禁止] 経路を自分で選んだ場合も、失敗をメイン側の実行や別モデルで自動代替してはいけない。 ` +
     `同じ経路を再試行するか、経路変更前に ask_user で許可を得る。`
   );

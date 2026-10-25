@@ -6,7 +6,7 @@
  * 設計: docs/discord-gateway-design.md
  *
  * 本クライアントが扱うのは「接続を維持して interaction を受け取る」ことだけ。
- * interaction への応答 (callback / follow-up) は呼び出し側 (interaction-server.ts) が
+ * interaction への応答 (callback / follow-up) は呼び出し側 (discord-bot.ts) が
  * REST API で行う。
  *
  * 依存: undici の WebSocket (既存の直接依存。新規パッケージ追加なし)

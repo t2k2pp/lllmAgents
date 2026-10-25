@@ -82,7 +82,7 @@ export async function runSetupWizard(): Promise<Config> {
 
 /**
  * ローカル系LLM (ollama/lmstudio/llamacpp/vllm) のセットアップフロー。
- * REPL `/model setup` と初回 wizard の両方から呼ばれる。
+ * REPL の `/models` Add new と初回 wizard の両方から呼ばれる。
  * 失敗時は throw する。 呼び出し側で catch してメッセージ表示すること。
  *
  * クラウド系 (azure-* / vertex-ai) はこの関数の対象外。 REPL 側の setupAzureLLM 等を使うこと。
@@ -184,7 +184,7 @@ export async function runLocalLLMSetup(opts: LocalLLMSetupOptions = {}): Promise
   console.log(chalk.dim("\n  モデルの特性を記述しておくと、サブエージェント委任時の判断材料になります。"));
   console.log(chalk.dim('  例: "MoE 32B。日本語堅牢で推論・企画に強い。中速"'));
   console.log(chalk.dim('      "Dense 13B。高速・コーディング特化・日本語苦手"'));
-  console.log(chalk.dim("  (空のままEnterで後から /model description で設定可)"));
+  console.log(chalk.dim("  (空のままEnterで後から /models → Edit で設定可)"));
   const { description } = await withPrompt(() =>
     inquirer.prompt<{ description: string }>([
       {

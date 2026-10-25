@@ -2,7 +2,6 @@ import chalk from "chalk";
 import { createSpinner } from "../utils/spinner.js";
 import { AgentEventBus, type TaskOutcome } from "./agent-events.js";
 import { getInteractionBridge } from "./interaction-bridge-registry.js";
-import { HarnessState, enrichToolResult } from "./harness-intervention.js";
 import { formatSelfCheck, rephraseUserIntent } from "./self-check-messages.js";
 import { isLikelyPermanentToolError } from "./tool-error-classification.js";
 import { globalTokenTracker } from "../cost/token-tracker.js";
@@ -282,8 +281,6 @@ export class AgentLoop {
       this.notice("info", line);
     },
   });
-  /** Phase 5 第2ラウンド: ハーネス介入の状態 (file_edit/壁ドン/Read→Edit/連続委任) を一元管理 */
-  private harnessState = new HarnessState();
   /**
    * Phase 5 第10ラウンド: 「対話必須」 ロック。 統合された 1 つの状態で扱う。
    *
@@ -421,7 +418,7 @@ export class AgentLoop {
   } | null = null;
   /** Evaluator（成果物の独立レビュー） */
   private evaluator: Evaluator;
-  /** LLMプロファイル情報（システムプロンプト再構築用。/model description 等の更新時に差し替え可） */
+  /** LLMプロファイル情報（システムプロンプト再構築用。/models Edit 等の更新時に差し替え可） */
   private llmProfiles?: LLMProfiles;
   /** システムプロンプト再構築に必要な構築時パラメータ (opt-in 入力圧縮の再ビルド用に保持) */
   private builtSkills?: SkillInfo[];
@@ -3274,11 +3271,6 @@ export class AgentLoop {
       resultContent += "\n\n" + guide;
     }
 
-    // Phase 5 第2ラウンド: ハーネス介入レイヤ (共通モジュール)。
-    // file_edit 連続失敗 / 壁ドンループ / Read→Edit 契約 / 連続委任ガード / 旧エラーガイダンス
-    // を一括で適用。
-    resultContent = enrichToolResult(toolCall, result.success, resultContent, this.harnessState);
-
     // Phase D-3: T3 でツール失敗時、 該当エラーパターン用の failure few-shot を 1 度だけ末尾に注入。
     // (toolName, errorPattern) ごとに 1 度のみ → 重複 spam 抑制。 D-2 (stuck-loop) より早く発動する。
     if (!result.success) {
@@ -3413,9 +3405,6 @@ export class AgentLoop {
           resultContent += "\n\n" + guide;
         }
 
-        // Phase 5 第2ラウンド: ハーネス介入レイヤ (並列ルートでも適用)
-        resultContent = enrichToolResult(toolCall, result.success, resultContent, this.harnessState);
-
         // Phase D-3: 並列ルートでも T3 失敗時の failure few-shot を注入
         if (!result.success) {
           const failGuide = getFailureGuide(
@@ -3534,7 +3523,7 @@ export class AgentLoop {
 
   /**
    * LLMプロファイル（description等）を差し替えてシステムプロンプトを再構築する。
-   * REPL で /model description / /model second description を実行した直後に呼ぶと、
+   * REPL の /models Edit で description を変えた直後に呼ぶと、
    * 次ターン以降のLLM呼び出しで新しい特性説明が反映される。
    */
   updateLLMProfiles(profiles: LLMProfiles, skills?: SkillInfo[], hasSecondLLM?: boolean, hasObsidian?: boolean): void {
@@ -4425,8 +4414,6 @@ export async function* abortableIterator<T>(gen: AsyncGenerator<T>, isAborted: (
     if (!finished) cleanup();
   }
 }
-
-// 旧版 enrichToolResult は src/agent/harness-intervention.ts に統合済 (Phase 5 第2ラウンド)。
 
 /** コードファイル（bash検証が意味を持つファイル）かどうかを判定する */
 function isCodeFile(filePath: string): boolean {

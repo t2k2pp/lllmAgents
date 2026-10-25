@@ -8,7 +8,7 @@ import { LLMLogger } from "../agent/llm-logger.js";
 import { resolveCapability } from "../agent/capability-tier.js";
 import { loadConfig } from "../config/config-manager.js";
 import { getOpsLogger } from "../utils/ops-logger.js";
-import { HarnessState, enrichToolResult, buildSubAgentStrategyPrompt } from "../agent/harness-intervention.js";
+import { buildSubAgentStrategyPrompt } from "../agent/harness-intervention.js";
 import type { SecondLLMConfig, SecondLLMEndpoint } from "../config/types.js";
 import type { LLMProvider, Message, ToolCall } from "../providers/base-provider.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
@@ -28,7 +28,7 @@ const EVALUATOR_ALLOWED_TOOLS = ["file_read", "grep", "glob"];
 // ─── サンプリング・ループ上限の既定値 (ID-020 / ID-021: 2026-04-30 切り出し) ───
 //
 // 優先順位:
-//   1. endpoint.temperature 等 (ユーザーが /model second temperature で設定した値)
+//   1. endpoint.temperature 等 (ユーザーが /models Edit で設定した値)
 //   2. config.secondLLM.samplingDefaults (config.json で用途別に指定された値)
 //   3. 下記の製品既定値
 //
@@ -132,7 +132,7 @@ export class SecondLLMManager {
    * 用途 (consult/agent/evaluator) のサンプリングパラメータを解決する。
    *
    * 優先順位:
-   *   1. endpoint.temperature 等 (= /model second temperature 等で個別設定された値)
+   *   1. endpoint.temperature 等 (= /models Edit で個別設定された値)
    *   2. config.samplingDefaults.{consultTemperature|agentTemperature|evaluatorTemperature}
    *   3. 製品既定値 (DEFAULT_TEMPERATURE_*)
    *
@@ -296,10 +296,6 @@ export class SecondLLMManager {
       ];
 
       const toolExecutor = new ToolExecutor(this.toolRegistry, this.permissions, undefined, selfAncestors);
-      // Phase 5 第2ラウンド: セカンドLLM 自身もハーネス介入レイヤを通す。
-      // メインから渡される警告 (連続委任警告等) は 既にメイン側で挿入済の prompt に乗ってくるが、
-      // セカンド内での失敗 (壁ドンループ・盲目編集) も検出するため independent な state を持つ。
-      const harnessState = new HarnessState();
       let iteration = 0;
       const maxIterations = this.maxAgentIterations;
 
@@ -379,10 +375,7 @@ export class SecondLLMManager {
             try {
               const res = await toolExecutor.execute(tc);
               const raw = res.success ? (res.output ?? "") : `Error: ${res.error ?? ""}\n${res.output ?? ""}`;
-              // Phase 5 第2ラウンド: セカンド側でも介入レイヤを通す。
-              // 壁ドンループ警告 / Read→Edit 契約 / 連続委任ガード / 旧エラーガイダンスを適用。
-              const enriched = enrichToolResult(tc, res.success, raw, harnessState);
-              messages.push({ role: "tool", content: enriched, tool_call_id: tc.id });
+              messages.push({ role: "tool", content: raw, tool_call_id: tc.id });
             } catch (e) {
               messages.push({ role: "tool", content: `Error: ${String(e)}`, tool_call_id: tc.id });
             }
@@ -435,8 +428,6 @@ export class SecondLLMManager {
       ];
 
       const toolExecutor = new ToolExecutor(this.toolRegistry, this.permissions);
-      // Phase 5 第2ラウンド: Evaluator にもハーネス介入を適用 (壁ドンループ検出等)
-      const harnessState = new HarnessState();
       let iteration = 0;
       const maxIter = this.resolveEvaluatorIterations(params.maxIterations);
 
@@ -516,9 +507,7 @@ export class SecondLLMManager {
             try {
               const res = await toolExecutor.execute(tc);
               const raw = res.success ? (res.output ?? "") : `Error: ${res.error ?? ""}\n${res.output ?? ""}`;
-              // Phase 5 第2ラウンド: Evaluator も介入レイヤを通す
-              const enriched = enrichToolResult(tc, res.success, raw, harnessState);
-              messages.push({ role: "tool", content: enriched, tool_call_id: tc.id });
+              messages.push({ role: "tool", content: raw, tool_call_id: tc.id });
             } catch (e) {
               messages.push({ role: "tool", content: `Error: ${String(e)}`, tool_call_id: tc.id });
             }

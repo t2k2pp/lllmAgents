@@ -17,12 +17,11 @@
  *      やらない」 と言うのは正当な境界線
  *   3. **後付け警告テキスト挿入は全廃**。 監視官的介入をやめてモデルの判断を信用する
  *
- * 既存の seam (HarnessState, enrichToolResult) は no-op として残し、 将来 hard gate を
- * 追加する際の足場として再利用可能にしておく。 ただしパターン検出による警告挿入は
- * 一切行わない。
+ * ツール結果を後から書き換える足場 (HarnessState / enrichToolResult) は第8ラウンド以降 no-op の
+ * まま使われなかったため 2026-10-25 に削除した。 関門はツール自身の引数検査で作る。
+ * 本ファイルに残るのはサブエージェント / セカンドLLM 用の system prompt (buildSubAgentStrategyPrompt) だけ。
  */
 
-import type { ToolCall } from "../providers/base-provider.js";
 import type { Tier } from "./capability-tier.js";
 import {
   buildRegisterRules,
@@ -34,31 +33,6 @@ import {
   buildToolUsageRules,
   buildSpecFileRules,
 } from "./shared-principles.js";
-
-/**
- * ハーネス介入の状態スロット。 第8ラウンドで監視官的介入を全廃したため、
- * 現状は何も保持しない空のクラス。 将来的に hard gate (Read→Edit のセッション内
- * Read 必須化等) を実装する際にフィールドを追加する余地として残す。
- */
-export class HarnessState {
-  // 意図的に空。 監視官状態を持たない。
-}
-
-/**
- * ツール実行結果を返す seam。 第8ラウンド以降は no-op (rawContent をそのまま返す)。
- *
- * ハーネスは tool_result に後付けでテキストを混ぜ込まない。 モデルへの原則伝達は
- * system-prompt / tool description / sub-agent prompt で行い、 構造的境界は tool 側の
- * hard gate (引数バリデーション等) で表現する。
- */
-export function enrichToolResult(
-  _toolCall: ToolCall,
-  _success: boolean,
-  rawContent: string,
-  _state: HarnessState,
-): string {
-  return rawContent;
-}
 
 /**
  * セカンドLLM (sub-agent) 用のシステムプロンプト。
