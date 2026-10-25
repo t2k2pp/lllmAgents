@@ -6,6 +6,7 @@ import type { Message } from "../providers/base-provider.js";
 import type { TodoItem } from "../tools/definitions/todo-write.js";
 import type { GoalDefinition, EvaluationRecord } from "./goal-slot.js";
 import type { RoomId } from "./room-types.js";
+import type { RequestGrowthSnapshot } from "./context-budget.js";
 import { parseDurableRunCheckpoint } from "./durable-run-checkpoint.js";
 
 const SESSION_DIR = path.join(os.homedir(), ".localllm", "sessions");
@@ -94,6 +95,11 @@ export interface SessionData {
   runCheckpoint?: unknown;
   /** Codex/Claude Code同様、resume時に画面へ復元する過去の標準出力。 */
   terminalTranscript?: SessionTerminalTranscript;
+  /**
+   * 依頼 1 件ごとの増分 G の記録 (docs/context-reduction-redesign.md §4.5)。 再開後も G に使う。
+   * 戻すときは RequestGrowthTracker.restore() で形を検査する。 この欄の無い古いセッションは空の記録から始める。
+   */
+  requestGrowth?: RequestGrowthSnapshot;
   // 注: paradigm モード (forward / goal-seek) は永続化しない。 goal-seek は必ず goal slot を
   // 伴うため、 restoreSession() が goal の有無からモードを一意に導出する (単一情報源)。
   // docs/room-model-design.md §10-3。
@@ -140,6 +146,8 @@ export function forkSession(source: SessionData): SessionData {
   fork.goal = source.goal === undefined ? undefined : structuredClone(source.goal);
   fork.terminalTranscript =
     source.terminalTranscript === undefined ? undefined : structuredClone(source.terminalTranscript);
+  // 増分 G の記録は会話の進み方の記録なので、 履歴と一緒に分岐へ引き継ぐ
+  fork.requestGrowth = source.requestGrowth === undefined ? undefined : structuredClone(source.requestGrowth);
   // 実行制御状態を別sessionへ複製すると、同じtool/APIを二重再開しうるためforkへは引き継がない。
   fork.meta.messageCount = fork.messages.length;
   return fork;

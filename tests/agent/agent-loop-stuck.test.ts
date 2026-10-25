@@ -12,7 +12,7 @@ function makeLoop(): AgentLoop {
     blockedCommands: [],
     rules: { allow: [], deny: [], ask: [] },
   };
-  return new AgentLoop(provider, "test-model-7b", new ToolRegistry(), new PermissionManager(security), 8192);
+  return new AgentLoop(provider, "test-model-7b", new ToolRegistry(), new PermissionManager(security), 128_000);
 }
 
 interface StuckLoopSubject {

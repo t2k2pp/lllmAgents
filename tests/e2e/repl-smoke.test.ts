@@ -137,10 +137,10 @@ beforeAll(async () => {
           providerType: "vllm",
           baseUrl,
           model: "mock-model",
-          contextWindow: 32768,
+          contextWindow: 262_144,
         },
         modelCapabilities: {
-          "mock-model": { tier: "T2", contextWindow: 32768 },
+          "mock-model": { tier: "T2", contextWindow: 262_144 },
         },
       },
       null,

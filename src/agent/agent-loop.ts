@@ -40,6 +40,8 @@ import {
   extractModelCandidates,
   type CapabilityProfile,
 } from "./capability-tier.js";
+import { checkContextWindowFits, formatContextWindowTooSmall } from "./context-budget.js";
+import { estimateMessageTokens, estimateToolDefinitionTokens } from "./token-counter.js";
 import { normalizeToolCalls } from "./tool-call-normalizer.js";
 import { classifyTaskComplexity, recommendTier, explainRecommendation } from "./task-complexity.js";
 import { buildSystemPrompt, type SkillInfo, type LLMProfiles, type SystemPromptOverrides } from "./system-prompt.js";
@@ -503,6 +505,8 @@ export class AgentLoop {
     // Goal / ToDo は system ではなく、 変化時に末尾へ添付する状態通知になる (docs/prompt-prefix-stability.md)。
     this.history = new MessageHistory(systemPrompt);
     this.history.setSystemPromptComposer((base) => this.composeQuasiSystemPrompt(base));
+    // 整理しても次の呼び出しが入らない枠なら、 ここで理由と必要量を示して止める (docs/context-reduction-redesign.md §6.3)
+    this.assertContextWindowFits(this.capability, contextWindow, model);
     // Phase C-2 + D-4: 圧縮閾値と keepRecentMessages は tier 由来で設定する。
     // (ユーザが明示的に変えたい場合は config.json modelCapabilities.<modelId>.* で override 可能)
     // 縮約手段 (圧縮 / 忘却) は config.context から。 未設定なら hybrid
@@ -3855,16 +3859,22 @@ export class AgentLoop {
   }
 
   setContextWindow(value: number): void {
+    // Phase A-3: ctx 窓変更でヒューリスティック判定の結果が変わり得るので再解決 (override 反映)
+    const capability = resolveCapability(this.model, value, this.getCapabilityOverride(this.model));
+    // 枠に入らない値なら何も変えずに止める (§6.3)
+    this.assertContextWindowFits(capability, value, this.model);
     this.contextWindow = value;
     this.contextManager.setContextWindow(value);
-    // Phase A-3: ctx 窓変更でヒューリスティック判定の結果が変わり得るので再解決 (override 反映)
-    this.capability = resolveCapability(this.model, value, this.getCapabilityOverride(this.model));
+    this.capability = capability;
     // Phase C-2 + D-4: 圧縮閾値・keepRecentMessages も追従
     this.contextManager.setThreshold(this.capability.compressionThreshold);
     this.contextManager.setKeepRecentMessages(this.capability.keepRecentMessages);
   }
 
   setModel(model: string): void {
+    // Phase A-3: model 切替で能力ティアを再解決 (override 反映)。 枠に入らなければ何も変えずに止める (§6.3)
+    const capability = resolveCapability(model, this.contextWindow, this.getCapabilityOverride(model));
+    this.assertContextWindowFits(capability, this.contextWindow, model);
     this.model = model;
     // /model <name> は provider を作り直さず model だけ即時反映する経路。
     // liveBinding を更新しないと、実際には切替済みなのに毎ターン「未反映」と誤警告する。
@@ -3876,8 +3886,7 @@ export class AgentLoop {
     this.contextManager.setProvider(this.provider, model);
     this.intentClassifier.setProvider(this.provider, model);
     this.evaluator.setMainProvider(this.provider, model);
-    // Phase A-3: model 切替で能力ティアを再解決 (override 反映)
-    this.capability = resolveCapability(model, this.contextWindow, this.getCapabilityOverride(model));
+    this.capability = capability;
     // Phase C-2 + D-4: 圧縮閾値・keepRecentMessages も tier 切替に追従
     this.contextManager.setThreshold(this.capability.compressionThreshold);
     this.contextManager.setKeepRecentMessages(this.capability.keepRecentMessages);
@@ -3889,9 +3898,21 @@ export class AgentLoop {
    * 接続先を実行時に変更する際に呼ぶ。modelも同時に渡せば一括反映される。
    */
   setProvider(provider: LLMProvider, model?: string, endpoint?: LLMEndpoint): void {
+    // 接続先の contextWindow もここで一緒に切り替える (ollama 32K → anthropic 200K 等で古い値を残さない)。
+    // 新しいモデル・枠の組で枠の検査をしてから反映し、 入らなければ何も変えずに止める (§6.3)
+    const nextModel = model || this.model;
+    const nextWindow =
+      endpoint?.contextWindow && endpoint.contextWindow > 0 ? endpoint.contextWindow : this.contextWindow;
+    // Phase A-3: provider 切替でも (model が変わる可能性あるため) capability を再解決 (override 反映)
+    const capability = resolveCapability(nextModel, nextWindow, this.getCapabilityOverride(nextModel));
+    this.assertContextWindowFits(capability, nextWindow, nextModel);
     this.rawProvider = provider;
     this.provider = gateLLMProvider(provider, this.runApiGate);
-    if (model) this.model = model;
+    this.model = nextModel;
+    if (nextWindow !== this.contextWindow) {
+      this.contextWindow = nextWindow;
+      this.contextManager.setContextWindow(nextWindow);
+    }
     // 実行中バインディングを更新 (docs/model-apply-immediacy.md §3.1)。
     // endpoint を渡さない旧来の呼び出しでは前の記録を残す (= 誤警告より検出漏れを取る)。
     if (endpoint) {
@@ -3901,8 +3922,7 @@ export class AgentLoop {
     this.contextManager.setProvider(this.provider, this.model);
     this.intentClassifier.setProvider(this.provider, this.model);
     this.evaluator.setMainProvider(this.provider, this.model);
-    // Phase A-3: provider 切替でも (model が変わる可能性あるため) capability を再解決 (override 反映)
-    this.capability = resolveCapability(this.model, this.contextWindow, this.getCapabilityOverride(this.model));
+    this.capability = capability;
     // Phase C-2 + D-4: 圧縮閾値・keepRecentMessages も追従
     this.contextManager.setThreshold(this.capability.compressionThreshold);
     this.contextManager.setKeepRecentMessages(this.capability.keepRecentMessages);
@@ -3947,6 +3967,24 @@ export class AgentLoop {
     } catch {
       /* 掃除失敗は無視 */
     }
+  }
+
+  /**
+   * 段階 0〜3 を最後まで行っても残る部分と予約 R が枠に入るかを確かめ、 入らなければ理由と必要量を示して止める
+   * (docs/context-reduction-redesign.md §6.3)。 起動時とモデル・枠の切替時に、 反映する前に呼ぶ。
+   * 固定部分はいまの system と、 登録済みのツール定義の全部 (絞り込み前。 多い方で確かめる)。
+   */
+  private assertContextWindowFits(capability: CapabilityProfile, contextWindow: number, modelId: string): void {
+    const system = this.history.getMessages()[0];
+    const fixedTokens =
+      estimateMessageTokens([system]) + estimateToolDefinitionTokens(this.toolRegistry.getDefinitions());
+    const fit = checkContextWindowFits({
+      contextWindow,
+      tier: capability.tier,
+      fixedTokens,
+      toolResultLimitChars: capability.toolResultTruncateBytes,
+    });
+    if (!fit.ok) throw new Error(formatContextWindowTooSmall(fit, modelId, capability.tier));
   }
 
   /**

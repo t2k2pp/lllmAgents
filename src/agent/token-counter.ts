@@ -1,4 +1,4 @@
-import type { Message } from "../providers/base-provider.js";
+import type { Message, ToolDefinition } from "../providers/base-provider.js";
 
 /**
  * Simple token counter using character-based estimation.
@@ -34,4 +34,14 @@ export function estimateMessageTokens(messages: Message[]): number {
     }
   }
   return total;
+}
+
+/**
+ * ツール定義 (provider に tools として渡す JSON) の推定トークン数。
+ * estimateMessageTokens はメッセージだけを数えるので、 プロンプト全体の推定にはこれを足す
+ * (docs/context-reduction-redesign.md §4.1 の P)。
+ */
+export function estimateToolDefinitionTokens(tools: ToolDefinition[]): number {
+  if (tools.length === 0) return 0;
+  return estimateTokens(JSON.stringify(tools));
 }

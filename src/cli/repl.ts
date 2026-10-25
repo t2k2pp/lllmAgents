@@ -639,12 +639,13 @@ export class REPL {
       console.log(chalk.yellow(`  ⚠ 接続テスト中にエラーが発生しました。設定は反映済み。`));
     }
 
-    // 第3引数の endpoint で実行中バインディングを更新する (docs/model-apply-immediacy.md §3.1)
-    this.agent.setProvider(newProvider, this.config.mainLLM.model, this.config.mainLLM);
-    // contextWindow も切り替える。 ollama 32K → anthropic 200K 等の急変で
-    // 古い値が残ると context 圧縮や max_tokens 計算が壊れる (= 旧バグ)
-    if (this.config.mainLLM.contextWindow && this.config.mainLLM.contextWindow > 0) {
-      this.agent.setContextWindow(this.config.mainLLM.contextWindow);
+    // 第3引数の endpoint で実行中バインディングと contextWindow を更新する (docs/model-apply-immediacy.md §3.1)。
+    // 枠が小さすぎるモデル・枠の組なら反映せずに止める (docs/context-reduction-redesign.md §6.3)
+    try {
+      this.agent.setProvider(newProvider, this.config.mainLLM.model, this.config.mainLLM);
+    } catch (e) {
+      this.reportApplyFailure(e instanceof Error ? e.message : String(e));
+      return false;
     }
     const subAgentMgr = getSubAgentManager();
     if (subAgentMgr) {
@@ -5723,7 +5724,13 @@ export class REPL {
             console.log(chalk.dim(`  例: /model context 128k  /model context 256000`));
           } else {
             const old = this.agent.getContextWindow();
-            this.agent.setContextWindow(val);
+            try {
+              this.agent.setContextWindow(val);
+            } catch (e) {
+              // 枠が小さすぎる値は反映も保存もしない (docs/context-reduction-redesign.md §6.3)
+              console.log(chalk.red(`  ${e instanceof Error ? e.message : String(e)}`));
+              break;
+            }
             this.config.mainLLM.contextWindow = val;
             saveConfig(this.config);
             const oldLabel = old >= 1000 ? `${Math.round(old / 1000)}K` : `${old}`;
@@ -5754,7 +5761,13 @@ export class REPL {
                 default: currentModel,
               });
               if (chosen !== currentModel) {
-                this.agent.setModel(chosen);
+                try {
+                  this.agent.setModel(chosen);
+                } catch (e) {
+                  // 枠に入らないモデルには切り替えない (docs/context-reduction-redesign.md §6.3)
+                  console.log(chalk.red(`  ${e instanceof Error ? e.message : String(e)}`));
+                  break;
+                }
                 this.config.mainLLM.model = chosen;
                 saveConfig(this.config);
                 const subAgentMgr = getSubAgentManager();
@@ -6006,7 +6019,13 @@ export class REPL {
           if (!available.ok) {
             this.printModelNameCheckFailure(available.lines);
           } else {
-            this.agent.setModel(newModel);
+            try {
+              this.agent.setModel(newModel);
+            } catch (e) {
+              // 枠に入らないモデルには切り替えない (docs/context-reduction-redesign.md §6.3)
+              console.log(chalk.red(`  ${e instanceof Error ? e.message : String(e)}`));
+              break;
+            }
             this.config.mainLLM.model = newModel;
             saveConfig(this.config);
             const subAgentMgr = getSubAgentManager();

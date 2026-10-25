@@ -151,6 +151,51 @@ const TIER_DEFAULTS: Record<Tier, Omit<CapabilityProfile, "tier" | "contextWindo
 };
 
 /**
+ * コンテキスト整理の予算に使うティアごとの既定値 (docs/context-reduction-redesign.md §4.2 / §5.1 / §14.2-6)。
+ * 単位はすべてトークン数 (keepRecentToolUses だけ件数)。
+ *
+ * CapabilityProfile (= config の modelCapabilities で上書きできる値) とは分けて置く。
+ * 利用者向けの設定にはしない (使う量を減らしたい人は contextWindow を下げる。 設計書 §3 非目標)。
+ */
+export interface TierContextBudget {
+  /** O: 本体呼び出し 1 回の出力の上限 (maxTokens として渡す。 タスク 4) */
+  outputTokenLimit: number;
+  /** T: 1 回の応答で足されるツール結果の合計の上限 (タスク 4) */
+  toolResultTotalTokens: number;
+  /** M: 推定の誤差の余白 */
+  estimateMarginTokens: number;
+  /** S: 整理そのものに要る余白 (段階 3 の要約呼び出しと整理後の状態通知) */
+  reductionMarginTokens: number;
+  /** K: 整理で必ず残す直近のツール呼び出しの回数 (keepRecentMessages を置き換える。 タスク 5) */
+  keepRecentToolUses: number;
+}
+
+export const TIER_CONTEXT_BUDGETS: Readonly<Record<Tier, Readonly<TierContextBudget>>> = {
+  // T1・T2 とも O=32,768 / T=24,576 (2026-10-25 利用者と決定。 観測された最大出力 16,552 の 2 倍)
+  T1: {
+    outputTokenLimit: 32_768,
+    toolResultTotalTokens: 24_576,
+    estimateMarginTokens: 8_192,
+    reductionMarginTokens: 6_144,
+    keepRecentToolUses: 6,
+  },
+  T2: {
+    outputTokenLimit: 32_768,
+    toolResultTotalTokens: 24_576,
+    estimateMarginTokens: 4_096,
+    reductionMarginTokens: 6_144,
+    keepRecentToolUses: 5,
+  },
+  T3: {
+    outputTokenLimit: 4_096,
+    toolResultTotalTokens: 8_192,
+    estimateMarginTokens: 2_048,
+    reductionMarginTokens: 3_072,
+    keepRecentToolUses: 3,
+  },
+};
+
+/**
  * 既知モデル ID の完全一致テーブル (tier 判定のみ)。
  * キーは小文字化済 (resolve 時に lowercase 比較)。
  *

@@ -14,7 +14,7 @@ const security: SecurityConfig = {
 
 describe("AgentLoop live model binding", () => {
   it("model 単体切替でも実行中 binding を更新し、未反映の誤警告を作らない", () => {
-    const loop = new AgentLoop(provider, "qwen-old-7b", new ToolRegistry(), new PermissionManager(security), 8192);
+    const loop = new AgentLoop(provider, "qwen-old-7b", new ToolRegistry(), new PermissionManager(security), 128_000);
     loop.setLiveBinding({ providerType: "ollama", model: "qwen-old-7b", baseUrl: "http://localhost:11434" });
 
     loop.setModel("qwen-new-7b");
@@ -34,5 +34,42 @@ describe("AgentLoop live model binding", () => {
     );
     expect(loop.capability.tier).toBe("T2");
     expect(loop.capability.contextWindow).toBe(262_144);
+  });
+
+  describe("枠の検査 (docs/context-reduction-redesign.md §6.3)", () => {
+    it("起動時: 整理しても次の呼び出しが入らない枠なら、 理由と必要量を示して止める", () => {
+      expect(
+        () => new AgentLoop(provider, "qwen-old-7b", new ToolRegistry(), new PermissionManager(security), 32_768),
+      ).toThrow(/contextWindow が小さすぎます.*32,768 トークンに対して.*トークン要ります/);
+    });
+
+    it("枠の変更: 入らない値なら何も変えずに止める", () => {
+      const loop = new AgentLoop(provider, "qwen-old-7b", new ToolRegistry(), new PermissionManager(security), 128_000);
+      expect(() => loop.setContextWindow(16_384)).toThrow(/contextWindow が小さすぎます/);
+      expect(loop.getContextWindow()).toBe(128_000);
+      expect(loop.capability.contextWindow).toBe(128_000);
+    });
+
+    it("モデル切替: 新しいティアで入らなければ切り替えない", () => {
+      const loop = new AgentLoop(provider, "qwen-old-7b", new ToolRegistry(), new PermissionManager(security), 128_000);
+      // T2 は R = 67,584、 K = 5 × 12KB で 128,000 に入らない
+      expect(() => loop.setModel("qwen3-32b")).toThrow(/ティア T2/);
+      expect(loop.getModel()).toBe("qwen-old-7b");
+      expect(loop.capability.tier).toBe("T3");
+    });
+
+    it("接続先の切替: endpoint の contextWindow と新しいモデルの組で確かめてから反映する", () => {
+      const loop = new AgentLoop(provider, "qwen-old-7b", new ToolRegistry(), new PermissionManager(security), 128_000);
+      const next = { providerType: "ollama" } as unknown as LLMProvider;
+      expect(() =>
+        loop.setProvider(next, "qwen3-32b", { providerType: "ollama", model: "qwen3-32b", contextWindow: 128_000 }),
+      ).toThrow(/ティア T2/);
+      expect(loop.getModel()).toBe("qwen-old-7b");
+
+      loop.setProvider(next, "qwen3-32b", { providerType: "ollama", model: "qwen3-32b", contextWindow: 262_144 });
+      expect(loop.getModel()).toBe("qwen3-32b");
+      expect(loop.getContextWindow()).toBe(262_144);
+      expect(loop.capability).toMatchObject({ tier: "T2", contextWindow: 262_144 });
+    });
   });
 });

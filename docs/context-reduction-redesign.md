@@ -118,6 +118,16 @@ T2 も T1 と同じ O・T にする (2026-10-25。 当初案の T2 O=16,384 で�
 「続きを出力」 処理 (`agent-loop.ts:1523`) が次の呼び出しとして続けるので、 その呼び出しの前にも同じ判定が走る。
 いずれもティアの既定値 (`TIER_DEFAULTS`) に置き、 利用者向けの設定にはしない。
 
+実装 (タスク 3、 2026-10-25): O / T / M / S / K は `capability-tier.ts` の `TIER_CONTEXT_BUDGETS` に置いた。
+`TIER_DEFAULTS` (= `CapabilityProfile`) は config の `modelCapabilities` で上書きできるので、 上書きできないよう別の定数にした。
+予算の計算は `src/agent/context-budget.ts`:
+- `computeContextBudget(W, tier)` → R を含む予算。 `measurePromptSize({ lastMainCall, addedSinceLastCall, messages, tools })` → P と
+  `basis: "usage" | "estimate"`。 `lastMainCall.promptTokens` は入力の全体 (AgentLoop の `previousMainPromptTokens` と同じ値)。
+  推定のときのツール定義は `estimateToolDefinitionTokens()` (`token-counter.ts`)。
+- 規則は `exceedsForcedLimit(P, budget)` (規則 1) と `exceedsBoundaryLimit(P, budget, G)` (規則 2)。
+  目標と最低量は `computeReductionGoal(budget, G)` → `{ targetPromptTokens, minimumReductionTokens }`。
+- この時点ではどこからも発火に使っていない (タスク 8 で旧経路と置き換える)。
+
 ### 4.3 1 回で増える量を有限にする
 
 - 出力: O を超えない (サーバが止める)。
@@ -158,6 +168,16 @@ T2 も T1 と同じ O・T にする (2026-10-25。 当初案の T2 O=16,384 で�
 - G = 直近 3 件の最大。 3 件そろうまでは既定 80,000 (≈ 2.3k × 35 回。 要確認)。
 - G は `(W − R) ÷ 2` で頭打ちにする (1 件の巨大な依頼のせいで、 区切りのたびに全部を要約する状態を避ける)。
 - 記録はセッションに保存し、 再開後も使う。
+
+実装 (タスク 3、 2026-10-25): `RequestGrowthTracker` (`context-budget.ts`)。 依頼の始まりで `beginRequest()`、
+本体呼び出しの応答ごとに `noteMainCall(入力の全体, 出力)`、 依頼の途中の整理で `noteReduction(減らした量)`、
+依頼の終わりで `endRequest()`。 G は `resolve(budget)` (= `resolveRequestGrowth(recent, budget)`) で、 既定値か直近 3 件の最大かと、
+頭打ちしたかを返す (頭打ちは既定値にもかかる)。 呼ぶ箇所の組み込みはタスク 8。
+- 本体呼び出しの実数が 1 件も無い依頼は記録しない (増分を作らない)。 終わる前に次の依頼が始まったら (中断など)、 そこまでを 1 件として記録する。
+- 保存先は `SessionData.requestGrowth` (`{ version: 1, recent, current }`。 依頼の途中で保存したときは途中の分も持つ)。
+  `toSnapshot()` で保存し、 `RequestGrowthTracker.restore(raw)` で戻す。 欄の無い古いセッションは空の記録から始め、
+  形が壊れていれば `{ ok: false, error }` を返す (黙って空にしない)。 `forkSession` は履歴と一緒に引き継ぐ。
+  AgentLoop の保存・再開への組み込みもタスク 8。
 
 ### 4.6 1 回の整理の目標と最低量
 
@@ -314,6 +334,19 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
 段階 0〜3 を最後まで行っても残るのは、 system・ツール定義・今の依頼の発話・直近 K 回のツール結果 (各 1 件の上限まで)・
 要約・状態通知。 起動時 (とモデル切替時) に `固定部分 + K × 1 件の上限 + 16,384 + R ≤ W` を確かめ、
 満たさなければ「contextWindow が小さすぎる」 と理由と必要量を示して止める。 これで「整理しても入らない」 も起きない。
+
+実装 (タスク 3、 2026-10-25): `checkContextWindowFits()` と `formatContextWindowTooSmall()` (`context-budget.ts`)。
+- 固定部分 = いまの system + 登録済みのツール定義の全部 (絞り込み前) の推定。
+- 1 件の上限 = ツール結果の切り詰めの閾値 (`toolResultTruncateBytes`。 実際は文字数で切っている) + 注記 200 字を、
+  推定で最も多く数える場合 (全部が全角 = 1 文字 1.1 トークン) で直した値 (`toolResultLimitTokens()`)。 中身によらず保証するため。
+- 呼ぶ箇所: `AgentLoop` の生成時 (= 起動時。 失敗は起動の致命的エラー)、 `setContextWindow` / `setModel` / `setProvider`
+  (反映する前に確かめ、 入らなければ何も変えずに例外)。 `setProvider` は endpoint の `contextWindow` も一緒に反映するようにし、
+  REPL の `applyMainLLMEndpoint` が別に呼んでいた `setContextWindow` をやめた (新しいモデルと新しい枠の組で 1 回だけ確かめるため)。
+  REPL の `/model context` / `/model <名前>` / `/model list` は失敗を赤字で示し、 設定を保存しない。 `applyMainLLMEndpoint` は既存の
+  「反映できなかった」 表示 (`reportApplyFailure`) に出す。
+- 実際の必要量 (固定部分 約 11k のとき): T1 約 236k、 T2 約 164k、 T3 約 66k。 **T1 で 200K 枠 (Claude 等)、 T2 で 128K 枠、
+  T3 で 64K 以下の枠は起動できなくなる** (要確認。 1 件の上限を全角の最悪値で数えているのが大きい)。
+  既存テストの 8,192 / 32,768 の枠は 128,000 / 262,144 に上げた。
 
 ---
 
@@ -514,8 +547,11 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
 
 ### 14.3 残る未決事項 (実装中に決めて本書に追記する)
 
-- G の既定値 (80,000)・直近 3 件の最大・`(W − R) ÷ 2` の頭打ち (§4.5)。 計測で見直す
+- G の既定値 (80,000)・直近 3 件の最大・`(W − R) ÷ 2` の頭打ち (§4.5)。 計測で見直す。
+  (タスク 3 で決めたこと: 頭打ちは既定値にもかける。 実数の無い依頼は記録しない。 中断で終わった依頼もそこまでを記録する。 F の G ÷ 2 は切り捨て)
 - 最低量 F = max(32,768, G ÷ 2) (§4.6)
+- 起動時検査の 1 件の上限を全角の最悪値で数えると、 200K 枠の T1 などが起動できない (§6.3)。 数え方を緩めるか、
+  タスク 4 で 1 件の切り詰めをトークン数基準に変えるかを決める
 - 保護するツールの一覧と、 `file_edit` だけでは前の `file_read` を古いとみなさない規則 (§5.1, §5.3)
 - 今の依頼の思考を何件残すか (案: 直近 3 件。 §5.5)
 - 要約を利用者の発言ごとの区間に置くときの置き方 (§5.6)
