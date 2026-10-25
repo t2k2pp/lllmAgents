@@ -17,6 +17,7 @@
 import type { LLMProvider, ToolCall } from "../providers/base-provider.js";
 import { collectResponse } from "../providers/base-provider.js";
 import * as logger from "../utils/logger.js";
+import { sideCall } from "./side-call.js";
 
 export type ProgressVerdict = "answered" | "took_step" | "stalled";
 
@@ -139,14 +140,17 @@ export async function judgeProgress(input: JudgeProgressInput): Promise<JudgePro
   const prompt = buildJudgePrompt(input);
 
   try {
-    const gen = input.provider.chat({
-      model: input.model,
-      messages: [{ role: "user", content: prompt }],
-      temperature: JUDGE_TEMPERATURE,
-      maxTokens: JUDGE_MAX_TOKENS,
-      // 思考モデルは 200 tok を思考で使い切り本文が空になる (docs/context-reduction-reasoning-model-fix.md §5)
-      disableThinking: true,
-      stream: true,
+    const gen = sideCall("progress", input.provider, {
+      method: "chat",
+      params: {
+        model: input.model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: JUDGE_TEMPERATURE,
+        maxTokens: JUDGE_MAX_TOKENS,
+        // 思考モデルは 200 tok を思考で使い切り本文が空になる (docs/context-reduction-reasoning-model-fix.md §5)
+        disableThinking: true,
+        stream: true,
+      },
     });
     const response = await collectResponse(gen);
     if (response.content.trim().length === 0) {

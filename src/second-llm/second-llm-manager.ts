@@ -15,6 +15,7 @@ import type { ToolRegistry } from "../tools/tool-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager } from "../security/permission-manager.js";
 import { ROOT_ANCESTORS, extendAncestors, excludedToolsFor, type AncestorTypes } from "../agent/delegation-context.js";
+import { sideCall } from "../agent/side-call.js";
 
 // D1 (2026-04-30): EXCLUDED_TOOLS のハードコードは廃止。
 // 代わりに `excludedToolsFor(extendAncestors(parentAncestors, "second"))` で動的に決定する。
@@ -212,11 +213,14 @@ export class SecondLLMManager {
 
       // maxTokens は渡さない: agent-loop.ts と同じ理由 (contextWindow を max_tokens として渡すと
       // サーバによって input + max_tokens > context で 400 を返す)。 provider 側既定値に委ねる。
-      const stream = this.provider.chat({
-        model: this.endpoint.model,
-        messages,
-        ...this.resolveSampling("consult"),
-        stream: true,
+      const stream = sideCall("second-llm", this.provider, {
+        method: "chat",
+        params: {
+          model: this.endpoint.model,
+          messages,
+          ...this.resolveSampling("consult"),
+          stream: true,
+        },
       });
 
       let responseText = "";
@@ -303,12 +307,15 @@ export class SecondLLMManager {
         log.nextTurn();
         log.logRequest(messages, this.endpoint.model, toolDefs);
 
-        const stream = this.provider.chatWithTools({
-          model: this.endpoint.model,
-          messages,
-          tools: toolDefs,
-          ...this.resolveSampling("agent"),
-          stream: true,
+        const stream = sideCall("second-llm", this.provider, {
+          method: "chatWithTools",
+          params: {
+            model: this.endpoint.model,
+            messages,
+            tools: toolDefs,
+            ...this.resolveSampling("agent"),
+            stream: true,
+          },
         });
 
         let responseText = "";
@@ -437,12 +444,15 @@ export class SecondLLMManager {
         log.nextTurn();
         log.logRequest(messages, this.endpoint.model, toolDefs);
 
-        const stream = this.provider.chatWithTools({
-          model: this.endpoint.model,
-          messages,
-          tools: toolDefs,
-          ...this.resolveSampling("evaluator"),
-          stream: true,
+        const stream = sideCall("second-llm", this.provider, {
+          method: "chatWithTools",
+          params: {
+            model: this.endpoint.model,
+            messages,
+            tools: toolDefs,
+            ...this.resolveSampling("evaluator"),
+            stream: true,
+          },
         });
 
         let responseText = "";

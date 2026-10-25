@@ -19,6 +19,7 @@ import type { MessageHistory } from "./message-history.js";
 import { estimateMessageTokens } from "./token-counter.js";
 import { isRateLimitError } from "../providers/utils/rate-limit.js";
 import * as logger from "../utils/logger.js";
+import { sideCall } from "./side-call.js";
 
 /** 引き継ぎメモ生成のサンプリング。 事実の書き写しなので決定論寄りに倒す */
 const HANDOFF_TEMPERATURE = 0.2;
@@ -172,12 +173,15 @@ export async function generateHandoffNote(
   let lastError = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const gen = provider.chat({
-        model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: HANDOFF_TEMPERATURE,
-        maxTokens: HANDOFF_MAX_TOKENS,
-        stream: true,
+      const gen = sideCall("handoff", provider, {
+        method: "chat",
+        params: {
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: HANDOFF_TEMPERATURE,
+          maxTokens: HANDOFF_MAX_TOKENS,
+          stream: true,
+        },
       });
       const response = await collectResponse(gen);
       const note = response.finishReason === "length" ? null : validateHandoffNote(response.content);

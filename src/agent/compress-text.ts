@@ -13,6 +13,7 @@ import type { LLMProvider } from "../providers/base-provider.js";
 import { collectResponse } from "../providers/base-provider.js";
 import { estimateTokens } from "./token-counter.js";
 import * as logger from "../utils/logger.js";
+import { sideCall } from "./side-call.js";
 
 export interface CompressionResult {
   /** 実際に使うべきテキスト (圧縮が有効なら圧縮版、 そうでなければ原文) */
@@ -63,14 +64,17 @@ export async function compressText(
 ): Promise<CompressionResult> {
   const beforeTokens = estimateTokens(text);
   try {
-    const gen = provider.chat({
-      model,
-      messages: [{ role: "user", content: buildPrompt(label, text) }],
-      temperature: COMPRESS_TEMPERATURE,
-      maxTokens: COMPRESS_MAX_TOKENS,
-      // 思考に枠を取られると圧縮結果が上限で切れる。 思考オフで完結する (docs/context-reduction-reasoning-model-fix.md §5)
-      disableThinking: true,
-      stream: true,
+    const gen = sideCall("compress-instructions", provider, {
+      method: "chat",
+      params: {
+        model,
+        messages: [{ role: "user", content: buildPrompt(label, text) }],
+        temperature: COMPRESS_TEMPERATURE,
+        maxTokens: COMPRESS_MAX_TOKENS,
+        // 思考に枠を取られると圧縮結果が上限で切れる。 思考オフで完結する (docs/context-reduction-reasoning-model-fix.md §5)
+        disableThinking: true,
+        stream: true,
+      },
     });
     const response = await collectResponse(gen);
     const compressed = response.content.trim();

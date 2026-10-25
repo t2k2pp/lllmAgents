@@ -19,6 +19,7 @@ import { collectResponse } from "../providers/base-provider.js";
 import { estimateTokens, estimateMessageTokens } from "./token-counter.js";
 import type { MessageHistory } from "./message-history.js";
 import * as logger from "../utils/logger.js";
+import { sideCall } from "./side-call.js";
 
 // ─── 定数 ───
 
@@ -793,21 +794,24 @@ export class ForgettingEngine {
     let lastFailure = "";
     for (let attempt = 0; attempt < 2 && !choice; attempt++) {
       try {
-        const gen = this.provider.chat({
-          model: this.model,
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a fast classifier for context reduction. Keep internal thinking very brief (under 50 words) and output the requested JSON directly without hesitation.",
-            },
-            { role: "user", content: prompt },
-          ],
-          temperature: FORGET_TEMPERATURE,
-          maxTokens: FORGET_MAX_TOKENS,
-          // 思考モデルは「思考は短く」 を守らず上限を思考だけで使い切る (docs §4.2)
-          disableThinking: true,
-          stream: true,
+        const gen = sideCall("forget-select", this.provider, {
+          method: "chat",
+          params: {
+            model: this.model,
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You are a fast classifier for context reduction. Keep internal thinking very brief (under 50 words) and output the requested JSON directly without hesitation.",
+              },
+              { role: "user", content: prompt },
+            ],
+            temperature: FORGET_TEMPERATURE,
+            maxTokens: FORGET_MAX_TOKENS,
+            // 思考モデルは「思考は短く」 を守らず上限を思考だけで使い切る (docs §4.2)
+            disableThinking: true,
+            stream: true,
+          },
         });
         const response = await collectResponse(gen);
         const trimmed = response.content.trim();

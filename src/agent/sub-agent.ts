@@ -30,6 +30,7 @@ import {
 } from "./workspace-context.js";
 import { WorktreeManager, type ManagedWorktreeRecord, type WorktreeOperationResult } from "../git/worktree-manager.js";
 import type { RequestSource } from "../security/permission-manager.js";
+import { sideCall } from "./side-call.js";
 
 const MAX_SUB_ITERATIONS = 30;
 
@@ -375,18 +376,24 @@ export class SubAgent {
         this.llmAbortController = new AbortController();
         const gen =
           defs.length > 0
-            ? this.provider.chatWithTools({
-                model: this.model,
-                messages: this.history.getMessages(),
-                tools: defs,
-                stream: true,
-                signal: this.llmAbortController.signal,
+            ? sideCall("subagent", this.provider, {
+                method: "chatWithTools",
+                params: {
+                  model: this.model,
+                  messages: this.history.getMessages(),
+                  tools: defs,
+                  stream: true,
+                  signal: this.llmAbortController.signal,
+                },
               })
-            : this.provider.chat({
-                model: this.model,
-                messages: this.history.getMessages(),
-                stream: true,
-                signal: this.llmAbortController.signal,
+            : sideCall("subagent", this.provider, {
+                method: "chat",
+                params: {
+                  model: this.model,
+                  messages: this.history.getMessages(),
+                  stream: true,
+                  signal: this.llmAbortController.signal,
+                },
               });
 
         let response: ChatResponse;

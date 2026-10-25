@@ -11,6 +11,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import type { CacheMissDiagnosis } from "./cache-miss.js";
+import type { SideCallRecord } from "./side-call.js";
 
 /**
  * 全レコード共通の文脈タグ (docs/async-surface-permission-delivery-design.md R-4/5.5)。
@@ -100,6 +102,28 @@ export interface LLMPrefixBreakLog extends LogContext {
   unexpected: boolean;
 }
 
+/**
+ * 脇の呼び出し (本体の会話ループ以外の LLM 呼び出し) 1 件の記録。 src/agent/side-call.ts の入口が書く。
+ * docs/context-reduction-redesign.md §10.3。
+ */
+export interface LLMSideCallLog extends LogContext, SideCallRecord {
+  ts: string;
+  turn: number;
+  agentId: string;
+  type: "side_call";
+}
+
+/**
+ * 本体呼び出しでプロンプトキャッシュが外れた記録。 原因は前回の本体呼び出しからの間に起きたこと。
+ * docs/context-reduction-redesign.md §10.2。
+ */
+export interface LLMCacheMissLog extends LogContext, CacheMissDiagnosis {
+  ts: string;
+  turn: number;
+  agentId: string;
+  type: "cache_miss";
+}
+
 /** logRequest() の返り値。 前方一致が保たれたかを呼び出し側が判定するのに使う。 */
 export interface RequestPrefixInfo {
   messageOffset: number;
@@ -107,7 +131,13 @@ export interface RequestPrefixInfo {
   toolsChanged: boolean;
 }
 
-export type LLMLogEntry = LLMRequestLog | LLMResponseLog | LLMToolResultLog | LLMPrefixBreakLog;
+export type LLMLogEntry =
+  | LLMRequestLog
+  | LLMResponseLog
+  | LLMToolResultLog
+  | LLMPrefixBreakLog
+  | LLMSideCallLog
+  | LLMCacheMissLog;
 
 export interface LLMLoggerOptions {
   logsDir?: string;
@@ -260,6 +290,22 @@ export class LLMLogger {
       unexpected,
     });
     return unexpected;
+  }
+
+  /** 脇の呼び出しを記録する (turn は直近の本体呼び出しの番号)。 */
+  logSideCall(record: SideCallRecord): void {
+    this.write({ ts: new Date().toISOString(), turn: this.turn, agentId: this.agentId, type: "side_call", ...record });
+  }
+
+  /** 本体呼び出しでキャッシュが外れたことを記録する。 */
+  logCacheMiss(diagnosis: CacheMissDiagnosis): void {
+    this.write({
+      ts: new Date().toISOString(),
+      turn: this.turn,
+      agentId: this.agentId,
+      type: "cache_miss",
+      ...diagnosis,
+    });
   }
 
   /** LLM レスポンスをログに記録（thinking content 含む） */

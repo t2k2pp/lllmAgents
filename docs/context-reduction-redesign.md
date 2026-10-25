@@ -385,11 +385,36 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
 整理イベントの id、 `prefix_break` の理由 (`message-history.ts` の書き換え理由)、 脇の呼び出しの目的の一覧。
 何も無ければ `unknown`。 整理イベントの直後の外れは想定どおりなので `expected: true` を付ける。
 
+実装 (タスク 1、 2026-10-25):
+- 判定と原因の特定は純粋な関数 `diagnoseCacheMiss()` (`src/agent/cache-miss.ts`)。 P は前回の本体呼び出しの入力の全体
+  (Anthropic 系はキャッシュ分を足した値)。 前回の usage が無い・今回 `cachedTokens` が無いときは判定しない。
+- 「間に起きたこと」 は AgentLoop が持つ `CacheMissCauseCollector` にためる。 本体の送信のたびに
+  `take(history.takeRewriteReasons())` で取り出し (接続の再試行で送り直したときは合わせる)、 その応答で判定する。
+- **整理イベントの id を渡す口**: 整理イベント (タスク 7) は `MessageHistory.replaceMessages()` の直後に
+  `this.cacheMissCauses.noteReductionEvent(<イベント id>)` を呼ぶ。 これで次の本体呼び出しの外れが `expected: true` になる。
+- ログの形 (`<sid>_main.jsonl`):
+  `{"type":"cache_miss","turn":12,"previousPromptTokens":150000,"promptTokens":151200,"tokensCached":0,"causes":["reduction:r-3","prefix_break:reduction:r-3","side_call:intent"],"expected":true}`。
+  `causes` は `reduction:<id>` / `prefix_break:<書き換え理由>` / `side_call:<目的>` の並び (同じものは 1 つ)、 何も無ければ `["unknown"]`。
+
 ### 10.3 脇の呼び出しの目的タグ (`side_call`)
 
 脇の呼び出しはすべて 1 つの入口 (目的タグを必須にした関数) を通し、 目的・`tokensIn`・`tokensCached`・所要時間を記録する。
 目的: `summarize` / `intent` / `completion` / `progress` / `goal-promotion` / `handoff` / `prewarm` / `subagent`
 (サブエージェントは別の文脈で何度も呼ぶため、 スロットが 1 つなら戻った後のメイン呼び出しが全部の読み直しになる。 影響が最も大きい見込み)。
+
+実装 (タスク 1、 2026-10-25):
+- 入口は `sideCall(目的, provider, { method: "chat" | "chatWithTools" | "chatWithVision", params })` (`src/agent/side-call.ts`)。
+  provider の応答をそのまま流し、 終わったとき (正常・失敗・途中で読むのをやめた) に 1 件だけ記録する。
+  本体の会話ループ (`agent-loop.ts` の本体呼び出し) 以外で provider の chat 系を直接呼ばない。
+- 記録先は AgentLoop が生成時に `setSideCallSink()` で登録し、 メインのセッションログに書く (サブエージェント・セカンド LLM の分も)。
+  ログの形: `{"type":"side_call","turn":12,"purpose":"intent","model":"…","providerType":"llamacpp","tokensIn":812,"tokensOut":9,"tokensCached":0,"durationMs":1530,"finishReason":"stop"}`
+  (失敗・中断なら `error`)。 `turn` は直前の本体呼び出しの番号。
+- 目的は上の 8 つに、 実在する呼び出し元に合わせて次の 4 つを足した:
+  `compress-instructions` (プロジェクト指示・メモの圧縮 `compress-text.ts`)、 `forget-select` (忘却の LLM 選択 `forgetting.ts`。 タスク 8 で削除)、
+  `second-llm` (セカンド LLM の相談・委任・評価 `second-llm-manager.ts`)、 `vision` (画像解析 `vision.ts`)。
+  呼び出し元と目的: `intent-classifier.ts` (intent / completion)、 `progress-judge.ts` (progress)、 `goal-promotion.ts` (goal-promotion)、
+  `handoff.ts` (handoff)、 `hierarchical-compressor.ts` (summarize。 タスク 8 で削除)、 `sub-agent.ts` (subagent)。
+  `prewarm` はタスク 9 で使う。
 
 本節の計測は [todo-local-llm-speed.md](todo-local-llm-speed.md) の T1 を兼ねる。 同書の T4 (依頼の区切りでの書き換え) は本書 §6.2 で扱う。
 

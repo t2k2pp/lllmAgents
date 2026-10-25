@@ -19,6 +19,7 @@ import { classifyTaskComplexity } from "./task-complexity.js";
 import { IntentClassifier } from "./intent-classifier.js";
 import { loadConfig } from "../config/config-manager.js";
 import * as logger from "../utils/logger.js";
+import { sideCall } from "./side-call.js";
 
 /** 提案先のエージェント (AgentLoop の必要最小インターフェース) */
 export interface GoalPromotionAgent {
@@ -86,14 +87,17 @@ export async function extractAcceptanceCriteria(
     `{"criteria": ["criterion 1", "criterion 2", "criterion 3"]}`;
 
   try {
-    const gen = provider.chat({
-      model,
-      messages: [{ role: "user", content: extractPrompt }],
-      temperature: 0.1,
-      maxTokens: 800,
-      // 思考オフでも同等の criteria が約 1/4 の時間で返る (docs/context-reduction-reasoning-model-fix.md §5)
-      disableThinking: true,
-      stream: true,
+    const gen = sideCall("goal-promotion", provider, {
+      method: "chat",
+      params: {
+        model,
+        messages: [{ role: "user", content: extractPrompt }],
+        temperature: 0.1,
+        maxTokens: 800,
+        // 思考オフでも同等の criteria が約 1/4 の時間で返る (docs/context-reduction-reasoning-model-fix.md §5)
+        disableThinking: true,
+        stream: true,
+      },
     });
     const response = await collectResponse(gen);
     const criteria = parseCriteriaResponse(response.content);

@@ -11,6 +11,7 @@ import { isRateLimitError } from "../providers/utils/rate-limit.js";
 import { collectResponse } from "../providers/base-provider.js";
 import { estimateTokens } from "./token-counter.js";
 import * as logger from "../utils/logger.js";
+import { sideCall } from "./side-call.js";
 
 export interface SummaryBlock {
   id: string;
@@ -187,20 +188,23 @@ export class HierarchicalCompressor {
     const prompt = LAYER1_PROMPT + blockText;
 
     try {
-      const gen = this.provider.chat({
-        model: this.model,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a fast summarizer for context compression. Keep internal thinking very brief (under 50 words) and output the requested JSON directly without hesitation.",
-          },
-          { role: "user", content: prompt },
-        ],
-        temperature: COMPRESSOR_LAYER1_TEMPERATURE,
-        maxTokens: COMPRESSOR_LAYER1_MAX_TOKENS,
-        disableThinking: true,
-        stream: true,
+      const gen = sideCall("summarize", this.provider, {
+        method: "chat",
+        params: {
+          model: this.model,
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a fast summarizer for context compression. Keep internal thinking very brief (under 50 words) and output the requested JSON directly without hesitation.",
+            },
+            { role: "user", content: prompt },
+          ],
+          temperature: COMPRESSOR_LAYER1_TEMPERATURE,
+          maxTokens: COMPRESSOR_LAYER1_MAX_TOKENS,
+          disableThinking: true,
+          stream: true,
+        },
       });
 
       const response = await collectResponse(gen);
@@ -249,20 +253,23 @@ export class HierarchicalCompressor {
     const prompt = LAYER2_PROMPT + blockTexts;
 
     try {
-      const gen = this.provider.chat({
-        model: this.model,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a fast summarizer for context compression. Keep internal thinking very brief (under 50 words) and output the requested JSON directly without hesitation.",
-          },
-          { role: "user", content: prompt },
-        ],
-        temperature: COMPRESSOR_LAYER2_TEMPERATURE,
-        maxTokens: COMPRESSOR_LAYER2_MAX_TOKENS,
-        disableThinking: true,
-        stream: true,
+      const gen = sideCall("summarize", this.provider, {
+        method: "chat",
+        params: {
+          model: this.model,
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a fast summarizer for context compression. Keep internal thinking very brief (under 50 words) and output the requested JSON directly without hesitation.",
+            },
+            { role: "user", content: prompt },
+          ],
+          temperature: COMPRESSOR_LAYER2_TEMPERATURE,
+          maxTokens: COMPRESSOR_LAYER2_MAX_TOKENS,
+          disableThinking: true,
+          stream: true,
+        },
       });
 
       const response = await collectResponse(gen);

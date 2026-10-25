@@ -64,6 +64,13 @@ import { CheckpointManager } from "../checkpoint/checkpoint-manager.js";
 import * as logger from "../utils/logger.js";
 import { getOpsLogger } from "../utils/ops-logger.js";
 import { LLMLogger } from "./llm-logger.js";
+import {
+  CacheMissCauseCollector,
+  type CacheMissCauses,
+  diagnoseCacheMiss,
+  mergeCacheMissCauses,
+} from "./cache-miss.js";
+import { setSideCallSink } from "./side-call.js";
 import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
 import { formatBufferedResponseStatus } from "../cli/response-preview.js";
@@ -309,6 +316,13 @@ export class AgentLoop {
   /** 直前ターンのプロンプトトークン数（待機スピナーでの文脈サイズ表示用） */
   private lastPromptTokens = 0;
   /**
+   * 前回の本体呼び出しの入力トークン数 (キャッシュ分を含む全体)。 cache_miss の判定に使う
+   * (docs/context-reduction-redesign.md §10.2)。 サーバが usage を返さなかったら undefined。
+   */
+  private previousMainPromptTokens: number | undefined;
+  /** 本体呼び出しの間に起きた整理イベント・脇の呼び出しをためる箱 (cache_miss の原因欄) */
+  private readonly cacheMissCauses = new CacheMissCauseCollector();
+  /**
    * P0-A: 直近 FAILURE_WINDOW 反復内のツール失敗履歴。 同じ (signature, error) が
    * 2 回以上出たら「同じ轍を踏んでいる」 と判定し self-check を注入する。
    * 既存の MAX_REPEAT_TOOL=3 (連続検出) では grep/read を間に挟まれると無効化されるため、
@@ -539,6 +553,14 @@ export class AgentLoop {
       roomId: this.session.meta.room,
       surface: this.currentSource,
     }));
+    // 脇の呼び出し (意図の分類・要約・サブエージェント 等) はすべてメインのセッションログに side_call として残し、
+    // 次の本体呼び出しでキャッシュが外れたときの原因欄に使う (docs/context-reduction-redesign.md §10.3)。
+    setSideCallSink({
+      recordSideCall: (record) => {
+        this.llmLogger.logSideCall(record);
+        this.cacheMissCauses.noteSideCall(record.purpose);
+      },
+    });
     this.intentClassifier = new IntentClassifier(this.provider, model);
     this.evaluator = new Evaluator(secondLLMManager, this.provider, model);
     // セカンドLLMにもセッションIDを共有（ログファイル名の統一用）
@@ -1066,6 +1088,8 @@ export class AgentLoop {
         let tokensIn: number | undefined;
         let tokensOut: number | undefined;
         let tokensCached: number | undefined;
+        // 前回の本体呼び出しからの間に起きたこと (cache_miss の原因欄)。 再試行で送り直したときは合わせて持つ。
+        let missCauses: CacheMissCauses = { reductionEventIds: [], rewriteReasons: [], sideCallPurposes: [] };
         // LLM呼び出しループ: 接続エラー時は自動リトライ、その他はユーザーに判断を委ねる
         let connectionRetries = 0;
 
@@ -1086,7 +1110,9 @@ export class AgentLoop {
             );
             // 送信済みの部分が変わった = プロンプトキャッシュが外れた。 忘却・圧縮など理由の分かる
             // 書き換えでなければ退行の疑いなので警告する (docs/prompt-prefix-stability.md §7)。
-            if (this.llmLogger.logPrefixBreak(prefixInfo, this.history.takeRewriteReasons())) {
+            const rewriteReasons = this.history.takeRewriteReasons();
+            missCauses = mergeCacheMissCauses(missCauses, this.cacheMissCauses.take(rewriteReasons));
+            if (this.llmLogger.logPrefixBreak(prefixInfo, rewriteReasons)) {
               logger.warn(
                 `[prefix] 理由の無い書き換えで送信済みの履歴が変わりました (messages[${prefixInfo.messageOffset}] 以降、` +
                   `前回 ${prefixInfo.previousTotal} 件)。プロンプトキャッシュが外れています。`,
@@ -1374,6 +1400,16 @@ export class AgentLoop {
                       );
                       recordedInput = promptTokens;
                     }
+                    // キャッシュが外れたかを、 前回の本体呼び出しの入力と比べて判定する (§10.2)。
+                    // Anthropic 系の promptTokens はキャッシュ分を含まないので、 全体 (recordedInput) で比べる。
+                    const miss = diagnoseCacheMiss({
+                      previousPromptTokens: this.previousMainPromptTokens,
+                      promptTokens: recordedInput,
+                      tokensCached: chunk.usage.cachedTokens,
+                      causes: missCauses,
+                    });
+                    if (miss) this.llmLogger.logCacheMiss(miss);
+                    this.previousMainPromptTokens = recordedInput;
                     globalTokenTracker.record({
                       timestamp: new Date().toISOString(),
                       provider: this.provider.providerType,
@@ -1389,6 +1425,9 @@ export class AgentLoop {
                     this.runStats.tokensIn += recordedInput;
                     this.runStats.tokensOut += outputTokens;
                     this.runStats.costUsd += cost;
+                  } else {
+                    // 入力の数が分からない呼び出しを挟んだら、 その前の数とは比べない
+                    this.previousMainPromptTokens = undefined;
                   }
                   stopWaitingSpinner();
                   stopThinkingSpinner();

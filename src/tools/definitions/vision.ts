@@ -3,6 +3,7 @@ import * as path from "node:path";
 import type { LLMProvider } from "../../providers/base-provider.js";
 import { collectResponse } from "../../providers/base-provider.js";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
+import { sideCall } from "../../agent/side-call.js";
 
 export class VisionService {
   constructor(
@@ -24,19 +25,22 @@ export class VisionService {
   }
 
   async analyzeImage(imageBase64: string, prompt: string, mimeType = "image/png"): Promise<string> {
-    const gen = this.provider.chatWithVision({
-      model: this.model,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: prompt },
-            { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
-          ],
-        },
-      ],
-      temperature: 0.3,
-      stream: true,
+    const gen = sideCall("vision", this.provider, {
+      method: "chatWithVision",
+      params: {
+        model: this.model,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
+            ],
+          },
+        ],
+        temperature: 0.3,
+        stream: true,
+      },
     });
 
     const response = await collectResponse(gen);

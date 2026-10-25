@@ -6,6 +6,7 @@
 import type { LLMProvider } from "../providers/base-provider.js";
 import { collectResponse } from "../providers/base-provider.js";
 import * as logger from "../utils/logger.js";
+import { sideCall } from "./side-call.js";
 
 export type IntentType = "task" | "question" | "conversation";
 export type CompletionType = "completed" | "in_progress" | "other";
@@ -161,14 +162,17 @@ export class IntentClassifier {
         userMessage.slice(0, 300),
       );
 
-      const gen = this.provider.chat({
-        model: this.model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: CLASSIFIER_TEMPERATURE,
-        maxTokens: CLASSIFIER_MAX_TOKENS,
-        // 思考モデルは 50 tok を思考で使い切り本文が空になる (docs/context-reduction-reasoning-model-fix.md §5)
-        disableThinking: true,
-        stream: true,
+      const gen = sideCall("intent", this.provider, {
+        method: "chat",
+        params: {
+          model: this.model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: CLASSIFIER_TEMPERATURE,
+          maxTokens: CLASSIFIER_MAX_TOKENS,
+          // 思考モデルは 50 tok を思考で使い切り本文が空になる (docs/context-reduction-reasoning-model-fix.md §5)
+          disableThinking: true,
+          stream: true,
+        },
       });
 
       const response = await collectResponse(gen);
@@ -199,14 +203,17 @@ export class IntentClassifier {
     try {
       const prompt = COMPLETION_CLASSIFY_PROMPT.replace("{response}", assistantResponse.slice(-200));
 
-      const gen = this.provider.chat({
-        model: this.model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: CLASSIFIER_TEMPERATURE,
-        maxTokens: CLASSIFIER_MAX_TOKENS,
-        // 思考モデルは 50 tok を思考で使い切り本文が空になる (docs/context-reduction-reasoning-model-fix.md §5)
-        disableThinking: true,
-        stream: true,
+      const gen = sideCall("completion", this.provider, {
+        method: "chat",
+        params: {
+          model: this.model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: CLASSIFIER_TEMPERATURE,
+          maxTokens: CLASSIFIER_MAX_TOKENS,
+          // 思考モデルは 50 tok を思考で使い切り本文が空になる (docs/context-reduction-reasoning-model-fix.md §5)
+          disableThinking: true,
+          stream: true,
+        },
       });
 
       const response = await collectResponse(gen);
