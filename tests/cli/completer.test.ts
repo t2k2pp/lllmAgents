@@ -264,18 +264,15 @@ describe("createCommandMenuProvider", () => {
     expect(labels).toContain("/models help");
   });
 
-  it("/integrations が補完候補に出る (Phase optimize #3 統合後)", () => {
-    // Phase optimize #3 (2026-05-28): /discord / /slack / /chatlog / /search は
-    // /integrations の picker 配下に統合され、 補完候補からは [非推奨] alias 1 件のみ残る。
+  it("/integrations が補完候補に出る", () => {
     const provider = createCommandMenuProvider();
     const items = provider("integrations");
     const labels = items.map((i) => i.label);
     expect(labels).toContain("/integrations");
   });
 
-  it("旧 /discord /slack /chatlog /search は補完から完全除外 (dispatcher 互換は維持)", () => {
-    // cleanup 2026-06-20 (docs/integrations-command-cleanup.md): /integrations へ統廃合済みのため
-    // 旧 4 系統の [非推奨] alias も補完候補から削除。dispatcher の case は内部実装として残置。
+  it("削除した /discord /slack /chatlog /search は補完に出ない", () => {
+    // 設定は /integrations 画面だけで行う (docs/todo-legacy-ways-cleanup.md T3)。 コマンド自体も削除済み。
     const provider = createCommandMenuProvider();
     const allLabels = provider("").map((i) => i.label);
     // トップレベル alias も含めて補完には出ない
@@ -283,7 +280,7 @@ describe("createCommandMenuProvider", () => {
     expect(allLabels).not.toContain("/slack");
     expect(allLabels).not.toContain("/chatlog");
     expect(allLabels).not.toContain("/search");
-    // 個別サブも従来どおり除外済み
+    // 個別サブも出ない
     expect(allLabels).not.toContain("/discord url");
     expect(allLabels).not.toContain("/discord listen start");
     expect(allLabels).not.toContain("/slack url");
@@ -293,6 +290,15 @@ describe("createCommandMenuProvider", () => {
     expect(allLabels).not.toContain("/search duckduckgo");
     // 代替の /integrations は残る
     expect(allLabels).toContain("/integrations");
+  });
+
+  it("/permission は画面を開く 1 件だけで、 旧サブコマンドのツール名補完も無い", () => {
+    const provider = createCommandMenuProvider([], ["bash", "file_read"]);
+    const labels = provider("permission").map((i) => i.label);
+    expect(labels).toEqual(["/permission"]);
+    expect(provider("permission auto-add ba")).toEqual([]);
+    const [matches] = createCompleter({ toolNames: ["bash"] })("/permission auto-add ba");
+    expect(matches).toEqual([]);
   });
 
   it("/loop の主要サブコマンドは引き続き補完候補に出る (B-2 統合後)", () => {

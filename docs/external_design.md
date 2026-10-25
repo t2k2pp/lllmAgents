@@ -145,7 +145,7 @@ stateDiagram-v2
   - `/sessions` `/continue` (→ `/resume list` / `/resume latest`)、 `/second` (→ `/model second`)、 `/profiles` `/profile` `/model-registry` `/registry` (→ `/models`)
   - `/integration` `/intg` (→ `/integrations`)、 `/switch` (→ `/swap`)、 `/token` (→ `/cost`)、 `/model url` `/model ip` (→ `/model host` + `/model port`)、 `/loop list` (→ `/loop status`)、 `/stream on|off` (→ 引数なし `/stream`)
   - `/metrics` `/capability` (→ `/status`)
-  - `/discord` `/slack` `/chatlog` `/search` の各サブは `/integrations` 配下が正。 直接コマンドの削除は T3 で行う
+  - `/discord` `/slack` `/chatlog` `/search` (→ `/integrations` の画面)、 `/permission <サブコマンド>` (`auto-add` `rule-add` 等 → 引数なし `/permission` の画面)
 
 #### `/models` (Model Registry) — main / second / vision 統合管理
 
@@ -170,7 +170,16 @@ stateDiagram-v2
 
 #### `/integrations` — 外部統合の集約 (Discord / Slack / Chatlog / Search)
 
-`/integrations` で 4 系統の状態を一覧表示し、 picker で対象を選択 → そのプロバイダの設定画面に入る。 内部的には旧 `/discord ...` 等の dispatcher が再利用されるため、 旧コマンドはそのまま動作する (補完候補からは除外)。
+`/integrations` で 4 系統の状態を一覧表示し、 picker で対象を選択 → そのプロバイダの設定画面に入る。 Discord / Slack / 会話ログ / Web検索 の設定方法はこの画面だけ (引数は取らない)。 画面からの変更は `src/cli/integrations-settings.ts` の関数で行う。
+
+| 対象 | 画面でできること |
+|---|---|
+| Discord 連携 | 通知オン/オフ・Webhook URL・テスト通知・生成画像の自動添付オン/オフ・Application ID・Bot Token・/ask 登録 (サーバーID 指定可)・受信の開始/停止・受信の自動開始・許可ユーザーの表示/追加/削除・待機リストからの承認/却下 |
+| Slack 連携 | 通知オン/オフ・Webhook URL・テスト通知・Bot Token・App-Level Token・許可ユーザーの表示/追加/削除 |
+| 会話ログの保存 | 保存オン/オフ・保存先 Vault |
+| Web検索エンジン | DuckDuckGo / SearXNG (URL) の切替・テスト検索 |
+
+対話できる端末 (TTY) が無いとき (パイプ実行など) は画面を出せないため、 端末が必要なことと、 代わりに `~/.localllm/config.json` で直接編集するキー (`discord.*` / `slack.*` / `chatLog.*` / `search.*`) を表示して終わる。
 
 #### `/permission` — 権限設定 picker
 
@@ -184,7 +193,9 @@ stateDiagram-v2
 | Discord auto-approve tools | Discord 経由のリクエストで自動承認するツール |
 | Slack auto-approve tools | Slack 経由のリクエストで自動承認するツール |
 
-各カテゴリ → Add / Remove のサブ picker → ツール picker。 引数付きの旧形式 (`/permission auto-add <tool>` / `/permission rule-add allow <pattern>` 等) も dispatcher 互換で利用可能 (スクリプト用途向け)。
+各カテゴリ → Add / Remove のサブ picker → ツール picker。 権限の設定方法はこの画面だけ (旧サブコマンド `auto-add` / `rule-add` 等は削除。 引数を付けると「引数を取りません」と表示)。 画面からの変更は `src/cli/permission-settings.ts` の関数で行う。
+
+対話できる端末 (TTY) が無いときは、 端末が必要なことと、 代わりに `~/.localllm/config.json` で直接編集するキー (`security.rules.*` / `security.autoApproveTools` / `security.requireApprovalTools` / `security.discordAutoApproveTools` / `security.slackAutoApproveTools`) を表示して終わる。
 
 ---
 
@@ -466,7 +477,7 @@ DiscordのWebhookを用いて、エージェントからの応答を任意のチ
 2. **URLの取得**: 作成したWebhookの「ウェブフックURLをコピー」をクリックしてURLを取得します。
 3. **設定の反映**: `~/.localllm/config.json` 内の `"discord"` ブロックに対し、`"enabled": true` とし、`"webhookUrl": "取得したURL"` を設定します。
 
-> **注意**: Webhook URLは `https://discord.com/api/webhooks/<id>/<token>` 形式である必要があります。招待URL（`discord.gg/...`）は使用できません。`/integrations` → Discord → "Test webhook" で送信テストが可能です (旧 `/discord test` も alias で動作)。
+> **注意**: Webhook URLは `https://discord.com/api/webhooks/<id>/<token>` 形式である必要があります。招待URL（`discord.gg/...`）は使用できません。`/integrations` → Discord 連携 →「テスト通知を送ってみる」で送信テストが可能です。
 
 ---
 

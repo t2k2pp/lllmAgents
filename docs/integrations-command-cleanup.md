@@ -2,6 +2,10 @@
 
 作成日: 2026-06-20 / 関連: `docs/channel-interaction-bridge-design.md`
 
+> **2026-10-25 追記 (本書は当時の記録)**: 本書で「実装本体として残す」とした直接コマンド `/discord` `/slack` `/chatlog` `/search` は、
+> docs/todo-legacy-ways-cleanup.md T3 で削除した。 `/integrations` 画面は `src/cli/integrations-settings.ts` の関数を直接呼ぶ構造に変え、
+> 直接コマンドにしか無かった Discord の生成画像添付オン/オフも画面に追加した。 `/intg` `/integration` も T1 で削除済み。
+
 ## 1. 背景
 
 `/discord` `/slack` `/chatlog` `/search` の 4 つの外部統合コマンドは

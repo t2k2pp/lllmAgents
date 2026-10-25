@@ -12,13 +12,14 @@
  *
  * セットアップ手順:
  * 1. Discord Developer Portal でアプリを作成し applicationId, botToken を取得
- *    → /discord app-id / /discord bot-token で設定
+ *    → REPL の /integrations → Discord 連携 で Application ID / Bot Token を設定
  * 2. 招待 URL (scope=bot+applications.commands) で Bot をサーバーに招待
- * 3. /discord register [サーバーID] でスラッシュコマンドを登録
- * 4. /discord listen start で受信開始
+ * 3. 同じ画面の「/ask コマンドを Discord に登録する」 (サーバーID 指定で即時反映)
+ * 4. 同じ画面の「受信を開始する」
  *    (Developer Portal の Interactions Endpoint URL は空欄にしておくこと。
  *     設定されていると interaction が Gateway に届かない)
- * 5. /discord user-add <DiscordユーザーID> (任意: 利用者を制限する場合)
+ * 5. 同じ画面で許可ユーザーを追加 (必須: allowedUserIds が空だと誰も受け付けない。
+ *    相手に /ask を一度実行してもらい「待機リストから利用申請を承認する」 で承認するのが確実)
  *
  * 既知の制約: interaction token は 15 分で失効するため、 15 分を超える長時間タスクの
  * 途中では権限確認・follow-up を送信できない (docs/channel-interaction-bridge-design.md §9)。
@@ -215,9 +216,7 @@ export class DiscordInteractionServer implements InteractionBridge {
       // 新規申請は REPL 操作者にすぐ気付いてもらう。
       console.log(
         `\n  [Discord] 🔔 利用申請: ${username ?? "(名前不明)"} (ID: ${userId})\n` +
-          "           承認するには /integrations の Discord 連携メニュー → 待機リスト、" +
-          "または /discord approve " +
-          userId,
+          "           承認するには /integrations → Discord 連携 →「待機リストから利用申請を承認する」",
       );
     }
     try {

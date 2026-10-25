@@ -355,6 +355,8 @@ API キー不要 (claude CLI 側の `claude login` 済みセッションを再�
 
 評価順: deny → ask → allow → autoApproveTools/requireApprovalTools
 
+REPL からは `/permission` の設定画面で追加・削除する (旧サブコマンド `auto-add` / `rule-add` 等は削除済み。 docs/todo-legacy-ways-cleanup.md T3)。 対話できる端末が無いときは本節と基本設定のキーを config.json で直接編集する。
+
 ### processSandbox — OSレベルサンドボックス
 
 | キー | 型 | 説明 |
@@ -389,9 +391,9 @@ API キー不要 (claude CLI 側の `claude login` 済みセッションを再�
 | `attachGeneratedImages` | boolean | `image_generate` で生成した画像を webhook に自動添付するか（未設定/`true`=添付、`false`=無効）。docs/image-generation.md |
 | `maxAttachmentMb` | number | 添付画像の目標サイズ上限（MB、デフォルト 8）。超過する画像はコードで自動縮小してから添付する（オリジナルは無加工） |
 
-CLI からは `/integrations` → Discord の picker で対話設定 (canonical)。 旧 `/discord url <URL>` → `/discord enable` → `/discord test` も dispatcher 互換のため動作する。
+CLI からの設定は `/integrations` → Discord 連携 の画面だけ (直接コマンド `/discord` は 2026-10-25 に削除。 docs/todo-legacy-ways-cleanup.md T3)。 対話できる端末が無いときは本表のキーを config.json で直接編集する。
 
-生成画像の自動添付: `enabled` かつ `webhookUrl` 設定済みで `attachGeneratedImages` が `false` でなければ、`image_generate` の完了ごとに生成画像を Discord へ添付投稿する。サイズ上限を超える画像は「リサイズ優先 → 必要時のみ JPEG 変換」でコード側が自動縮小する（生成 AI には縮小させない）。REPL からは `/discord images on|off` で切替（`/discord status` に状態を表示）。
+生成画像の自動添付: `enabled` かつ `webhookUrl` 設定済みで `attachGeneratedImages` が `false` でなければ、`image_generate` の完了ごとに生成画像を Discord へ添付投稿する。サイズ上限を超える画像は「リサイズ優先 → 必要時のみ JPEG 変換」でコード側が自動縮小する（生成 AI には縮小させない）。REPL からは `/integrations` → Discord 連携 →「生成画像の自動添付をオン/オフにする」で切替（同画面の状態表示に出る）。
 
 ### Slash Command受信（オプション）
 
@@ -400,7 +402,7 @@ CLI からは `/integrations` → Discord の picker で対話設定 (canonical)
 | `applicationId` | string | Discord Developer PortalのApplication ID |
 | `botToken` | string | Botトークン（コマンド登録・応答送信） |
 | `listenEnabled` | boolean | 起動時にInteractionサーバーを自動起動するか |
-| `allowedUserIds` | string[] | コマンド・確認ボタンを受け付けるユーザーID。未設定=全員（確認ボタンは常に依頼者のみ有効）。`/discord user-add <ID>` で設定 |
+| `allowedUserIds` | string[] | コマンド・確認ボタンを受け付けるユーザーID。未設定/空=全員拒否 (fail-closed)。`/integrations` → Discord 連携 の許可ユーザー追加、または待機リストからの承認で設定 |
 | `interactionTimeoutSec` | number | 権限確認ボタンのタイムアウト秒（デフォルト300。ask_user はこの2倍）。詳細: docs/channel-interaction-bridge-design.md |
 
 ## slack
@@ -411,11 +413,11 @@ CLI からは `/integrations` → Discord の picker で対話設定 (canonical)
 | `webhookUrl` | string | Incoming Webhook URL |
 | `botToken` | string | `xoxb-` Bot Token (Bolt用) |
 | `appToken` | string | `xapp-` App-Level Token (Socket Mode用) |
-| `allowedUserIds` | string[] | メッセージ・確認ボタンを受け付けるユーザーID。未設定=全員（確認ボタンは常に依頼者のみ有効）。`/slack user-add <ID>` で設定 |
+| `allowedUserIds` | string[] | メッセージ・確認ボタンを受け付けるユーザーID。未設定/空=全員拒否 (fail-closed)。`/integrations` → Slack 連携 の許可ユーザー追加で設定 |
 | `interactionTimeoutSec` | number | 権限確認ボタンのタイムアウト秒（デフォルト300。ask_user はこの2倍）。詳細: docs/channel-interaction-bridge-design.md |
 
 Slack Bot (`--slack` モード) を使う場合は `botToken` + `appToken` の両方が必要。
-CLI からは `/integrations` → Slack の picker で対話設定 (canonical)。 旧 `/slack bot-token <TOKEN>` → `/slack app-token <TOKEN>` も dispatcher 互換で動作する。
+CLI からの設定は `/integrations` → Slack 連携 の画面だけ (直接コマンド `/slack` は削除済み)。 対話できる端末が無いときは本表のキーを config.json で直接編集する。
 
 ## search
 
@@ -424,7 +426,7 @@ CLI からは `/integrations` → Slack の picker で対話設定 (canonical)�
 | `provider` | `"duckduckgo"` \| `"searxng"` | `"duckduckgo"` | Web検索プロバイダー |
 | `searxngUrl` | string | — | SearXNGのJSON APIエンドポイント (例: `http://localhost:8888`) |
 
-CLIコマンド `/search searxng http://localhost:8888` または `/search duckduckgo` でも設定可能。
+REPL からは `/integrations` → Web検索エンジン の画面で設定する (直接コマンド `/search` は削除済み)。
 選択したproviderが失敗した場合、別providerへ自動切替はしない。`web_search`呼出しの`provider`に
 `"duckduckgo"`または`"searxng"`を明示すると、保存設定を変えずその1回だけ別経路を検証できる。
 SearXNGが0件と同時にupstream engine障害を返した場合は、情報不存在ではなく検索coverage失敗として報告する。

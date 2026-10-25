@@ -231,7 +231,7 @@ export interface ImageProvider {
 
 - 実装: `src/tools/definitions/image-generate.ts` の `maybeSendToDiscord()` →
   `src/utils/discord.ts` の `sendDiscordFiles()`。`config` をツールに渡してライブ参照する
-  （`/discord` 切替が即反映）。
+  （`/integrations` での切替が即反映）。
 - 送信方式: webhook の JSON エンドポイント (`httpPost`) は使えないため、`fetch` + `FormData`
   + `Blob` で `multipart/form-data`（`payload_json` + `files[n]`）を組み立てる。
 - ベストエフォート: 添付の失敗は警告ログのみ。画像生成自体は成功しているのでツール結果には
@@ -241,8 +241,9 @@ export interface ImageProvider {
   - 方針は「リサイズ優先 → 必要時のみ JPEG 変換」。リサイズは透過と PNG 形式を保てるためまず試し、
     最小寸法でも PNG が目標超なら JPEG（品質を 85→70→55→40 と段階的に低下）へ。判定は実バイト数で行う。
   - 上限は `config.discord.maxAttachmentMb`（既定 8MB、安全マージン 0.9 を掛けた値が目標）。
-- REPL 切替: `/discord images on|off`（引数なしで現在値を表示）。`attachGeneratedImages` を
-  書き換えて即保存する。`/discord status` にも添付 ON/OFF を表示する。
+- REPL 切替: `/integrations` → Discord 連携 →「生成画像の自動添付をオフ/オンにする」（項目名に現在値を表示）。
+  `attachGeneratedImages` を書き換えて即保存する。同画面の状態表示にも添付 ON/OFF を表示する。
+  (直接コマンド `/discord images` は 2026-10-25 に削除。 docs/todo-legacy-ways-cleanup.md T3)
   - **オリジナルは無加工**。縮小版は OS の一時ディレクトリに生成し、送信後（成功・失敗・例外いずれでも）
     必ず破棄する。
   - 縮小ライブラリは **Jimp**（純 JS）。単一 exe (postject SEA) にバンドルするため、ネイティブ依存の

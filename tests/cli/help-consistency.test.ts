@@ -94,4 +94,31 @@ describe("削除した別名コマンドが dispatcher に残っていない", (
     expect(replSource).not.toMatch(/sub === "on"\) \{\s*this\.agent\.setStreamingDisplay/);
     expect(replSource).not.toContain('subCmd === "public-key"');
   });
+
+  // T3: 設定コマンドは対話画面 (/permission・/integrations) だけにした
+  it.each(["/discord", "/slack", "/search", "/chatlog"])("直接コマンド case %s が無い", (cmd) => {
+    expect(replSource).not.toContain(`case "${cmd}":`);
+  });
+
+  it("/permission の旧サブコマンド分岐が無い", () => {
+    // list / rules は他コマンドにもある名前なので、 権限固有の名前だけを見る
+    for (const sub of [
+      "rule-add",
+      "rule-remove",
+      "auto-add",
+      "auto-remove",
+      "require-add",
+      "require-remove",
+      "discord-add",
+      "discord-remove",
+      "slack-add",
+      "slack-remove",
+    ]) {
+      expect(replSource, sub).not.toContain(`subCmd === "${sub}"`);
+    }
+  });
+
+  it("設定画面は削除したコマンドを内部で呼ばない (関数を直接呼ぶ)", () => {
+    expect(replSource).not.toMatch(/handleCommand\(\s*[`"]\/(discord|slack|search|chatlog|permission)\b/);
+  });
 });

@@ -46,12 +46,54 @@ import { parseTokenCount } from "../config/types.js";
 import type { Config, LLMEndpoint, SecondLLMEndpoint, SecondLLMProviderType } from "../config/types.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { PlanManager } from "../agent/plan-mode.js";
-import { sendDiscordNotification, isValidDiscordWebhookUrl } from "../utils/discord.js";
-import { sendSlackNotification, isValidSlackWebhookUrl } from "../utils/slack.js";
+import { sendDiscordNotification } from "../utils/discord.js";
+import { sendSlackNotification } from "../utils/slack.js";
 import { formatTaskReport } from "../agent/task-reporter.js";
 import { maybePromoteToGoal, extractAcceptanceCriteria } from "../agent/goal-promotion.js";
 import { DiscordInteractionServer } from "../discord/interaction-server.js";
-import { registerAskCommand } from "../discord/slash-commands.js";
+import {
+  addDiscordUser,
+  addSlackUser,
+  approveDiscordPending,
+  nonInteractiveSettingsNotice,
+  printChatlogStatus,
+  printDiscordStatus,
+  printDiscordUsers,
+  printSearchStatus,
+  printSlackStatus,
+  printSlackUsers,
+  registerDiscordAsk,
+  rejectDiscordPending,
+  removeDiscordUser,
+  removeSlackUser,
+  runSearchTest,
+  sendDiscordTest,
+  sendSlackTest,
+  setChatlogEnabled,
+  setChatlogVault,
+  setDiscordApplicationId,
+  setDiscordAttachImages,
+  setDiscordBotToken,
+  setDiscordEnabled,
+  setDiscordListenAutoStart,
+  setDiscordWebhookUrl,
+  setSlackAppToken,
+  setSlackBotToken,
+  setSlackEnabled,
+  setSlackWebhookUrl,
+  type SettingsContext,
+  useDuckDuckGo,
+  useSearxng,
+} from "./integrations-settings.js";
+import {
+  addPatternRule,
+  addToolToList,
+  getToolList,
+  type PermissionSettingsContext,
+  removePatternRule,
+  removeToolFromList,
+  type ToolListKind,
+} from "./permission-settings.js";
 // プロンプトは prompt-gate 経由で呼ぶ (docs/tui-alternate-screen.md §4.3)。
 // 表示中はライブ領域を排他所有し、他の出力をキューへ退避させる。
 import { select, input, password, confirm, checkbox, Separator, inquirer, withPrompt } from "./prompt-gate.js";
@@ -63,7 +105,6 @@ import { AzureOpenAIProvider } from "../providers/azure-openai.js";
 import { AzureClaudeProvider } from "../providers/azure-claude.js";
 import { saveConfig } from "../config/config-manager.js";
 import { isWindows, isMacOS } from "../utils/platform.js";
-import { maskWebhookUrl } from "../utils/mask.js";
 import { detectWsl } from "../security/wsl.js";
 import { configureSandboxProxy, getSandboxProxy } from "../security/sandbox-proxy.js";
 import { addDomain, removeDomain, resolveAllowedDomains, domainAllowed } from "../security/net-allowlist.js";
@@ -153,7 +194,7 @@ export class REPL {
         }))
       : [];
 
-    // 登録済みツール名を取得（/permission auto-add 等の補完用）
+    // 登録済みツール名を取得（/context tools <ツール名> の補完用）
     const toolNames = agent
       .getToolRegistry()
       .getDefinitions()
@@ -2656,9 +2697,14 @@ export class REPL {
   /**
    * /permission の対話 picker (Phase optimize #1、 2026-05-28)。
    * 引数なし呼び出しから入り、 カテゴリ → アクション → ツール/ルール選択 のループ。
-   * Esc / Ctrl+C で終了。 引数付きの旧形式は dispatcher 側で従来通り処理される。
+   * Esc / Ctrl+C で終了。 権限の設定方法はこの画面だけ (旧サブコマンドは T3 で削除)。
+   * 設定の書き換えは src/cli/permission-settings.ts の関数で行う。
    */
   private async handlePermissionInteractive(): Promise<void> {
+    if (!process.stdin.isTTY) {
+      for (const line of nonInteractiveSettingsNotice("/permission")) console.log(chalk.yellow(line));
+      return;
+    }
     const permissions = this.agent.getPermissions();
     while (true) {
       const rules = permissions.getRules();
@@ -2703,7 +2749,7 @@ export class REPL {
         await this.permissionPatternRulesMenu();
         continue;
       }
-      await this.permissionToolListMenu(category as "auto" | "require" | "discord" | "slack");
+      await this.permissionToolListMenu(category as ToolListKind);
     }
   }
 
@@ -2770,12 +2816,7 @@ export class REPL {
             console.log(chalk.dim("  キャンセル。"));
             continue;
           }
-          permissions.addRule(kind, pattern);
-          this.config.security.rules ??= { allow: [], deny: [], ask: [] };
-          if (!this.config.security.rules[kind].includes(pattern)) {
-            this.config.security.rules[kind].push(pattern);
-          }
-          saveConfig(this.config);
+          addPatternRule(this.permissionSettingsContext(), kind, pattern);
           const icon = kind === "deny" ? "🚫" : kind === "allow" ? "✅" : "❓";
           console.log(chalk.green(`  ${icon} ${kind}: "${pattern}" を追加`));
         } catch {
@@ -2798,11 +2839,7 @@ export class REPL {
           const sepIdx = chosen.indexOf("|");
           const a = chosen.slice(0, sepIdx) as "deny" | "allow" | "ask";
           const pat = chosen.slice(sepIdx + 1);
-          permissions.removeRule(a, pat);
-          if (this.config.security.rules) {
-            this.config.security.rules[a] = this.config.security.rules[a].filter((p) => p !== pat);
-          }
-          saveConfig(this.config);
+          removePatternRule(this.permissionSettingsContext(), a, pat);
           console.log(chalk.green(`  ✓ ${a}: "${pat}" を削除`));
         } catch {
           /* cancel */
@@ -2812,7 +2849,7 @@ export class REPL {
   }
 
   /** /permission 対話 picker のツールリスト編集サブメニュー (auto/require/discord/slack) */
-  private async permissionToolListMenu(kind: "auto" | "require" | "discord" | "slack"): Promise<void> {
+  private async permissionToolListMenu(kind: ToolListKind): Promise<void> {
     const permissions = this.agent.getPermissions();
     const labelMap = {
       auto: "Auto-approve (CLI)",
@@ -2820,69 +2857,7 @@ export class REPL {
       discord: "Discord auto-approve",
       slack: "Slack auto-approve",
     };
-    const getList = (): string[] => {
-      switch (kind) {
-        case "auto":
-          return permissions.getAutoApproveList();
-        case "require":
-          return permissions.getRequireApprovalList();
-        case "discord":
-          return permissions.getDiscordAutoApproveList();
-        case "slack":
-          return permissions.getSlackAutoApproveList();
-      }
-    };
-    const addTo = (tool: string): void => {
-      switch (kind) {
-        case "auto":
-          permissions.addAutoApprove(tool);
-          if (!this.config.security.autoApproveTools.includes(tool)) this.config.security.autoApproveTools.push(tool);
-          break;
-        case "require":
-          permissions.addRequireApproval(tool);
-          if (!this.config.security.requireApprovalTools.includes(tool))
-            this.config.security.requireApprovalTools.push(tool);
-          break;
-        case "discord":
-          permissions.addDiscordAutoApprove(tool);
-          this.config.security.discordAutoApproveTools ??= [];
-          if (!this.config.security.discordAutoApproveTools.includes(tool))
-            this.config.security.discordAutoApproveTools.push(tool);
-          break;
-        case "slack":
-          permissions.addSlackAutoApprove(tool);
-          this.config.security.slackAutoApproveTools ??= [];
-          if (!this.config.security.slackAutoApproveTools.includes(tool))
-            this.config.security.slackAutoApproveTools.push(tool);
-          break;
-      }
-    };
-    const removeFrom = (tool: string): void => {
-      switch (kind) {
-        case "auto":
-          permissions.removeAutoApprove(tool);
-          this.config.security.autoApproveTools = this.config.security.autoApproveTools.filter((t) => t !== tool);
-          break;
-        case "require":
-          permissions.removeRequireApproval(tool);
-          this.config.security.requireApprovalTools = this.config.security.requireApprovalTools.filter(
-            (t) => t !== tool,
-          );
-          break;
-        case "discord":
-          permissions.removeDiscordAutoApprove(tool);
-          this.config.security.discordAutoApproveTools = (this.config.security.discordAutoApproveTools ?? []).filter(
-            (t) => t !== tool,
-          );
-          break;
-        case "slack":
-          permissions.removeSlackAutoApprove(tool);
-          this.config.security.slackAutoApproveTools = (this.config.security.slackAutoApproveTools ?? []).filter(
-            (t) => t !== tool,
-          );
-          break;
-      }
-    };
+    const getList = (): string[] => getToolList(permissions, kind);
 
     while (true) {
       const list = getList();
@@ -2918,8 +2893,7 @@ export class REPL {
             choices: candidates.map((t) => ({ name: t, value: t })),
             pageSize: 12,
           });
-          addTo(chosen);
-          saveConfig(this.config);
+          addToolToList(this.permissionSettingsContext(), kind, chosen);
           console.log(chalk.green(`  ✓ ${chosen} を追加`));
         } catch {
           /* cancel */
@@ -2931,8 +2905,7 @@ export class REPL {
             choices: list.map((t) => ({ name: t, value: t })),
             pageSize: 12,
           });
-          removeFrom(chosen);
-          saveConfig(this.config);
+          removeToolFromList(this.permissionSettingsContext(), kind, chosen);
           console.log(chalk.green(`  ✓ ${chosen} を削除`));
         } catch {
           /* cancel */
@@ -2941,13 +2914,26 @@ export class REPL {
     }
   }
 
+  /** 設定画面から設定を書き換える関数に渡す共通の窓口 */
+  private settingsContext(): SettingsContext {
+    return { config: this.config, save: () => saveConfig(this.config) };
+  }
+
+  private permissionSettingsContext(): PermissionSettingsContext {
+    return { ...this.settingsContext(), permissions: this.agent.getPermissions() };
+  }
+
   // ─── /integrations (Phase optimize #3、 2026-05-28) ─────────────
   //
-  // /discord / /slack / /chatlog / /search の 4 つの "外部統合" 設定パネルを
-  // 1 つの picker に束ねる。 旧 4 コマンドは dispatcher 互換維持 (この picker は
-  // 内部的に this.handleCommand("/discord <sub>") 等を再帰呼び出しする)。
+  // Discord / Slack / 会話ログ / Web検索 の設定はこの画面だけで行う
+  // (直接コマンド /discord /slack /chatlog /search は T3 で削除)。
+  // 設定の書き換えは src/cli/integrations-settings.ts の関数を直接呼ぶ。
 
   private async handleIntegrationsCommand(): Promise<void> {
+    if (!process.stdin.isTTY) {
+      for (const line of nonInteractiveSettingsNotice("/integrations")) console.log(chalk.yellow(line));
+      return;
+    }
     while (true) {
       const dEnabled = this.config.discord?.enabled ?? false;
       const dListening = this.interactionServer?.running ?? false;
@@ -2983,10 +2969,29 @@ export class REPL {
     }
   }
 
-  /** /integrations → Discord 編集サブメニュー (旧 /discord と互換) */
+  /** 1 行入力を受け取る。 空欄・キャンセルは undefined (「取り消しました」 を表示) */
+  private async askSettingValue(message: string): Promise<string | undefined> {
+    try {
+      const val = (await input({ message: `${message} (空欄で取り消し):` })).trim();
+      if (!val) {
+        console.log(chalk.dim("  取り消しました。"));
+        return undefined;
+      }
+      return val;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** /integrations → Discord 編集サブメニュー */
   private async integrationsDiscordMenu(): Promise<void> {
+    const ctx = this.settingsContext();
     while (true) {
-      await this.handleCommand("/discord status");
+      printDiscordStatus(this.config, {
+        listening: this.interactionServer?.running ?? false,
+        botUser: this.interactionServer?.botUser,
+      });
+      const attachOn = this.config.discord?.attachGeneratedImages !== false;
       let action: string;
       try {
         action = await select({
@@ -2996,6 +3001,10 @@ export class REPL {
             { name: "通知をオフにする", value: "disable" },
             { name: "通知の送り先を設定する (Webhook URL)", value: "url" },
             { name: "テスト通知を送ってみる", value: "test" },
+            {
+              name: `生成画像の自動添付を${attachOn ? "オフ" : "オン"}にする (今: ${attachOn ? "オン" : "オフ"})`,
+              value: "images-toggle",
+            },
             { name: "Application ID を設定する (Discord から呼び出すための準備 1/2)", value: "app-id" },
             { name: "Bot Token を設定する (Discord から呼び出すための準備 2/2)", value: "bot-token" },
             { name: "/ask コマンドを Discord に登録する", value: "register" },
@@ -3008,63 +3017,84 @@ export class REPL {
             { name: "許可ユーザーを削除する", value: "user-remove" },
             { name: chalk.dim("前のメニューに戻る"), value: "back" },
           ],
-          pageSize: 16,
+          pageSize: 17,
         });
       } catch {
         return;
       }
       if (action === "back") return;
 
-      if (["enable", "disable", "test"].includes(action)) {
-        await this.handleCommand(`/discord ${action}`);
-      } else if (action === "users") {
-        await this.handleCommand("/discord users");
-      } else if (action === "waitlist") {
-        await this.discordWaitlistApprove();
-      } else if (action === "user-add" || action === "user-remove") {
-        try {
-          const val = await input({ message: "Discord ユーザー ID を入力 (空欄で取り消し):" });
-          if (!val.trim()) {
-            console.log(chalk.dim("  取り消しました。"));
-            continue;
-          }
-          await this.handleCommand(`/discord ${action} ${val.trim()}`);
-        } catch {
-          /* cancel */
+      switch (action) {
+        case "enable":
+        case "disable":
+          setDiscordEnabled(ctx, action === "enable");
+          break;
+        case "test":
+          await sendDiscordTest(this.config);
+          break;
+        case "images-toggle":
+          setDiscordAttachImages(ctx, !attachOn);
+          break;
+        case "users":
+          printDiscordUsers(this.config);
+          break;
+        case "waitlist":
+          await this.discordWaitlistApprove();
+          break;
+        case "user-add":
+        case "user-remove": {
+          const id = await this.askSettingValue("Discord ユーザー ID を入力");
+          if (!id) break;
+          if (action === "user-add") addDiscordUser(ctx, id);
+          else removeDiscordUser(ctx, id);
+          break;
         }
-      } else if (action === "register") {
-        // サーバーID を聞いてから登録 (空欄なら全サーバー向け = 反映に最大 1 時間)
-        try {
-          const gid = await input({
-            message: "登録先サーバーの ID (空欄なら全サーバー向けに登録。サーバー限定なら即時反映):",
-          });
-          await this.handleCommand(`/discord register ${gid.trim()}`.trim());
-        } catch {
-          /* cancel */
-        }
-      } else if (action === "listen-start") {
-        await this.handleCommand("/discord listen start");
-      } else if (action === "listen-stop") {
-        await this.handleCommand("/discord listen stop");
-      } else if (action === "auto-start-toggle") {
-        const cur = this.config.discord?.listenEnabled ?? false;
-        await this.handleCommand(`/discord listen auto-start ${cur ? "off" : "on"}`);
-      } else {
-        // url / app-id / bot-token — 1 引数
-        const fieldLabel: Record<string, string> = {
-          url: "Webhook URL (Discord のサーバー設定 → 連携サービス → ウェブフック で取得)",
-          "app-id": "Application ID (Discord Developer Portal → General Information)",
-          "bot-token": "Bot Token (Discord Developer Portal → Bot)",
-        };
-        try {
-          const val = await input({ message: `${fieldLabel[action] ?? action} を入力 (空欄で取り消し):` });
-          if (!val.trim()) {
-            console.log(chalk.dim("  取り消しました。"));
-            continue;
+        case "register": {
+          // サーバーID を聞いてから登録 (空欄なら全サーバー向け = 反映に最大 1 時間)
+          let gid: string;
+          try {
+            gid = await input({
+              message: "登録先サーバーの ID (空欄なら全サーバー向けに登録。サーバー限定なら即時反映):",
+            });
+          } catch {
+            break;
           }
-          await this.handleCommand(`/discord ${action} ${val.trim()}`);
-        } catch {
-          /* cancel */
+          await registerDiscordAsk(this.config, gid.trim() || undefined);
+          break;
+        }
+        case "listen-start":
+          if (this.interactionServer?.running) console.log(chalk.yellow("  すでに受信を開始しています。"));
+          else await this.startInteractionServer();
+          break;
+        case "listen-stop":
+          if (!this.interactionServer?.running) {
+            console.log(chalk.yellow("  受信は開始していません。"));
+          } else {
+            this.interactionServer.stop();
+            console.log(chalk.yellow("  受信を停止しました (Discord との接続を切りました)。"));
+          }
+          break;
+        case "auto-start-toggle":
+          setDiscordListenAutoStart(ctx, !(this.config.discord?.listenEnabled ?? false));
+          break;
+        case "url": {
+          const v = await this.askSettingValue(
+            "Webhook URL (Discord のサーバー設定 → 連携サービス → ウェブフック で取得) を入力",
+          );
+          if (v) setDiscordWebhookUrl(ctx, v);
+          break;
+        }
+        case "app-id": {
+          const v = await this.askSettingValue(
+            "Application ID (Discord Developer Portal → General Information) を入力",
+          );
+          if (v) setDiscordApplicationId(ctx, v);
+          break;
+        }
+        case "bot-token": {
+          const v = await this.askSettingValue("Bot Token (Discord Developer Portal → Bot) を入力");
+          if (v) setDiscordBotToken(ctx, v);
+          break;
         }
       }
     }
@@ -3115,13 +3145,15 @@ export class REPL {
       console.log(chalk.dim("  取り消しました。"));
       return;
     }
-    await this.handleCommand(`/discord ${act} ${id}`);
+    if (act === "approve") approveDiscordPending(this.settingsContext(), id);
+    else rejectDiscordPending(this.settingsContext(), id);
   }
 
-  /** /integrations → Slack 編集サブメニュー (旧 /slack と互換) */
+  /** /integrations → Slack 編集サブメニュー */
   private async integrationsSlackMenu(): Promise<void> {
+    const ctx = this.settingsContext();
     while (true) {
-      await this.handleCommand("/slack status");
+      printSlackStatus(this.config);
       let action: string;
       try {
         action = await select({
@@ -3145,46 +3177,53 @@ export class REPL {
       }
       if (action === "back") return;
 
-      if (["enable", "disable", "test"].includes(action)) {
-        await this.handleCommand(`/slack ${action}`);
-      } else if (action === "users") {
-        await this.handleCommand("/slack users");
-      } else if (action === "user-add" || action === "user-remove") {
-        try {
-          const val = await input({ message: "Slack ユーザー ID を入力 (例: U01234567、空欄で取り消し):" });
-          if (!val.trim()) {
-            console.log(chalk.dim("  取り消しました。"));
-            continue;
-          }
-          await this.handleCommand(`/slack ${action} ${val.trim()}`);
-        } catch {
-          /* cancel */
+      switch (action) {
+        case "enable":
+        case "disable":
+          setSlackEnabled(ctx, action === "enable");
+          break;
+        case "test":
+          await sendSlackTest(this.config);
+          break;
+        case "users":
+          printSlackUsers(this.config);
+          break;
+        case "user-add":
+        case "user-remove": {
+          const id = await this.askSettingValue("Slack ユーザー ID を入力 (例: U01234567)");
+          if (!id) break;
+          if (action === "user-add") addSlackUser(ctx, id);
+          else removeSlackUser(ctx, id);
+          break;
         }
-      } else {
-        // url / bot-token / app-token
-        const fieldLabel: Record<string, string> = {
-          url: "Webhook URL (Slack アプリ設定 → Incoming Webhooks で取得)",
-          "bot-token": "Bot Token (Slack アプリ設定 → OAuth & Permissions、xoxb- で始まる)",
-          "app-token": "App-Level Token (Slack アプリ設定 → Basic Information、xapp- で始まる)",
-        };
-        try {
-          const val = await input({ message: `${fieldLabel[action] ?? action} を入力 (空欄で取り消し):` });
-          if (!val.trim()) {
-            console.log(chalk.dim("  取り消しました。"));
-            continue;
-          }
-          await this.handleCommand(`/slack ${action} ${val.trim()}`);
-        } catch {
-          /* cancel */
+        case "url": {
+          const v = await this.askSettingValue("Webhook URL (Slack アプリ設定 → Incoming Webhooks で取得) を入力");
+          if (v) setSlackWebhookUrl(ctx, v);
+          break;
+        }
+        case "bot-token": {
+          const v = await this.askSettingValue(
+            "Bot Token (Slack アプリ設定 → OAuth & Permissions、xoxb- で始まる) を入力",
+          );
+          if (v) setSlackBotToken(ctx, v);
+          break;
+        }
+        case "app-token": {
+          const v = await this.askSettingValue(
+            "App-Level Token (Slack アプリ設定 → Basic Information、xapp- で始まる) を入力",
+          );
+          if (v) setSlackAppToken(ctx, v);
+          break;
         }
       }
     }
   }
 
-  /** /integrations → Chatlog 編集サブメニュー (旧 /chatlog と互換) */
+  /** /integrations → 会話ログ編集サブメニュー */
   private async integrationsChatlogMenu(): Promise<void> {
+    const ctx = this.settingsContext();
     while (true) {
-      await this.handleCommand("/chatlog status");
+      printChatlogStatus(this.config, this.agent);
       let action: string;
       try {
         action = await select({
@@ -3201,26 +3240,19 @@ export class REPL {
       }
       if (action === "back") return;
       if (action === "enable" || action === "disable") {
-        await this.handleCommand(`/chatlog ${action}`);
+        await setChatlogEnabled(ctx, this.agent, action === "enable");
       } else {
-        try {
-          const val = await input({ message: "Obsidian Vault のフォルダパス (空欄で取り消し):" });
-          if (!val.trim()) {
-            console.log(chalk.dim("  取り消しました。"));
-            continue;
-          }
-          await this.handleCommand(`/chatlog vault ${val.trim()}`);
-        } catch {
-          /* cancel */
-        }
+        const v = await this.askSettingValue("Obsidian Vault のフォルダパス");
+        if (v) await setChatlogVault(ctx, this.agent, v);
       }
     }
   }
 
-  /** /integrations → Search 編集サブメニュー (旧 /search と互換) */
+  /** /integrations → Web検索 編集サブメニュー */
   private async integrationsSearchMenu(): Promise<void> {
+    const ctx = this.settingsContext();
     while (true) {
-      await this.handleCommand("/search status");
+      printSearchStatus(this.config);
       let action: string;
       try {
         action = await select({
@@ -3237,16 +3269,16 @@ export class REPL {
       }
       if (action === "back") return;
       if (action === "ddg") {
-        await this.handleCommand("/search duckduckgo");
+        useDuckDuckGo(ctx);
       } else if (action === "test") {
-        await this.handleCommand("/search test");
+        await runSearchTest(this.config);
       } else if (action === "searxng") {
         try {
           const val = await input({
             message: "SearXNG の URL (空欄なら今の設定のまま):",
             default: this.config.search?.searxngUrl ?? "",
           });
-          await this.handleCommand(`/search searxng ${val.trim()}`.trim());
+          useSearxng(ctx, val);
         } catch {
           /* cancel */
         }
@@ -6233,637 +6265,22 @@ export class REPL {
       }
 
       case "/integrations": {
-        // 2026-05-28: Discord / Slack / Chatlog / Search の設定パネルを 1 つの picker に
-        // 集約 (Phase optimize #3)。 旧 4 コマンドは dispatcher 互換維持。
+        // Discord / Slack / 会話ログ / Web検索 の設定は対話画面だけ (直接コマンドは T3 で削除)
+        if (args.length > 0) {
+          console.log(chalk.yellow("  /integrations は引数を取りません。引数なしで実行すると設定画面が開きます。"));
+          break;
+        }
         await this.handleIntegrationsCommand();
         break;
       }
 
-      case "/discord": {
-        const subCmd = args[0];
-        if (!subCmd || subCmd === "status") {
-          const d = this.config.discord;
-          const dEnabled = d?.enabled ?? false;
-          const dUrl = d?.webhookUrl ? maskWebhookUrl(d.webhookUrl) : "未設定";
-          const dListening = this.interactionServer?.running ?? false;
-          const dBotName = this.interactionServer?.botUser;
-          const dAppId = d?.applicationId ? chalk.dim(d.applicationId) : chalk.yellow("未設定");
-          const dToken = d?.botToken ? chalk.green("設定済み") : chalk.yellow("未設定");
-          const dAttach = (d?.attachGeneratedImages ?? true) !== false;
-          console.log(chalk.bold("\n  === Discord 連携の状態 ==="));
-          console.log(chalk.dim(`  通知 (Webhook): ${dEnabled ? chalk.green("オン") : chalk.yellow("オフ")}`));
-          console.log(chalk.dim(`  Webhook URL:    ${dUrl}`));
-          console.log(chalk.dim(`  生成画像の添付: ${dAttach ? chalk.green("オン") : chalk.yellow("オフ")}`));
-          console.log(
-            chalk.dim(
-              `  Bot 接続:       ${dListening ? chalk.green(`接続中${dBotName ? ` (${dBotName})` : ""}`) : chalk.yellow("停止中")}`,
-            ),
-          );
-          console.log(chalk.dim(`  Application ID: ${dAppId}`));
-          console.log(chalk.dim(`  Bot Token:      ${dToken}`));
-          console.log();
-        } else if (subCmd === "enable") {
-          if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
-          if (!this.config.discord.webhookUrl) {
-            console.log(
-              chalk.yellow(
-                "  注意: 通知の送り先 (Webhook URL) が未設定です。/integrations の Discord 連携メニューから設定してください。",
-              ),
-            );
-          }
-          this.config.discord.enabled = true;
-          saveConfig(this.config);
-          console.log(chalk.green("  Discord 通知を有効化しました。"));
-        } else if (subCmd === "disable") {
-          if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
-          this.config.discord.enabled = false;
-          saveConfig(this.config);
-          console.log(chalk.yellow("  Discord 通知を無効化しました。"));
-        } else if (subCmd === "url") {
-          const urlStr = args[1];
-          if (!urlStr) {
-            console.log(chalk.yellow("  使い方: /discord url <webhook-url>"));
-            console.log(chalk.dim("  例: /discord url https://discord.com/api/webhooks/123456/abcdef"));
-          } else if (!isValidDiscordWebhookUrl(urlStr)) {
-            console.log(chalk.red("  ❌ 無効なWebhook URLです。"));
-            console.log(chalk.yellow("  正しい形式: https://discord.com/api/webhooks/<id>/<token>"));
-            console.log(chalk.dim("  Discordサーバー設定 → 連携サービス → ウェブフック で取得してください。"));
-          } else {
-            if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
-            this.config.discord.webhookUrl = urlStr;
-            saveConfig(this.config);
-            console.log(chalk.green(`  ✅ Discord Webhook URL を設定しました。`));
-            console.log(chalk.dim(`  URL: ${maskWebhookUrl(urlStr)}`));
-            console.log(chalk.dim("  「テスト通知を送ってみる」で動作確認できます。"));
-          }
-        } else if (subCmd === "test") {
-          const webhookUrl = this.config.discord?.webhookUrl ?? "";
-          if (!webhookUrl) {
-            console.log(
-              chalk.yellow(
-                "  通知の送り先 (Webhook URL) が未設定です。/integrations の Discord 連携メニューから設定してください。",
-              ),
-            );
-          } else if (!isValidDiscordWebhookUrl(webhookUrl)) {
-            console.log(
-              chalk.red(
-                "  ❌ 設定されている URL が無効です。/integrations の Discord 連携メニューから正しい Webhook URL を設定してください。",
-              ),
-            );
-          } else {
-            console.log(chalk.dim("  Discord にテストメッセージを送信中..."));
-            const result = await sendDiscordNotification(
-              webhookUrl,
-              "🤖 lllmAgents テスト通知\nDiscord通知が正常に動作しています！",
-            );
-            if (result.success) {
-              console.log(chalk.green("  ✅ テストメッセージを送信しました。Discordを確認してください。"));
-            } else {
-              console.log(chalk.red(`  ❌ 送信失敗: ${result.error}`));
-            }
-          }
-        } else if (subCmd === "app-id") {
-          // Application ID 設定
-          const id = args[1];
-          if (!id) {
-            console.log(chalk.yellow("  使い方: /discord app-id <application-id>"));
-            console.log(chalk.dim("  Discord Developer Portal → アプリ → General Information → Application ID"));
-          } else {
-            if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
-            this.config.discord.applicationId = id;
-            saveConfig(this.config);
-            console.log(chalk.green(`  ✅ Application ID を設定しました: ${id}`));
-          }
-        } else if (subCmd === "bot-token") {
-          // Bot Token 設定 (コマンド登録・follow-up 送信用)
-          const token = args[1];
-          if (!token) {
-            console.log(chalk.yellow("  使い方: /discord bot-token <bot-token>"));
-            console.log(chalk.dim("  Discord Developer Portal → アプリ → Bot → Token"));
-          } else {
-            if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
-            this.config.discord.botToken = token;
-            saveConfig(this.config);
-            console.log(chalk.green("  ✅ Bot Token を設定しました。"));
-          }
-        } else if (subCmd === "register") {
-          // スラッシュコマンドを Discord に登録
-          const guildId = args[1]; // 省略時はグローバル登録
-          const appId = this.config.discord?.applicationId;
-          const botToken = this.config.discord?.botToken;
-          if (!appId || !botToken) {
-            console.log(chalk.yellow("  Application ID と Bot Token が必要です。"));
-            console.log(chalk.dim("  /integrations の Discord 連携メニューから設定してください。"));
-          } else {
-            const scope = guildId ? `サーバー ${guildId} 限定` : "全サーバー向け";
-            const inviteUrl = `https://discord.com/oauth2/authorize?client_id=${appId}&scope=bot+applications.commands&permissions=2048`;
-            console.log(chalk.dim(`  /ask コマンドを登録中 (${scope})...`));
-            const result = await registerAskCommand(appId, botToken, guildId);
-            if (result.success) {
-              console.log(chalk.green(`  ✅ /ask コマンドを登録しました (ID: ${result.commandId})`));
-              console.log(chalk.dim("  注意: /ask が使えるのは、この Bot を招待したサーバーだけです。"));
-              console.log(chalk.dim("  まだ招待していなければ、下の URL を開いて招待してください:"));
-              console.log(chalk.cyan(`    ${inviteUrl}`));
-              if (!guildId) {
-                console.log(chalk.dim("  全サーバー向けの登録は、反映まで最大 1 時間かかります。"));
-                console.log(
-                  chalk.dim("  すぐ試したい場合は、もう一度登録を実行してサーバーIDを指定してください (即時反映)。"),
-                );
-              }
-            } else {
-              console.log(chalk.red(`  ❌ 登録失敗: ${result.error}`));
-              if (result.error?.includes("50001") || result.error?.includes("Missing Access")) {
-                console.log(chalk.yellow("  原因: この Bot は指定したサーバーにまだ参加していません。"));
-                console.log(chalk.dim("  下の URL を開いて Bot をサーバーに招待してから、もう一度お試しください:"));
-                console.log(chalk.cyan(`    ${inviteUrl}`));
-              }
-            }
-          }
-        } else if (subCmd === "listen") {
-          // Interaction Server の起動/停止
-          const action = args[1];
-          if (action === "start") {
-            if (this.interactionServer?.running) {
-              console.log(chalk.yellow("  すでに受信を開始しています。"));
-            } else {
-              await this.startInteractionServer();
-            }
-          } else if (action === "stop") {
-            if (!this.interactionServer?.running) {
-              console.log(chalk.yellow("  受信は開始していません。"));
-            } else {
-              this.interactionServer.stop();
-              console.log(chalk.yellow("  受信を停止しました (Discord との接続を切りました)。"));
-            }
-          } else if (action === "auto-start") {
-            // 次回起動時から自動起動
-            const on = args[2] !== "off";
-            if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
-            this.config.discord.listenEnabled = on;
-            saveConfig(this.config);
-            console.log(
-              on
-                ? chalk.green("  ✅ 次回起動時から自動で受信を開始します。")
-                : chalk.yellow("  受信の自動開始をオフにしました。"),
-            );
-          } else {
-            console.log(chalk.yellow("  使い方: /discord listen [start|stop|auto-start [off]]"));
-          }
-        } else if (subCmd === "user-add" || subCmd === "user-remove" || subCmd === "users") {
-          // A-2: 利用許可ユーザーの管理 (docs/channel-interaction-bridge-design.md §6)
-          if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
-          const list = this.config.discord.allowedUserIds ?? [];
-          if (subCmd === "users") {
-            if (list.length === 0) {
-              console.log(chalk.dim("  許可ユーザー: 未設定 (全員が利用可能。確認ボタンは常に依頼者のみ有効)"));
-            } else {
-              console.log(chalk.bold("  許可ユーザー:"));
-              for (const id of list) console.log(chalk.dim(`    - ${id}`));
-            }
-          } else {
-            const id = args[1];
-            if (!id) {
-              console.log(chalk.yellow(`  使い方: /discord ${subCmd} <DiscordユーザーID>`));
-            } else if (subCmd === "user-add") {
-              if (!/^\d{15,21}$/.test(id)) {
-                // 失敗の典型: ユーザー名 (osia4782 等) を入れてしまう。 ID は数値 snowflake。
-                console.log(
-                  chalk.yellow(`  ⚠ "${id}" は Discord ユーザー ID の形式 (15〜21桁の数字) ではありません。`),
-                );
-                console.log(chalk.dim("    ユーザー名ではなく数値の ID を指定してください (一致せず利用できません)。"));
-                console.log(chalk.dim("    ID 入力が面倒な場合は、相手に Discord から /ask を一度実行してもらい、"));
-                console.log(chalk.dim("    待機リスト (/discord waitlist) から承認する方法が確実です。"));
-              }
-              if (!list.includes(id)) list.push(id);
-              this.config.discord.allowedUserIds = list;
-              // 許可したユーザーは待機リストから取り除く。
-              if (this.config.discord.pendingUsers) {
-                this.config.discord.pendingUsers = this.config.discord.pendingUsers.filter((u) => u.id !== id);
-              }
-              saveConfig(this.config);
-              console.log(chalk.green(`  許可ユーザーに ${id} を追加しました (${list.length} 名)。`));
-            } else {
-              this.config.discord.allowedUserIds = list.filter((u) => u !== id);
-              saveConfig(this.config);
-              console.log(chalk.yellow(`  許可ユーザーから ${id} を削除しました。`));
-            }
-          }
-        } else if (subCmd === "waitlist" || subCmd === "approve" || subCmd === "reject") {
-          // 待機リスト: 未許可ユーザーのアクセスを自動記録 → ここで承認/却下する
-          if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
-          const pending = this.config.discord.pendingUsers ?? [];
-          if (subCmd === "waitlist") {
-            if (pending.length === 0) {
-              console.log(chalk.dim("  待機リスト: なし (未許可ユーザーが /ask を試みると自動で記録されます)"));
-            } else {
-              console.log(chalk.bold("  待機リスト (利用申請):"));
-              for (const u of pending) {
-                console.log(
-                  chalk.dim(
-                    `    - ${u.username ?? "(名前不明)"} (ID: ${u.id})  ` +
-                      `試行 ${u.attempts} 回 / 最終 ${u.lastSeen.replace("T", " ").slice(0, 16)}`,
-                  ),
-                );
-              }
-              console.log(chalk.dim("  承認: /discord approve <ID>  却下: /discord reject <ID>"));
-            }
-          } else {
-            const id = args[1];
-            if (!id) {
-              console.log(chalk.yellow(`  使い方: /discord ${subCmd} <DiscordユーザーID>`));
-            } else if (subCmd === "approve") {
-              const allow = this.config.discord.allowedUserIds ?? [];
-              if (!allow.includes(id)) allow.push(id);
-              this.config.discord.allowedUserIds = allow;
-              this.config.discord.pendingUsers = pending.filter((u) => u.id !== id);
-              saveConfig(this.config);
-              console.log(chalk.green(`  ✅ ${id} を許可しました (許可ユーザー ${allow.length} 名)。`));
-            } else {
-              this.config.discord.pendingUsers = pending.filter((u) => u.id !== id);
-              saveConfig(this.config);
-              console.log(chalk.yellow(`  待機リストから ${id} を削除しました。`));
-            }
-          }
-        } else if (subCmd === "images") {
-          // 生成画像の Discord 自動添付 ON/OFF (docs/image-generation.md §5.1)
-          if (!this.config.discord) this.config.discord = { enabled: false, webhookUrl: "" };
-          const action = args[1];
-          if (!action) {
-            const on = this.config.discord.attachGeneratedImages !== false;
-            console.log(
-              chalk.dim(`  生成画像の自動添付: ${on ? chalk.green("オン") : chalk.yellow("オフ")} (既定: オン)`),
-            );
-            console.log(chalk.dim("  切替: /discord images on | off"));
-          } else if (action === "on") {
-            this.config.discord.attachGeneratedImages = true;
-            saveConfig(this.config);
-            console.log(chalk.green("  ✅ 生成画像を Discord に自動添付します。"));
-          } else if (action === "off") {
-            this.config.discord.attachGeneratedImages = false;
-            saveConfig(this.config);
-            console.log(chalk.yellow("  生成画像の自動添付をオフにしました (通知テキストは従来どおり)。"));
-          } else {
-            console.log(chalk.yellow("  使い方: /discord images [on|off]"));
-          }
-        } else {
-          console.log(chalk.yellow("  使い方: /discord <サブコマンド>"));
-          console.log(chalk.dim("  通知系:    status | enable | disable | url <URL> | test"));
-          console.log(chalk.dim("  画像添付:  images [on|off]"));
-          console.log(chalk.dim("  受信設定:  app-id <id> | bot-token <トークン>"));
-          console.log(chalk.dim("  コマンド:  register [サーバーID]"));
-          console.log(chalk.dim("  受信:      listen start | listen stop | listen auto-start [off]"));
-          console.log(chalk.dim("  認可:      user-add <ID> | user-remove <ID> | users"));
-          console.log(chalk.dim("  待機リスト: waitlist | approve <ID> | reject <ID>"));
-        }
-        break;
-      }
-
-      case "/slack": {
-        const subCmd = args[0];
-        if (!subCmd || subCmd === "status") {
-          const s = this.config.slack;
-          const sEnabled = s?.enabled ?? false;
-          const sUrl = s?.webhookUrl ? maskWebhookUrl(s.webhookUrl) : "未設定";
-          const sBotToken = s?.botToken ? chalk.green("設定済み") : chalk.yellow("未設定");
-          const sAppToken = s?.appToken ? chalk.green("設定済み") : chalk.yellow("未設定");
-          console.log(chalk.bold("\n  === Slack 連携の状態 ==="));
-          console.log(chalk.dim(`  通知 (Webhook): ${sEnabled ? chalk.green("オン") : chalk.yellow("オフ")}`));
-          console.log(chalk.dim(`  Webhook URL:    ${sUrl}`));
-          console.log(chalk.dim(`  Bot Token:      ${sBotToken}`));
-          console.log(chalk.dim(`  App Token:      ${sAppToken}`));
-          console.log(chalk.dim(`  --slack モード:  bot-token + app-token 設定後に 'npm run start -- --slack' で起動`));
-          console.log();
-        } else if (subCmd === "enable") {
-          if (!this.config.slack) this.config.slack = { enabled: false, webhookUrl: "" };
-          if (!this.config.slack.webhookUrl) {
-            console.log(
-              chalk.yellow(
-                "  注意: 通知の送り先 (Webhook URL) が未設定です。/integrations の Slack 連携メニューから設定してください。",
-              ),
-            );
-          }
-          this.config.slack.enabled = true;
-          saveConfig(this.config);
-          console.log(chalk.green("  Slack 通知を有効化しました。"));
-        } else if (subCmd === "disable") {
-          if (!this.config.slack) this.config.slack = { enabled: false, webhookUrl: "" };
-          this.config.slack.enabled = false;
-          saveConfig(this.config);
-          console.log(chalk.yellow("  Slack 通知を無効化しました。"));
-        } else if (subCmd === "url") {
-          const urlStr = args[1];
-          if (!urlStr) {
-            console.log(chalk.yellow("  使い方: /slack url <webhook-url>"));
-            console.log(chalk.dim("  例: /slack url https://hooks.slack.com/services/T.../B.../..."));
-          } else if (!isValidSlackWebhookUrl(urlStr)) {
-            console.log(chalk.red("  無効なWebhook URLです。"));
-            console.log(chalk.yellow("  正しい形式: https://hooks.slack.com/services/T.../B.../..."));
-            console.log(chalk.dim("  Slack App設定 → Incoming Webhooks で取得してください。"));
-          } else {
-            if (!this.config.slack) this.config.slack = { enabled: false, webhookUrl: "" };
-            this.config.slack.webhookUrl = urlStr;
-            saveConfig(this.config);
-            console.log(chalk.green(`  Slack Webhook URL を設定しました。`));
-            console.log(chalk.dim(`  URL: ${maskWebhookUrl(urlStr)}`));
-            console.log(chalk.dim("  「テスト通知を送ってみる」で動作確認できます。"));
-          }
-        } else if (subCmd === "test") {
-          const webhookUrl = this.config.slack?.webhookUrl ?? "";
-          if (!webhookUrl) {
-            console.log(
-              chalk.yellow(
-                "  通知の送り先 (Webhook URL) が未設定です。/integrations の Slack 連携メニューから設定してください。",
-              ),
-            );
-          } else if (!isValidSlackWebhookUrl(webhookUrl)) {
-            console.log(
-              chalk.red(
-                "  設定されている URL が無効です。/integrations の Slack 連携メニューから正しい Webhook URL を設定してください。",
-              ),
-            );
-          } else {
-            console.log(chalk.dim("  Slack にテストメッセージを送信中..."));
-            const result = await sendSlackNotification(
-              webhookUrl,
-              "lllmAgents テスト通知\nSlack通知が正常に動作しています！",
-            );
-            if (result.success) {
-              console.log(chalk.green("  テストメッセージを送信しました。Slackを確認してください。"));
-            } else {
-              console.log(chalk.red(`  送信失敗: ${result.error}`));
-            }
-          }
-        } else if (subCmd === "bot-token") {
-          const token = args[1];
-          if (!token) {
-            console.log(chalk.yellow("  使い方: /slack bot-token <xoxb-...>"));
-            console.log(chalk.dim("  Slack App → OAuth & Permissions → Bot User OAuth Token"));
-          } else {
-            if (!this.config.slack) this.config.slack = { enabled: false, webhookUrl: "" };
-            this.config.slack.botToken = token;
-            saveConfig(this.config);
-            console.log(chalk.green("  Bot Token を設定しました。"));
-          }
-        } else if (subCmd === "app-token") {
-          const token = args[1];
-          if (!token) {
-            console.log(chalk.yellow("  使い方: /slack app-token <xapp-...>"));
-            console.log(chalk.dim("  Slack App → Basic Information → App-Level Tokens"));
-          } else {
-            if (!this.config.slack) this.config.slack = { enabled: false, webhookUrl: "" };
-            this.config.slack.appToken = token;
-            saveConfig(this.config);
-            console.log(chalk.green("  App-Level Token を設定しました。"));
-          }
-        } else if (subCmd === "user-add" || subCmd === "user-remove" || subCmd === "users") {
-          // A-2: 利用許可ユーザーの管理 (docs/channel-interaction-bridge-design.md §6)
-          if (!this.config.slack) this.config.slack = { enabled: false, webhookUrl: "" };
-          const list = this.config.slack.allowedUserIds ?? [];
-          if (subCmd === "users") {
-            if (list.length === 0) {
-              console.log(chalk.dim("  許可ユーザー: 未設定 (全員が利用可能。確認ボタンは常に依頼者のみ有効)"));
-            } else {
-              console.log(chalk.bold("  許可ユーザー:"));
-              for (const id of list) console.log(chalk.dim(`    - ${id}`));
-            }
-          } else {
-            const id = args[1];
-            if (!id) {
-              console.log(chalk.yellow(`  使い方: /slack ${subCmd} <SlackユーザーID (例: U01234567)>`));
-            } else if (subCmd === "user-add") {
-              if (!list.includes(id)) list.push(id);
-              this.config.slack.allowedUserIds = list;
-              saveConfig(this.config);
-              console.log(chalk.green(`  許可ユーザーに ${id} を追加しました (${list.length} 名)。`));
-            } else {
-              this.config.slack.allowedUserIds = list.filter((u) => u !== id);
-              saveConfig(this.config);
-              console.log(chalk.yellow(`  許可ユーザーから ${id} を削除しました。`));
-            }
-          }
-        } else {
-          console.log(chalk.yellow("  使い方: /slack <サブコマンド>"));
-          console.log(chalk.dim("  通知系:    status | enable | disable | url <URL> | test"));
-          console.log(chalk.dim("  Bot設定:   bot-token <xoxb-...> | app-token <xapp-...>"));
-          console.log(chalk.dim("  認可:      user-add <ID> | user-remove <ID> | users"));
-          console.log(chalk.dim("  起動:      npm run start -- --slack"));
-        }
-        break;
-      }
-
-      case "/search": {
-        const subCmd = args[0];
-        if (!subCmd || subCmd === "status") {
-          const s = this.config.search ?? { provider: "duckduckgo" };
-          console.log(chalk.bold("  Web検索設定:"));
-          console.log(`    プロバイダー: ${chalk.cyan(s.provider)}`);
-          if (s.provider === "searxng") {
-            console.log(`    SearXNG URL:  ${chalk.cyan(s.searxngUrl ?? "http://localhost:8888")}`);
-          }
-        } else if (subCmd === "searxng") {
-          const url = args[1] ?? "http://localhost:8888";
-          if (!this.config.search) this.config.search = { provider: "searxng", searxngUrl: url };
-          else {
-            this.config.search.provider = "searxng";
-            this.config.search.searxngUrl = url;
-          }
-          saveConfig(this.config);
-          console.log(chalk.green(`  検索プロバイダーを SearXNG に変更しました (${url})`));
-          console.log(chalk.dim("  反映には再起動が必要です。"));
-        } else if (subCmd === "duckduckgo" || subCmd === "ddg") {
-          if (!this.config.search) this.config.search = { provider: "duckduckgo" };
-          else this.config.search.provider = "duckduckgo";
-          saveConfig(this.config);
-          console.log(chalk.green("  検索プロバイダーを DuckDuckGo に変更しました。"));
-          console.log(chalk.dim("  反映には再起動が必要です。"));
-        } else if (subCmd === "test") {
-          const s = this.config.search ?? { provider: "duckduckgo" };
-          console.log(chalk.dim(`  ${s.provider} でテスト検索中...`));
-          try {
-            const { createWebSearchTool } = await import("../tools/definitions/web-search.js");
-            const tool = createWebSearchTool(this.config.search);
-            const result = await tool.execute({ query: "test", max_results: 3 });
-            if (result.success) {
-              console.log(chalk.green("  テスト成功:"));
-              console.log(
-                result.output
-                  .split("\n")
-                  .map((l: string) => `    ${l}`)
-                  .join("\n"),
-              );
-            } else {
-              console.log(chalk.red(`  テスト失敗: ${result.error}`));
-            }
-          } catch (e) {
-            console.log(chalk.red(`  エラー: ${e}`));
-          }
-        } else {
-          console.log(chalk.yellow("  使い方: /search <サブコマンド>"));
-          console.log(chalk.dim("  status               現在の設定を表示"));
-          console.log(chalk.dim("  searxng [url]         SearXNG に切替 (デフォルト: http://localhost:8888)"));
-          console.log(chalk.dim("  duckduckgo | ddg      DuckDuckGo に切替"));
-          console.log(chalk.dim("  test                  テスト検索を実行"));
-        }
-        break;
-      }
-
       case "/permission": {
-        // 2026-05-28: 引数なしは対話 picker (Phase optimize #1)。 引数付きは互換のため legacy 経路。
-        if (args.length === 0) {
-          await this.handlePermissionInteractive();
+        // 権限の設定は対話画面だけ (旧サブコマンド auto-add / rule-add 等は T3 で削除)
+        if (args.length > 0) {
+          console.log(chalk.yellow("  /permission は引数を取りません。引数なしで実行すると設定画面が開きます。"));
           break;
         }
-        const permissions = this.agent.getPermissions();
-        const subCmd = args[0];
-        const toolName = args[1];
-
-        if (!subCmd || subCmd === "list") {
-          const autoList = permissions.getAutoApproveList();
-          const requireList = permissions.getRequireApprovalList();
-          const discordList = permissions.getDiscordAutoApproveList();
-          const rules = permissions.getRules();
-          console.log(chalk.bold("  [パターンルール] rules (ツール名リストより優先):"));
-          console.log(chalk.bold("    deny (常に拒否):"));
-          if (rules.deny.length === 0) console.log(chalk.dim("      (なし)"));
-          else for (const r of rules.deny) console.log(chalk.red(`      ✗ ${r}`));
-          console.log(chalk.bold("    allow (常に許可):"));
-          if (rules.allow.length === 0) console.log(chalk.dim("      (なし)"));
-          else for (const r of rules.allow) console.log(chalk.green(`      ✓ ${r}`));
-          console.log(chalk.bold("    ask (常に確認):"));
-          if (rules.ask.length === 0) console.log(chalk.dim("      (なし)"));
-          else for (const r of rules.ask) console.log(chalk.yellow(`      ? ${r}`));
-          console.log(chalk.bold("  [CLI] 自動許可 (autoApproveTools):"));
-          if (autoList.length === 0) {
-            console.log(chalk.dim("    (なし)"));
-          } else {
-            for (const t of autoList) console.log(chalk.green(`    ✓ ${t}`));
-          }
-          console.log(chalk.bold("  [CLI] 確認必要 (requireApprovalTools):"));
-          if (requireList.length === 0) {
-            console.log(chalk.dim("    (なし)"));
-          } else {
-            for (const t of requireList) console.log(chalk.yellow(`    ? ${t}`));
-          }
-          console.log(chalk.bold("  [Discord] 自動許可 (discordAutoApproveTools):"));
-          if (discordList.length === 0) {
-            console.log(chalk.dim("    (なし)"));
-          } else {
-            for (const t of discordList) console.log(chalk.cyan(`    ✓ ${t}`));
-          }
-        } else if (subCmd === "rules") {
-          // /permission rules のみ: ルール一覧表示
-          const rules = permissions.getRules();
-          console.log(chalk.bold("  パターンルール一覧:"));
-          for (const action of ["deny", "allow", "ask"] as const) {
-            console.log(chalk.bold(`  ${action}:`));
-            if (rules[action].length === 0) {
-              console.log(chalk.dim("    (なし)"));
-            } else {
-              for (const r of rules[action]) {
-                const icon =
-                  action === "deny" ? chalk.red("✗") : action === "allow" ? chalk.green("✓") : chalk.yellow("?");
-                console.log(`    ${icon} ${r}`);
-              }
-            }
-          }
-        } else if (subCmd === "rule-add") {
-          // /permission rule-add <allow|deny|ask> <pattern>
-          const action = args[1] as "allow" | "deny" | "ask" | undefined;
-          const pattern = args.slice(2).join(" ");
-          if (!action || !["allow", "deny", "ask"].includes(action) || !pattern) {
-            console.log(chalk.yellow(`  使い方: /permission rule-add <allow|deny|ask> <パターン>`));
-            console.log(chalk.dim(`  例: /permission rule-add allow "bash(npm *)"`));
-            console.log(chalk.dim(`  例: /permission rule-add deny "bash(rm -rf *)"`));
-            console.log(chalk.dim(`  例: /permission rule-add allow "file_write(./src/**)"`));
-            console.log(chalk.dim(`  例: /permission rule-add allow "web_fetch(domain:github.com)"`));
-          } else {
-            permissions.addRule(action, pattern);
-            if (!this.config.security.rules) {
-              this.config.security.rules = { allow: [], deny: [], ask: [] };
-            }
-            if (!this.config.security.rules[action].includes(pattern)) {
-              this.config.security.rules[action].push(pattern);
-            }
-            saveConfig(this.config);
-            const icon = action === "deny" ? "🚫" : action === "allow" ? "✅" : "❓";
-            console.log(chalk.green(`  ${icon} ${action}: "${pattern}" を追加しました`));
-          }
-        } else if (subCmd === "rule-remove") {
-          // /permission rule-remove <allow|deny|ask> <pattern>
-          const action = args[1] as "allow" | "deny" | "ask" | undefined;
-          const pattern = args.slice(2).join(" ");
-          if (!action || !["allow", "deny", "ask"].includes(action) || !pattern) {
-            console.log(chalk.yellow(`  使い方: /permission rule-remove <allow|deny|ask> <パターン>`));
-          } else {
-            permissions.removeRule(action, pattern);
-            if (this.config.security.rules) {
-              this.config.security.rules[action] = this.config.security.rules[action].filter((p) => p !== pattern);
-            }
-            saveConfig(this.config);
-            console.log(chalk.green(`  ✅ ${action}: "${pattern}" を削除しました`));
-          }
-        } else if (subCmd === "auto-add" && toolName) {
-          permissions.addAutoApprove(toolName);
-          if (!this.config.security.autoApproveTools.includes(toolName)) {
-            this.config.security.autoApproveTools.push(toolName);
-          }
-          saveConfig(this.config);
-          console.log(chalk.green(`  ✅ ${toolName} を autoApproveTools に追加しました`));
-        } else if (subCmd === "auto-remove" && toolName) {
-          permissions.removeAutoApprove(toolName);
-          this.config.security.autoApproveTools = this.config.security.autoApproveTools.filter((t) => t !== toolName);
-          saveConfig(this.config);
-          console.log(chalk.green(`  ✅ ${toolName} を autoApproveTools から削除しました`));
-        } else if (subCmd === "require-add" && toolName) {
-          permissions.addRequireApproval(toolName);
-          if (!this.config.security.requireApprovalTools.includes(toolName)) {
-            this.config.security.requireApprovalTools.push(toolName);
-          }
-          saveConfig(this.config);
-          console.log(chalk.green(`  ✅ ${toolName} を requireApprovalTools に追加しました`));
-        } else if (subCmd === "require-remove" && toolName) {
-          permissions.removeRequireApproval(toolName);
-          this.config.security.requireApprovalTools = this.config.security.requireApprovalTools.filter(
-            (t) => t !== toolName,
-          );
-          saveConfig(this.config);
-          console.log(chalk.green(`  ✅ ${toolName} を requireApprovalTools から削除しました`));
-        } else if (subCmd === "discord-add" && toolName) {
-          permissions.addDiscordAutoApprove(toolName);
-          if (!this.config.security.discordAutoApproveTools) {
-            this.config.security.discordAutoApproveTools = [];
-          }
-          if (!this.config.security.discordAutoApproveTools.includes(toolName)) {
-            this.config.security.discordAutoApproveTools.push(toolName);
-          }
-          saveConfig(this.config);
-          console.log(chalk.green(`  ✅ ${toolName} を discordAutoApproveTools に追加しました`));
-        } else if (subCmd === "discord-remove" && toolName) {
-          permissions.removeDiscordAutoApprove(toolName);
-          if (this.config.security.discordAutoApproveTools) {
-            this.config.security.discordAutoApproveTools = this.config.security.discordAutoApproveTools.filter(
-              (t) => t !== toolName,
-            );
-          }
-          saveConfig(this.config);
-          console.log(chalk.green(`  ✅ ${toolName} を discordAutoApproveTools から削除しました`));
-        } else {
-          console.log(chalk.yellow("  使い方: /permission <サブコマンド> [引数]"));
-          console.log(chalk.bold("  パターンルール (優先):"));
-          console.log(chalk.dim('  rule-add allow "bash(npm *)"    - パターンに一致する実行を常に許可'));
-          console.log(chalk.dim('  rule-add deny  "bash(rm -rf *)" - パターンに一致する実行を常に拒否'));
-          console.log(chalk.dim('  rule-add ask   "bash(git push *)"- パターンに一致する実行を常に確認'));
-          console.log(chalk.dim('  rule-remove allow "bash(npm *)" - allowルールを削除'));
-          console.log(chalk.dim("  rules                           - パターンルール一覧"));
-          console.log(chalk.bold("  ツール名リスト:"));
-          console.log(chalk.dim("  list                        - 現在の設定一覧を表示"));
-          console.log(chalk.dim("  auto-add <tool>             - CLIで自動許可するツールを追加（設定保存）"));
-          console.log(chalk.dim("  auto-remove <tool>          - CLIの自動許可から削除（設定保存）"));
-          console.log(chalk.dim("  require-add <tool>          - CLIで確認必要なツールを追加（設定保存）"));
-          console.log(chalk.dim("  require-remove <tool>       - CLIの確認必要から削除（設定保存）"));
-          console.log(chalk.dim("  discord-add <tool>          - Discord経由で自動許可するツールを追加（設定保存）"));
-          console.log(chalk.dim("  discord-remove <tool>       - Discord経由の自動許可から削除（設定保存）"));
-        }
+        await this.handlePermissionInteractive();
         break;
       }
 
@@ -7102,90 +6519,6 @@ export class REPL {
         } else {
           if (this.agent.getInputCompressionEnabled()) await turnOff();
           else await turnOn();
-        }
-        break;
-      }
-
-      case "/chatlog": {
-        const subArg = args[0];
-        if (!subArg || subArg === "status") {
-          const cl = this.config.chatLog;
-          if (!cl?.vaultPath) {
-            console.log(chalk.yellow("  チャットログが未設定です。"));
-            console.log(chalk.dim("  設定: /chatlog vault <Obsidian Vaultのパス>"));
-          } else {
-            console.log(chalk.bold("  チャットログ:"));
-            console.log(`    状態:   ${cl.enabled ? chalk.green("ON") : chalk.yellow("OFF")}`);
-            console.log(`    Vault:  ${chalk.cyan(cl.vaultPath)}`);
-            const logDir = path.join(cl.vaultPath, "ChatLogs");
-            if (fs.existsSync(logDir)) {
-              const countMd = (dir: string): number => {
-                if (!fs.existsSync(dir)) return 0;
-                let count = 0;
-                for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-                  if (e.isDirectory()) count += countMd(path.join(dir, e.name));
-                  else if (e.name.endsWith(".md")) count++;
-                }
-                return count;
-              };
-              console.log(`    ログ数: ${chalk.yellow(String(countMd(logDir)))}`);
-            }
-            const chatLogger = this.agent.getChatLogger();
-            if (chatLogger) {
-              console.log(
-                `    現在:   ${chalk.dim(chatLogger.getCurrentFilePath())} (Part ${chatLogger.getPartNumber()})`,
-              );
-            }
-          }
-        } else if (subArg === "vault") {
-          const vaultPath = args.slice(1).join(" ").trim();
-          if (!vaultPath) {
-            console.log(chalk.yellow("  使い方: /chatlog vault <Obsidian Vaultのパス>"));
-            break;
-          }
-          const resolved = path.resolve(vaultPath);
-          if (!fs.existsSync(resolved)) {
-            console.log(chalk.red(`  パスが存在しません: ${resolved}`));
-            break;
-          }
-          if (!this.config.chatLog) {
-            this.config.chatLog = { enabled: true, vaultPath: resolved };
-          } else {
-            this.config.chatLog.vaultPath = resolved;
-          }
-          saveConfig(this.config);
-          // ChatLogger を起動/再作成
-          const { ChatLogger } = await import("../agent/chat-logger.js");
-          const cl2 = new ChatLogger(this.config.chatLog);
-          this.agent.setChatLogger(cl2);
-          console.log(chalk.green(`  チャットログ Vault を設定しました: ${resolved}`));
-          console.log(chalk.dim(`  ログは ${resolved}/ChatLogs/ に保存されます。`));
-        } else if (subArg === "enable" || subArg === "on") {
-          if (!this.config.chatLog?.vaultPath) {
-            console.log(chalk.yellow("  Vault が未設定です。/chatlog vault <パス> で設定してください。"));
-            break;
-          }
-          this.config.chatLog.enabled = true;
-          saveConfig(this.config);
-          // ChatLogger がなければ作成
-          if (!this.agent.getChatLogger()) {
-            const { ChatLogger } = await import("../agent/chat-logger.js");
-            const cl2 = new ChatLogger(this.config.chatLog);
-            this.agent.setChatLogger(cl2);
-          } else {
-            this.agent.getChatLogger()!.setEnabled(true);
-          }
-          console.log(chalk.green("  チャットログ ON (設定に保存)"));
-        } else if (subArg === "disable" || subArg === "off") {
-          if (this.config.chatLog) {
-            this.config.chatLog.enabled = false;
-            saveConfig(this.config);
-          }
-          const chatLogger = this.agent.getChatLogger();
-          if (chatLogger) chatLogger.setEnabled(false);
-          console.log(chalk.yellow("  チャットログ OFF (設定に保存)"));
-        } else {
-          console.log(chalk.dim("  使い方: /chatlog [status|vault <path>|enable|disable]"));
         }
         break;
       }

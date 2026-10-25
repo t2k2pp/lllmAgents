@@ -1,6 +1,6 @@
 # Slack統合 設計書
 
-> **2026-05-28 更新**: REPL からの設定は `/integrations` → Slack の picker 経由が canonical (Phase optimize #3 で Discord / Slack / Chatlog / Search を統合)。 本書中の `/slack xxx` は dispatcher 互換で引き続き動作するが、 補完候補からは外れている。 Slack-auto-approve ツールも `/permission` の picker から編集可能になった (旧 `/permission slack-add` は完全互換のため残存)。
+> **2026-10-25 更新**: REPL からの設定は `/integrations` → Slack 連携 の画面だけで行う。 直接コマンド `/slack` は削除した (docs/todo-legacy-ways-cleanup.md T3)。 Slack 経由で自動許可するツールは `/permission` の画面 → "Slack auto-approve tools" で編集する。 対話できる端末が無いときは `~/.localllm/config.json` の `slack.*` / `security.slackAutoApproveTools` を直接編集する。
 
 ## 概要
 
@@ -20,7 +20,7 @@ Discord統合と同様の2系統（通知送信 + メッセージ受信）を提
 
 | モード | 起動方法 | 説明 |
 |--------|----------|------|
-| 通知のみ | 通常起動 + `/slack enable` | CLI使用中にLLM応答をSlack Webhookで通知 |
+| 通知のみ | 通常起動 + `/integrations` → Slack 連携 で通知オン | CLI使用中にLLM応答をSlack Webhookで通知 |
 | Slackモード | `--slack` フラグ | 全やりとりをSlack経由。CLIはexit/statusのみ |
 
 ### メッセージフロー
@@ -55,7 +55,8 @@ src/
 ├── agent/
 │   └── agent-loop.ts         # getFilteredToolDefs slack対応
 ├── cli/
-│   └── repl.ts               # /slack コマンド群
+│   ├── repl.ts               # /integrations 画面 (Slack 連携メニュー)
+│   └── integrations-settings.ts # 設定を書き換える関数
 └── index.ts                  # --slack 起動フラグ
 ```
 
@@ -83,25 +84,16 @@ slackAutoApproveTools: string[]  // Slack経由で自動許可するツール
 
 ## CLIコマンド
 
-canonical な操作経路は `/integrations` → Slack の picker。 下表の `/slack xxx` 形式は dispatcher 互換のため残存 (補完候補からは外れている)。
+操作は `/integrations` → Slack 連携 の画面だけ (直接コマンドは無い)。 画面は状態を表示したうえで次を選べる。
 
-### 通知設定
-
-```
-/integrations              picker から Slack を選択 → status / enable / disable / url / test
-/slack status              設定状態表示 (alias)
-/slack enable              Webhook通知有効化 (alias)
-/slack disable             Webhook通知無効化 (alias)
-/slack url <URL>           Incoming Webhook URL設定 (alias)
-/slack test                テスト通知送信 (alias)
-```
-
-### Bot設定（--slackモード用）
-
-```
-/slack bot-token <xoxb-...>   Bot Token設定 (alias / または /integrations → Slack → Set Bot Token)
-/slack app-token <xapp-...>   App-Level Token設定 (alias / または /integrations → Slack → Set App-Level Token)
-```
+| 項目 | 用途 |
+|---|---|
+| 通知をオンにする / オフにする | Webhook 通知の有効/無効 |
+| 通知の送り先を設定する | Incoming Webhook URL |
+| テスト通知を送ってみる | テスト通知送信 |
+| Bot Token を設定する | `xoxb-` (--slack モード用) |
+| App-Level Token を設定する | `xapp-` (--slack モード用) |
+| 許可ユーザーを表示 / 追加 / 削除する | `allowedUserIds` (未設定だと誰も受け付けない) |
 
 ## Slack App セットアップ手順
 
@@ -153,14 +145,11 @@ canonical な操作経路は `/integrations` → Slack の picker。 下表の `
 ```bash
 # 通知のみ
 npm run start
-> /slack url https://hooks.slack.com/services/T.../B.../...
-> /slack enable
-> /slack test
+> /integrations   → Slack 連携 →「通知の送り先を設定する」「通知をオンにする」「テスト通知を送ってみる」
 
 # Slackモード（全やりとりSlack経由）
 npm run start
-> /slack bot-token xoxb-...
-> /slack app-token xapp-...
+> /integrations   → Slack 連携 →「Bot Token を設定する」「App-Level Token を設定する」「許可ユーザーを追加する」
 > exit
 
 npm run start -- --slack
@@ -176,7 +165,7 @@ Slack経由のリクエストはDiscordと同じheadlessモデル:
 4. 上記以外のツールは拒否（インタラクティブ確認不可のため）
 5. ファイル操作はサンドボックスチェック適用
 
-`/permission` の picker → "Slack auto-approve tools" → "Add tool" でツール追加可能。 旧仕様の `/permission slack-add <tool>` は dispatcher 上で **未公開** のまま `permission-manager` 側だけに API があった (Phase optimize #1 で picker から初めて UI 露出した)。
+`/permission` の画面 → "Slack auto-approve tools" → "Add tool" でツールを追加する (権限の設定方法はこの画面だけ)。
 
 ## 制限事項・将来拡張
 

@@ -1,6 +1,6 @@
 # チャットログ保存機能 設計書
 
-> **2026-05-28 更新**: REPL からの操作は `/integrations` の picker 経由が canonical (Phase optimize #3 で Discord / Slack / Chatlog / Search を統合)。 本書中の `/chatlog xxx` は dispatcher 互換として引き続き動作するが、 補完候補からは外れている。
+> **2026-10-25 更新**: REPL からの設定は `/integrations` → 会話ログの保存 の画面だけで行う。 直接コマンド `/chatlog` は削除した (docs/todo-legacy-ways-cleanup.md T3)。 対話できる端末が無いときは `~/.localllm/config.json` の `chatLog.enabled` / `chatLog.vaultPath` を直接編集する。
 
 ## 概要
 
@@ -9,7 +9,7 @@
 
 ## 要件
 
-- 有効/無効の切り替え（`/integrations` → Chatlog、 または旧 `/chatlog enable` / `disable` alias）
+- 有効/無効の切り替え（`/integrations` → 会話ログの保存）
 - ナレッジベースとは独立したVaultパス指定
 - セッションごとにファイルを分離
 - コンテキスト圧縮前後でファイルを分割（Part 1, 2, ...）
@@ -83,15 +83,15 @@ tags:
 
 ## CLIコマンド
 
-canonical な操作経路は `/integrations` の Chatlog セクション (picker)。 旧 `/chatlog ...` も dispatcher 互換で動作するが、 補完候補からは外れている。
+操作は `/integrations` → 会話ログの保存 の画面だけ (直接コマンドは無い)。 画面は状態を表示したうえで次を選べる。
 
-| コマンド | 説明 |
+| 項目 | 説明 |
 |----------|------|
-| `/integrations` → Chatlog | ステータス表示 + Enable / Disable / Set Vault path の picker |
-| `/chatlog` (alias) | ステータス表示 |
-| `/chatlog vault <path>` (alias) | Vault パスを設定（自動で enabled） |
-| `/chatlog enable` (alias) | チャットログ ON |
-| `/chatlog disable` (alias) | チャットログ OFF |
+| 保存をオンにする | チャットログ ON (保存先が未設定なら先に設定を促す) |
+| 保存をオフにする | チャットログ OFF |
+| 保存先フォルダを設定する | Vault パスを設定（新規設定時は自動で enabled） |
+
+設定の書き換えは `src/cli/integrations-settings.ts` の `setChatlogEnabled` / `setChatlogVault` / `printChatlogStatus`。
 
 ## アーキテクチャ
 
@@ -110,7 +110,7 @@ canonical な操作経路は `/integrations` の Chatlog セクション (picker
    - `run()` 冒頭: ユーザーメッセージを `chatLogger.logUser()` で記録
    - `MessageHistory.addAssistantMessage` コールバック: AI応答を `chatLogger.logAssistant()` で記録
    - `contextManager.compress()` 成功後: `chatLogger.onCompressed()` でパート分割
-3. **repl.ts**: `/chatlog` コマンドで設定・状態確認
+3. **repl.ts / integrations-settings.ts**: `/integrations` 画面で設定・状態確認
 
 ### データフロー
 
@@ -131,6 +131,6 @@ User入力 → agent-loop.run()
 | `src/agent/chat-logger.ts` | 新規: ChatLogger クラス |
 | `src/agent/message-history.ts` | `AssistantMessageCallback` 型追加、コールバック機構 |
 | `src/agent/agent-loop.ts` | `chatLogger` フィールド、`setChatLogger`/`getChatLogger`、圧縮時のパート分割 |
-| `src/cli/repl.ts` | `/chatlog` コマンド |
-| `src/cli/completer.ts` | `/chatlog` 補完候補 |
+| `src/cli/repl.ts` | `/integrations` の会話ログ画面 |
+| `src/cli/integrations-settings.ts` | 会話ログ設定の関数 |
 | `src/index.ts` | `ChatLogger` 初期化・注入 |

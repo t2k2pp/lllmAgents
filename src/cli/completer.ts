@@ -233,18 +233,13 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/knowledge recent", description: "最近のノート" },
   { command: "/knowledge search", description: "ナレッジ検索", needsArg: true },
   { command: "/knowledge open", description: "フォルダを開く" },
-  // /integrations (Phase optimize #3、 2026-05-28): Discord / Slack / Chatlog / Search を 1 picker に集約。
-  // /discord /slack /chatlog /search は /integrations の各サブメニューが内部呼び出しする実装で、
-  // 補完候補には出さない (対話画面への一本化は docs/todo-legacy-ways-cleanup.md T3)。
+  // /integrations: Discord / Slack / 会話ログ / Web検索 の設定画面 (設定方法はこの画面だけ。 docs/todo-legacy-ways-cleanup.md T3)
   { command: "/integrations", description: "外部統合 (Discord / Slack / Chatlog / Search) を 1 画面で設定" },
-  // /search のサブコマンド (duckduckgo / ddg / test / status) は /integrations 配下に集約済み
   { command: "/loop", description: "プロンプトを定期実行 (例: /loop 5m /pr-review)", needsArg: true },
   { command: "/loop status", description: "アクティブなループ一覧 + 停止 picker" },
   { command: "/loop stop", description: "ループを停止 (id 指定 / all または省略で全停止)", needsArg: true },
-  // /permission は引数なしで対話 picker (Phase optimize #1)。
-  // 旧サブコマンド (auto-add / require-add / rule-add allow / 等) は dispatcher 互換のため残存するが、
-  // 補完候補からは外して 1 件に集約。
-  { command: "/permission", description: "権限設定 (引数なしで picker: rules / auto / require / discord / slack)" },
+  // /permission: 権限の設定画面 (設定方法はこの画面だけ。 docs/todo-legacy-ways-cleanup.md T3)
+  { command: "/permission", description: "権限の設定画面 (パターンルール / CLI・Discord・Slack のツール名一覧)" },
 ];
 
 // ─── MenuProvider（InteractiveInput用ドロップダウン） ────
@@ -272,24 +267,6 @@ export function createCommandMenuProvider(
   ];
 
   return (partial: string): MenuItem[] => {
-    // /permission <subcommand> <tool名> のツール名補完
-    // partial 例: "permission auto-add ba"
-    const permToolMatch = partial.match(
-      /^(permission (auto-add|auto-remove|require-add|require-remove|discord-add|discord-remove) )(.*)$/,
-    );
-    if (permToolMatch && toolNames.length > 0) {
-      const cmdPrefix = permToolMatch[1]; // "permission auto-add "
-      const toolPrefix = permToolMatch[3]; // 入力中のツール名プレフィックス
-      return toolNames
-        .filter((n) => n.startsWith(toolPrefix))
-        .sort()
-        .map((n) => ({
-          label: `/${cmdPrefix}${n}`,
-          value: `/${cmdPrefix}${n}`,
-          description: "ツール名",
-        }));
-    }
-
     // /context tools <tool名> のツール名補完 (partial 例: "context tools ba")
     const ctxToolMatch = partial.match(/^(context tools )(.*)$/);
     if (ctxToolMatch && toolNames.length > 0) {
@@ -352,16 +329,6 @@ export function createCompleter(options: CompleterOptions = {}): (line: string) 
 
   return (line: string): CompleterResult => {
     if (line.startsWith("/")) {
-      // /permission <subcommand> <tool名> のツール名補完
-      const permToolMatch = line.match(
-        /^(\/permission (?:auto-add|auto-remove|require-add|require-remove|discord-add|discord-remove) )(.*)$/,
-      );
-      if (permToolMatch && toolNames.length > 0) {
-        const cmdPrefix = permToolMatch[1];
-        const toolPrefix = permToolMatch[2];
-        const matches = toolNames.filter((n) => n.startsWith(toolPrefix)).map((n) => `${cmdPrefix}${n}`);
-        return [matches, line];
-      }
       // /context tools <tool名> のツール名補完
       const ctxToolMatch = line.match(/^(\/context tools )(.*)$/);
       if (ctxToolMatch && toolNames.length > 0) {

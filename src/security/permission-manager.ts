@@ -257,7 +257,7 @@ export class PermissionManager {
     return new Set([...INHERENTLY_SAFE_TOOLS, ...this.slackAutoApprove]);
   }
 
-  // --- 変更メソッド（REPLの /permission コマンドから使用） ---
+  // --- 変更メソッド（REPLの /permission 画面から使用。 src/cli/permission-settings.ts） ---
 
   addAutoApprove(tool: string): void {
     this.autoApprove.add(tool);
@@ -423,7 +423,7 @@ export class PermissionManager {
           allowed: false,
           reason:
             `${label}経由の bash は OS 封じ込め (sandbox) が未確立のため自動実行しません。` +
-            `封じ込めを有効化するか、 /permission ${source}-add bash で明示許可してください。`,
+            `封じ込めを有効化するか、 CLI の /permission → ${label} auto-approve tools に bash を追加して明示許可してください。`,
         };
       }
       const autorunResult = this.checkAutorunPermission(toolName, params);
@@ -435,7 +435,7 @@ export class PermissionManager {
         allowed: false,
         reason:
           `${label}経由では ${toolName} を自動実行できません (破壊的操作または確認が必要な操作)。` +
-          `/permission ${source}-add ${toolName} で明示許可してください。`,
+          `CLI の /permission → ${label} auto-approve tools に ${toolName} を追加して明示許可してください。`,
       };
     }
     // autorun 無効時のみ、 従来のブリッジ確認に退避する (対話可能な環境向け)。 ブリッジが無ければ拒否。
@@ -443,7 +443,7 @@ export class PermissionManager {
     if (!bridge?.requestPermission) {
       return {
         allowed: false,
-        reason: `${label}経由では ${toolName} は許可されていません（autorun 無効・確認手段なし。/permission ${source}-add ${toolName} で追加可能）`,
+        reason: `${label}経由では ${toolName} は許可されていません（autorun 無効・確認手段なし。CLI の /permission → ${label} auto-approve tools で追加可能）`,
       };
     }
 
@@ -843,7 +843,7 @@ export class PermissionManager {
         this.onPermanentApprove(toolName);
       }
       console.log(
-        chalk.green(`  ✅ ${toolName} を設定に保存しました（/permission auto-remove ${toolName} で取り消し可能）`),
+        chalk.green(`  ✅ ${toolName} を設定に保存しました（/permission → Auto-approve tools (CLI) で取り消し可能）`),
       );
     } else if (action === "always") {
       this.alwaysAllowTools.add(toolName);

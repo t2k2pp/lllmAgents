@@ -17,10 +17,9 @@
  *    app_mention, message.im
  * 5. Interactivity & Shortcuts を ON (Socket Mode ならエンドポイント URL は不要)
  * 6. Install to Workspace → Bot User OAuth Token (xoxb-...) を取得
- * 7. lllmAgentsで設定:
- *    /slack bot-token xoxb-...
- *    /slack app-token xapp-...
- *    /slack user-add <SlackユーザーID>   (任意: 利用者を制限する場合)
+ * 7. lllmAgents の /integrations → Slack 連携 で設定:
+ *    Bot Token (xoxb-...) / App-Level Token (xapp-...) /
+ *    許可ユーザー (必須: allowedUserIds が空だと誰も受け付けない)
  * 8. npm run start -- --slack で起動
  */
 

@@ -227,7 +227,9 @@ describe("checkToolPermission (channel + bridge)", () => {
     const r = await pm.checkToolPermission("bash", { command: "echo hi" }, "discord");
     expect(r.allowed).toBe(false);
     expect(r.reason).toContain("封じ込め");
-    expect(r.reason).toContain("/permission discord-add bash");
+    // 削除した旧サブコマンドではなく /permission 画面の項目を案内する (T3)
+    expect(r.reason).toContain("/permission → Discord auto-approve tools に bash を追加");
+    expect(r.reason).not.toContain("discord-add");
   });
 
   it("封じ込め下なら安全な bash は autorun 自動許可", async () => {

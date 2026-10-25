@@ -12,7 +12,7 @@ import * as logger from "../../utils/logger.js";
  * 登録ゲート: config.imageGen.enabled かつ active profile があるときのみ登録
  * (browser ゲートと同型。無効時はツールが見えない＝エージェントが無駄試行しない)。
  *
- * config は Discord 自動添付の判定に使う (ライブ参照: /discord 切替が即反映される)。
+ * config は Discord 自動添付の判定に使う (ライブ参照: /integrations での切替が即反映される)。
  */
 export function createImageGenerateTool(imageService: ImageService, config: Config): ToolHandler {
   return {

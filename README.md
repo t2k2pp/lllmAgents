@@ -197,14 +197,12 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/compress-input` | 入力圧縮モード切替（project指示/メモが閾値超過時に意図保持で圧縮、縮まなければ原文、既定OFF） |
 | `/parallel` | 並列ツール実行数の設定 |
 | `/stream` | ストリーミング表示の現状表示と切替（引数なし） |
-| `/search` | Web検索 |
-| `/permission` | 権限設定の管理 |
+| `/permission` | 権限の設定画面 (パターンルール / CLI・Discord・Slack のツール名一覧)。対話できる端末専用で、端末が無いときは `~/.localllm/config.json` の `security.*` を直接編集 |
 | `/loop` | 反復実行モード (`/loop <間隔> <プロンプト>` / `/loop status` で一覧と停止 / `/loop stop [id\|all]`) |
 | `/goal-seek <goal>` | Goal Seek mode 開始（acceptance criteria を立て合格まで自律実行）。複雑なタスクは通常入力でも自動提案される（`goalSeek.autoPropose: false` で無効化） |
 | `/exit-goal-seek` | Goal Seek mode を抜ける |
-| `/integrations` | 外部サービス連携の設定メニュー (Discord / Slack / 会話ログ / Web検索)。Discord の `/ask` 受信は Gateway 方式で公開URL・トンネル不要 (docs/discord-gateway-design.md) |
+| `/integrations` | 外部サービス連携の設定画面 (Discord / Slack / 会話ログ / Web検索)。設定方法はこの画面だけ (対話できる端末専用。端末が無いときは `~/.localllm/config.json` の `discord` / `slack` / `chatLog` / `search` を直接編集)。Discord の `/ask` 受信は Gateway 方式で公開URL・トンネル不要 (docs/discord-gateway-design.md) |
 | Discord/Slack からのコマンド | `/ask` の本文（Slack は通常メッセージ）を `/` で始めると、`/help` `/clear` `/context` `/status` `/todo` `/room` をリモート実行できる。意味は REPL と共通で、Discord は Room B / Slack は Room C に効く (docs/room-model-design.md §8) |
-| `/discord` `/slack` `/chatlog` | [非推奨] 各サービスの単体設定コマンド。`/integrations` に集約済み (サブコマンド直打ちは動作維持) |
 | `/knowledge` | Obsidianナレッジベース連携 (`save` / `search`) |
 | `/try` | 実験的機能の実行 |
 

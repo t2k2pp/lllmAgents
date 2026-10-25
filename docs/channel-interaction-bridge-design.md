@@ -95,7 +95,7 @@ ask_user ツール (context.source=slack)
   - 未設定: 従来どおり誰でも会話可能（後方互換）。ただし**確認ボタン/回答は常に依頼者本人のみ有効**
     （他ユーザーのクリックは無視し、その旨を ephemeral / 別メッセージで通知）
 - 決定後はメッセージを編集してボタンを除去（後からのクリック・リプレイ防止）
-- REPL: `/slack user-add <id>` `/slack user-remove <id>` `/slack users`（/discord も同様）
+- REPL: `/integrations` → Slack 連携 / Discord 連携 の「許可ユーザーを表示/追加/削除する」 (直接コマンド `/slack` `/discord` は 2026-10-25 に削除。 docs/todo-legacy-ways-cleanup.md T3)
 
 ### 6.1 待機リスト（利用申請）— Discord (2026-06-21 追加)
 
@@ -109,13 +109,9 @@ ID と一致せず永遠に拒否される。数値 ID は自分でも分かり�
 - 未許可ユーザーが `/ask` を試みると、`DiscordInteractionServer.recordPendingUser` が
   正しい数値 ID と表示名を自動で記録し、config を保存（`persistConfig` コールバック経由）して
   REPL コンソールに申請を通知する。本人には ephemeral で「申請を記録しました」と返す。
-- REPL から承認:
-  - `/discord waitlist` — 申請一覧
-  - `/discord approve <ID>` — `allowedUserIds` へ移動（待機リストから除去）
-  - `/discord reject <ID>` — 待機リストから削除
-  - `/integrations` → Discord メニュー → 「待機リストから利用申請を承認する」で
-    `select` から選ぶだけ（ID のタイピング不要・推奨）
-- `/discord user-add` は ID が数値形式でない場合に警告し、待機リスト承認を案内する。
+- REPL から承認: `/integrations` → Discord 連携 → 「待機リストから利用申請を承認する」で
+  申請一覧 (`select`) から選び、承認 (`allowedUserIds` へ移動し待機リストから除去) か却下 (待機リストから削除) を選ぶ（ID のタイピング不要）
+- 同画面の「許可ユーザーを追加する」は ID が数値形式でない場合に警告し、待機リスト承認を案内する。
 
 ## 7. タイムアウト
 
@@ -136,7 +132,7 @@ ID と一致せず永遠に拒否される。数値 ID は自分でも分かり�
 | `src/slack/slack-bot.ts` | ブリッジ実装 (Block Kit / 返信ルーティング / 認可) |
 | `src/discord/interaction-server.ts` | ブリッジ実装 (Components / Modal / 認可) |
 | `src/config/types.ts` | allowedUserIds / interactionTimeoutSec / pendingUsers + PendingUser |
-| `src/cli/repl.ts` | /slack /discord の user-add/user-remove/users、/discord waitlist/approve/reject、待機リスト承認メニュー |
+| `src/cli/repl.ts` / `src/cli/integrations-settings.ts` | `/integrations` の Slack / Discord 連携画面: 許可ユーザーの表示/追加/削除、待機リストからの承認/却下 |
 | `src/index.ts` | `--background` の DiscordInteractionServer に persistConfig を渡す |
 | tests | interaction-bridge-registry / permission channel flow / ask_user 経路 |
 

@@ -41,7 +41,7 @@ interaction は Gateway には配送されない。両方式を併存させる�
 - 認証失敗 (close code 4004) や intent 設定エラー (4013/4014) など回復不能な
   切断は **再接続せず**、原因と対処をコンソールに表示して停止する。
 - 回復可能な切断は指数バックオフで自動再接続し、その旨をログに出す。
-- `/discord status` で「Bot 接続: 接続中 / 停止中」を表示する。
+- `/integrations` → Discord 連携 の状態表示で「Bot 接続: 接続中 / 停止中」を表示する。
 
 ### 2.4 応答側 (REST) は変更しない
 
@@ -106,20 +106,21 @@ src/discord/
 | `discord.interactionPort` | 同上 |
 | 必須設定 | applicationId + botToken の 2 つに減る |
 | `/discord public-key` `/discord port` | 2026-10-25 に削除 (何もしない残骸だったため。 docs/todo-legacy-ways-cleanup.md) |
-| `/discord listen start/stop` | 受信の開始/停止 (意味は同じ、中身が WS 接続に) |
-| `/discord status` | Public Key / ポート行を削除し「Bot 接続」行を表示 |
+| 受信の開始/停止 | 意味は同じ、中身が WS 接続に。 操作は `/integrations` → Discord 連携 の「受信を開始する / 停止する」 (直接コマンド `/discord` は 2026-10-25 に削除。 docs/todo-legacy-ways-cleanup.md T3) |
+| 状態表示 | Public Key / ポート行を削除し「Bot 接続」行を表示 |
 | `--background` モード | publicKey 必須チェックを botToken 必須チェックに変更 |
 
 セットアップ手順 (新):
 
-1. Developer Portal でアプリ作成 → applicationId / botToken を設定
+1. Developer Portal でアプリ作成 → `/integrations` → Discord 連携 で Application ID / Bot Token を設定
 2. 招待 URL (`scope=bot+applications.commands`) で Bot をサーバーに招待
-3. `/discord register [サーバーID]` で /ask を登録
-4. `/discord listen start` で受信開始 (Portal の Interactions Endpoint URL は **空にしておく**)
+3. 同画面の「/ask コマンドを Discord に登録する」で登録 (サーバーID を入れると即時反映)
+4. 同画面の「受信を開始する」で受信開始 (Portal の Interactions Endpoint URL は **空にしておく**)
+5. 同画面で許可ユーザーを追加 (未設定だと誰も受け付けない。待機リストからの承認が確実)
 
 ※ 旧方式から移行する場合、Portal に Endpoint URL を設定済みだと Gateway に
 interaction が流れないため、**Portal の Interactions Endpoint URL を空欄に戻す**
-必要がある。listen start 時にこの注意を表示する。
+必要がある。受信開始時にこの注意を表示する。
 
 ## 4. 既知の制約
 

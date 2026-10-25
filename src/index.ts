@@ -785,7 +785,9 @@ async function main(): Promise<void> {
     const discord = config.discord;
     if (!discord?.applicationId || !discord?.botToken) {
       console.error("  --background モードには Discord の applicationId と botToken が必要です。");
-      console.error("  通常モードで起動して /discord app-id と /discord bot-token を設定してください。");
+      console.error(
+        "  通常モードで起動し、/integrations → Discord 連携 で Application ID と Bot Token を設定してください。",
+      );
       process.exit(1);
     }
     // Room モデル: --background は REPL なしで Discord(Room B) を resting room とする。
@@ -820,7 +822,9 @@ async function main(): Promise<void> {
     const slackConfig = config.slack;
     if (!slackConfig?.botToken || !slackConfig?.appToken) {
       console.error("  --slack モードには Slack の botToken と appToken が必要です。");
-      console.error("  通常モードで起動して /slack bot-token と /slack app-token を設定してください。");
+      console.error(
+        "  通常モードで起動し、/integrations → Slack 連携 で Bot Token と App-Level Token を設定してください。",
+      );
       process.exit(1);
     }
 

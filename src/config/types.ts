@@ -236,7 +236,7 @@ export interface DiscordConfig {
   allowedUserIds?: string[];
   /**
    * 未許可ユーザーが /ask を試みた際に自動で記録される待機リスト。
-   * REPL の /integrations Discord メニュー or `/discord approve <ID>` で allowedUserIds へ移す。
+   * REPL の /integrations → Discord 連携 →「待機リストから利用申請を承認する」 で allowedUserIds へ移す。
    * 許可リストへの手入力 (数値 ID のタイプミスが起きやすい) を不要にするための仕組み。
    */
   pendingUsers?: PendingUser[];
