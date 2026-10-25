@@ -383,7 +383,7 @@ options: [
 Anthropic記事のPlan-Generate-Evaluateパターンは、6時間/$200の長時間タスク向け。
 本アプリの主要ユースケース（10-30分のコーディングタスク）では:
 
-- Plannerの分離 → 既存の `enter_plan_mode` / `todo_write` で代替可能
+- Plannerの分離 → 既存の `enter_plan_mode` / ToDo ツール (`todo_append` 等) で代替可能
 - Generator → メインLLMそのもの
 - Evaluator → **これだけ分離する**のが費用対効果最大
 

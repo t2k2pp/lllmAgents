@@ -124,12 +124,12 @@ baseUrl は `GEMINI_API_BASE = "https://generativelanguage.googleapis.com"` を�
 6. `applyMainLLMEndpoint()` / `applySecondLLMEndpoint()` で実行時反映
    (暗号化保存は再起動 + 合言葉が必要なので案内)
 
-## /second / /model コマンドへの組み込み
+## /model / /model second コマンドへの組み込み
 
 - `cloudProviders` / `validProviders` 配列に `"gemini"` を追加 (`repl.ts` 内 2 箇所)
-- `/model setup gemini` / `/second setup gemini` の case を追加 → `setupGeminiLLM` を呼ぶ
-- ヘルプ (`/model setup` 引数なし時の案内、 `/second setup` 引数なし時の案内) に gemini 行を追加
-- `completer.ts` に `/model setup gemini` / `/second setup gemini` を追加
+- `/model setup gemini` / `/model second setup gemini` の case を追加 → `setupGeminiLLM` を呼ぶ
+- ヘルプ (`/model setup` 引数なし時の案内、 `/model second setup` 引数なし時の案内) に gemini 行を追加
+- `completer.ts` に `/model setup gemini` / `/model second setup gemini` を追加 (その後プロバイダ別の setup は補完から外した。 docs/model-registry.md §4.1)
 
 ## 動作確認手順
 

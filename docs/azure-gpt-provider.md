@@ -129,7 +129,7 @@ Responses API (フラット):
 
 ## REPL 操作
 
-`/model setup azure-gpt`, `/second setup azure-gpt` を追加。`setupAzureLLM` の
+`/model setup azure-gpt`, `/model second setup azure-gpt` を追加。`setupAzureLLM` の
 `skipDeployment` ブランチに含める (deployment 入力をスキップ、model 名は必須)。
 
 endpoint hint: `例: https://your-resource.openai.azure.com  (完全URLを貼っても可)`
@@ -158,6 +158,6 @@ Azure ポータルから貼り付けた URL は `https://<resource>.openai.azure
 | azure-openai     | ✅ (2026-04-30 追加) | ✅ |
 | azure-claude     | ✅ (2026-04-30 追加) | ✅ |
 
-REPL の `/model setup azure-*` / `/second setup azure-*` でも保存前に正規化する
+REPL の `/model setup azure-*` / `/model second setup azure-*` でも保存前に正規化する
 (`src/cli/repl.ts:setupAzureLLM`)。 既存の config.json に古い完全URLが残っていても、
 プロバイダ初期化時に再正規化されるので動作する。

@@ -91,9 +91,7 @@ visionLLM 設定はそのまま残す。
 
 ## 後方互換
 
-- `/model url <URL>` は残す。 ただし実行時に黄色文字で
-  「このコマンドは非推奨です。 `/model host` / `/model port` または `/model setup`
-  をご利用ください」 と表示。
+- (当初は `/model url <URL>` を非推奨表示つきで残したが、 2026-10-25 に削除した。 `/model host` / `/model port` または `/model setup` を使う)
 - 設定ファイル形式は変更なし (`baseUrl` フィールドのまま)。
 - `npm run setup` の挙動は変わらず (内部は新しい関数群を使うが UI は同じ)。
 

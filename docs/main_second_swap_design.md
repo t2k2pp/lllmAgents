@@ -90,16 +90,15 @@ private resolveSampling(fallbackTemperature: number): {
 | `runAsAgent` | 0.2 | サブエージェント実行 (ツール有り) |
 | `runAsEvaluator` | 0.1 | 評価モード (低温度で決定的) |
 
-ユーザーが `/second temperature` 等で endpoint に値を設定すれば、 fallback を上書きできる。
+ユーザーが `/model second temperature` 等で endpoint に値を設定すれば、 fallback を上書きできる。
 
-### 2.3 `/swap` (alias `/switch`) コマンド
+### 2.3 `/swap` コマンド
 
 メイン⇔セカンドの設定を一括入れ替え:
 
 ```
 /swap          # 確認あり (デフォルト)
 /swap -y       # 確認スキップ
-/switch        # alias
 ```
 
 #### 動作シーケンス
@@ -149,10 +148,10 @@ const newSecondEndpoint: SecondLLMEndpoint = { ...cur };  // メインの全フ�
 
 | コマンド | 機能 |
 |----------|------|
-| `/second temperature <値>` | サンプリング温度 (0.0〜2.0) |
-| `/second top_p <値>` | Top-p (0.0〜1.0) |
-| `/second top_k <値>` | Top-k (整数、 Ollama 系で有効) |
-| `/second rep_penalty <値>` | 繰り返しペナルティ |
+| `/model second temperature <値>` | サンプリング温度 (0.0〜2.0) |
+| `/model second top_p <値>` | Top-p (0.0〜1.0) |
+| `/model second top_k <値>` | Top-k (整数、 Ollama 系で有効) |
+| `/model second rep_penalty <値>` | 繰り返しペナルティ |
 
 各コマンドで:
 - 引数なし → 現在値・推奨値・範囲を表示
@@ -172,8 +171,8 @@ reg.register(secondLLMAgentTool);
 
 これにより以下のシナリオでも `second_llm_consult` / `second_llm_agent` が使えるようになる:
 
-- 起動時に secondLLM が **無効** → `/second setup` で初設定 → 委任ツール利用可
-- 起動時に secondLLM が **接続失敗** → `/second url` で復旧 → 委任ツール利用可
+- 起動時に secondLLM が **無効** → `/model second setup` で初設定 → 委任ツール利用可
+- 起動時に secondLLM が **接続失敗** → `/model second host` / `/model second port` で復旧 → 委任ツール利用可
 - 起動時に secondLLM が **接続失敗** → `/swap` で経路を切り替え → 委任ツール利用可
 
 `ToolRegistry.register` は内部 `Map.set` ベースで冪等のため、 通常起動経路 (`src/index.ts` で起動時登録済み) との二重登録も無害。
@@ -213,8 +212,8 @@ reg.register(secondLLMAgentTool);
 |---------|----------|
 | `src/config/types.ts` | `SecondLLMEndpoint = LLMEndpoint` の型エイリアス化 |
 | `src/second-llm/second-llm-manager.ts` | `resolveSampling()` 追加、 consult/runAsAgent/runAsEvaluator 3箇所で利用 |
-| `src/cli/repl.ts` | `/swap`, `/switch`, `/second temperature` 等を実装、 `applySecondLLMEndpoint` で遅延登録 |
-| `src/cli/completer.ts` | `/swap`, `/swap -y`, `/switch`, `/second temperature` 等を補完候補に追加 |
+| `src/cli/repl.ts` | `/swap`, `/switch` (2026-10-25 に削除), `/second temperature` (現 `/model second temperature`) 等を実装、 `applySecondLLMEndpoint` で遅延登録 |
+| `src/cli/completer.ts` | `/swap`, `/swap -y`, `/switch` (2026-10-25 に削除) 等を補完候補に追加 |
 | `src/cli/renderer.ts` | `/help` に `/swap` を追記 |
 
 ### 4.2 後方互換性
@@ -241,9 +240,9 @@ reg.register(secondLLMAgentTool);
 |------|----------|
 | 起動時 secondLLM 有効 → `/swap` → メインに新モデル、 セカンドに旧モデル | 設定 + 接続が両側で実行時反映 |
 | `/swap` 後の `second_llm_consult` 呼び出し | 新セカンド側のモデルで応答 |
-| `/swap` 後の description 表示 (`/model` / `/second`) | 両側の特性説明が入れ替わっている |
-| `/second temperature 0.8` → 委任実行 | 0.8 で呼ばれる (fallback ではなく) |
-| 起動時 secondLLM 無効 → `/second setup` → 委任実行 | 委任ツールが使える (遅延登録の動作確認) |
+| `/swap` 後の description 表示 (`/model` / `/model second`) | 両側の特性説明が入れ替わっている |
+| `/model second temperature 0.8` → 委任実行 | 0.8 で呼ばれる (fallback ではなく) |
+| 起動時 secondLLM 無効 → `/model second setup` → 委任実行 | 委任ツールが使える (遅延登録の動作確認) |
 
 ---
 

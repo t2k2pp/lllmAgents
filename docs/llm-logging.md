@@ -32,7 +32,7 @@
 | type | 内容 | 必須性 |
 |---|---|---|
 | `request` | 前回requestと最初に食い違った位置以降のmessages、変更時だけtools、messageOffset / messageTotal (messageOffset が前回の messageTotal より小さい = 既存メッセージが書き換わった) | ✅ |
-| `response` | text + thinking + toolCalls + finishReason + tokensIn + tokensOut + tokensCached (サーバ報告時のみ) | ✅ 既存 (tokens 修正必要) |
+| `response` | text + thinking + toolCalls + finishReason + tokensIn + tokensOut + tokensCached (サーバ報告時のみ) | ✅ |
 | `tool_result` | toolCallId + toolName + input + output + success + durationMs | ✅ |
 | `prefix_break` | 送信済みの部分が変わった記録 (messageOffset / previousTotal / toolsChanged / reasons / unexpected)。docs/prompt-prefix-stability.md §7.3 | ✅ |
 | `log_limit` | 単一ファイル上限へ到達して追記を停止した事実 | 上限到達時 |
@@ -65,6 +65,7 @@ interface SessionResponseLog extends SessionLogBase {
   toolCalls?: ToolCall[];
   tokensIn?: number;
   tokensOut?: number;
+  tokensCached?: number;     // プロンプトキャッシュで再利用された入力トークン数 (サーバ報告時のみ)
   durationMs?: number;
   finishReason?: string;
 }
@@ -78,6 +79,15 @@ interface SessionToolResultLog extends SessionLogBase {
   success: boolean;
   error?: string;
   durationMs: number;
+}
+
+interface SessionPrefixBreakLog extends SessionLogBase {
+  type: "prefix_break";
+  messageOffset: number;     // 前回 request と最初に食い違った位置
+  previousTotal: number;     // 前回 request の件数
+  toolsChanged: boolean;     // tools 定義が変わったか
+  reasons: string[];         // 申告された書き換え理由 (ephemeral-purge / thinking-clear / replace / compress / system-prompt / clear)
+  unexpected: boolean;       // 理由の申告が無い = 予期しない破壊
 }
 ```
 

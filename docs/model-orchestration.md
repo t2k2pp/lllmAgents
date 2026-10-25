@@ -350,7 +350,7 @@ system prompt に短いブロックを足す。
 | ビルトインサブエージェント定義 | `model:` を書かないので挙動不変 |
 | `task` ツール | `model` は optional。 未指定時は完全に従来通り |
 | system prompt | named slot が 0 個なら注入されない = 既定では変化なし |
-| `/second` / `/swap` / `/model vision` | 変更なし |
+| `/model second` / `/swap` / `/model vision` | 変更なし |
 
 つまり **user が自由 named slot を 1 つも作らなければ、 挙動は一切変わらない**。
 

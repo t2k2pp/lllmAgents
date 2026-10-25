@@ -453,7 +453,9 @@ export function isCloudProvider(type: SecondLLMProviderType): boolean {
 > [!NOTE]
 > ローカルLLMをセカンドLLMに指定した場合、`budget` は `null` となり予算チェックは行われない。同一Ollamaサーバー上の別モデルや、別ホスト上のLMStudio等を指定することで、異なるモデルの知見を組み合わせて利用できる。
 
-### 3.3 動的設定 — `/second setup` コマンド
+### 3.3 動的設定 — `/model second setup` コマンド
+
+> **2026-10-25 注記**: `/second ...` は削除し `/model second ...` に一本化した (現行の一覧は §7.1)。 下のブロックは当時の設計。 `budget` を変えるコマンドは無く、 `config.json` の `secondLLM.budget` を直接編集する (docs/config-reference.md)。
 
 `npm start` 実行中に REPL から `/second setup` コマンドでセカンドLLMを設定・変更できる。
 
@@ -680,7 +682,7 @@ const EXCLUDED_TOOLS_FOR_SECOND_LLM = [
 ```
 
 このリストにより、セカンドLLMは:
-- ✅ ファイル操作（read/write/edit）、bash、glob、grep、web系、browser系、vision、skill、ask_user、todo_write が使用可能
+- ✅ ファイル操作（read/write/edit）、bash、glob、grep、web系、browser系、vision、skill、ask_user、ToDo ツール (todo_append 等) が使用可能
 - ❌ 他のエージェントの起動やプランモードの制御は不可（リーダーのみの権限）
 ```
 
@@ -968,17 +970,18 @@ else → "ok"
 
 ## 7. REPL コマンド拡張
 
-### 7.1 セカンドLLM操作コマンド (`/second`)
+### 7.1 セカンドLLM操作コマンド (`/model second`)
+
+> **2026-10-25 更新**: 旧 `/second ...` は削除し `/model second ...` に一本化した (docs/todo-legacy-ways-cleanup.md T1)。 `budget` を変えるコマンドは無い (`config.json` の `secondLLM.budget` を直接編集)。
 
 | コマンド | 説明 |
 |---|---|
-| `/second` | セカンドLLMの状態表示 |
-| `/second setup` | セカンドLLM設定ウィザード起動 |
-| `/second enable` | セカンドLLMを有効化 |
-| `/second disable` | セカンドLLMを無効化 |
-| `/second budget <USD>` | 予算上限を設定 |
-| `/second model <name>` | セカンドLLMのモデルを変更 |
-| `/second model list` | 利用可能なクラウドモデル一覧 |
+| `/model second` | セカンドLLMの状態表示 |
+| `/model second setup` | セカンドLLM設定ウィザード起動 |
+| `/model second enable` | セカンドLLMを有効化 |
+| `/model second disable` | セカンドLLMを無効化 |
+| `/model second list` | 利用可能なモデル一覧から選択 |
+| `/model second host` / `port` / `provider` / `context` / `description` | 接続先・コンテキスト長・特性説明の変更 |
 
 ### 7.2 コスト表示コマンド (`/cost`)
 
@@ -1010,7 +1013,7 @@ else → "ok"
 
 1. ~~**`@second` プレフィックス**~~ — 不採用 (`/swap` で代替)
 2. ~~**`/second ask` コマンド**~~ — 不採用 (`/swap` で代替)
-3. **メインLLMが判断**: メインLLMが description (= `/model description` / `/second description` で設定された特性説明) を見て、 `second_llm_consult` / `second_llm_agent` ツールを自発的に呼び出す。 これが通常運用。
+3. **メインLLMが判断**: メインLLMが description (= `/model description` / `/model second description` で設定された特性説明) を見て、 `second_llm_consult` / `second_llm_agent` ツールを自発的に呼び出す。 これが通常運用。
 4. **明示的な切替** (新): ユーザーが一時的にセカンドを「メイン化」 して直接対話したいときは `/swap` で入れ替え、 用件後に再度 `/swap` で戻す。 熟練ユーザー向け。
 
 これにより、 ユーザーがメインLLMの判断を信頼してそのまま使うか、 swap で能動的に切り替えるかの 2 軸 (= 信頼ベース / 切替ベース) で運用できる。 「 `@second` で 1 メッセージだけセカンドに送る」 という中間粒度の体験は提供しない。

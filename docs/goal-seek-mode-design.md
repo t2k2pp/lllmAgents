@@ -74,7 +74,7 @@ paradigm 切替は **stakes が高い** ため、 AI 自動判定ではなく **
 
 ### 2.3 AI suggest は許容、 toggle は user
 
-完全 manual だと user が機会を逃すこともある。 ヒューリスティック (例: self-check 連続発火 / `todo_write` で複数 acceptance criteria が立っている) で AI が `ask_user` を介して提案するのは可。 ただし **switch 権限は user 専有**。
+完全 manual だと user が機会を逃すこともある。 ヒューリスティック (例: self-check 連続発火 / `todo_append` で複数 acceptance criteria が立っている) で AI が `ask_user` を介して提案するのは可。 ただし **switch 権限は user 専有**。
 
 ### 2.4 Pin (Goal Slot) は mode の構成部品
 
@@ -82,7 +82,7 @@ Goal を圧縮で消えない slot に保持する Pin 機構は、 単体の機
 
 ### 2.5 既存メカニズムを温存
 
-Goal Seek mode は forward mode と **並立**。 既存の register / self-check / Evaluator / todo_write / response_complete はそのまま残す。 forward mode の挙動は変更しない (回帰リスク回避)。
+Goal Seek mode は forward mode と **並立**。 既存の register / self-check / Evaluator / ToDo ツール (todo_append 等) / response_complete はそのまま残す。 forward mode の挙動は変更しない (回帰リスク回避)。
 
 ---
 
@@ -213,7 +213,7 @@ interface EvaluationResult {
 
 forward mode 中、 以下を満たすと AI は **1 度だけ** `/goal-seek` を提案する (`ask_user` 経由):
 
-- `todo_write` で 3 個以上の acceptance criteria が立っている
+- `todo_append` で 3 個以上の acceptance criteria が立っている
 - かつ self-check が直近 2 反復連続で発火している (= drift の兆候)
 - かつ register が `standard` 以上
 - session 内で既に提案済みでない
@@ -236,7 +236,7 @@ forward mode 中、 以下を満たすと AI は **1 度だけ** `/goal-seek` �
 | `Evaluator` | file 書込後の 1 回レビュー | 各反復終了時に goal 全体を評価 (Phase 1) |
 | `sub-agent` | 委任作業の実行 | 設計者視点レビュー (Phase 2+) |
 | `plan-mode` | 計画立案 | mode 入口で設計内容を Goal Slot に変換可 |
-| `todo_write` | acceptance checklist | Goal Slot の acceptance_criteria と同期 |
+| ToDo ツール (`todo_append` / `todo_mark` / `todo_delete`) | acceptance checklist | Goal Slot の acceptance_criteria と同期 |
 | `response_complete` | LLM 自己申告で span 終了 | acceptance 全合格時のみ呼べる (force 必須) |
 
 ### 3.10 圧縮との相互作用

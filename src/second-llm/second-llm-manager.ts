@@ -27,7 +27,7 @@ const EVALUATOR_ALLOWED_TOOLS = ["file_read", "grep", "glob"];
 // ─── サンプリング・ループ上限の既定値 (ID-020 / ID-021: 2026-04-30 切り出し) ───
 //
 // 優先順位:
-//   1. endpoint.temperature 等 (ユーザーが /second temperature で設定した値)
+//   1. endpoint.temperature 等 (ユーザーが /model second temperature で設定した値)
 //   2. config.secondLLM.samplingDefaults (config.json で用途別に指定された値)
 //   3. 下記の製品既定値
 //
@@ -131,7 +131,7 @@ export class SecondLLMManager {
    * 用途 (consult/agent/evaluator) のサンプリングパラメータを解決する。
    *
    * 優先順位:
-   *   1. endpoint.temperature 等 (= /second temperature 等で個別設定された値)
+   *   1. endpoint.temperature 等 (= /model second temperature 等で個別設定された値)
    *   2. config.samplingDefaults.{consultTemperature|agentTemperature|evaluatorTemperature}
    *   3. 製品既定値 (DEFAULT_TEMPERATURE_*)
    *

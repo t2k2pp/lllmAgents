@@ -117,6 +117,9 @@ Options:
   --resume latest     Resume the most recent saved session (same as /resume latest)
   --safe-mode         Start without customizations
   --no-mcp            Start without MCP servers
+  --no-skills         Start without skills (this run only; /skills off changes the setting)
+  --background        Run the chat bot receiver only, without the REPL (set up via /integrations first)
+  --slack             Run the Slack bot instead of the REPL (set up via /integrations first)
   --alt-screen        Enable the full-screen TUI (inline native scrollback is the default)
   --no-alt-screen     Keep the inline display for this run (overrides LLLMAGENT_ENABLE_ALTERNATE_SCREEN)
   --mouse             Enable full-screen TUI mouse-wheel history (implies --alt-screen)

@@ -1,6 +1,6 @@
 # Model Registry 設計書 (LLM 接続のレジストリ化)
 
-> **ステータス**: 2026-05-27 提案 (実装前ドラフト・user レビュー待ち)
+> **ステータス**: 実装済み (Phase 1〜5)。 2026-05-27 提案。 2026-10-25 に旧コマンド (`/profiles` `/second` `/model-registry` `/registry` `/model url` `/model ip`) の alias を削除 (docs/todo-legacy-ways-cleanup.md)
 > **作成日**: 2026-05-27
 > **位置付け**: 「メインLLM / セカンドLLM / プロファイル履歴 / プロバイダ別 setup コマンド」
 > が並走している現状を、 **registry (登録一覧) + slot (現在の割当) の 2 層モデル** に
@@ -214,9 +214,9 @@ modelRef: <registry-id> # この registry entry を直接指定 (slot バイン�
 | `/profiles` | (旧) 履歴ピッカー | 2026-10-25 に削除 (`/models` に一本化) |
 | `/second ...` | (旧) second 編集系 | 2026-10-25 に削除 (`/model second ...` に一本化) |
 | `/model info` | (旧) `/model` と完全に同一の重複 | **削除** (`/model` に統一) |
-| `/model setup *` (×9) | (旧) プロバイダ別 setup | **補完から外す**。 `/models` の "Add new..." に統合 |
-| `/model host/port/url/provider/temperature/top_p/top_k/rep_penalty/description` | (旧) main 個別編集 | **deprecated 警告**。 `/models` の Edit を推奨。 1 リリース後に削除 |
-| `/second setup *` (×9)、 `/second model/url/provider/temperature/...` 等 | (旧) second 個別編集 | 同上 (補完候補から削除済み、 dispatcher 互換維持) |
+| `/model setup *` (×9) | (旧) プロバイダ別 setup | 補完から外した (引数なし `/model setup` の wizard は残る。 `/models` の "Add new..." と目的が重なる — docs/todo-legacy-ways-cleanup.md「未対応・要判断」) |
+| `/model host/port/provider/temperature/top_p/top_k/rep_penalty/description` | main 個別編集 | 当初は deprecated 予定だったが、 2026-06-21 に補完へ戻して現行。 `/models` の Edit と目的が重なる (docs/todo-legacy-ways-cleanup.md「未対応・要判断」)。 `/model url` `/model ip` は 2026-10-25 に削除 (`/model host` + `/model port`) |
+| `/second setup *` (×9)、 `/second model/url/provider/temperature/...` 等 | (旧) second 個別編集 | 2026-10-25 に削除。 同じ操作は `/model second setup` / `host` / `port` / `provider` / `temperature` 等 (`/model second url` も削除し host/port に揃えた) |
 
 合計: 170 件超 → 約 40 件削減 (補完候補ベース)。 第 1 階層メニューの肥大化を解消。
 
@@ -323,7 +323,7 @@ slot.main と slot.second の id を入れ替えるだけ。 entry そのもの�
 | 5 | `visionLLM` を slots.named.vision に統合、 `/model vision` サブツリーを `/model second` と同型で実装。 setupClaudeLLM / setupGeminiLLM / setupAzureLLM の target に "vision" を追加。 ローカル系 vision setup (setupLocalVisionLLM) も追加。 VisionService に hot-swap 機構を追加 | 既存 `config.visionLLM` は維持。 起動時 reconcile で vision slot に同期 → 無破壊 | **済 (Phase 5)** |
 | 6 (将来) | 任意 named slot の REPL 操作 (`/models slot eval <id>` 等)、 サブエージェントカタログとのバインド (`modelSlot` / `modelRef` frontmatter)、 第 3 のスロット (例: cheap / fast) | 必要になったら | 構想のみ |
 
-各 Phase で push 可能な単位。
+各 Phase で push 可能な単位。 Phase 2・4 で残した alias (`/profiles` `/second ...`) は 2026-10-25 に削除した (§4.1)。
 
 ---
 

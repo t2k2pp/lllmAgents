@@ -60,13 +60,13 @@ interface SecondLLMEndpoint {  // セカンドLLM
 
 ### 4. REPL コマンド (`src/cli/repl.ts`)
 
-**2026-05-28 更新**: 個別編集系のコマンドは `/models` (Model Registry) の Edit ダイアログに統合された。 旧 `/model description` 等は dispatcher 互換で動作するが、 補完候補からは外れている。
+**2026-05-28 更新**: 個別編集系のコマンドは `/models` (Model Registry) の Edit ダイアログにも統合された。 `/model description` 等は 2026-06-21 に補完へ戻しており、 現在も使える (`/models` の Edit と目的が重なる件は docs/todo-legacy-ways-cleanup.md「未対応・要判断」)。
 
 - `/models` → エントリ選択 → Edit → Description フィールド (canonical)
-- `/model description` (alias) — 現在値表示＋使い方＋記載例
-- `/model description <text>` (alias) — 設定
-- `/model description clear` (alias) — クリア
-- `/model second description` / `/model second description <text>` / `/model second description clear` — second slot 用 (旧 `/second description ...` も alias で動作)
+- `/model description` — 現在値表示＋使い方＋記載例
+- `/model description <text>` — 設定
+- `/model description clear` — クリア
+- `/model second description` / `/model second description <text>` / `/model second description clear` — second slot 用 (旧 `/second description ...` は 2026-10-25 に削除)
 - `/model vision description` — vision slot 用 (Phase 5 で追加)
 - `/model` の status 出力に各 slot の特性を表示 (旧 `/model info` は `/model` と同義になり、 補完からは削除)
 - 設定直後 `REPL.refreshLLMProfiles()` が `AgentLoop.updateLLMProfiles()` を呼び、 次ターン以降のシステムプロンプトに反映

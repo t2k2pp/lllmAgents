@@ -75,7 +75,7 @@ importConversation(state | null): void    // 載せ替え (null = 新規会話)
 
 ## 6. 既知の制約・後続課題
 
-- チャネル会話は in-memory（再起動で消える）。`/sessions` にも出ない
+- チャネル会話は in-memory（再起動で消える）。`/resume list` にも出ない
 - Discord は interaction token が 15 分で失効するため、キュー待ち + 実行が 15 分を超えると
   応答を届けられない（キュー追加通知でその旨を案内）
 - 複数ユーザーの同時利用はキューで直列化される（ローカル GPU 前提のため並列実行はしない）

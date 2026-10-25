@@ -1,6 +1,6 @@
 # ToDo: 同じことをする複数のやり方 (旧方式の残り) を一本化する
 
-> 作成日: 2026-10-25 / ステータス: **実施中** (洗い出し・判断済み。 T1〜T4 完了、 T5 が残り)
+> 作成日: 2026-10-25 / ステータス: **完了** (T1〜T5。 旧コマンド・別名・旧設定キー・todo_write を削除し、 docs / help / スキル / モデル向け説明を 1 つのやり方に揃えた。 残る別名は末尾「未対応・要判断」)
 
 ## 背景
 `/run pause` と `/run pause --durable` のように、同じ目的に 2 つのやり方が残っていると、
@@ -17,7 +17,7 @@
       同じ目的の別名・旧方式・alias・後方互換コードを列挙する (例: コード中の「後方互換」「旧シグネチャ」「alias」「deprecated」 の検索から)
 - [x] 1 件ずつ「同じ目的か / 残す理由があるか」 を判定し、 一覧を本書に表で残す
 - [x] ユーザーに一覧を見せて削除対象を確定する (2026-10-25、 下記「決定」)
-- [ ] 削除・統合を実装し、 docs / help / テストを揃える (下記 T1〜T4)
+- [x] 削除・統合を実装し、 docs / help / テストを揃える (下記 T1〜T5)
 
 ## 洗い出し結果 (2026-10-25)
 
@@ -68,7 +68,7 @@ config.json のシークレット分離移行、 llm-profiles.json → registry 
 - [x] T2: C2 起動フラグ + T1 で見えた入力検査 (`/model <名前>`・`/loop`) (2026-10-25、 下記「T2 実施内容」)
 - [x] T3: C3 設定コマンドを対話画面に一本化 (2026-10-25、 下記「T3 実施内容」)
 - [x] T4: C1 権限を rules に一本化 (2026-10-25、 下記「T4 実施内容」)
-- [ ] T5: ドキュメントの最終確認 — README / docs (履歴の cycle-* 等を除く) / 組み込みスキル / `/help`・`--help` / モデル向けツール説明に、 T1〜T4 で削除・変更したコマンド・フラグ・ツール・設定キーが旧い書き方で残っていないか、 同じことに 2 つのやり方があるように読める説明が無いかを確認して直す。 履歴文書で現行仕様への注記が必要なものには注記を足す
+- [x] T5: ドキュメントの最終確認 (2026-10-25、 下記「T5 実施内容」) — README / docs (履歴の cycle-* 等を除く) / 組み込みスキル / `/help`・`--help` / モデル向けツール説明に、 T1〜T4 で削除・変更したコマンド・フラグ・ツール・設定キーが旧い書き方で残っていないか、 同じことに 2 つのやり方があるように読める説明が無いかを確認して直す。 履歴文書で現行仕様への注記が必要なものには注記を足す
 
 ## T1 実施内容 (2026-10-25)
 
@@ -231,3 +231,55 @@ config.json のシークレット分離移行、 llm-profiles.json → registry 
 - tests/cli/permission-settings.test.ts: 画面の関数 (範囲とルール文字列の対応・範囲ごとの一覧・追加/削除と保存)
 - 既存の権限テストは同じ期待値のまま新しい表し方 (rules.allow) に書き換えた
 
+
+
+## T5 実施内容 (2026-10-25)
+
+T1〜T4 と `/run pause` の一本化 (docs/durable-run-resume-design.md) で削除・変更したものを README / docs / 組み込みスキル / `.claude/skills` / `/help` / `--help` / 補完 / モデル向けツール説明・プロンプト / 画面の文言で検索し、 現行仕様の記述を 1 つのやり方に直した。
+`/help` (BUILTIN_HELP_ENTRIES・レジストリ)・補完・モデル向けツール説明・システムプロンプトには旧い書き方は残っていなかった。
+
+### 直したもの
+- `--help` (src/index.ts): 実在するのに載っていなかった `--no-skills` `--background` `--slack` を追加
+- コードコメント: second-llm-manager.ts の `/second temperature` → `/model second temperature`
+- `.claude/skills/lllmagents-test`: `autoApproveTools` / `requireApprovalTools` の説明を `security.rules` に、 確認ダイアログ 3 の保存先を `security.rules.allow` の `cli:<ツール名>` に
+- external_design: コマンド一覧に `/run` が無かったので追加、 `/permission` の説明 (旧「Pattern rules / Auto / Require」) を権限ルールの画面に、 削除済み一覧に `/run pause --durable` を追加
+- llm-logging: response の「tokens 修正必要」 を外し、 スキーマに `tokensCached` と `prefix_break` (SessionPrefixBreakLog) を追加 (prompt-prefix-stability §7.3 と一致)
+- model-registry: ステータスを実装済みに、 §4.1 の表 (`/second` は「dispatcher 互換維持」→ 削除済み、 `/model host` 等は「deprecated 予定」→ 現行、 `/model url` 削除) と Phase 表の注記
+- llm-profile-descriptions: `/model description` を「alias・補完に無い」 → 現行、 `/second description` alias → 削除済み
+- model-setup: 「`/model url` は非推奨表示つきで残す」 → 削除済み
+- main_second_swap_design: `/swap` の alias `/switch` を削除、 `/second temperature` 等と `/second setup` `/second url` を `/model second ...` に
+- v030_second_llm_design: §3.3・§7.1 を `/model second ...` に (budget を変えるコマンドは無く config.json を編集する旨も)、 セカンドLLM のツール一覧の `todo_write`
+- gemini-aistudio-provider / azure-gpt-provider: `/second setup` → `/model second setup`
+- model-orchestration (`/second` → `/model second`)、 channel-session-queue-design (`/sessions` → `/resume list`)、 cost-token-command-design (`/token` に削除済みを併記)
+- `todo_write` → `todo_append` / `todo_mark` / `todo_delete`: context-strategy (P1・B1/B4 の検出)・goal-seek-mode-design・goal-loop-deterministic-check-design・evaluation-loop・channel-progress-design・harness-engineering (当時名を併記)
+- docs/README.md (索引): durable-run-resume-design の説明を現行 (保存して止める 1 方式・起動時の再開確認) に、 本書を索引に追加
+
+### 冒頭に注記を足した文書 (本文は当時の記録として残す)
+- strategic-todo-design (`todo_write` compat shim は削除済み。 ステータスも実装済みに)
+- main-second-subagent-comparison (`/second` 表記)
+- harness-engineering-phase5-progress (`/second`・`todo_write` 表記)
+- 既に注記があったので触っていないもの: llm-profiles・integrations-command-cleanup・security_assessment・channel-interaction-bridge-design・async-surface-permission-delivery-design・cycle-17 / cycle-18
+- 触っていない履歴: cycle-*・product-review-*・todo-cycle-*・changelog-feature-backlog・nodejs-security-review・issues・prompt-tech-debt-review (2026-04-29 の日付つき棚卸し)・system-prompt-redesign / agent-loop-efficiency-review / lightweight-register-anchors-design / ephemeral-context-design の当時のログ・分析中の `todo_write`、 commit スキルのコミット例文、 claude-code-driver スキルの `--continue` (Claude Code CLI 自身のフラグ)
+
+### 意図的に旧キーを参照していて残したコード
+- src/config/permission-migration.ts (1 回だけの移行)、 types.ts / config-manager.ts / rule-engine.ts / permission-settings.ts の移行に関するコメント、 tool-name-aliases.ts の経緯コメント
+- `capability.compressionThreshold` (能力ティアの圧縮閾値) は削除した設定キー `context.compressionThreshold` とは別物で現行
+
+### 確認した prompt-cache の文書
+- prompt-prefix-stability / prompt-cache-cost-reduction §3.1 の注記 / llm-logging (`prefix_break`・`tokensCached`) は内容が一致している (llm-logging のスキーマ不足のみ上記で補った)
+
+### 見つけたが直していないもの
+- docs/README.md の索引に載っていない文書が 20 件ある (context-forgetting・context-strategy・model-orchestration・tui-alternate-screen・request-elaboration-design・todo-request-elaboration 等。 今回の作業以前から)。 本書以外は Status の判定が要るため未追加
+
+## 未対応・要判断 (同じ目的のやり方が 2 つ残っているもの)
+| 対象 | 重なっているもの | 現状 |
+|---|---|---|
+| `/quit` と `/exit` | 同じ終了 | 両方動く。 `/help` は「/quit (/exit も同じ)」 |
+| `/model second status` / `info` | 引数なし `/model second` | 両方動く。 `/model second` の使い方表示が「/model second info も同義」 と案内している |
+| 引数なし `/model second model` | `/model second list` | 同じ picker を開く (名前付き `/model second model <名前>` は直接指定で別) |
+| `/cost model` / `/cost provider` (単数形) | `/cost models` / `/cost providers` | 両方動く。 補完は複数形だけ |
+| `/loop stop [id\|all]` | `/loop status` の停止 picker | 非TTY で止められる唯一の手段なので残している (T1) |
+| `--no-alt-screen` / `--no-mouse` | 既定 (off) | 環境変数を常用する人がその回だけ打ち消す用途で残している (T1)。 `--mouse` が `--alt-screen` も有効にする暗黙の重なりは記録のみ (C5) |
+| `/model host` `port` `provider` `temperature` `top_p` `top_k` `rep_penalty` `description` (main / second の個別編集) | `/models` の Edit | 2026-06-21 に補完へ戻して両方現行。 `/model second temperature` 等と `/model second provider` は動くが補完に無い |
+| `/model setup` (wizard) | `/models` の Add new | 両方現行 |
+| config の `mainLLM` / `secondLLM` / `visionLLM` | model-registry の slots | C4 で「今は触らない」 と決定済み |

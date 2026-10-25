@@ -41,12 +41,18 @@ readline を複数作成するとバッファが消失するため、REPLとPerm
   5: 中止
   ```
 
-### config.json の autoApproveTools / requireApprovalTools
+### config.json の security.rules
+権限は `security.rules` (allow / deny / ask) だけで表す (docs/config-reference.md「rules — 権限ルール」)。既定値:
 ```json
-"autoApproveTools": ["file_read", "glob", "grep", "browser_snapshot", "vision_analyze"],
-"requireApprovalTools": ["file_write", "file_edit", "bash", "browser_navigate", "browser_click", "browser_type"]
+"security": {
+  "rules": {
+    "allow": ["file_read", "glob", "grep", "browser_snapshot", "vision_analyze", "web_search", "web_fetch"],
+    "deny": [],
+    "ask": []
+  }
+}
 ```
-`skill` ツールはどちらにも未登録のため、デフォルトで `ask`（確認必要）になる。
+`skill` ツールは allow に無いため、デフォルトで確認が出る。
 
 ---
 
@@ -86,7 +92,7 @@ Bashツールの timeout を十分大きく設定する（例: `timeout: 600000`
 
 ### 絶対に選択してはいけない: 選択肢 3「設定に保存して常に許可」
 
-選択肢 3 を選ぶと **`~/.localllm/config.json` の `autoApproveTools` に永続追加**される。
+選択肢 3 を選ぶと **`~/.localllm/config.json` の `security.rules.allow` に `cli:<ツール名>` が永続追加**される。
 これにより:
 - 以降のテストで権限確認ダイアログが表示されなくなる（テスト不能）
 - アプリのセキュリティ機能の動作確認ができなくなる

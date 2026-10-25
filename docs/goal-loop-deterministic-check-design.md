@@ -46,7 +46,7 @@ state check → 次アクション決定 → 実行（コード/ツール）→ 
 | 機能 | 実体 | 停止ゲート | 性質 |
 |---|---|---|---|
 | `/loop` (`src/loop/loop-manager.ts`) | `setInterval` で prompt を時間反復 | 時間間隔 | そもそも「完了」概念が無い |
-| `/goal-seek` (`src/agent/goal-slot.ts` + `agent-loop.ts`) | 後ろ向き連鎖 paradigm。受入基準を `todo_write` に同期 | **LLM 判定**: todo 完了 + evaluator スコア ≥ 0.8 | モデルの自己評価 |
+| `/goal-seek` (`src/agent/goal-slot.ts` + `agent-loop.ts`) | 後ろ向き連鎖 paradigm。受入基準を ToDo (`todo_append` 等) に同期 | **LLM 判定**: todo 完了 + evaluator スコア ≥ 0.8 | モデルの自己評価 |
 | `/try` (`src/tenacious/tenacious-runner.ts`) | Planner→Generator→Evaluator のサブエージェント再試行 | **LLM 判定**: スコア ≥ 7/10 | モデルの自己評価 |
 
 ### 2.2 思想の対比

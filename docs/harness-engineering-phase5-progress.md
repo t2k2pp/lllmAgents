@@ -3,6 +3,8 @@
 > **位置づけ**: `docs/harness-engineering-phase5.md` (設計書) の対になる **進捗トラッカー**。
 > 「何を試した / 試していない / リトライ結果」を明示し、ループ運用に耐えるようにする。
 > 設計書 = 不変、本書 = 各イテレーションごとに更新。
+>
+> **2026-10-25 注記**: 本文の `/second ...` は `/model second ...` に、 `todo_write` は `todo_append` / `todo_mark` / `todo_delete` に置き換わった (docs/todo-legacy-ways-cleanup.md T1)。 本文中の旧表記は各イテレーション当時の記録。
 
 ---
 

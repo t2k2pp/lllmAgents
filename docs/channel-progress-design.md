@@ -81,4 +81,4 @@ detach 後の停止、表示内容（✓/✗/▶、件数）、ChannelResponseCo
 ## 5. 後続課題
 
 - 確認待ち（権限ボタン表示中）であることの明示（「⏸ 確認待ち」行）
-- ToDo 進捗（todo_write の中身）の表示は、todo イベント化（A-1 Phase 2）後に検討
+- ToDo 進捗（todo_append 等で書いた中身）の表示は、todo イベント化（A-1 Phase 2）後に検討

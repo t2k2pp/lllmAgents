@@ -147,7 +147,7 @@ B6 の「連続していない」 は **文字 2-gram の Jaccard 係数 (< 0.12
 
 | ID | シグナル | 根拠 |
 |----|---------|------|
-| P1 | `todo_write` で **3 件以上の pending** を含むリストが新規作成された | これから多段の作業が始まる |
+| P1 | ToDo ツール (`todo_append` 等) で **3 件以上の pending** が新たに積まれた | これから多段の作業が始まる |
 | P2 | plan mode を抜けた (計画 → 実装への移行) | 実装はツール結果で急速に膨らむ |
 | P3 | 新しい user 発話が `classifyTaskComplexity() === "complex"` | 既存ヒューリスティックの流用 |
 
@@ -157,7 +157,7 @@ B6 の「連続していない」 は **文字 2-gram の Jaccard 係数 (< 0.12
 
 ### 3.3 検出の実装位置
 
-- **B1 / B4**: `todo_write` 系ツール実行の前後で `getTodos()` のスナップショットを比較
+- **B1 / B4**: ToDo ツール (`todo_append` / `todo_mark` / `todo_delete`) 実行の前後で `getTodos()` のスナップショットを比較
 - **B2**: `bash` ツールの結果から `git commit` の成功を検出 (コマンド文字列 + exit 0)
 - **B3**: Goal Seek の評価結果ハンドラ
 - **B5**: `purgeEphemeralAtSpanEnd(reason)` の reason と、 最終テキストの完了判定。
@@ -165,7 +165,7 @@ B6 の「連続していない」 は **文字 2-gram の Jaccard 係数 (< 0.12
   `final_text_response` のときだけ `IntentClassifier.classifyCompletion()` の
   **既存呼び出しの結果を控えて流用**する (B5 のために追加の LLM 呼び出しはしない)
 - **B6 / P3**: user 発話を受けた時点 (`classifyTaskComplexity` の既存呼び出し箇所 + B6 の 2-gram 判定)
-- **P1 / P2**: `todo_write` 系ツール実行後 / plan mode 退出時 (反復先頭で `isInPlanMode()` の変化を見る)
+- **P1 / P2**: ToDo ツール実行後 / plan mode 退出時 (反復先頭で `isInPlanMode()` の変化を見る)
 
 いずれも **既存の通り道にフックを 1 行足す**形にし、 新しいループは作らない。
 

@@ -1,6 +1,7 @@
 # 準システムプロンプト + 戦略 ToDo アーキテクチャ 設計書
 
-> **ステータス**: ドラフト (レビュー前)
+> **ステータス**: 実装済み (2026-05-15 ドラフト)
+> **2026-10-25 注記**: 本書で compat shim として残した `todo_write` は削除した。 ToDo ツールは `todo_append` / `todo_mark` / `todo_delete` だけ (docs/todo-legacy-ways-cleanup.md T1)。 以下の compat shim に関する記述は当時の計画
 > **作成日**: 2026-05-15
 > **位置づけ**: `docs/goal-seek-mode-design.md` Phase 2 の再構成 + `docs/harness-engineering.md` の延長線
 > **関連**:

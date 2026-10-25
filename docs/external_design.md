@@ -134,17 +134,18 @@ stateDiagram-v2
 | `/remember` | 指定した情報を永続メモリに記録します |
 | `/diff` | stage済み・未stage・未追跡を含む working tree の実Git差分を表示します。Git不在・非repository・出力上限超過は復旧方法付きで失敗します |
 | `/integrations` | 外部統合 (Discord / Slack / Chatlog / Search) を 1 画面で設定 |
-| `/permission` | ツール実行権限を picker で編集 (Pattern rules / Auto / Require / Discord / Slack) |
+| `/permission` | 権限ルール (`security.rules` の allow / deny / ask) を画面で編集。 範囲はすべての面 / CLI / Discord / Slack |
 | `/stream` | 表示モード (ストリーミング / スピナー+Markdown) を toggle |
 | `/loop` | プロンプトを定期実行 (例: `/loop 5m /pr-review`)。 一覧 + 停止は `/loop status` |
 | `/autorun` | 自律実行モードの toggle |
+| `/run` | 実行中の作業の一時停止と再開。 `/run pause` は進行中の応答と tool を完了させ、 次の LLM API 直前で会話と再開地点を保存して止める (アプリ・PC を終了しても `/resume <id>` → `/run resume` で続けられる)。 `status` / `resume` / `inspect` / `discard`。 docs/durable-run-resume-design.md |
 
 ※ `/setup` は REPL コマンドではなく、 CLI 起動時のフラグ `--setup` で実行します。
 ※ 起動時にセッションを復元するフラグは REPL の `/resume` と同じ書き方: `--resume <id>` / `--resume latest`。 引数なし `--resume` (REPL では picker) は起動前に picker を出せないため使い方エラー、 見つからない ID・保存セッション無しもエラー終了 (終了コード 1) で、 黙って新規セッションで始めない。 旧 `--continue` は削除済み (→ `--resume latest`)
 ※ 同じことをするコマンドは 1 つだけにしている (docs/todo-legacy-ways-cleanup.md)。 次の旧コマンドは削除済みで、 入力しても動かない:
   - `/sessions` `/continue` (→ `/resume list` / `/resume latest`)、 `/second` (→ `/model second`)、 `/profiles` `/profile` `/model-registry` `/registry` (→ `/models`)
   - `/integration` `/intg` (→ `/integrations`)、 `/switch` (→ `/swap`)、 `/token` (→ `/cost`)、 `/model url` `/model ip` (→ `/model host` + `/model port`)、 `/loop list` (→ `/loop status`)、 `/stream on|off` (→ 引数なし `/stream`)
-  - `/metrics` `/capability` (→ `/status`)
+  - `/metrics` `/capability` (→ `/status`)、 `/run pause --durable` (→ `/run pause`。 一時停止は保存して止める 1 方式だけ)
   - `/discord` `/slack` `/chatlog` `/search` (→ `/integrations` の画面)、 `/permission <サブコマンド>` (`auto-add` `rule-add` 等 → 引数なし `/permission` の画面)
 
 #### `/models` (Model Registry) — main / second / vision 統合管理

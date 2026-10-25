@@ -183,7 +183,7 @@ window=全ファイルを `timestamp >= windowStartAt` で抽出、session=in-me
 
 ## 6. 補完（completer.ts）
 
-`BUILTIN_COMMAND_DEFS` に `/cost`（と `/token`）を追加。`/status` 集約の注記は残しつつ
+`BUILTIN_COMMAND_DEFS` に `/cost`（と `/token`。 `/token` は 2026-10-25 に削除）を追加。`/status` 集約の注記は残しつつ
 「`/cost` は詳細表示として復活」を明記。サブコマンド（models/providers/reset/export/rate/today/
 month/all/session）は `/loop` 等と同様にサブコマンド補完を実装（completer のサブコマンド機構に追従）。
 
@@ -192,7 +192,7 @@ month/all/session）は `/loop` 等と同様にサブコマンド補完を実装
 - **P1 永続化基盤**: `TokenUsageRecord.slot` 追加 + record 箇所修正 + インクリメンタル append +
   state.json（firstRecordAt/windowStartAt）。旧 flush 廃止。
 - **P2 集計モジュール**: `usage-store.ts`（loadRecords/aggregate/reset/export）+ ユニットテスト。
-- **P3 コマンド**: `/cost` + サブコマンド + `/token` alias を repl に実装。
+- **P3 コマンド**: `/cost` + サブコマンド + `/token` alias を repl に実装 (`/token` は 2026-10-25 に削除)。
 - **P4 補完**: completer にコマンド + サブコマンド補完。
 - **P5 整合**: `/status` の Cost 行に「詳細は /cost」 を 1 行追記（重複表示はしない）。
 
