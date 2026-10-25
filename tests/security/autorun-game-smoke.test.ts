@@ -5,7 +5,7 @@ import { PermissionManager } from "../../src/security/permission-manager.js";
 
 // autorun 中の game_smoke は読み取り系として自動許可する (2026-10-14 実アプリ動作確認で発覚:
 // browser_* は自動許可なのに game_smoke だけ検証のたびに確認が出ていた)。
-// docs/todo-request-elaboration.md 第 5 段
+// docs/archive/todo-request-elaboration.md 第 5 段
 
 function mkConfig(): SecurityConfig {
   return {

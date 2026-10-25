@@ -2,7 +2,7 @@
 
 > **ステータス**: 2026-08-13 設計 / 実装
 > **関連**: `docs/repl-io-robustness.md` / `docs/interrupt-and-progress-design.md` /
-> `docs/spinner-mode-response-coloring-design.md` / `docs/issues.md` (不具合 1・2・4)
+> `docs/spinner-mode-response-coloring-design.md` / `docs/archive/issues.md` (不具合 1・2・4)
 
 ---
 

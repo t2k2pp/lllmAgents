@@ -3,7 +3,7 @@
 > **ステータス**: 2026-09-23 設計 / 2026-10-15 §4〜§5 改訂 (思考オフを内部呼び出し全体へ適用)
 > **対象**: `src/agent/forgetting.ts`, `src/agent/hierarchical-compressor.ts`, `src/providers/openai-compat.ts`,
 > `src/agent/{intent-classifier,progress-judge,goal-promotion,compress-text,handoff}.ts`
-> **関連**: `docs/context-forgetting.md`, `docs/context-strategy.md`
+> **関連**: `docs/archive/context-forgetting.md`, `docs/archive/context-strategy.md`
 >
 > **2026-10-25 の扱い** (`docs/context-reduction-redesign.md` §5.6 / §12): 対象の `forgetting.ts` と `hierarchical-compressor.ts` は、
 > コンテキストの整理の作り直しで削除した。 新しい要約 (段階 3) は **思考をオフにしない**: 今の並び (キャッシュ済み) の末尾に指示を足して
@@ -84,7 +84,7 @@
 - `ChatParams.disableThinking?: boolean` を追加 (`src/providers/base-provider.ts`)
 - `openai-compat.ts` は `llamacpp` / `vllm` のときだけ `chat_template_kwargs: {enable_thinking: false}` を送る。
   未知フィールドで 400 を返し得る商用 API には送らない (対応外 provider では従来どおり)
-- 忘却選択の扱いは `docs/context-forgetting.md` §4.2 / §4.5
+- 忘却選択の扱いは `docs/archive/context-forgetting.md` §4.2 / §4.5
 
 ## 5. 内部呼び出しごとの判断 (実測)
 

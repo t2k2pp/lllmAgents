@@ -12,7 +12,7 @@ import { evaluateRules, isToolAllowedByRule, parseRule } from "../../src/securit
 import { nonTTYReader } from "../../src/utils/non-tty-reader.js";
 
 /**
- * 権限をルール (security.rules) に一本化した後の判定 (docs/todo-legacy-ways-cleanup.md T4)。
+ * 権限をルール (security.rules) に一本化した後の判定 (docs/archive/todo-legacy-ways-cleanup.md T4)。
  * 旧ツール名一覧で下していた判定と同じになることを代表例で確かめる。
  * 確認ダイアログは非TTY (テキストメニュー) を通るので nonTTYReader.readLine を差し替えて答える。
  */

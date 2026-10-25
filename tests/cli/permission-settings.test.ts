@@ -10,7 +10,7 @@ import {
 } from "../../src/cli/permission-settings.js";
 
 /**
- * /permission 画面が呼ぶ設定関数 (docs/todo-legacy-ways-cleanup.md T3 / T4)。
+ * /permission 画面が呼ぶ設定関数 (docs/archive/todo-legacy-ways-cleanup.md T3 / T4)。
  * 権限は security.rules のルールだけで表す。 画面からの変更はすべてここを通り、
  * 実行中の PermissionManager と config.security.rules の両方が変わり、 保存が呼ばれることを確かめる。
  */

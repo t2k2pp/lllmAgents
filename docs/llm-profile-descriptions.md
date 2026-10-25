@@ -60,7 +60,7 @@ interface SecondLLMEndpoint {  // セカンドLLM
 
 ### 4. REPL コマンド (`src/cli/repl.ts`)
 
-**2026-05-28 更新**: 個別編集系のコマンドは `/models` (Model Registry) の Edit ダイアログにも統合された。 `/model description` 等は 2026-06-21 に補完へ戻しており、 現在も使える (`/models` の Edit と目的が重なる件は docs/todo-legacy-ways-cleanup.md「未対応・要判断」)。
+**2026-05-28 更新**: 個別編集系のコマンドは `/models` (Model Registry) の Edit ダイアログにも統合された。 `/model description` 等は 2026-06-21 に補完へ戻しており、 現在も使える (`/models` の Edit と目的が重なる件は docs/archive/todo-legacy-ways-cleanup.md「未対応・要判断」)。
 
 - `/models` → エントリ選択 → Edit → Description フィールド (canonical)
 - `/model description` — 現在値表示＋使い方＋記載例

@@ -29,7 +29,7 @@ describe("IntentClassifier failure policy", () => {
   });
 });
 
-/** 思考モデルが 50 tok を思考で使い切る件 (docs/context-reduction-reasoning-model-fix.md §5) */
+/** 思考モデルが 50 tok を思考で使い切る件 (docs/archive/context-reduction-reasoning-model-fix.md §5) */
 describe("IntentClassifier: 思考オフと失敗理由", () => {
   it("LLM 分類は disableThinking=true で呼ぶ", async () => {
     const calls: Array<{ disableThinking?: boolean }> = [];

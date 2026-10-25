@@ -44,7 +44,7 @@ describe("compressText — サイズガードと原文保持", () => {
   });
 });
 
-/** 思考モデルで圧縮結果が上限で切れる件 (docs/context-reduction-reasoning-model-fix.md §5) */
+/** 思考モデルで圧縮結果が上限で切れる件 (docs/archive/context-reduction-reasoning-model-fix.md §5) */
 describe("compressText — 出力上限での打ち切りと思考オフ", () => {
   it("finishReason=length の圧縮結果は原文より短くても採用しない", async () => {
     const truncated = {

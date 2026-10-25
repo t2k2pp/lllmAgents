@@ -1,5 +1,5 @@
 /**
- * REPL コマンドレジストリ (docs/production-readiness.md PR-10)。
+ * REPL コマンドレジストリ (docs/archive/production-readiness.md PR-10)。
  *
  * 新規コマンドの追加手順:
  * 1. src/cli/commands/<name>.ts に ReplCommandDef を1つ定義する

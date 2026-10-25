@@ -100,7 +100,7 @@ interface BashToolHandler extends ToolHandler {
 
 /**
  * P3-B: 破壊的なコマンドを検出して、 実行前に git status のスナップショットを
- * 取得する。 docs/agent-loop-efficiency-review.md §4.7 参照。
+ * 取得する。 docs/archive/agent-loop-efficiency-review.md §4.7 参照。
  *
  * 対象パターン:
  * - git checkout -- <path> / git checkout . (作業ツリー破棄)

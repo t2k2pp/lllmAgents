@@ -1,5 +1,5 @@
 /**
- * REPL コマンドレジストリの型定義 (docs/production-readiness.md PR-10)。
+ * REPL コマンドレジストリの型定義 (docs/archive/production-readiness.md PR-10)。
  *
  * 「1コマンド=1ファイル」で name / summary / 補完候補 / handler を1オブジェクトに
  * まとめる。ヘルプと補完はレジストリから自動生成されるため、旧方式の

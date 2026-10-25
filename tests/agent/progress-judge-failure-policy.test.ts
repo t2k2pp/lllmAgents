@@ -44,7 +44,7 @@ describe("progress judge failure policy", () => {
   });
 });
 
-/** 思考モデルが 200 tok を思考で使い切る件 (docs/context-reduction-reasoning-model-fix.md §5) */
+/** 思考モデルが 200 tok を思考で使い切る件 (docs/archive/context-reduction-reasoning-model-fix.md §5) */
 describe("progress judge: 思考オフと失敗理由", () => {
   it("disableThinking=true で呼ぶ", async () => {
     const calls: Array<{ disableThinking?: boolean }> = [];

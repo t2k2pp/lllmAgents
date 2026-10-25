@@ -1,5 +1,5 @@
 /**
- * 引き継ぎメモ + Clear (手動の /handoff。 docs/context-reduction-redesign.md §7。 メモの形は docs/context-strategy.md §2.2)
+ * 引き継ぎメモ + Clear (手動の /handoff。 docs/context-reduction-redesign.md §7。 メモの形は docs/archive/context-strategy.md §2.2)
  *
  * 「次やることの指示を残して、 一度コンテキストをクリア」 を実現する。
  *
@@ -27,7 +27,7 @@ const HANDOFF_TEMPERATURE = 0.2;
  * 出力上限 (思考 + メモ本文の合算)。 メモの長さはテンプレートで決まるので、 ここは暴走を止める絶対上限。
  * 思考は残す: 思考ありの方が「直前の作業」 と具体的な数値を拾い、 再開の拠り所として明確に良い。
  * 1200 では思考なしでもメモ本文だけで超えた (2026-10-15 実測: 84 セグメントの履歴で
- * 思考なし 1,272t / 思考あり 2,390t。 docs/context-reduction-reasoning-model-fix.md §5)。
+ * 思考なし 1,272t / 思考あり 2,390t。 docs/archive/context-reduction-reasoning-model-fix.md §5)。
  */
 const HANDOFF_MAX_TOKENS = 8000;
 

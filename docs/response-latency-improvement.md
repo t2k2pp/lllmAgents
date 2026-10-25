@@ -2,7 +2,7 @@
 
 > 対象: アプリの応答レイテンシ改善。 **メインLLMをより速いモデルに替える以外**の打ち手を網羅的に検討する。
 > 最優先軸: **体感(UI)レイテンシ**（ユーザーが「待たされている」と感じる時間）。
-> 位置づけ: `docs/agent-loop-efficiency-review.md` は **反復回数（マルチステップタスクの総ターン数）削減** を扱う。
+> 位置づけ: `docs/archive/agent-loop-efficiency-review.md` は **反復回数（マルチステップタスクの総ターン数）削減** を扱う。
 > 本書はそれを補完し、**1ターンあたりの遅延・補助LLM往復・体感待ち時間** をカバーする。
 > 作成日: 2026-06-18 / ステータス: 段階実装中（A1 live previewは2026-08-31 cycle 13で実装）
 > 関連: Lever B(プロンプトキャッシュ)/Lever C(安定プレフィクス) は **コスト削減**(品質・速度不変)として
@@ -144,7 +144,7 @@ coherence-check（`agent-loop.ts:1111-1124`）は regex のみで LLM 呼び出�
 
 ### Lever D — 往復 / 反復回数（既存doc参照）
 
-`docs/agent-loop-efficiency-review.md` の P0-P3 を要約参照（重複実装しない）:
+`docs/archive/agent-loop-efficiency-review.md` の P0-P3 を要約参照（重複実装しない）:
 同一引数リトライ検知、file_edit→file_read 抑制、build/run 集約、browser_snapshot キャッシュ、計画/Todo 過多検知。
 一部は既に `agent-loop.ts`（`recentFailures` 等）に実装済。総ターン数の削減は体感にも直結するため継続課題。
 

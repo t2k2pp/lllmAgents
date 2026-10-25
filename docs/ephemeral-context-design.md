@@ -2,7 +2,7 @@
 
 > **目的**: ハーネスが in-turn の方向修正・自己点検・空応答救済のために注入する補助メッセージを、 **ユーザー応答完了の瞬間に消費し終えた scratch space として破棄する**。 これにより過去 span のノイズが次 span の判断を引きずらず、 同時に LLM が思考した内容を span 内では十分活用できる仕組みにする。
 >
-> **位置づけ**: `docs/multi-tier-harness-roadmap.md` Phase B-C / Phase D-4 (短 ctx 最適化) と直交する横串の改善。 思想は「思考と試行錯誤を無駄にしない」。 設計の詳細は `docs/agent-loop-efficiency-review.md` で分析した P0-P3 自己点検メカニズムの上に乗る。
+> **位置づけ**: `docs/multi-tier-harness-roadmap.md` Phase B-C / Phase D-4 (短 ctx 最適化) と直交する横串の改善。 思想は「思考と試行錯誤を無駄にしない」。 設計の詳細は `docs/archive/agent-loop-efficiency-review.md` で分析した P0-P3 自己点検メカニズムの上に乗る。
 >
 > **作成日**: 2026-05-10
 >

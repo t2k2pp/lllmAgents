@@ -1,6 +1,6 @@
 # 商品品質レビュー cycle 18: durable run resume
 
-> **2026-10-25 改訂**: `/run pause --durable` は廃止し、 `/run pause` が常にこの方式で動く。 現在の仕様は [durable-run-resume-design.md](durable-run-resume-design.md)。 本書は当時の記録として残す。
+> **2026-10-25 改訂**: `/run pause --durable` は廃止し、 `/run pause` が常にこの方式で動く。 現在の仕様は [durable-run-resume-design.md](../durable-run-resume-design.md)。 本書は当時の記録として残す。
 
 - 日付: 2026-09-03
 - 観点: Codex / Claude Code開発者、local LLM運用、再起動耐性、二重tool防止

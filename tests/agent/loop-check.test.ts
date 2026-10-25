@@ -6,7 +6,7 @@ import type { SecurityConfig } from "../../src/config/types.js";
 import { ToolRegistry, type ToolHandler } from "../../src/tools/tool-registry.js";
 import { clearTodos, todoAppendTool, todoMarkTool, getCurrentTodos } from "../../src/tools/definitions/todo-write.js";
 
-// 作業回数の上限は撤廃し、 一定回数ごとのループ点検に置き換え (docs/todo-request-elaboration.md 第 4 段)。
+// 作業回数の上限は撤廃し、 一定回数ごとのループ点検に置き換え (docs/archive/todo-request-elaboration.md 第 4 段)。
 // 進んでいる・毎回違うことをしている限り止めない。 進捗無し + 繰り返しが 2 区間続いたときだけ止めて報告する。
 
 const security: SecurityConfig = {

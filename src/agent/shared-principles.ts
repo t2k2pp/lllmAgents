@@ -2,7 +2,7 @@
  * メインLLM と サブエージェント (= SubAgent + セカンドLLM agent モード) で共有する行動原則。
  *
  * これまで `system-prompt.ts` と `harness-intervention.ts:buildSubAgentStrategyPrompt()` の
- * 2 箇所で同じ概念を独立に書いていたため、 表現の drift が発生していた (`docs/prompt-tech-debt-review.md`
+ * 2 箇所で同じ概念を独立に書いていたため、 表現の drift が発生していた (`docs/archive/prompt-tech-debt-review.md`
  * ID-002)。 「メイン・サブで乖離したいポイントはない」 というユーザー判断に基づき、 共有概念は
  * 本ファイルから両方が同じ関数で組み立てる。
  *
@@ -19,7 +19,7 @@
  * 言語ポリシー (2026-06-09, docs/prompt-language-policy.md):
  *   モデルに渡る文字列は英語が正本。 ユーザー可視文 (UI / コンソール) は日本語のまま。
  *   出力は「日本語入力には日本語で返す」 と各 core identity 側で指示する。
- *   英語化前の日本語版は docs/prompt-ja-reference.md に退避 (非同期スナップショット)。
+ *   英語化前の日本語版は docs/archive/prompt-ja-reference.md に退避 (非同期スナップショット)。
  */
 
 import type { Tier } from "./capability-tier.js";

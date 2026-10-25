@@ -2,7 +2,7 @@
  * config.json の 1 回だけの書き換え (旧キーの移行・削除) に共通の仕組み。
  *
  * 使っているもの:
- *   - 権限ルールへの移行 (permission-migration.ts。 docs/todo-legacy-ways-cleanup.md T4)
+ *   - 権限ルールへの移行 (permission-migration.ts。 docs/archive/todo-legacy-ways-cleanup.md T4)
  *   - コンテキスト整理の旧キーの削除 (context-keys-removal.ts。 docs/context-reduction-redesign.md §11)
  *
  * 流れ (loadConfig から呼ぶ):

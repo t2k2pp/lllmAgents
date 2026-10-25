@@ -1,6 +1,6 @@
 # Slack統合 設計書
 
-> **2026-10-25 更新**: REPL からの設定は `/integrations` → Slack 連携 の画面だけで行う。 直接コマンド `/slack` は削除した (docs/todo-legacy-ways-cleanup.md T3)。 Slack 経由で自動許可するツールは `/permission` の画面 → "Slack だけのルール" (または "すべての面に効くルール") で allow ルールとして編集する。 対話できる端末が無いときは `~/.localllm/config.json` の `slack.*` / `security.rules` (`slack:<ツール名>`) を直接編集する。 旧 `security.slackAutoApproveTools` は廃止し、 起動時にルールへ移行する (docs/todo-legacy-ways-cleanup.md T4)。
+> **2026-10-25 更新**: REPL からの設定は `/integrations` → Slack 連携 の画面だけで行う。 直接コマンド `/slack` は削除した (docs/archive/todo-legacy-ways-cleanup.md T3)。 Slack 経由で自動許可するツールは `/permission` の画面 → "Slack だけのルール" (または "すべての面に効くルール") で allow ルールとして編集する。 対話できる端末が無いときは `~/.localllm/config.json` の `slack.*` / `security.rules` (`slack:<ツール名>`) を直接編集する。 旧 `security.slackAutoApproveTools` は廃止し、 起動時にルールへ移行する (docs/archive/todo-legacy-ways-cleanup.md T4)。
 
 ## 概要
 
@@ -75,7 +75,7 @@ interface SlackConfig {
 
 ### SecurityConfig 拡張
 
-Slack 専用の設定キーは無く、 権限ルール `security.rules` で表す (旧 `slackAutoApproveTools` は廃止。 docs/todo-legacy-ways-cleanup.md T4):
+Slack 専用の設定キーは無く、 権限ルール `security.rules` で表す (旧 `slackAutoApproveTools` は廃止。 docs/archive/todo-legacy-ways-cleanup.md T4):
 
 ```json
 "rules": { "allow": ["file_read", "slack:image_generate"] }

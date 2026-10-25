@@ -7,7 +7,7 @@
 > 以下本文の `second_llm_consult` への言及は、この畳み込み前の状態の記録として残す。
 > なお「文脈を保持する対話サブエージェント」(会話を覚え続ける話し相手) は将来課題として保留中。
 >
-> **2026-10-25 注記**: 本文の `/second ...` コマンドは削除し `/model second ...` に一本化した (docs/todo-legacy-ways-cleanup.md T1)。 本文中の `/second` 表記は当時の記録。
+> **2026-10-25 注記**: 本文の `/second ...` コマンドは削除し `/model second ...` に一本化した (docs/archive/todo-legacy-ways-cleanup.md T1)。 本文中の `/second` 表記は当時の記録。
 
 > **作成日**: 2026-04-30
 > **目的**: 「メインLLM」「セカンドLLM」「サブエージェント」 という 3 つの実行主体について、**何が違うのか / 何が同じなのか** を 1 か所に集約し、現在のコード実装と過去の設計書の間に生じているズレを可視化する。
@@ -17,7 +17,7 @@
 > - 元設計: `docs/v030_second_llm_design.md` (Orchestrator-Worker パターン、 階層型委任ルール)
 > - 対称化: `docs/main_second_swap_design.md` (型統一・swap 機能、 主従の対称性)
 > - 補助情報: `docs/llm-profile-descriptions.md` (description によるルーティング誘導)
-> - ハーネス: `docs/harness-engineering.md`, `docs/harness-engineering-phase5.md` (委任ガード、 Evaluator 統合)
+> - ハーネス: `docs/harness-engineering.md`, `docs/archive/harness-engineering-phase5.md` (委任ガード、 Evaluator 統合)
 
 ---
 

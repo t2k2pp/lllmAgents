@@ -1,6 +1,6 @@
 /**
  * OpenAI 互換のモック LLM サーバー (E2E スモークテスト用)。
- * docs/production-readiness.md PR-08
+ * docs/archive/production-readiness.md PR-08
  *
  * GET /v1/models と POST /v1/chat/completions (SSE ストリーミング) だけを実装し、
  * 応答内容はテスト側が渡す reply 関数 (canned response) で決める。

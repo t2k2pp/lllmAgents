@@ -1,6 +1,6 @@
 /**
  * config.json の zod スキーマ検証 (PR-03) のテスト。
- * docs/production-readiness.md PR-03
+ * docs/archive/production-readiness.md PR-03
  */
 import { describe, it, expect } from "vitest";
 import { sanitizeParsedConfig } from "../../src/config/config-schema.js";
@@ -134,7 +134,7 @@ describe("sanitizeParsedConfig", () => {
   });
 
   it("削除した設定キー (discord.publicKey 等) が残った旧 config も無警告で読める", () => {
-    // docs/todo-legacy-ways-cleanup.md T1: 型・スキーマから削除したが、 既存 config.json に残っていても起動を止めない。
+    // docs/archive/todo-legacy-ways-cleanup.md T1: 型・スキーマから削除したが、 既存 config.json に残っていても起動を止めない。
     // 実際の読み込み (loadConfig) では検証の前に 1 回だけの移行・削除で消える (permission-migration / context-keys-removal の試験)
     const input = {
       discord: { enabled: false, webhookUrl: "", publicKey: "abc", interactionPort: 3003 },

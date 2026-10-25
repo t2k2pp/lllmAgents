@@ -1,5 +1,5 @@
 /**
- * 更新確認と明示診断 (docs/production-readiness.md PR-14 / GAP-REL-01)。
+ * 更新確認と明示診断 (docs/archive/production-readiness.md PR-14 / GAP-REL-01)。
  *
  * background通知は起動を止めないbest-effort advisory、`--check-update`は
  * state不明・壊れたreleaseを成功扱いしない明示診断として分離する。

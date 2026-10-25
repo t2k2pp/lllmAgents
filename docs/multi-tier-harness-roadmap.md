@@ -4,7 +4,7 @@
 >
 > **核心原則**: ハーネス工学は LLM の能力ティアに適応する。 賢い LLM (Claude/GPT-5) のための工夫が、 弱い LLM (7B ローカル) の足枷になってはいけない。 逆に弱い LLM 向けの scaffolding が、 賢い LLM を萎縮させてもいけない。
 >
-> **位置づけ**: `docs/agent-loop-efficiency-review.md` (P0-P3) は「振る舞いの効率化」 を扱った。 本書はその上位レイヤとして「能力ティアに応じた harness 設計」 を扱う。
+> **位置づけ**: `docs/archive/agent-loop-efficiency-review.md` (P0-P3) は「振る舞いの効率化」 を扱った。 本書はその上位レイヤとして「能力ティアに応じた harness 設計」 を扱う。
 >
 > **作成日**: 2026-05-07
 
@@ -113,7 +113,7 @@ interface CapabilityProfile {
   reliableInstructionFollowing: boolean;
   promptStyle: "concise" | "standard" | "verbose+examples";
   // ループ制御チューナブル (Phase C で追加)
-  maxIterations: number;  // 2026-10-14 廃止 → loopCheckInterval (docs/todo-request-elaboration.md 第 4 段)
+  maxIterations: number;  // 2026-10-14 廃止 → loopCheckInterval (docs/archive/todo-request-elaboration.md 第 4 段)
   maxSelfCheckRounds: number;
   compressionThreshold: number;
   toolResultTruncateBytes: number; // 2026-10-25 廃止 → TIER_CONTEXT_BUDGETS.toolResultLimitTokens (トークン数。 docs/context-reduction-redesign.md §4.2)
@@ -261,7 +261,7 @@ tier テーブルが独自の数値を持つと矛盾と保守負担を生む。
 
 **実装内容**:
 - `MAX_TOOL_ITERATIONS` を `capability.maxIterations` に置換 (T1=100, T2=80, T3=50)
-  - **2026-10-14 撤廃**: 作業回数の上限 (maxIterations / ソフトキャップ) は廃止し、 `loopCheckInterval` 回ごとのループ点検に置き換え (docs/todo-request-elaboration.md 第 4 段)
+  - **2026-10-14 撤廃**: 作業回数の上限 (maxIterations / ソフトキャップ) は廃止し、 `loopCheckInterval` 回ごとのループ点検に置き換え (docs/archive/todo-request-elaboration.md 第 4 段)
 - `MAX_SELF_CHECK_ROUNDS` も tier 別 (T1=3, T2=2, T3=1)
 - ContextManager `threshold` を tier 別 (T1=0.7, T2=0.6, T3=0.5)
 - 大 tool_result の truncate 閾値を tier 別 (T1=20KB, T2=12KB, T3=6KB)

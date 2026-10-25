@@ -9,7 +9,7 @@ export function createBrowserTools(manager: PlaywrightManager): ToolHandler[] {
    * P2-A: browser_snapshot 結果のキャッシュ。 同一 DOM のままキャプチャを連発する
    * (引数 `{}` で 19 連発の事例あり) ことを抑止するため、 直前の snapshot のハッシュ
    * と一致したら短い「変化なし」 レスポンスのみ返す。
-   * docs/agent-loop-efficiency-review.md §4.5 参照。
+   * docs/archive/agent-loop-efficiency-review.md §4.5 参照。
    */
   let lastSnapshotHash = "";
   let lastSnapshotLen = 0;

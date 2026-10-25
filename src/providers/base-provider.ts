@@ -67,7 +67,7 @@ export interface ChatParams {
    * true のとき、 思考 (reasoning) を出さずに直接答えるようサーバへ求める。
    * 分類・JSON 抽出のような短い内部タスク用。 思考モデルは「思考は短く」 という
    * 指示を守らず maxTokens を思考だけで使い切り、 本文が空になることがある
-   * (2026-10-15 忘却選択で顕在化。 docs/context-forgetting.md §4.2)。
+   * (2026-10-15 忘却選択で顕在化。 docs/archive/context-forgetting.md §4.2)。
    * 対応: llama.cpp / vLLM (chat_template_kwargs.enable_thinking=false)。
    * 未対応 provider は無視してよい (従来挙動)。
    */

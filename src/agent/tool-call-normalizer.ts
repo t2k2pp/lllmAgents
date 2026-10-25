@@ -195,7 +195,7 @@ function extractAnthropicXmlToolCalls(text: string): NormalizationResult | null 
  *
  * 2026-10-14 観測 (goemon 試作): Claude 蒸留の Qwen3.8 Flash Next が思考の途中に `</thinking>` を書き、
  * その後ろに本文とこの形式の呼び出しを続けた。 llama.cpp は全体を reasoning_content に入れるため
- * text/toolCalls が空になり、 空応答扱い → 打ち切りになっていた (docs/todo-request-elaboration.md 第 2 段)。
+ * text/toolCalls が空になり、 空応答扱い → 打ち切りになっていた (docs/archive/todo-request-elaboration.md 第 2 段)。
  *
  * - 思考欄に `</thinking>` があり、 その後ろに呼び出しがあれば **後ろだけ** を採る (前は下書き・検討)
  * - VALUE は既定で文字列のまま。 ツール定義でその引数が string 以外 (number/boolean/array/object) と

@@ -6,7 +6,7 @@ import { BUILTIN_HELP_ENTRIES } from "../../src/cli/renderer.js";
 import { getRegistryHelpEntries } from "../../src/cli/commands/registry.js";
 
 /**
- * /help と補完の一覧が一致していることの検査 (docs/todo-legacy-ways-cleanup.md T1)。
+ * /help と補完の一覧が一致していることの検査 (docs/archive/todo-legacy-ways-cleanup.md T1)。
  * 以前は /help に削除済みの /capability /metrics や旧名 /sessions /continue が残り、
  * /skills が 2 行載るなど、 ヘルプと実際に使えるコマンドがずれていた。
  */

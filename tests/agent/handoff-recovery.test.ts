@@ -79,7 +79,7 @@ describe("context failure diagnostics", () => {
   });
 });
 
-/** 引き継ぎメモは思考を残し、 上限を十分に取る (docs/context-reduction-reasoning-model-fix.md §5) */
+/** 引き継ぎメモは思考を残し、 上限を十分に取る (docs/archive/context-reduction-reasoning-model-fix.md §5) */
 describe("generateHandoffNote: 思考と出力上限", () => {
   it("思考はオフにせず、 出力上限は思考込みで収まる大きさ (>= 4000) にする", async () => {
     const calls: Array<{ disableThinking?: boolean; maxTokens?: number }> = [];

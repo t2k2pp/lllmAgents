@@ -1,7 +1,7 @@
 # 設計書整理時の気づき・Issue一覧
 
 > **作成日**: 2026-03-15（設計書統合整理作業中に記録）
-> **棚卸し**: 2026-07-04 (docs/production-readiness.md PR-11) — 各 Issue に現状を追記した。
+> **棚卸し**: 2026-07-04 (docs/archive/production-readiness.md PR-11) — 各 Issue に現状を追記した。
 > 10 件中 9 件は解消済み。残 1 件 (ISSUE-02 の一部バックログ) は下記に現状を記載し、本ファイルはこれ以上更新しない (新規課題は production-readiness.md か GitHub Issues へ)。
 
 ---

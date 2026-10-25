@@ -369,7 +369,7 @@ Claude Code 風のツール名 (`Bash` / `Read` / `Write` 等) も使える。
 
 **旧キーからの移行**: 以前の `autoApproveTools` / `requireApprovalTools` / `discordAutoApproveTools` / `slackAutoApproveTools` は廃止。
 config.json に残っていると、 起動時に 1 回だけ同じ判定になるルールへ変換し (元の内容は `config.json.before-rules-migration.bak` に残す)、 旧キーを消して保存する。
-対応表は docs/todo-legacy-ways-cleanup.md 「T4 実施内容」。
+対応表は docs/archive/todo-legacy-ways-cleanup.md 「T4 実施内容」。
 
 REPL からは `/permission` の設定画面 (すべての面 / CLI / Discord / Slack ごとのルール) で追加・削除する。 対話できる端末が無いときは config.json の `security.rules` を直接編集する。
 
@@ -432,7 +432,7 @@ config.json に残っていると、 起動時に 1 回だけ削除して保存�
 | `attachGeneratedImages` | boolean | `image_generate` で生成した画像を webhook に自動添付するか（未設定/`true`=添付、`false`=無効）。docs/image-generation.md |
 | `maxAttachmentMb` | number | 添付画像の目標サイズ上限（MB、デフォルト 8）。超過する画像はコードで自動縮小してから添付する（オリジナルは無加工） |
 
-CLI からの設定は `/integrations` → Discord 連携 の画面だけ (直接コマンド `/discord` は 2026-10-25 に削除。 docs/todo-legacy-ways-cleanup.md T3)。 対話できる端末が無いときは本表のキーを config.json で直接編集する。
+CLI からの設定は `/integrations` → Discord 連携 の画面だけ (直接コマンド `/discord` は 2026-10-25 に削除。 docs/archive/todo-legacy-ways-cleanup.md T3)。 対話できる端末が無いときは本表のキーを config.json で直接編集する。
 
 生成画像の自動添付: `enabled` かつ `webhookUrl` 設定済みで `attachGeneratedImages` が `false` でなければ、`image_generate` の完了ごとに生成画像を Discord へ添付投稿する。サイズ上限を超える画像は「リサイズ優先 → 必要時のみ JPEG 変換」でコード側が自動縮小する（生成 AI には縮小させない）。REPL からは `/integrations` → Discord 連携 →「生成画像の自動添付をオン/オフにする」で切替（同画面の状態表示に出る）。
 
@@ -503,7 +503,7 @@ CLIコマンド `/knowledge vault <path>` でも設定可能。設定すると�
 | `maxParallelTools` | number | 3 | ツールの最大同時実行数。vLLMのKVキャッシュやリソースに合わせて調整 |
 | `notifications.minDurationSec` | number | 0 | この秒数未満で完了したタスクは webhook 完了通知を送らない（docs/task-report-notification-design.md） |
 | `goalSeek.autoPropose` | boolean | true | 複雑なタスクで Goal Seek 昇格を自動提案する（docs/goal-promotion-design.md） |
-| `logging.retention.logMaxAgeDays` | number | 30 | 起動時にこの日数より古い ops / LLM I/O ログを削除する。`0` で無制限（docs/production-readiness.md PR-15） |
+| `logging.retention.logMaxAgeDays` | number | 30 | 起動時にこの日数より古い ops / LLM I/O ログを削除する。`0` で無制限（docs/archive/production-readiness.md PR-15） |
 | `logging.retention.logMaxTotalMb` | number | 256 | 起動時に ops / LLM I/O ログの合計をこの容量以下にする。古いログから削除し、`0` で無制限。単一LLMログは別途32 MiBで停止する。 |
 | `logging.retention.sessionMaxCount` | number | 100 | セッション履歴を新しい順にこの件数まで保持し、超過分を起動時に削除する。`0` で無制限 |
 | `updateCheck.enabled` | boolean | true | 起動時に GitHub の最新リリースを確認する (TTY のみ)。通信不能は起動を妨げないが、新版releaseのtag/配布物不整合は表示する。明示診断は`--check-update [--json]`。`false`でbackground確認をオフ |

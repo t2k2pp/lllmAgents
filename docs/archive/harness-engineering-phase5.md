@@ -59,7 +59,7 @@ lllmAgents と一対一の比較に使う。
 **lllmAgents は P1, P3 を file-edit に限り実装。それ以外は未着手か断片的。**
 これが「Phase 1-4 の成果が局所最適に留まっている」状態の正体。
 
-**P10 は第 2 ラウンドのリトライで判明した追加原則** (`docs/harness-engineering-phase5-progress.md` 第 2 ラウンド節参照)。
+**P10 は第 2 ラウンドのリトライで判明した追加原則** (`docs/archive/harness-engineering-phase5-progress.md` 第 2 ラウンド節参照)。
 "失敗を防ぐ" 系の P1-P9 と異なり、 **"成功の定義を合わせる"** 系の原則。 第 3 ラウンドの主軸となる。
 
 ---

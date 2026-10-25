@@ -1,6 +1,6 @@
 /**
  * E2E スモークテスト — アプリ全体を子プロセスとして起動し、主要経路を通す。
- * docs/production-readiness.md PR-08
+ * docs/archive/production-readiness.md PR-08
  *
  * 方式:
  *   - モック LLM サーバー (OpenAI 互換 canned response) を test プロセス内に起動

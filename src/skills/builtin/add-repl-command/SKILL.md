@@ -6,7 +6,7 @@ description: lllmAgentsにREPLコマンドを追加する。ユーザーが「/X
 # Add REPL Command Skill
 
 新しい REPL コマンドは **コマンドレジストリ方式** (`src/cli/commands/`) で追加する。
-1コマンド=1ファイルで定義し、レジストリに登録するだけでディスパッチ・補完・/help のすべてに反映される (docs/production-readiness.md PR-10)。
+1コマンド=1ファイルで定義し、レジストリに登録するだけでディスパッチ・補完・/help のすべてに反映される (docs/archive/production-readiness.md PR-10)。
 
 旧方式 (repl.ts の switch + completer.ts + renderer.ts の3箇所更新) は廃止方向。新規追加には使わないこと。
 

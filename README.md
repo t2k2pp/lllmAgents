@@ -172,7 +172,7 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/run [status\|pause\|resume\|inspect\|discard]` | foreground runの状態表示・一時停止 (再開地点を保存)・再開・再開地点の診断/破棄。PC再起動を跨ぐ。background taskとsecond LLMは対象外 |
 | `/context` | コンテキストの内訳（トークン数・進捗バー）と整理の状態（次に送る量 P とそれが実数か推定か、予約 R の内訳、整理する点 (規則 1・2)、ひと仕事の増分 G と直近 3 件、直近の整理、今 `/compact` した場合の段階ごとの見込み）。`/context <system|memory|skills|tools|messages>` で各カテゴリの中身をダンプ。詳細: docs/context-reduction-redesign.md §7 |
 | `/compact` | コンテキストを今すぐ整理する（手動の整理はこれ 1 つ。段階 0〜3 を最後まで進め、前後の量・段階ごとの減った量・要約の有無・予熱の有無を表示）。詳細: docs/context-reduction-redesign.md §7 |
-| `/handoff` | 引き継ぎメモを残してコンテキストをリセット（手動のリセット。区切りでの自動リセットは無い）。`/handoff dry` でメモを表示するだけ（リセットしない）。メモの生成に失敗した場合は履歴を変更しない。詳細: docs/context-reduction-redesign.md §7（メモの形は docs/context-strategy.md §2.2） |
+| `/handoff` | 引き継ぎメモを残してコンテキストをリセット（手動のリセット。区切りでの自動リセットは無い）。`/handoff dry` でメモを表示するだけ（リセットしない）。メモの生成に失敗した場合は履歴を変更しない。詳細: docs/context-reduction-redesign.md §7（メモの形は docs/archive/context-strategy.md §2.2） |
 | `/model` | 現在のモデル情報 / `/model list` / `/model <name>` / `/model host <ホスト>` / `/model port <番号>` / `/model provider <type>` / `/model description <text>` / `/model temperature <値>` / `/model top_p <値>` / `/model top_k <値>` / `/model rep_penalty <値>` |
 | `/model second` | セカンドLLM管理 (`setup` / `enable` / `disable` / `list` / `context` / `host` / `port` / `provider` / `description` / `temperature` 等) |
 | `/model vision` | Vision LLM管理 (`setup` / `list` / `context` / `description` / `clear`) |

@@ -169,7 +169,7 @@ function renderMarkdown(text: string): string {
 }
 
 /**
- * ループ点検の 1 区間を判定する (docs/todo-request-elaboration.md 第 4 段)。
+ * ループ点検の 1 区間を判定する (docs/archive/todo-request-elaboration.md 第 4 段)。
  * 進捗 (ToDo の完了 / ファイル変更) があれば ok。 進捗が無くても毎回違う呼び出し (調査を進めている) なら ok。
  * 進捗が無く、 区間内の呼び出しの半分以上が繰り返し (同じ名前 + 引数) なら "looping"。
  * 呼び出しが少なすぎる区間 (4 未満) は判断材料が無いので ok (テキストだけの空回りは別の仕組みで扱う)。
@@ -180,7 +180,7 @@ export function judgeLoopWindow(calls: readonly string[], progressed: boolean): 
 }
 
 /**
- * ループの疑いで止めるときの報告文 (docs/todo-request-elaboration.md 第 4 段)。
+ * ループの疑いで止めるときの報告文 (docs/archive/todo-request-elaboration.md 第 4 段)。
  * 今の依頼の ToDo から「終わったこと / 残り」 を並べ、 「続けて」 で再開できることを伝える。
  */
 export function buildLoopStopReport(iterations: number, window: number): string {
@@ -947,7 +947,7 @@ export class AgentLoop {
       let coherenceGateRetries = durableResume?.run.coherenceGateRetries ?? 0; // Axis (2a) thinking-text コヒーレンス
       const MAX_NEW_GATE_RETRIES = 2; // 各 gate の上限 (自己点検と独立)
 
-      // 作業回数・文字数の上限は設けない (docs/todo-request-elaboration.md 第 4 段)。 Claude Code と同じく、
+      // 作業回数・文字数の上限は設けない (docs/archive/todo-request-elaboration.md 第 4 段)。 Claude Code と同じく、
       // 止まるのは完了・ユーザー操作・本当に必要な確認のときだけ。 代わりに loopCheckInterval 回ごとに
       // 「ループしていないか」 を点検する:
       //   - 直近の区間で ToDo の完了かファイル変更があった、 または毎回違う呼び出しをしている → 何もしない
@@ -1644,7 +1644,7 @@ export class AgentLoop {
             // 実行ブロックの addAssistantMessage(textContent, toolCalls, ...) が textContent も正しく永続化する。
             toolCalls.push(...normalized.toolCalls);
             // 思考欄に紛れた `</thinking>` の後ろはモデルがユーザー向けに書いた本文。 本文が空なら表示に使う
-            // (例: 「原因特定！ … 修正します。」)。 docs/todo-request-elaboration.md 第 2 段
+            // (例: 「原因特定！ … 修正します。」)。 docs/archive/todo-request-elaboration.md 第 2 段
             if (!textContent.trim() && normalized.visibleText) textContent = normalized.visibleText;
           }
         }
@@ -2300,7 +2300,7 @@ export class AgentLoop {
       }
 
       // ここに来るのはループ点検で止めたときだけ (for に終了条件は無い)。 黙って終わらず、
-      // 何が終わり何が残ったか・なぜ止めたかを最終応答として届ける (docs/todo-request-elaboration.md 第 4 段)
+      // 何が終わり何が残ったか・なぜ止めたかを最終応答として届ける (docs/archive/todo-request-elaboration.md 第 4 段)
       const report = buildLoopStopReport(this.runStats.iterations, loopCheckInterval);
       console.log(chalk.yellow(`\n  ${report.replace(/\n/g, "\n  ")}`));
       this.events.emit("harness_notice", { level: "warn", message: "ループの疑いが続いたため作業を止めました" });
@@ -2927,7 +2927,7 @@ export class AgentLoop {
    *
    * 既存の MAX_REPEAT_TOOL=3 (連続検出) は grep/read を間に挟まれると無効化されるため、
    * これは「間に他ツールが挟まっても失敗の繰り返しを検出する」 補強。
-   * docs/agent-loop-efficiency-review.md §4.2 参照。
+   * docs/archive/agent-loop-efficiency-review.md §4.2 参照。
    */
   private static readonly FAILURE_WINDOW = 10;
   /** P4: 一過性失敗でも同一失敗がこの回数続いたら run を打ち切る。 恒久失敗は2回目で打ち切る。 */
@@ -3102,7 +3102,7 @@ export class AgentLoop {
   /**
    * P1-A: bash 累積時間 / P1-B: plan/todo 呼出回数を観測し、 閾値超過で 1 度だけ
    * self-check を注入する。 ツール完了直後に呼び出される。
-   * docs/agent-loop-efficiency-review.md §4.4 / §4.6 参照。
+   * docs/archive/agent-loop-efficiency-review.md §4.4 / §4.6 参照。
    */
   private static readonly BASH_CUMULATIVE_WARN_MS = 5 * 60 * 1000; // 5 分
   private static readonly PLAN_MODE_LIMIT = 2;

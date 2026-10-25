@@ -1,7 +1,7 @@
 import type { SessionData } from "../agent/session-manager.js";
 
 /**
- * 起動フラグ `--resume` の解釈 (docs/todo-legacy-ways-cleanup.md 決定 C2)。
+ * 起動フラグ `--resume` の解釈 (docs/archive/todo-legacy-ways-cleanup.md 決定 C2)。
  *
  * REPL の `/resume <id>` / `/resume latest` と同じ意味・同じ書き方に揃える。
  *   --resume <id>     → 指定 ID のセッションを復元

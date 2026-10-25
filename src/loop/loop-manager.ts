@@ -227,7 +227,7 @@ export type LoopArgsParse =
 /**
  * /loop の引数から間隔とプロンプトを取り出す。
  *
- * 書き方は `/loop <間隔> <プロンプト>` の 1 つだけ (docs/todo-legacy-ways-cleanup.md T2)。
+ * 書き方は `/loop <間隔> <プロンプト>` の 1 つだけ (docs/archive/todo-legacy-ways-cleanup.md T2)。
  * 以前は間隔を省略すると既定 10m で登録していたため、 `/loop list` のような
  * 打ち間違いが「list を 10 分ごとに送るループ」 として黙って登録されていた。
  * 先頭が間隔として読めない入力・プロンプトが無い入力は使い方エラーにする。

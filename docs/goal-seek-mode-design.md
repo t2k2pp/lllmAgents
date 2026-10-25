@@ -5,7 +5,7 @@
 > **タグ**: `pre-goal-seek-mode` (実装開始前の最終地点)
 > **関連**:
 > - 上位構造: `docs/internal_design.md`, `docs/harness-engineering.md`
-> - 連携: `docs/agent-loop-efficiency-review.md` (self-check 機構), `docs/ephemeral-context-design.md` (span 境界), `docs/main-second-subagent-comparison.md` (sub-agent 役割)
+> - 連携: `docs/archive/agent-loop-efficiency-review.md` (self-check 機構), `docs/ephemeral-context-design.md` (span 境界), `docs/archive/main-second-subagent-comparison.md` (sub-agent 役割)
 > - 既存軸: `docs/multi-tier-harness-roadmap.md` (capability tier), agent-loop.ts:1423 (register table)
 
 ---
@@ -185,7 +185,7 @@ interface EvaluationResult {
 
 #### 3.4.3 評価の駆動 LLM
 
-- T1 (高品質モデル) が利用可能なら secondLLM (= 別モデル) で評価。 main と異なる視点を得る (`docs/main-second-subagent-comparison.md` の発想)
+- T1 (高品質モデル) が利用可能なら secondLLM (= 別モデル) で評価。 main と異なる視点を得る (`docs/archive/main-second-subagent-comparison.md` の発想)
 - T1 不可なら main と同じモデル。 prompt で「評価者として振る舞え」 と分離
 
 ### 3.5 収穫逓減 (diminishing returns) の検出

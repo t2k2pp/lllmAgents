@@ -7,7 +7,7 @@
 
 - [x] 1. 設計とToDoの作成・確認
   - [x] 設計書（`docs/model-path-capability-and-startup-error-fix.md`）の作成
-  - [x] ToDoファイル（`docs/todo-cycle-19-model-path-capability-and-startup-error-fix.md`）の作成
+  - [x] ToDoファイル（`docs/archive/todo-cycle-19-model-path-capability-and-startup-error-fix.md`）の作成
 - [x] 2. 起動時例外可視化の改善 (`src/index.ts`)
   - [x] Alternate Screen終了（`restoreOutput`）後にエラーを出力するように修正
   - [x] 診断性向上のため `writeCrashLog` も連携

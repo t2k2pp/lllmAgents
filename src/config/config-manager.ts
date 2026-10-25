@@ -53,7 +53,7 @@ export function loadConfig(): Config {
   // 旧キーの 1 回だけの書き換え (one-time-migration.ts)。 書き換え前の内容をバックアップしてから変換し、 下で保存し直す。
   // 2 回目以降は旧キーが無いので何もしない。 バックアップは他の保存 (下のシークレット分離など) より先に書き、
   // スキーマ検証 (sanitizeParsedConfig) より前に当てる。
-  //   - 旧ツール名一覧 (autoApproveTools 等) → security.rules (docs/todo-legacy-ways-cleanup.md T4)
+  //   - 旧ツール名一覧 (autoApproveTools 等) → security.rules (docs/archive/todo-legacy-ways-cleanup.md T4)
   //   - コンテキスト整理の旧キー (context.reduction 等) の削除 (docs/context-reduction-redesign.md §11)
   const migrations = applyOneTimeMigrations(parsed, CONFIG_FILE, [permissionRulesMigration, contextKeysRemoval]);
   // シークレットは credentials.json から合流させる (PR-04 方針2)。

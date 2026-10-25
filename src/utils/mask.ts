@@ -1,5 +1,5 @@
 /**
- * 秘密情報の表示用マスク。設計: docs/production-readiness.md PR-04
+ * 秘密情報の表示用マスク。設計: docs/archive/production-readiness.md PR-04
  *
  * トークンや Webhook URL を画面に出すときは必ずここを通す。
  * 「設定されていること」と「どれが設定されているか (末尾数文字)」だけ分かればよい。

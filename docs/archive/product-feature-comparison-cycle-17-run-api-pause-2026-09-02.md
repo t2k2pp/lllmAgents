@@ -1,6 +1,6 @@
 # Codex / Claude Code 機能比較・商品品質改善 cycle 17
 
-> **2026-10-25 改訂**: 本書のプロセス内 pause (`/run pause` が API 応答直後に止まり保存しない方式) は廃止し、 一時停止は「保存して止める」 1 方式に統合した。 現在の仕様は [durable-run-resume-design.md](durable-run-resume-design.md)。 本書は当時の記録として残す。
+> **2026-10-25 改訂**: 本書のプロセス内 pause (`/run pause` が API 応答直後に止まり保存しない方式) は廃止し、 一時停止は「保存して止める」 1 方式に統合した。 現在の仕様は [durable-run-resume-design.md](../durable-run-resume-design.md)。 本書は当時の記録として残す。
 
 - 実施日: 2026-09-02
 - 基準commit: `87274f0`
@@ -83,7 +83,7 @@
 
 ## 7. 次cycle候補
 
-利用者が期待したPC再起動後の`/resume`→`/run resume`はcycle 17の契約外である。会話、pending response/tool、追加入力、実行journalを安全境界でatomic保存する`GAP-DURABLE-RUN-01`をP1候補として分離した。実装条件とcross-process受け入れ試験は[durable run resume設計](durable-run-resume-design.md)を正本とする。
+利用者が期待したPC再起動後の`/resume`→`/run resume`はcycle 17の契約外である。会話、pending response/tool、追加入力、実行journalを安全境界でatomic保存する`GAP-DURABLE-RUN-01`をP1候補として分離した。実装条件とcross-process受け入れ試験は[durable run resume設計](../durable-run-resume-design.md)を正本とする。
 
 ## 8. 不具合修正 (2026-10-25): API 実行中カウントの漏れ
 

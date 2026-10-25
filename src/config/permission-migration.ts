@@ -1,5 +1,5 @@
 /**
- * 旧ツール名一覧 → 権限ルール (security.rules) への 1 回だけの移行 (docs/todo-legacy-ways-cleanup.md T4 / 決定 C1)。
+ * 旧ツール名一覧 → 権限ルール (security.rules) への 1 回だけの移行 (docs/archive/todo-legacy-ways-cleanup.md T4 / 決定 C1)。
  *
  * 旧キー: security.autoApproveTools / requireApprovalTools / discordAutoApproveTools / slackAutoApproveTools。
  * config.json にどれかが残っていたら、 旧コードが下していた判定をそのまま保つルールに書き換え、 旧キーは消す。

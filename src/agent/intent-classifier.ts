@@ -169,7 +169,7 @@ export class IntentClassifier {
           messages: [{ role: "user", content: prompt }],
           temperature: CLASSIFIER_TEMPERATURE,
           maxTokens: CLASSIFIER_MAX_TOKENS,
-          // 思考モデルは 50 tok を思考で使い切り本文が空になる (docs/context-reduction-reasoning-model-fix.md §5)
+          // 思考モデルは 50 tok を思考で使い切り本文が空になる (docs/archive/context-reduction-reasoning-model-fix.md §5)
           disableThinking: true,
           stream: true,
         },
@@ -210,7 +210,7 @@ export class IntentClassifier {
           messages: [{ role: "user", content: prompt }],
           temperature: CLASSIFIER_TEMPERATURE,
           maxTokens: CLASSIFIER_MAX_TOKENS,
-          // 思考モデルは 50 tok を思考で使い切り本文が空になる (docs/context-reduction-reasoning-model-fix.md §5)
+          // 思考モデルは 50 tok を思考で使い切り本文が空になる (docs/archive/context-reduction-reasoning-model-fix.md §5)
           disableThinking: true,
           stream: true,
         },

@@ -6,7 +6,7 @@
  * 「ツール → ガイドキー配列」 のマッピングで管理し、 まだ使われていないガイドだけを
  * 連結して返す。
  *
- * 関連: `docs/prompt-tech-debt-review.md` ID-001 の §2 と §4 (2026-04-30 実施)
+ * 関連: `docs/archive/prompt-tech-debt-review.md` ID-001 の §2 と §4 (2026-04-30 実施)
  *
  * Phase B-3 (2026-05-07): tier 引数を追加。 T3 (7B local) では主要ツールの
  * few-shot 例を初回使用時に追加注入する。 docs/multi-tier-harness-roadmap.md §4 D-3 参照。

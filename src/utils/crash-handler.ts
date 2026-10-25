@@ -1,6 +1,6 @@
 /**
  * グローバル例外ハンドラとクラッシュログ。
- * 設計: docs/production-readiness.md PR-01
+ * 設計: docs/archive/production-readiness.md PR-01
  *
  * 未捕捉例外 / 未処理 Promise rejection で落ちるとき、
  *   (a) セッションの緊急保存 → (b) 端末状態の復元 → (c) クラッシュログ書き出し

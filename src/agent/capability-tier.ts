@@ -47,7 +47,7 @@ export interface CapabilityProfile {
   /**
    * ループ点検の間隔 (LLM 呼び出し回数)。 作業回数の上限ではない — この回数ごとに、 直近の区間で
    * 進捗 (ToDo の完了 / ファイル変更) が無く同じ呼び出しを繰り返していないかを点検し、
-   * ループの疑いが続いたときだけ止めて報告する。 docs/todo-request-elaboration.md 第 4 段
+   * ループの疑いが続いたときだけ止めて報告する。 docs/archive/todo-request-elaboration.md 第 4 段
    */
   loopCheckInterval: number;
   /** 自己点検の最大連続発動回数 (text-only / verification / evaluator 共通) */
@@ -469,7 +469,7 @@ function filterUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> 
 function applyOverride(profile: CapabilityProfile, override?: CapabilityOverride): CapabilityProfile {
   if (!override) return profile;
   if (override.maxIterations !== undefined) {
-    // 黙って無視しない: 作業回数の上限は撤廃済み (docs/todo-request-elaboration.md 第 4 段)
+    // 黙って無視しない: 作業回数の上限は撤廃済み (docs/archive/todo-request-elaboration.md 第 4 段)
     logger.warn(
       `[capability] modelCapabilities.maxIterations は廃止されました (作業回数の上限は撤廃し、 ループ点検に置き換え)。 ` +
         `設定値 ${override.maxIterations} は無視します。 点検の間隔は loopCheckInterval で変更できます。`,

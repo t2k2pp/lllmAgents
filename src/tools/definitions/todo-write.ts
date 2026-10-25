@@ -15,7 +15,7 @@ export interface TodoItem {
   /**
    * どの依頼 (user 発話) の中で作った / 最後に状態を変えたか。 前の依頼で完了した項目を
    * 一覧・完了カウントから外すために使う (削除はしない)。 旧データには無い。
-   * docs/todo-request-elaboration.md 第 3 段 項目 15
+   * docs/archive/todo-request-elaboration.md 第 3 段 項目 15
    */
   round?: number;
 }

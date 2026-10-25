@@ -55,7 +55,7 @@ llamacpp で複数モデルを別ポートで起動する運用 (8080 以外を�
 | `/model provider <type> [<URL>]` | プロバイダー切替 (URL 同時指定可、既存) |
 | `/model list` | モデル一覧から対話選択 (既存) |
 | `/model <name>` | モデル名直接指定 (既存) |
-| `/model url <URL>` | 2026-10-25 に削除 (`/model host` + `/model port` に一本化。 docs/todo-legacy-ways-cleanup.md) |
+| `/model url <URL>` | 2026-10-25 に削除 (`/model host` + `/model port` に一本化。 docs/archive/todo-legacy-ways-cleanup.md) |
 
 ## setup-wizard.ts のリファクタ
 

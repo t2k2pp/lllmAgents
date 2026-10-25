@@ -109,7 +109,7 @@ export function toSentMessage(m: Message): Message {
 }
 
 /**
- * ツールの対の検証 (docs/context-forgetting.md §2.1)。 tool_calls を持つ assistant の直後に、
+ * ツールの対の検証 (docs/archive/context-forgetting.md §2.1)。 tool_calls を持つ assistant の直後に、
  * その全 tool_call_id に対応する role="tool" が揃っていること、 孤立した tool 結果が無いことを確かめる。
  * @returns 壊れていればその内容、 揃っていれば null
  */

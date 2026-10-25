@@ -10,7 +10,7 @@
  * ToolRegistry から除外する。 モデルからはツール定義そのものが見えないため、 ガード破りは
  * 原理的に不可能。
  *
- * 関連設計: `docs/main-second-subagent-comparison.md` §6.1, `docs/v030_second_llm_design.md` §2.3
+ * 関連設計: `docs/archive/main-second-subagent-comparison.md` §6.1, `docs/v030_second_llm_design.md` §2.3
  */
 import type { ToolHandler, ToolRegistry } from "../tools/tool-registry.js";
 import { ToolRegistry as ToolRegistryImpl } from "../tools/tool-registry.js";

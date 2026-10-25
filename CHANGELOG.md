@@ -1,6 +1,6 @@
 # Changelog
 
-このファイルはリリースごとの主要な変更を記録する。形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠する。公開版は `package.json` を単一ソースとする3桁SemVer、build identityはGit commitとして分離する。リリース前に `npm run validate:version -- --tag v<version>` を通す (docs/production-readiness.md PR-12)。
+このファイルはリリースごとの主要な変更を記録する。形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠する。公開版は `package.json` を単一ソースとする3桁SemVer、build identityはGit commitとして分離する。リリース前に `npm run validate:version -- --tag v<version>` を通す (docs/archive/production-readiness.md PR-12)。
 
 ## [Unreleased]
 
@@ -158,7 +158,7 @@
 
 - Qwen 3.6モデル対応
 
-### 製品品質 (docs/production-readiness.md P3+P4)
+### 製品品質 (docs/archive/production-readiness.md P3+P4)
 
 - ログ・セッションの世代管理: 起動時に古い ops/LLM I/O ログ (既定30日) とセッション (既定100件超過分) を告知つきで削除。`logging.retention` で調整可能 (PR-15)
 - シークレット分離: API キー・Bot/App トークン・Webhook URL を `~/.localllm/credentials.json` (自ユーザーのみ) へ分離。旧 config.json からは初回起動時に自動移行 (PR-04 方針2)
@@ -173,7 +173,7 @@
 
 v0.3.0 の後にリリースなしで main へ積まれていた変更のまとめ (CHANGELOG 導入に伴う初回ロールアップエントリ)。
 
-### 製品品質 (docs/production-readiness.md P1+P2)
+### 製品品質 (docs/archive/production-readiness.md P1+P2)
 
 - グローバル例外ハンドラ: クラッシュ時にセッション緊急保存→端末復元→`~/.localllm/logs/crash/` へレポート出力 (PR-01)
 - config/セッションのアトミック書き込みと、破損時の退避・`.bak` 復元・告知つきリカバリ (PR-02)

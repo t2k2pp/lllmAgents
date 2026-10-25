@@ -2,7 +2,7 @@ import type { ModelInfo } from "../config/types.js";
 
 /**
  * `/model <名前>` / `/model second model <名前>` で直接指定されたモデル名の検査
- * (docs/todo-legacy-ways-cleanup.md T2)。
+ * (docs/archive/todo-legacy-ways-cleanup.md T2)。
  *
  * 以前はどんな語でも受け付けて切り替え・保存していたため、 打ち間違いや
  * `/model foo bar` のような入力でメインモデルが実在しない名前に黙って変わっていた。

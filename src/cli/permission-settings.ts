@@ -3,7 +3,7 @@
  *
  * 権限の設定は /permission の対話画面 1 つに揃えた (旧サブコマンド auto-add / rule-add 等は T3 で削除)。
  * 権限の表し方は security.rules のルールだけ (旧ツール名一覧 autoApproveTools 等は T4 で廃止。
- * docs/todo-legacy-ways-cleanup.md)。 画面からはここにある関数を直接呼ぶ。
+ * docs/archive/todo-legacy-ways-cleanup.md)。 画面からはここにある関数を直接呼ぶ。
  * 各関数は実行中の PermissionManager と設定 (config.security.rules) の両方を更新し、 ctx.save() で保存する。
  */
 import type { Config } from "../config/types.js";

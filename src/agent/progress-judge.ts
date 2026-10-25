@@ -147,7 +147,7 @@ export async function judgeProgress(input: JudgeProgressInput): Promise<JudgePro
         messages: [{ role: "user", content: prompt }],
         temperature: JUDGE_TEMPERATURE,
         maxTokens: JUDGE_MAX_TOKENS,
-        // 思考モデルは 200 tok を思考で使い切り本文が空になる (docs/context-reduction-reasoning-model-fix.md §5)
+        // 思考モデルは 200 tok を思考で使い切り本文が空になる (docs/archive/context-reduction-reasoning-model-fix.md §5)
         disableThinking: true,
         stream: true,
       },

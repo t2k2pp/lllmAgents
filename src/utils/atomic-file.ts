@@ -1,6 +1,6 @@
 /**
  * アトミックなファイル書き込みと、秘密情報を含むファイルの保護。
- * 設計: docs/production-readiness.md PR-02 / PR-04
+ * 設計: docs/archive/production-readiness.md PR-02 / PR-04
  *
  * writeFileSync で直接上書きすると、書き込み途中のプロセス死 (クラッシュ、taskkill、
  * 電源断) でファイルが半端な JSON になる。一時ファイルに書いてから rename で

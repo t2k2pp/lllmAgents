@@ -1,15 +1,15 @@
 # Model Registry 設計書 (LLM 接続のレジストリ化)
 
-> **ステータス**: 実装済み (Phase 1〜5)。 2026-05-27 提案。 2026-10-25 に旧コマンド (`/profiles` `/second` `/model-registry` `/registry` `/model url` `/model ip`) の alias を削除 (docs/todo-legacy-ways-cleanup.md)
+> **ステータス**: 実装済み (Phase 1〜5)。 2026-05-27 提案。 2026-10-25 に旧コマンド (`/profiles` `/second` `/model-registry` `/registry` `/model url` `/model ip`) の alias を削除 (docs/archive/todo-legacy-ways-cleanup.md)
 > **作成日**: 2026-05-27
 > **位置付け**: 「メインLLM / セカンドLLM / プロファイル履歴 / プロバイダ別 setup コマンド」
 > が並走している現状を、 **registry (登録一覧) + slot (現在の割当) の 2 層モデル** に
 > 統合し直す上位設計。
 >
 > **関連 (本書で吸収・改訂する設計)**:
-> - `docs/llm-profiles.md` — 履歴管理 (本書で **registry に昇格**)
+> - `docs/archive/llm-profiles.md` — 履歴管理 (本書で **registry に昇格**)
 > - `docs/main_second_swap_design.md` — `/swap` (本書では **slot 入替** として整理)
-> - `docs/main-second-subagent-comparison.md` — main / second / subagent の関係 (将来の slot 拡張に影響)
+> - `docs/archive/main-second-subagent-comparison.md` — main / second / subagent の関係 (将来の slot 拡張に影響)
 > - `docs/model-setup.md` — setup wizard (本書で **/models の "Add new..." に統合**)
 > - `docs/v030_second_llm_design.md` — second LLM 全体 (slot 上の "second" として位置付け)
 
@@ -214,8 +214,8 @@ modelRef: <registry-id> # この registry entry を直接指定 (slot バイン�
 | `/profiles` | (旧) 履歴ピッカー | 2026-10-25 に削除 (`/models` に一本化) |
 | `/second ...` | (旧) second 編集系 | 2026-10-25 に削除 (`/model second ...` に一本化) |
 | `/model info` | (旧) `/model` と完全に同一の重複 | **削除** (`/model` に統一) |
-| `/model setup *` (×9) | (旧) プロバイダ別 setup | 補完から外した (引数なし `/model setup` の wizard は残る。 `/models` の "Add new..." と目的が重なる — docs/todo-legacy-ways-cleanup.md「未対応・要判断」) |
-| `/model host/port/provider/temperature/top_p/top_k/rep_penalty/description` | main 個別編集 | 当初は deprecated 予定だったが、 2026-06-21 に補完へ戻して現行。 `/models` の Edit と目的が重なる (docs/todo-legacy-ways-cleanup.md「未対応・要判断」)。 `/model url` `/model ip` は 2026-10-25 に削除 (`/model host` + `/model port`) |
+| `/model setup *` (×9) | (旧) プロバイダ別 setup | 補完から外した (引数なし `/model setup` の wizard は残る。 `/models` の "Add new..." と目的が重なる — docs/archive/todo-legacy-ways-cleanup.md「未対応・要判断」) |
+| `/model host/port/provider/temperature/top_p/top_k/rep_penalty/description` | main 個別編集 | 当初は deprecated 予定だったが、 2026-06-21 に補完へ戻して現行。 `/models` の Edit と目的が重なる (docs/archive/todo-legacy-ways-cleanup.md「未対応・要判断」)。 `/model url` `/model ip` は 2026-10-25 に削除 (`/model host` + `/model port`) |
 | `/second setup *` (×9)、 `/second model/url/provider/temperature/...` 等 | (旧) second 個別編集 | 2026-10-25 に削除。 同じ操作は `/model second setup` / `host` / `port` / `provider` / `temperature` 等 (`/model second url` も削除し host/port に揃えた) |
 
 合計: 170 件超 → 約 40 件削減 (補完候補ベース)。 第 1 階層メニューの肥大化を解消。
@@ -358,8 +358,8 @@ slot.main と slot.second の id を入れ替えるだけ。 entry そのもの�
 
 | 既存 doc | 改訂方針 |
 |----------|----------|
-| `docs/llm-profiles.md` | 冒頭に「→ `docs/model-registry.md` に統合 (registry に昇格)」 を追記。 内容は実装が落ち着くまで参照可能なまま残す |
+| `docs/archive/llm-profiles.md` | 冒頭に「→ `docs/model-registry.md` に統合 (registry に昇格)」 を追記。 内容は実装が落ち着くまで参照可能なまま残す |
 | `docs/main_second_swap_design.md` | 冒頭に「slot 表現への移行は `docs/model-registry.md` 参照」 を追記。 `/swap` の挙動は不変なので本文はそのまま |
-| `docs/main-second-subagent-comparison.md` | サブエージェントとの将来統合点 (§2.4) を相互参照リンクで結ぶ |
+| `docs/archive/main-second-subagent-comparison.md` | サブエージェントとの将来統合点 (§2.4) を相互参照リンクで結ぶ |
 | `docs/model-setup.md` | 「setup wizard は `/models` の Add new... から呼ばれる形に統合」 と注記 |
 | `docs/v030_second_llm_design.md` | second LLM の概念は slot.second として継続。 構成変更は無し、 参照リンクのみ |

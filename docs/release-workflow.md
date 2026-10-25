@@ -50,7 +50,7 @@ tag 未作成の手動実行を設けた理由: Claude Code の Web 実行環境
 
 ## 5. 制約・判断
 
-- **コード署名なし**: 従来どおり無署名 (docs/production-readiness.md の判断を継承)
+- **コード署名なし**: 従来どおり無署名 (docs/archive/production-readiness.md の判断を継承)
 - **権限**: `contents: write` のみ。Release 作成・資産アップロードに `GITHUB_TOKEN` を使う
 - **同一 tag の同時実行**: `concurrency` で直列化
 - **CI との関係**: CI (`ci.yml`) も Node 24 の最新パッチ版で実行し、package-smoke は同じ `scripts/smoke-deploy.ps1` を使う

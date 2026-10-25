@@ -4,7 +4,7 @@
 > **調査対象**: main ブランチ (914a4f7 時点、src 161ファイル / 約41,000行、テスト71ファイル)
 > **目的**: 「開発者の手元で動くアプリ」から「第三者に配布できる製品」へのギャップを洗い出し、改善タスクの元にする
 > **基準線**: Claude Code 等の製品エージェントアプリ。機能面の比較ではなく、信頼性・セキュリティ・リリース工学などの製品品質の観点で評価する
-> **関連文書**: docs/issues.md (2026-03 の設計書レビュー起点の Issue 一覧)、docs/security_assessment.md、docs/repl-io-robustness.md
+> **関連文書**: docs/archive/issues.md (2026-03 の設計書レビュー起点の Issue 一覧)、docs/security_assessment.md、docs/repl-io-robustness.md
 
 ---
 
@@ -152,7 +152,7 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 
 > 実装: `docs/README.md` を索引として新規作成 — 正典 7 本 (external/internal/security/config-reference/workspace-separation/production-readiness/issues) と機能別設計書をカテゴリ分類し、全ファイルに Status (implemented/in-progress/proposal/record/reference/superseded) を付与。**Status は索引で一元管理する方式に変更** (70+ ファイルへのヘッダ一斉付与は差分が巨大で blame を汚すため、各ファイルへのヘッダは触るついでに追加)。運用ルール「新規設計書は索引に1行追加」を索引冒頭に明記。issues.md は 10 件を棚卸し — 9 件解消 (ISSUE-01/03〜10)、ISSUE-02 の一部 (BROWSER-01/PERF-01/CTX-01/WEB-03) のみバックログとして残置し、以後 issues.md は凍結 (新規課題は本ドキュメントか GitHub Issues へ)。
 
-**現状**: docs 配下に設計書が 70 本超あり、`docs/README.md` の索引は追加済み。ただし、各文書が「実装済みの正」「未着手の構想」「廃止済み」のどれかを全件で機械判定できる段階にはない。docs/issues.md の解消済み項目を含め、状態ラベルの継続整備が必要。
+**現状**: docs 配下に設計書が 70 本超あり、`docs/README.md` の索引は追加済み。ただし、各文書が「実装済みの正」「未着手の構想」「廃止済み」のどれかを全件で機械判定できる段階にはない。docs/archive/issues.md の解消済み項目を含め、状態ラベルの継続整備が必要。
 
 **改善方針**:
 1. 各設計書の冒頭に status ヘッダを付ける: `Status: implemented | in-progress | proposal | superseded (→後継doc)`
@@ -186,7 +186,7 @@ agent-loop.ts はターン制御・圧縮・介入 (harness-intervention) の責
 
 > 実装: `src/utils/update-check.ts`。TTY起動時の非同期通知に加え、副作用なしの`--check-update [--json]`を追加。明示診断は通信/API失敗、tag不正、新版releaseのasset 0件を理由・復旧手順つきでexit 1にする。background確認では通信不能を起動障害にしない一方、更新先に配布物が無い状態は隠さない。`updateCheck.enabled: false`はbackground確認だけを無効化する。
 >
-> **リリース手順 (GitHub Releases)**: 2026-10-22 から GitHub Actions (`release.yml`) で自動化 (設計: [release-workflow.md](release-workflow.md))。手元の Windows 機でのビルドは不要。
+> **リリース手順 (GitHub Releases)**: 2026-10-22 から GitHub Actions (`release.yml`) で自動化 (設計: [release-workflow.md](../release-workflow.md))。手元の Windows 機でのビルドは不要。
 > 1. package.json / package-lock.json / CHANGELOG.md を更新し、`npm run validate:version -- --tag v<version>`を通して main へマージ
 > 2. main の該当コミットに `v<version>` tag を付けて push
 > 3. workflow が最新パッチ版 Node 24 で検査・`build:deploy`・exe スモークを行い、`localllm.exe` と `localllm-v<version>-win-x64.zip` を添付した Release を作成する

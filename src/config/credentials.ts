@@ -1,5 +1,5 @@
 /**
- * シークレットの credentials.json 分離 (docs/production-readiness.md PR-04 方針2)。
+ * シークレットの credentials.json 分離 (docs/archive/production-readiness.md PR-04 方針2)。
  *
  * API キー・Bot トークン・Webhook URL などのシークレットを config.json から
  * `~/.localllm/credentials.json` (自ユーザーのみ読み書き可) に分離する。

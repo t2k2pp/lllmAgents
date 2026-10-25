@@ -5,7 +5,7 @@
  * (Claude Code 用に書かれた SKILL.md) の両方がこの表を使う。
  * 以前は rule-engine.ts と skill-loader.ts に別々の表があり、 内容がずれていた
  * (rule-engine の Agent が実在しない sub_agent を指していた)。
- * docs/todo-legacy-ways-cleanup.md T1
+ * docs/archive/todo-legacy-ways-cleanup.md T1
  *
  * キーは小文字。 照合は大文字小文字を区別しない ("Bash" も "bash" も bash)。
  */

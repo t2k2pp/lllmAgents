@@ -1,13 +1,13 @@
 # 忘却機能 設計書 (Selective Forgetting)
 
-> **現行は [context-reduction-redesign.md](context-reduction-redesign.md)** (2026-10-25 実装。 本書は記録扱いで更新しない)。
+> **現行は [context-reduction-redesign.md](../context-reduction-redesign.md)** (2026-10-25 実装。 本書は記録扱いで更新しない)。
 > 何を忘れるかを LLM に選ばせる経路 (`ForgettingEngine`・`forgetting.ts`)、 `/forget` 一式、 設定 `context.reduction` / `context.forgetting.*` は削除した。
 > 引き継いだもの: §2.1 (ツールの対を分けない)、 §3.1 (呼び出しを残して結果の本文を消す・本文ありの呼び出しは対ごと記録へ移す・
 > 引数を切り詰めて残さない) は新しい設計の段階 0・1 (`reduction-stages.ts`)、 §4.4 (忘却の記録) は整理イベントの忘却の記録。
 
 > **ステータス**: 2026-08-13 設計 / 実装
 > **関連**: `docs/context-intelligence.md` (圧縮の既存設計) / `docs/ephemeral-context-design.md`
-> (span 境界の揮発) / `docs/context-strategy.md` (後続。 圧縮・忘却・Clear の使い分け)
+> (span 境界の揮発) / `docs/archive/context-strategy.md` (後続。 圧縮・忘却・Clear の使い分け)
 
 ---
 
@@ -365,7 +365,7 @@ targetTokens = 現在の推定トークン - contextWindow * max(0.05, threshold
 | これから難所に入る | **事前に圧縮** | 山場で余裕を確保しておく |
 
 この選択を **タイミングも含めて自動化する**のが後続の
-`docs/context-strategy.md` (F3) の役割。 本設計では **手段を用意する**ところまで。
+`docs/archive/context-strategy.md` (F3) の役割。 本設計では **手段を用意する**ところまで。
 
 ---
 

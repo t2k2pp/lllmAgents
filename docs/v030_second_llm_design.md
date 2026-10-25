@@ -5,7 +5,7 @@
 > **関連**: 外部仕様の概要は `external_design.md` §12 を参照
 >
 > **後続設計書 (本書よりも優先される最新方針)**:
-> - `docs/main-second-subagent-comparison.md` — メインLLM / セカンドLLM / サブエージェントの最新の関係整理と決定事項 (2026-04-30)
+> - `docs/archive/main-second-subagent-comparison.md` — メインLLM / セカンドLLM / サブエージェントの最新の関係整理と決定事項 (2026-04-30)
 > - `docs/main_second_swap_design.md` — main⇔second 入替機能 (型統一による主従の対称化、 2026-04-29)
 > - `docs/llm-profile-descriptions.md` — description によるルーティング誘導
 > - `docs/harness-engineering.md` / `harness-engineering-phase5.md` — Evaluator・ハーネス介入の導入
@@ -972,7 +972,7 @@ else → "ok"
 
 ### 7.1 セカンドLLM操作コマンド (`/model second`)
 
-> **2026-10-25 更新**: 旧 `/second ...` は削除し `/model second ...` に一本化した (docs/todo-legacy-ways-cleanup.md T1)。 `budget` を変えるコマンドは無い (`config.json` の `secondLLM.budget` を直接編集)。
+> **2026-10-25 更新**: 旧 `/second ...` は削除し `/model second ...` に一本化した (docs/archive/todo-legacy-ways-cleanup.md T1)。 `budget` を変えるコマンドは無い (`config.json` の `secondLLM.budget` を直接編集)。
 
 | コマンド | 説明 |
 |---|---|

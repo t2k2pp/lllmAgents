@@ -3,7 +3,7 @@
  *
  * 以前は /integrations 画面が `/discord <sub>` 等の直接コマンドを内部で呼んでいたが、
  * 設定の書き方を対話画面 1 つに揃えるため直接コマンドを削除し、 画面からは
- * ここにある関数を直接呼ぶ (docs/todo-legacy-ways-cleanup.md T3)。
+ * ここにある関数を直接呼ぶ (docs/archive/todo-legacy-ways-cleanup.md T3)。
  *
  * 各関数は設定 (Config) を書き換えて ctx.save() で保存し、 結果を画面に表示する。
  * Discord 受信の開始/停止は REPL が持つ接続オブジェクトを扱うため repl.ts 側に置く。

@@ -26,7 +26,6 @@ When a design doc and the code disagree, the code is truth — docs lag the impl
 | `docs/internal_design.md` | Architecture, modules, data flow (mermaid) |
 | `docs/external_design.md` | External spec (REPL commands, tools, config) |
 | `docs/config-reference.md` | Every config key |
-| `docs/llm-profiles.md` | LLM profile mechanism |
 | `docs/model-registry.md` | Model list management |
 | `docs/workspace-separation.md` | src/dist/deploy/sandbox roles |
 | `docs/<feature>-design.md` | One per feature |

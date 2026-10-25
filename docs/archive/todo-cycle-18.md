@@ -6,7 +6,7 @@
 ## タスク一覧
 
 - [x] 1. 設計・差分・機能削除の整合性精査
-  - [x] 設計書（`docs/durable-run-resume-design.md`）および比較マトリックス（`docs/product-feature-comparison-cycle-18-durable-run-resume-2026-09-03.md`）の整合性確認
+  - [x] 設計書（`docs/durable-run-resume-design.md`）および比較マトリックス（`docs/archive/product-feature-comparison-cycle-18-durable-run-resume-2026-09-03.md`）の整合性確認
   - [x] 意図しない処理の削除がないことの確認
   - [x] `sandbox/` 等のユーザー所有資産が除外されていることの確認
 - [x] 2. ローカル品質ゲート検証

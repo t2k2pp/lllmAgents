@@ -105,8 +105,8 @@ src/discord/
 | `discord.publicKey` | 不要になる。 2026-10-25 に型・スキーマからも削除 (旧設定に残っていても無視される) |
 | `discord.interactionPort` | 同上 |
 | 必須設定 | applicationId + botToken の 2 つに減る |
-| `/discord public-key` `/discord port` | 2026-10-25 に削除 (何もしない残骸だったため。 docs/todo-legacy-ways-cleanup.md) |
-| 受信の開始/停止 | 意味は同じ、中身が WS 接続に。 操作は `/integrations` → Discord 連携 の「受信を開始する / 停止する」 (直接コマンド `/discord` は 2026-10-25 に削除。 docs/todo-legacy-ways-cleanup.md T3) |
+| `/discord public-key` `/discord port` | 2026-10-25 に削除 (何もしない残骸だったため。 docs/archive/todo-legacy-ways-cleanup.md) |
+| 受信の開始/停止 | 意味は同じ、中身が WS 接続に。 操作は `/integrations` → Discord 連携 の「受信を開始する / 停止する」 (直接コマンド `/discord` は 2026-10-25 に削除。 docs/archive/todo-legacy-ways-cleanup.md T3) |
 | 状態表示 | Public Key / ポート行を削除し「Bot 接続」行を表示 |
 | `--background` モード | publicKey 必須チェックを botToken 必須チェックに変更 |
 

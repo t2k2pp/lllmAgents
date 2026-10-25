@@ -1,6 +1,6 @@
 # docs 索引 (Documentation Index)
 
-> **作成日**: 2026-07-04 (docs/production-readiness.md PR-11)
+> **作成日**: 2026-07-04 (docs/archive/production-readiness.md PR-11)
 > docs 配下 70+ 本の設計書を分類し、どれが「実装済みの正」でどれが「構想・記録」かを一覧にする。
 >
 > **運用ルール**:
@@ -20,41 +20,41 @@
 | [git-hooks.md](git-hooks.md) | Git フック (commit-msg / pre-commit) — コミット前に CI と同じ型・lint 検査を通す |
 | [release-workflow.md](release-workflow.md) | リリース自動ビルド — tag push / 手動実行で最新パッチ版 Node 24 の exe を Windows runner でビルドし Release へ添付 |
 | [nodejs-security-review-2026-10.md](nodejs-security-review-2026-10.md) | Node.js セキュリティ調査 (2026-10) — 汎用チェックリストと本アプリへの影響・対応状況 |
-| [production-readiness.md](production-readiness.md) | 製品品質改善計画 PR-01〜16 — P1〜P4 の進行管理表 |
-| [issues.md](issues.md) | 設計書レビュー起点の課題一覧 (2026-07-04 棚卸し済み) |
-| [product-review-cycle-1-2026-08-24.md](product-review-cycle-1-2026-08-24.md) | 商品品質レビュー・修正・評価サイクル第1回の記録 |
-| [product-review-cycle-2-2026-08-25.md](product-review-cycle-2-2026-08-25.md) | Codex類似アプリ観点の商品品質レビュー・改善サイクル第2回の記録 |
-| [product-review-closure-2026-08-25.md](product-review-closure-2026-08-25.md) | cycle 1 / 2 の未修正課題を終端状態まで処理する統合クローズ記録 |
-| [product-feature-comparison-2026-08-26.md](product-feature-comparison-2026-08-26.md) | Codex / Claude Code 機能比較マトリックスとサブエージェントskill preload改善記録 |
-| [product-feature-comparison-cycle-2-2026-08-26.md](product-feature-comparison-cycle-2-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第2回とモデル向けschedule改善記録 |
-| [product-feature-comparison-cycle-3-2026-08-26.md](product-feature-comparison-cycle-3-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第3回とbackground task一覧・停止の改善記録 |
-| [product-feature-comparison-cycle-4-2026-08-26.md](product-feature-comparison-cycle-4-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第4回とbackground agent steer改善記録 |
-| [product-feature-comparison-cycle-5-2026-08-26.md](product-feature-comparison-cycle-5-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第5回とlocal plugin bundle改善記録 |
-| [product-feature-comparison-cycle-6-2026-08-26.md](product-feature-comparison-cycle-6-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第6回とsafe mode改善記録 |
-| [product-feature-comparison-cycle-7-2026-08-27.md](product-feature-comparison-cycle-7-2026-08-27.md) | Codex / Claude Code機能比較第7回とTUI session全期間scrollback改善記録 |
-| [product-feature-comparison-cycle-8-2026-08-29.md](product-feature-comparison-cycle-8-2026-08-29.md) | Codex / Claude Code機能比較第8回、日本語IME右端描画・fail-fast・session fork改善記録 |
-| [product-feature-comparison-cycle-9-2026-08-30.md](product-feature-comparison-cycle-9-2026-08-30.md) | Codex / Claude Code機能比較第9回、working-tree実差分とsession命名改善記録 |
-| [product-feature-comparison-cycle-10-2026-08-30.md](product-feature-comparison-cycle-10-2026-08-30.md) | Codex / Claude Computer Use比較第10回、native OS window操作の実装・評価記録 |
-| [product-feature-comparison-cycle-16-foreground-steering-2026-09-02.md](product-feature-comparison-cycle-16-foreground-steering-2026-09-02.md) | Codex / Claude Codeの処理中入力比較とforeground同一turn steering改善記録 |
+| [production-readiness.md](archive/production-readiness.md) | 製品品質改善計画 PR-01〜16 — P1〜P4 の進行管理表 |
+| [issues.md](archive/issues.md) | 設計書レビュー起点の課題一覧 (2026-07-04 棚卸し済み) |
+| [product-review-cycle-1-2026-08-24.md](archive/product-review-cycle-1-2026-08-24.md) | 商品品質レビュー・修正・評価サイクル第1回の記録 |
+| [product-review-cycle-2-2026-08-25.md](archive/product-review-cycle-2-2026-08-25.md) | Codex類似アプリ観点の商品品質レビュー・改善サイクル第2回の記録 |
+| [product-review-closure-2026-08-25.md](archive/product-review-closure-2026-08-25.md) | cycle 1 / 2 の未修正課題を終端状態まで処理する統合クローズ記録 |
+| [product-feature-comparison-2026-08-26.md](archive/product-feature-comparison-2026-08-26.md) | Codex / Claude Code 機能比較マトリックスとサブエージェントskill preload改善記録 |
+| [product-feature-comparison-cycle-2-2026-08-26.md](archive/product-feature-comparison-cycle-2-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第2回とモデル向けschedule改善記録 |
+| [product-feature-comparison-cycle-3-2026-08-26.md](archive/product-feature-comparison-cycle-3-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第3回とbackground task一覧・停止の改善記録 |
+| [product-feature-comparison-cycle-4-2026-08-26.md](archive/product-feature-comparison-cycle-4-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第4回とbackground agent steer改善記録 |
+| [product-feature-comparison-cycle-5-2026-08-26.md](archive/product-feature-comparison-cycle-5-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第5回とlocal plugin bundle改善記録 |
+| [product-feature-comparison-cycle-6-2026-08-26.md](archive/product-feature-comparison-cycle-6-2026-08-26.md) | Codex / Claude Code 機能比較マトリックス第6回とsafe mode改善記録 |
+| [product-feature-comparison-cycle-7-2026-08-27.md](archive/product-feature-comparison-cycle-7-2026-08-27.md) | Codex / Claude Code機能比較第7回とTUI session全期間scrollback改善記録 |
+| [product-feature-comparison-cycle-8-2026-08-29.md](archive/product-feature-comparison-cycle-8-2026-08-29.md) | Codex / Claude Code機能比較第8回、日本語IME右端描画・fail-fast・session fork改善記録 |
+| [product-feature-comparison-cycle-9-2026-08-30.md](archive/product-feature-comparison-cycle-9-2026-08-30.md) | Codex / Claude Code機能比較第9回、working-tree実差分とsession命名改善記録 |
+| [product-feature-comparison-cycle-10-2026-08-30.md](archive/product-feature-comparison-cycle-10-2026-08-30.md) | Codex / Claude Computer Use比較第10回、native OS window操作の実装・評価記録 |
+| [product-feature-comparison-cycle-16-foreground-steering-2026-09-02.md](archive/product-feature-comparison-cycle-16-foreground-steering-2026-09-02.md) | Codex / Claude Codeの処理中入力比較とforeground同一turn steering改善記録 |
 | [native-computer-use.md](native-computer-use.md) | Native Computer Useの安全境界、tool/OS driver契約、実機gate |
 
 ## アーキテクチャ・ハーネス
 
 | ドキュメント | Status | 内容 |
 |---|---|---|
-| [product-feature-comparison-cycle-11-worktree-design-2026-08-31.md](product-feature-comparison-cycle-11-worktree-design-2026-08-31.md) | implemented | Codex/Claude比較、類似機能監査、sub-agent worktree分離の実装・安全・評価記録 |
-| [product-feature-comparison-cycle-12-workflow-learning-2026-08-31.md](product-feature-comparison-cycle-12-workflow-learning-2026-08-31.md) | implemented | Codex Record & Replay / Claude skills比較と操作学習gapの実装・評価記録 |
-| [product-feature-comparison-cycle-13-response-preview-2026-08-31.md](product-feature-comparison-cycle-13-response-preview-2026-08-31.md) | implemented | Codex/Claude streaming比較と応答preview・実PTY評価記録 |
-| [product-feature-comparison-cycle-14-release-version-2026-09-01.md](product-feature-comparison-cycle-14-release-version-2026-09-01.md) | implemented | Codex/Claude更新機能比較、version単一ソース化と明示更新診断の実装・評価記録 |
-| [product-quality-cycle-15-tui-mouse-scrollback-2026-09-01.md](product-quality-cycle-15-tui-mouse-scrollback-2026-09-01.md) | implemented | Alternate Screenのマウススクロールバック不具合と実PTY評価記録 |
-| [product-feature-comparison-cycle-21-response-copy-api-compat-2026-09-05.md](product-feature-comparison-cycle-21-response-copy-api-compat-2026-09-05.md) | implemented | 応答エラー可視化、copy-friendly mouse mode、OpenAI sampling互換性 |
+| [product-feature-comparison-cycle-11-worktree-design-2026-08-31.md](archive/product-feature-comparison-cycle-11-worktree-design-2026-08-31.md) | implemented | Codex/Claude比較、類似機能監査、sub-agent worktree分離の実装・安全・評価記録 |
+| [product-feature-comparison-cycle-12-workflow-learning-2026-08-31.md](archive/product-feature-comparison-cycle-12-workflow-learning-2026-08-31.md) | implemented | Codex Record & Replay / Claude skills比較と操作学習gapの実装・評価記録 |
+| [product-feature-comparison-cycle-13-response-preview-2026-08-31.md](archive/product-feature-comparison-cycle-13-response-preview-2026-08-31.md) | implemented | Codex/Claude streaming比較と応答preview・実PTY評価記録 |
+| [product-feature-comparison-cycle-14-release-version-2026-09-01.md](archive/product-feature-comparison-cycle-14-release-version-2026-09-01.md) | implemented | Codex/Claude更新機能比較、version単一ソース化と明示更新診断の実装・評価記録 |
+| [product-quality-cycle-15-tui-mouse-scrollback-2026-09-01.md](archive/product-quality-cycle-15-tui-mouse-scrollback-2026-09-01.md) | implemented | Alternate Screenのマウススクロールバック不具合と実PTY評価記録 |
+| [product-feature-comparison-cycle-21-response-copy-api-compat-2026-09-05.md](archive/product-feature-comparison-cycle-21-response-copy-api-compat-2026-09-05.md) | implemented | 応答エラー可視化、copy-friendly mouse mode、OpenAI sampling互換性 |
 | [harness-engineering.md](harness-engineering.md) | implemented | ハーネス改善の起点 (テトリスセッション分析→システムプロンプト再設計ほか) |
-| [harness-engineering-phase5.md](harness-engineering-phase5.md) | in-progress | Phase 5 計画 — Claude Code 比較で見える本質的弱点と段階的改善 |
-| [harness-engineering-phase5-progress.md](harness-engineering-phase5-progress.md) | in-progress | Phase 5 の進捗トラッカー |
+| [harness-engineering-phase5.md](archive/harness-engineering-phase5.md) | in-progress | Phase 5 計画 — Claude Code 比較で見える本質的弱点と段階的改善 |
+| [harness-engineering-phase5-progress.md](archive/harness-engineering-phase5-progress.md) | in-progress | Phase 5 の進捗トラッカー |
 | [multi-tier-harness-roadmap.md](multi-tier-harness-roadmap.md) | in-progress | マルチティア (T1/T2/T3) ハーネス戦略ロードマップ |
 | [system-prompt-redesign.md](system-prompt-redesign.md) | implemented | システムプロンプト再構成 (behavioral/rest 2層+tool-guides 遅延注入) |
 | [prompt-language-policy.md](prompt-language-policy.md) | in-progress | プロンプト言語ポリシー (モデル向け英語正本。Phase 1 済 / 2,3 未) |
-| [prompt-ja-reference.md](prompt-ja-reference.md) | reference | プロンプト日本語リファレンス (参照用スナップショット) |
+| [prompt-ja-reference.md](archive/prompt-ja-reference.md) | reference | プロンプト日本語リファレンス (参照用スナップショット) |
 | [prompt-optimization.md](prompt-optimization.md) | implemented | システムプロンプト最適化 |
 | [prompt-cache-cost-reduction.md](prompt-cache-cost-reduction.md) | implemented | プロンプトキャッシュによるコスト削減 (§3.1 は下記で改訂) |
 | [prompt-prefix-stability.md](prompt-prefix-stability.md) | implemented | プロンプト前方一致の安定化 (状態通知を末尾へ追記、 KV キャッシュ再利用) |
@@ -66,10 +66,10 @@
 | [ephemeral-context-design.md](ephemeral-context-design.md) | implemented | Ephemeral Context (span スコープの揮発メッセージ) |
 | [context-intelligence.md](context-intelligence.md) | implemented | コンテキストインテリジェンス (A 節の意図の分類が現行。 B 節の階層圧縮は削除済みで記録扱い) |
 | [context-reduction-redesign.md](context-reduction-redesign.md) | implemented | コンテキスト整理の作り直し (次が必ず入る予約で発火・決まった段階で 1 回だけ書き換え・予熱・計測)。 実機での確認 (§13 の T2・T13) が残る |
-| [handover-2026-10-25-context-reduction.md](handover-2026-10-25-context-reduction.md) | record | 上の作り直しの引き継ぎ書 (進め方の約束・実装の状態・実機で確かめる項目) |
-| [context-forgetting.md](context-forgetting.md) | superseded | 忘却機能 (LLM に忘れるものを選ばせる・`/forget`) (→ [context-reduction-redesign.md](context-reduction-redesign.md)) |
-| [context-strategy.md](context-strategy.md) | superseded | 区切りでの圧縮・忘却・Clear の使い分け (→ [context-reduction-redesign.md](context-reduction-redesign.md)。 `/handoff` のメモの形 §2.2 は現行) |
-| [context-reduction-reasoning-model-fix.md](context-reduction-reasoning-model-fix.md) | record | 忘却・圧縮の思考モデル対応と空応答の扱い (対象コードは削除済み。 脇の呼び出しの思考オフの知見は現行) |
+| [handover-2026-10-25-context-reduction.md](archive/handover-2026-10-25-context-reduction.md) | record | 上の作り直しの引き継ぎ書 (進め方の約束・実装の状態・実機で確かめる項目) |
+| [context-forgetting.md](archive/context-forgetting.md) | superseded | 忘却機能 (LLM に忘れるものを選ばせる・`/forget`) (→ [context-reduction-redesign.md](context-reduction-redesign.md)) |
+| [context-strategy.md](archive/context-strategy.md) | superseded | 区切りでの圧縮・忘却・Clear の使い分け (→ [context-reduction-redesign.md](context-reduction-redesign.md)。 `/handoff` のメモの形 §2.2 は現行) |
+| [context-reduction-reasoning-model-fix.md](archive/context-reduction-reasoning-model-fix.md) | record | 忘却・圧縮の思考モデル対応と空応答の扱い (対象コードは削除済み。 脇の呼び出しの思考オフの知見は現行) |
 | [evaluation-loop.md](evaluation-loop.md) | implemented | 評価ループ (/try 試行錯誤モード) |
 | [tool-call-salvage-pipe-format-design.md](tool-call-salvage-pipe-format-design.md) | implemented | ツール呼び出しサルベージ (`<\|tool\|>call:` 形式) |
 | [input-compression-design.md](input-compression-design.md) | implemented | opt-in 入力圧縮モード (/compress-input) |
@@ -82,8 +82,8 @@
 | [model-setup.md](model-setup.md) | implemented | /model setup ウィザード |
 | [v030_second_llm_design.md](v030_second_llm_design.md) | implemented | セカンド LLM (consult / agent / evaluator 委任) |
 | [main_second_swap_design.md](main_second_swap_design.md) | implemented | /swap (メイン⇔セカンド入れ替え) |
-| [main-second-subagent-comparison.md](main-second-subagent-comparison.md) | record | メイン / セカンド / サブエージェントの役割比較整理 |
-| [llm-profiles.md](llm-profiles.md) | superseded | 旧 LLM プロファイル (→ [model-registry.md](model-registry.md)) |
+| [main-second-subagent-comparison.md](archive/main-second-subagent-comparison.md) | record | メイン / セカンド / サブエージェントの役割比較整理 |
+| [llm-profiles.md](archive/llm-profiles.md) | superseded | 旧 LLM プロファイル (→ [model-registry.md](model-registry.md)) |
 | [llm-profile-descriptions.md](llm-profile-descriptions.md) | implemented | モデル特性説明 (サブエージェント選択の材料) |
 | [azure-gpt-provider.md](azure-gpt-provider.md) | implemented | azure-gpt プロバイダ |
 | [gemini-aistudio-provider.md](gemini-aistudio-provider.md) | implemented | gemini (Google AI Studio) プロバイダ |
@@ -96,22 +96,22 @@
 |---|---|---|
 | [repl-io-robustness.md](repl-io-robustness.md) | implemented | REPL I/O 堅牢化 (raw mode 自己修復・Esc 中断) |
 | [interrupt-and-progress-design.md](interrupt-and-progress-design.md) | implemented | 中断手段と進捗表示 |
-| [product-feature-comparison-cycle-17-run-api-pause-2026-09-02.md](product-feature-comparison-cycle-17-run-api-pause-2026-09-02.md) | implemented | Codex / Claude比較とforeground runのLLM API境界pause |
-| [product-feature-comparison-cycle-18-durable-run-resume-2026-09-03.md](product-feature-comparison-cycle-18-durable-run-resume-2026-09-03.md) | implemented | Codex / Claude比較とPC・アプリ再起動を跨ぐdurable run resume |
-| [product-feature-comparison-cycle-20-interactive-resume-2026-09-05.md](product-feature-comparison-cycle-20-interactive-resume-2026-09-05.md) | implemented | 処理中composer・mode切替・session stdout復元 |
-| [product-feature-comparison-cycle-22-resume-preview-integrity-2026-09-05.md](product-feature-comparison-cycle-22-resume-preview-integrity-2026-09-05.md) | implemented | resume会話補完と1行preview継続時の本文欠落修正 |
-| [product-feature-comparison-cycle-23-copy-long-line-integrity-2026-09-05.md](product-feature-comparison-cycle-23-copy-long-line-integrity-2026-09-05.md) | implemented | copy-first既定、長文折り返し、resume論理行正規化 |
-| [product-feature-comparison-cycle-24-native-scroll-selection-2026-09-05.md](product-feature-comparison-cycle-24-native-scroll-selection-2026-09-05.md) | implemented | 既定inline表示で端末nativeの選択・コピーとホイールscrollbackを同時に復元 |
-| [product-feature-comparison-cycle-25-search-recovery-2026-09-05.md](product-feature-comparison-cycle-25-search-recovery-2026-09-05.md) | implemented | 名前訂正後の検索復旧、SearXNG劣化診断、明示provider再検索を強化 |
-| [product-feature-comparison-cycle-26-completion-prompt-handoff-2026-09-06.md](product-feature-comparison-cycle-26-completion-prompt-handoff-2026-09-06.md) | implemented | 応答完了時の処理中composer・診断ログ・通常promptの表示handoffを修復 |
+| [product-feature-comparison-cycle-17-run-api-pause-2026-09-02.md](archive/product-feature-comparison-cycle-17-run-api-pause-2026-09-02.md) | implemented | Codex / Claude比較とforeground runのLLM API境界pause |
+| [product-feature-comparison-cycle-18-durable-run-resume-2026-09-03.md](archive/product-feature-comparison-cycle-18-durable-run-resume-2026-09-03.md) | implemented | Codex / Claude比較とPC・アプリ再起動を跨ぐdurable run resume |
+| [product-feature-comparison-cycle-20-interactive-resume-2026-09-05.md](archive/product-feature-comparison-cycle-20-interactive-resume-2026-09-05.md) | implemented | 処理中composer・mode切替・session stdout復元 |
+| [product-feature-comparison-cycle-22-resume-preview-integrity-2026-09-05.md](archive/product-feature-comparison-cycle-22-resume-preview-integrity-2026-09-05.md) | implemented | resume会話補完と1行preview継続時の本文欠落修正 |
+| [product-feature-comparison-cycle-23-copy-long-line-integrity-2026-09-05.md](archive/product-feature-comparison-cycle-23-copy-long-line-integrity-2026-09-05.md) | implemented | copy-first既定、長文折り返し、resume論理行正規化 |
+| [product-feature-comparison-cycle-24-native-scroll-selection-2026-09-05.md](archive/product-feature-comparison-cycle-24-native-scroll-selection-2026-09-05.md) | implemented | 既定inline表示で端末nativeの選択・コピーとホイールscrollbackを同時に復元 |
+| [product-feature-comparison-cycle-25-search-recovery-2026-09-05.md](archive/product-feature-comparison-cycle-25-search-recovery-2026-09-05.md) | implemented | 名前訂正後の検索復旧、SearXNG劣化診断、明示provider再検索を強化 |
+| [product-feature-comparison-cycle-26-completion-prompt-handoff-2026-09-06.md](archive/product-feature-comparison-cycle-26-completion-prompt-handoff-2026-09-06.md) | implemented | 応答完了時の処理中composer・診断ログ・通常promptの表示handoffを修復 |
 | [durable-run-resume-design.md](durable-run-resume-design.md) | implemented | foreground run の一時停止と再開 (`/run pause` は保存して止める 1 方式、 PC・アプリ再起動を跨いで再開、 起動時の再開確認) |
-| [todo-legacy-ways-cleanup.md](todo-legacy-ways-cleanup.md) | implemented | 同じことをする複数のやり方 (旧コマンド・別名・旧設定キー・todo_write) の一本化 T1〜T5。 未対応・要判断の別名も記載 |
+| [todo-legacy-ways-cleanup.md](archive/todo-legacy-ways-cleanup.md) | implemented | 同じことをする複数のやり方 (旧コマンド・別名・旧設定キー・todo_write) の一本化 T1〜T5。 未対応・要判断の別名も記載 |
 | [prompt-history-resume.md](prompt-history-resume.md) | implemented | 入力欄の ↑↓ 履歴を作業フォルダ単位で永続化（Claude Code の history.jsonl 相当） |
 | [spinner-mode-response-coloring-design.md](spinner-mode-response-coloring-design.md) | implemented | 応答テキストの色分け (構造ベース) |
 | [ux-transparency.md](ux-transparency.md) | implemented | UX 透明性+サンプリングパラメータ |
 | [context-inspector.md](context-inspector.md) | implemented | /context ドリルダウン |
 | [cost-token-command-design.md](cost-token-command-design.md) | implemented | /cost (コスト・トークン可視化) |
-| [integrations-command-cleanup.md](integrations-command-cleanup.md) | implemented | /integrations への統合コマンド集約 |
+| [integrations-command-cleanup.md](archive/integrations-command-cleanup.md) | implemented | /integrations への統合コマンド集約 |
 | [response-latency-improvement.md](response-latency-improvement.md) | implemented | 応答速度改善 |
 | [loop_feature.md](loop_feature.md) | implemented | /loop (定期実行) |
 
@@ -129,7 +129,7 @@
 | ドキュメント | Status | 内容 |
 |---|---|---|
 | [room-model-design.md](room-model-design.md) | implemented | Room モデル (A/B/C のサーフェス別セッション分離) |
-| [room-model-review.md](room-model-review.md) | record | Room モデル実装レビュー記録 |
+| [room-model-review.md](archive/room-model-review.md) | record | Room モデル実装レビュー記録 |
 | [discord-gateway-design.md](discord-gateway-design.md) | implemented | Discord 受信の Gateway (WS) 方式 |
 | [slack-integration.md](slack-integration.md) | implemented | Slack 統合 (Socket Mode) |
 | [channel-interaction-bridge-design.md](channel-interaction-bridge-design.md) | implemented | チャネル対話ブリッジ (権限確認 / ask_user) |
@@ -163,9 +163,9 @@
 |---|---|---|
 | [openclaw-compat-addon-feasibility.md](openclaw-compat-addon-feasibility.md) | proposal | OpenClaw 互換アドオンの実現性調査・実装設計 |
 | [autonomy-improvement-proposal.md](autonomy-improvement-proposal.md) | proposal | 他エージェントアプリ比較と自律性向上の提案 |
-| [agent-loop-efficiency-review.md](agent-loop-efficiency-review.md) | proposal | Agent Loop 効率レビュー (米国株投資支援アプリのログ分析起点) |
+| [agent-loop-efficiency-review.md](archive/agent-loop-efficiency-review.md) | proposal | Agent Loop 効率レビュー (米国株投資支援アプリのログ分析起点) |
 | [changelog-feature-backlog.md](changelog-feature-backlog.md) | proposal | Claude Code changelog 由来の機能バックログ |
-| [prompt-tech-debt-review.md](prompt-tech-debt-review.md) | record | プロンプト棚卸しレビュー (2026-04-29) |
+| [prompt-tech-debt-review.md](archive/prompt-tech-debt-review.md) | record | プロンプト棚卸しレビュー (2026-04-29) |
 
 ## 手順書・参照
 

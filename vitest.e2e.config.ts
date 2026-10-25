@@ -1,6 +1,6 @@
 import { defineConfig } from "vitest/config";
 
-// E2E スモークテスト専用設定 (docs/production-readiness.md PR-08)。
+// E2E スモークテスト専用設定 (docs/archive/production-readiness.md PR-08)。
 // アプリ全体を tsx 子プロセスで起動するため重い。ユニットテストとの
 // CPU 競合による flake を避けるため、ファイル並列を止めて直列実行する。
 // 実行: npm run test:e2e

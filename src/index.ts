@@ -203,7 +203,7 @@ async function main(): Promise<void> {
   }
 
   // 未捕捉例外での即死時にセッション保存・端末復元・クラッシュログを行う
-  // (docs/production-readiness.md PR-01)。最初に登録する。
+  // (docs/archive/production-readiness.md PR-01)。最初に登録する。
   installCrashHandlers();
 
   // 端末出力を ScreenManager に集約する (docs/tui-alternate-screen.md §3.3)。

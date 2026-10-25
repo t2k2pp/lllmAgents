@@ -48,7 +48,7 @@ import {
 } from "../../src/cli/integrations-settings.js";
 
 /**
- * /integrations 画面が呼ぶ設定関数 (docs/todo-legacy-ways-cleanup.md T3)。
+ * /integrations 画面が呼ぶ設定関数 (docs/archive/todo-legacy-ways-cleanup.md T3)。
  * 直接コマンド /discord /slack /chatlog /search を削除したため、 画面からの変更はすべてここを通る。
  */
 function makeCtx() {

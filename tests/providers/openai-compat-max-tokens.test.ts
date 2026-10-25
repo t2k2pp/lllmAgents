@@ -78,7 +78,7 @@ describe("OpenAICompatProvider: max_tokens 送信ポリシー", () => {
   });
 });
 
-/** ChatParams.disableThinking の送信ポリシー (docs/context-forgetting.md §4.2) */
+/** ChatParams.disableThinking の送信ポリシー (docs/archive/context-forgetting.md §4.2) */
 describe("OpenAICompatProvider: disableThinking 送信ポリシー", () => {
   let capturedBody: Record<string, unknown> | undefined;
 

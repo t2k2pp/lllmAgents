@@ -201,7 +201,7 @@ describe("createCommandMenuProvider", () => {
     expect(matches).toEqual(["/context tools bash"]);
   });
 
-  it("削除した別名コマンドは補完候補に出ない (docs/todo-legacy-ways-cleanup.md T1)", () => {
+  it("削除した別名コマンドは補完候補に出ない (docs/archive/todo-legacy-ways-cleanup.md T1)", () => {
     const provider = createCommandMenuProvider();
     const allLabels = provider("").map((i) => i.label);
     for (const removed of [
@@ -272,7 +272,7 @@ describe("createCommandMenuProvider", () => {
   });
 
   it("削除した /discord /slack /chatlog /search は補完に出ない", () => {
-    // 設定は /integrations 画面だけで行う (docs/todo-legacy-ways-cleanup.md T3)。 コマンド自体も削除済み。
+    // 設定は /integrations 画面だけで行う (docs/archive/todo-legacy-ways-cleanup.md T3)。 コマンド自体も削除済み。
     const provider = createCommandMenuProvider();
     const allLabels = provider("").map((i) => i.label);
     // トップレベル alias も含めて補完には出ない

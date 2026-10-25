@@ -282,7 +282,7 @@ export interface OpsLogConfig {
 }
 
 /**
- * ログ・セッションの世代管理 (docs/production-readiness.md PR-15)。
+ * ログ・セッションの世代管理 (docs/archive/production-readiness.md PR-15)。
  * 起動時に一度だけ適用する。削除時は件数を1行表示する (黙って消さない)。
  */
 export interface LogRetentionConfig {
@@ -483,7 +483,7 @@ export interface Config {
   /** ログ設定 (運用ログ等)。詳細: docs/llm-logging.md */
   logging?: LoggingConfig;
   /**
-   * 起動時の更新チェック (docs/production-readiness.md PR-14)。
+   * 起動時の更新チェック (docs/archive/production-readiness.md PR-14)。
    * GitHub の最新リリースタグを非同期で確認し、新しければ1行通知する。
    * 対話セッション (TTY) のみ実行。通信不能は起動を妨げず、release不整合は通知する。
    * 明示診断は --check-update。enabled: false でbackground確認をオフ (既定 on)
@@ -736,7 +736,7 @@ export function getDefaultConfig(): Config {
       blockedCommands: [],
       // 旧既定の autoApproveTools / discordAutoApproveTools / slackAutoApproveTools と同じ判定になる既定ルール
       // (本質的に安全なツール INHERENTLY_SAFE_TOOLS は書かなくても常に許可。 3 つの一覧の残りは同じだったので面の指定なし)。
-      // requireApprovalTools は判定に使われていなかったため対応するルールは無い (docs/todo-legacy-ways-cleanup.md T4)
+      // requireApprovalTools は判定に使われていなかったため対応するルールは無い (docs/archive/todo-legacy-ways-cleanup.md T4)
       rules: {
         allow: [...DEFAULT_ALLOW_RULES],
         deny: [],

@@ -1,7 +1,7 @@
 # コンテキスト整理の作り直し 設計書
 
 > **ステータス**: implemented (2026-10-25 設計・実装。 §13 のタスク 1・3〜12 済み。 実機での確認 (タスク 2・13) が残る。 確かめる項目は §14.3 の B)
-> **置き換えた設計**: `docs/context-forgetting.md` (忘却) / `docs/context-strategy.md` (区切りでの使い分け)。
+> **置き換えた設計**: `docs/archive/context-forgetting.md` (忘却) / `docs/archive/context-strategy.md` (区切りでの使い分け)。
 > 両書の先頭に「現行は本書」 の注記を入れた (§12)。
 > **前提**: `docs/prompt-prefix-stability.md` (一度送ったメッセージは書き換えない) が実装済みであること。
 
@@ -882,12 +882,12 @@ AgentLoop は整理イベントのたびに `loadConfig()` から読む (変更�
 
 | 文書 | 扱い |
 |---|---|
-| `docs/context-forgetting.md` | 記録扱い。 先頭に「現行は context-reduction-redesign.md」 の注記 (タスク 12 で済み)。 §3.1 (呼び出しを残す・本文ありの扱い・切り詰めて残さない) と §4.4 (忘却の記録) は本書の段階 0・1 が引き継ぐ |
-| `docs/context-strategy.md` | 記録扱い。 先頭に同じ注記 (タスク 12 で済み)。 区切りの検出 (§3) のうち強い区切りだけを本書 §4.4 が引き継ぐ。 §2.2 の引き継ぎメモの形は手動の `/handoff` が使い続ける |
+| `docs/archive/context-forgetting.md` | 記録扱い。 先頭に「現行は context-reduction-redesign.md」 の注記 (タスク 12 で済み)。 §3.1 (呼び出しを残す・本文ありの扱い・切り詰めて残さない) と §4.4 (忘却の記録) は本書の段階 0・1 が引き継ぐ |
+| `docs/archive/context-strategy.md` | 記録扱い。 先頭に同じ注記 (タスク 12 で済み)。 区切りの検出 (§3) のうち強い区切りだけを本書 §4.4 が引き継ぐ。 §2.2 の引き継ぎメモの形は手動の `/handoff` が使い続ける |
 | `docs/context-intelligence.md` | 圧縮 (B 節) は記録扱い (B 節の先頭に注記。 タスク 12 で済み)。 意図の分類 (A 節) は変わらない |
 | `docs/ephemeral-context-design.md` | 揮発の印の考えは残る。 除く時期を「応答のたび」 から「整理イベント」 に変えた旨を先頭に追記 (タスク 7 で済み) |
 | `docs/prompt-prefix-stability.md` | 前提として残る。 §2.3 の「span 境界の除去は依頼 1 件につき 1 回なので許容」 を本書で改めた旨を §2.3 の表 (タスク 7) と先頭 (タスク 12) に追記 |
-| `docs/context-reduction-reasoning-model-fix.md` | 記録扱い (先頭に注記。 タスク 12 で済み)。 **段階 3 は思考をオフにしない** (§5.6。 オフにすると system の先頭が変わり全部の読み直しになる)。 同書の「思考オフで呼ぶ」 知見は、 キャッシュを使わない脇の呼び出しにだけ当てはまる。 同書の対象 `forgetting.ts` / `hierarchical-compressor.ts` は削除した |
+| `docs/archive/context-reduction-reasoning-model-fix.md` | 記録扱い (先頭に注記。 タスク 12 で済み)。 **段階 3 は思考をオフにしない** (§5.6。 オフにすると system の先頭が変わり全部の読み直しになる)。 同書の「思考オフで呼ぶ」 知見は、 キャッシュを使わない脇の呼び出しにだけ当てはまる。 同書の対象 `forgetting.ts` / `hierarchical-compressor.ts` は削除した |
 | `docs/README.md` | 本書を `implemented` (実機確認が残る旨を添える) に、 上の 2 書を `superseded` にした (タスク 12 で済み) |
 | README.md / `config-reference.md` / `external_design.md` / `internal_design.md` | 新しい整理に合わせて書き直した (タスク 12 で済み。 `external_design.md` §2.3、 `internal_design.md` §2.5 に要点) |
 

@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 /**
- * 旧ツール名一覧 → security.rules の 1 回だけの移行 (docs/todo-legacy-ways-cleanup.md T4)。
+ * 旧ツール名一覧 → security.rules の 1 回だけの移行 (docs/archive/todo-legacy-ways-cleanup.md T4)。
  * loadConfig は import 時に os.homedir() から config.json の場所を決めるので、 import より前に一時ホームへ差し替える。
  * (利用者の実際の ~/.localllm には触れない)
  */

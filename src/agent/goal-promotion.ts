@@ -99,7 +99,7 @@ export async function extractAcceptanceCriteria(
         messages: [{ role: "user", content: extractPrompt }],
         temperature: 0.1,
         maxTokens: 800,
-        // 思考オフでも同等の criteria が約 1/4 の時間で返る (docs/context-reduction-reasoning-model-fix.md §5)
+        // 思考オフでも同等の criteria が約 1/4 の時間で返る (docs/archive/context-reduction-reasoning-model-fix.md §5)
         disableThinking: true,
         stream: true,
       },

@@ -1,5 +1,5 @@
 /**
- * config.json の zod スキーマ検証 (docs/production-readiness.md PR-03)。
+ * config.json の zod スキーマ検証 (docs/archive/production-readiness.md PR-03)。
  *
  * 方針:
  * - スキーマは「型が合っているか」の検出専用 (deep partial)。値の欠落は検証しない

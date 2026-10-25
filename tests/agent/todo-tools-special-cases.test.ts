@@ -7,7 +7,7 @@ import * as todoModule from "../../src/tools/definitions/todo-write.js";
 /**
  * 旧 todo_write ツールを削除した後も、 ToDo ツール (todo_append / todo_mark / todo_delete) が
  * 旧ツールと同じ扱い (plan mode で使える・既定で自動許可) を受けていることの検査
- * (docs/todo-legacy-ways-cleanup.md T1)。
+ * (docs/archive/todo-legacy-ways-cleanup.md T1)。
  */
 const TODO_TOOLS = ["todo_append", "todo_mark", "todo_delete"];
 

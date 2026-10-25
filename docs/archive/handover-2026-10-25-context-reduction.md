@@ -1,6 +1,6 @@
 # 引き継ぎ書: コンテキスト整理の作り直し (2026-10-25)
 
-> 次のチャットはこの文書から始める。 正本の設計は [context-reduction-redesign.md](context-reduction-redesign.md)。
+> 次のチャットはこの文書から始める。 正本の設計は [context-reduction-redesign.md](../context-reduction-redesign.md)。
 > この文書は作業の状態と進め方の約束だけを書く (設計の中身は設計書を読む)。
 
 ## 0. 実装の状態 (2026-10-26 更新)
@@ -42,12 +42,12 @@ T2・T13 の実機確認にビルド (`npm run build:deploy`) か `npm run start
 
 | 内容 | コミット | 正本 |
 |---|---|---|
-| KV キャッシュが毎回全損していた不具合の修正 (日時・Goal・ToDo を履歴の前に置いていた → 末尾の未送信メッセージへ追記) | `1dce520` | [prompt-prefix-stability.md](prompt-prefix-stability.md) |
+| KV キャッシュが毎回全損していた不具合の修正 (日時・Goal・ToDo を履歴の前に置いていた → 末尾の未送信メッセージへ追記) | `1dce520` | [prompt-prefix-stability.md](../prompt-prefix-stability.md) |
 | 再発防止: 前方一致の不変条件テスト、 書き換え理由の申告と `prefix_break` ログ、 CLAUDE.md のルール | `28e4b9f` | 同上 §7 |
 | `/run pause` の API 実行中カウント漏れの修正 | `30a0dd1` | [product-feature-comparison-cycle-17-run-api-pause-2026-09-02.md](product-feature-comparison-cycle-17-run-api-pause-2026-09-02.md) §8 |
-| `/run pause` を「保存して止める」 1 方式に統合、 次回起動時の再開確認 | `af5d053` | [durable-run-resume-design.md](durable-run-resume-design.md) |
+| `/run pause` を「保存して止める」 1 方式に統合、 次回起動時の再開確認 | `af5d053` | [durable-run-resume-design.md](../durable-run-resume-design.md) |
 | 旧方式・別名の整理 T1〜T5 (コマンド別名削除、 `--resume latest`、 設定コマンドを対話画面に一本化、 権限を `security.rules` に一本化、 文書の最終確認) | `f72a56e` `34ea051` `69d0b54` `b1c67f0` `0e832bc` `33d4d9f` | [todo-legacy-ways-cleanup.md](todo-legacy-ways-cleanup.md) |
-| コンテキスト整理の作り直しの **設計** (未実装) | `66da100` `5be15b9` | [context-reduction-redesign.md](context-reduction-redesign.md) |
+| コンテキスト整理の作り直しの **設計** (未実装) | `66da100` `5be15b9` | [context-reduction-redesign.md](../context-reduction-redesign.md) |
 
 実機の効果 (2026-10-25 myppt 再開後): キャッシュ再利用率は毎回 99% 以上 (再利用数 = 前回の入力 − 4)、
 1 回の呼び出しは平均 約 28 分 → 約 1.5 分。 `prefix_break` は 0 件。
@@ -69,7 +69,7 @@ T2・T13 の実機確認にビルド (`npm run build:deploy`) か `npm run start
 - モデルに残量を伝えない (context anxiety 対策)
 - 予熱 (依頼の境目・`/compact` 後・再開時)、 計測 (`reduction_event` / `cache_miss` / `side_call`)
 
-関連: 補助呼び出し・サブエージェントによるキャッシュの追い出しは [todo-local-llm-speed.md](todo-local-llm-speed.md) T2/T3
+関連: 補助呼び出し・サブエージェントによるキャッシュの追い出しは [todo-local-llm-speed.md](../todo-local-llm-speed.md) T2/T3
 (2 スロット起動の案は T6)。 計測 (T1) と依頼の区切りの書き換え (T4) は整理の設計書が担当。
 
 ## 3. 進め方の約束 (利用者と合意済み)

@@ -215,12 +215,12 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/knowledge recent", description: "最近のノート" },
   { command: "/knowledge search", description: "ナレッジ検索", needsArg: true },
   { command: "/knowledge open", description: "フォルダを開く" },
-  // /integrations: Discord / Slack / 会話ログ / Web検索 の設定画面 (設定方法はこの画面だけ。 docs/todo-legacy-ways-cleanup.md T3)
+  // /integrations: Discord / Slack / 会話ログ / Web検索 の設定画面 (設定方法はこの画面だけ。 docs/archive/todo-legacy-ways-cleanup.md T3)
   { command: "/integrations", description: "外部統合 (Discord / Slack / Chatlog / Search) を 1 画面で設定" },
   { command: "/loop", description: "プロンプトを定期実行 (例: /loop 5m /pr-review)", needsArg: true },
   { command: "/loop status", description: "アクティブなループ一覧 + 停止 picker" },
   { command: "/loop stop", description: "ループを停止 (id 指定 / all または省略で全停止)", needsArg: true },
-  // /permission: 権限の設定画面 (設定方法はこの画面だけ。 docs/todo-legacy-ways-cleanup.md T3)
+  // /permission: 権限の設定画面 (設定方法はこの画面だけ。 docs/archive/todo-legacy-ways-cleanup.md T3)
   { command: "/permission", description: "権限の設定画面 (権限ルール。 すべての面 / CLI・Discord・Slack ごと)" },
 ];
 

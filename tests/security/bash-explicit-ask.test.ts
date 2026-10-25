@@ -4,7 +4,7 @@ import { bashNeedsExplicitAsk } from "../../src/security/permission-manager.js";
 
 // auto-approve 中でも bash を都度確認に回す判定 (CWD 外参照 / 広域スキャン)。
 // 2026-10-14 goemon ログで、 ヒアドキュメント本文の `//` 等を CWD 外と誤判定し 30 回中 12 回確認が出ていた。
-// docs/todo-request-elaboration.md 第 2 段 項目 13
+// docs/archive/todo-request-elaboration.md 第 2 段 項目 13
 
 const isWin = process.platform === "win32";
 const cwd = isWin ? "C:\\work\\games\\goemon" : "/work/games/goemon";

@@ -84,7 +84,7 @@
 ### CL-07 サブエージェント worktree 分離 — 実装済み
 - **結果**: サブエージェントに `isolation: worktree` の独立 detached Git worktreeを与え、並列編集をmain checkoutから分離した。変更なしは自動除去し、変更・取消・異常終了はdiff/apply/discardまでdurableに保持する。
 - **再評価理由**: 現行のbackground/parallel taskはediting agentも同じ`process.cwd()`を共有するため、同一fileの後勝ち上書きと検証の相互汚染が起こり得る。Codex/Claude Codeの双方がworktreeを正式な並列実行境界としている。
-- **設計・評価正本**: [`product-feature-comparison-cycle-11-worktree-design-2026-08-31.md`](product-feature-comparison-cycle-11-worktree-design-2026-08-31.md)。既存checkpoint、per-agent workspace context、main checkout redirect遮断、Git hook/filter、cancel/crash、diff/apply/discard、cross-OS/SEA gateを一体で評価した。
+- **設計・評価正本**: [`product-feature-comparison-cycle-11-worktree-design-2026-08-31.md`](archive/product-feature-comparison-cycle-11-worktree-design-2026-08-31.md)。既存checkpoint、per-agent workspace context、main checkout redirect遮断、Git hook/filter、cancel/crash、diff/apply/discard、cross-OS/SEA gateを一体で評価した。
 - **反映先**: `src/git/`（新規）、`src/agent/sub-agent.ts`、`src/tools/`、`src/security/`、`src/agents/agent-loader.ts`、CLI、docs/tests。`sub-agent.ts`だけの変更では成立しない。
 
 ### CL-08 Rewind / "ここまで要約" — 価値★☆☆ / L（オプション）

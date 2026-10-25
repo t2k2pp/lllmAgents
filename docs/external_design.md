@@ -143,7 +143,7 @@ stateDiagram-v2
 
 ※ `/setup` は REPL コマンドではなく、 CLI 起動時のフラグ `--setup` で実行します。
 ※ 起動時にセッションを復元するフラグは REPL の `/resume` と同じ書き方: `--resume <id>` / `--resume latest`。 引数なし `--resume` (REPL では picker) は起動前に picker を出せないため使い方エラー、 見つからない ID・保存セッション無しもエラー終了 (終了コード 1) で、 黙って新規セッションで始めない。 旧 `--continue` は削除済み (→ `--resume latest`)
-※ 同じことをするコマンドは 1 つだけにしている (docs/todo-legacy-ways-cleanup.md)。 次の旧コマンドは削除済みで、 入力しても動かない:
+※ 同じことをするコマンドは 1 つだけにしている (docs/archive/todo-legacy-ways-cleanup.md)。 次の旧コマンドは削除済みで、 入力しても動かない:
   - `/sessions` `/continue` (→ `/resume list` / `/resume latest`)、 `/second` (→ `/model second`)、 `/profiles` `/profile` `/model-registry` `/registry` (→ `/models`)
   - `/integration` `/intg` (→ `/integrations`)、 `/switch` (→ `/swap`)、 `/token` (→ `/cost`)、 `/model url` `/model ip` (→ `/model host` + `/model port`)、 `/loop list` (→ `/loop status`)、 `/stream on|off` (→ 引数なし `/stream`)
   - `/metrics` `/capability` (→ `/status`)、 `/run pause --durable` (→ `/run pause`。 一時停止は保存して止める 1 方式だけ)
@@ -188,7 +188,7 @@ stateDiagram-v2
 
 引数なしで対話 picker:
 
-権限は `security.rules` のルールだけで表す (旧ツール名一覧は廃止。 docs/todo-legacy-ways-cleanup.md T4)。 範囲を選んでその範囲のルールを編集する:
+権限は `security.rules` のルールだけで表す (旧ツール名一覧は廃止。 docs/archive/todo-legacy-ways-cleanup.md T4)。 範囲を選んでその範囲のルールを編集する:
 
 | 範囲 | 内容 |
 |---|---|
@@ -481,7 +481,7 @@ sequenceDiagram
 | `discord` | Discord連携の設定（`enabled` フラグと `webhookUrl`）|
 | `secondLLM` | セカンドLLM設定（v0.3.0、§12参照）|
 
-> **権限ルールと既定値**: `security.rules` が保存されていればそれがすべてで、 既定ルールとは混ぜない (画面で外した既定ルールが起動のたびに戻らない)。 旧キー `autoApproveTools` 等が残っている config.json は起動時に 1 回だけルールへ移行する (docs/todo-legacy-ways-cleanup.md T4)。
+> **権限ルールと既定値**: `security.rules` が保存されていればそれがすべてで、 既定ルールとは混ぜない (画面で外した既定ルールが起動のたびに戻らない)。 旧キー `autoApproveTools` 等が残っている config.json は起動時に 1 回だけルールへ移行する (docs/archive/todo-legacy-ways-cleanup.md T4)。
 
 ### 5.2 プロバイダー別セットアップ要件
 

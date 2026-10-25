@@ -26,7 +26,7 @@ Claude Code の `/loop` と `CronCreate/List/Delete` に相当する、ユーザ
 /loop stop all              全ループを停止 (スクリプト用)
 ```
 
-`/loop status` は一覧表示の直後に停止対象を checkbox で複数選択できる。 `/loop stop` は picker を使わずに id 指定 / 全停止する (非TTY でも使える)。 旧 `/loop list` は `/loop status` に一本化して削除した (docs/todo-legacy-ways-cleanup.md)。
+`/loop status` は一覧表示の直後に停止対象を checkbox で複数選択できる。 `/loop stop` は picker を使わずに id 指定 / 全停止する (非TTY でも使える)。 旧 `/loop list` は `/loop status` に一本化して削除した (docs/archive/todo-legacy-ways-cleanup.md)。
 
 ### 間隔指定フォーマット
 
@@ -38,7 +38,7 @@ Claude Code の `/loop` と `CronCreate/List/Delete` に相当する、ユーザ
 | `2h`   | 2時間        |
 | `1d`   | 1日          |
 
-- 省略不可。 先頭が間隔として読めない入力 (例: `/loop list`)・プロンプトの無い入力 (例: `/loop 5m`) は登録せず使い方を表示する。 以前は省略時に既定 `10m` で登録しており、 打ち間違いが黙ってループになっていた。 末尾に `every 20m` を付ける別の書き方も削除し、 `/loop <間隔> <プロンプト>` の 1 つにした (docs/todo-legacy-ways-cleanup.md T2)
+- 省略不可。 先頭が間隔として読めない入力 (例: `/loop list`)・プロンプトの無い入力 (例: `/loop 5m`) は登録せず使い方を表示する。 以前は省略時に既定 `10m` で登録しており、 打ち間違いが黙ってループになっていた。 末尾に `every 20m` を付ける別の書き方も削除し、 `/loop <間隔> <プロンプト>` の 1 つにした (docs/archive/todo-legacy-ways-cleanup.md T2)
 - 単位の大文字・小文字は問わない
 - 小数点あり（例: `1.5h`）も可
 

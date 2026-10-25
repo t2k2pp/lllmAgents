@@ -25,7 +25,7 @@ export const THINNED_MARKER = "[忘却済み]";
 
 /**
  * tool_call 引数ではこれを超える文字列を「本文」 とみなし、 その呼び出しを対ごと履歴から外す
- * (docs/context-forgetting.md §3.1)。 旧方式の切り詰め (先頭 N 文字を残す) の長さでもある
+ * (docs/archive/context-forgetting.md §3.1)。 旧方式の切り詰め (先頭 N 文字を残す) の長さでもある
  */
 export const THIN_TEXT_CHARS = 200;
 
@@ -121,7 +121,7 @@ export function forgottenResultText(call: ToolCall, resultText: string, reason: 
 export const TOMBSTONE_MARKER = "[忘却の記録]";
 
 /**
- * 忘却の記録を写しに入れる (docs/context-forgetting.md §4.4)。 既存の記録があればそこへ追記して 1 件にまとめ、
+ * 忘却の記録を写しに入れる (docs/archive/context-forgetting.md §4.4)。 既存の記録があればそこへ追記して 1 件にまとめ、
  * 無ければ「最初に忘却した位置」 に 1 件だけ挿入する (履歴中に散乱させない)。 入力の配列は書き換えない。
  */
 export function insertTombstone(next: Message[], text: string, insertAt: number): Message[] {
@@ -154,7 +154,7 @@ export type ToolCallAction = { kind: "remove" } | { kind: "replace-result"; cont
 /**
  * 1 回の応答の組 (assistant(tool_calls) + 続く tool 結果) に、 呼び出しごとの変換を当てはめる (元は変更しない)。
  *   - remove: 呼び出しと結果の対ごと外す。 引数を切り詰めて呼び出しの形のまま残すことはしない
- *     (モデルが真似して壊れた呼び出しを出す。 docs/context-forgetting.md §3.1 の 2026-10-18〜19 の実害)。
+ *     (モデルが真似して壊れた呼び出しを出す。 docs/archive/context-forgetting.md §3.1 の 2026-10-18〜19 の実害)。
  *     呼び出しが 1 つも残らないときは本文 (か思考) だけの assistant にし、 どちらも無ければ消す。
  *   - replace-result: 結果の本文だけ差し替える。 呼び出しは残す (「このファイルを読んだ」 という行動の記録を
  *     消すと読み直しの繰り返しを招く)。 状態通知 (contextNote) などの他の欄は残す。
@@ -270,7 +270,7 @@ export interface ReductionStagesResult {
   recordLines: string[];
   /**
    * 最初に消したものの位置 (変換後の写しの添字)。 忘却の記録を元の時系列の位置に置くのに使う
-   * (docs/context-forgetting.md §4.4)。 何も消していなければ null
+   * (docs/archive/context-forgetting.md §4.4)。 何も消していなければ null
    */
   firstForgottenIndex: number | null;
   /** 段階 2 の後の推定 P (= 整理前の P − 減った量の合計) */
@@ -692,7 +692,7 @@ const RESULT_RULE_LABEL: Partial<Record<ForgottenRule, string>> = {
 };
 
 /**
- * 忘却の記録に入れる行 (docs/context-forgetting.md §4.4 の形)。 結果の本文を消したものは規則ごとにツール名と件数、
+ * 忘却の記録に入れる行 (docs/archive/context-forgetting.md §4.4 の形)。 結果の本文を消したものは規則ごとにツール名と件数、
  * 対ごと外したものは 1 件 1 行 (REMOVED_CALLS_LISTED 件まで。 超えた分は件数で示し、 黙って欠けさせない)、
  * 段階 2 で消した思考は件数。 前処理 (揮発メッセージ・終わった依頼の思考) はハーネスの一時的なものなので行にせず、
  * 件数を repaid で返す (整理イベントの記録 §10.1 に出す)。

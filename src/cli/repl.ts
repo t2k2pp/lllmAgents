@@ -4525,7 +4525,7 @@ export class REPL {
         // 履歴・goal-slot・todos を一括リセット (cross-contamination 阻止)。
         // H-1: 背景ジョブと衝突しないよう受信順キューに乗せ、 REPL の Room をアクティブ化してから
         // クリアする。 旧実装は agent が「今ロードしている Room」を消すため、 Discord/Slack の
-        // ジョブ実行中は誤って相手の会話を消していた (docs/room-model-review.md H-1)。
+        // ジョブ実行中は誤って相手の会話を消していた (docs/archive/room-model-review.md H-1)。
         const replRoom = this.roomManager?.bindingFor("repl");
         const cleared = await this.runRoomMutation(async () => {
           const doClear = (): void => {
@@ -5962,7 +5962,7 @@ export class REPL {
             console.log(chalk.dim("    /model setup azure-claude     Azure Claude — OpenAI互換ルート"));
           }
         } else {
-          // 直接指定は 1 語のみ・利用可能な名前のみ受け付ける (docs/todo-legacy-ways-cleanup.md T2)。
+          // 直接指定は 1 語のみ・利用可能な名前のみ受け付ける (docs/archive/todo-legacy-ways-cleanup.md T2)。
           const nameOpts = { usage: "/model <モデル名>", pickerCommand: "/model list" };
           const argCheck = checkModelNameArgs(args, nameOpts);
           if (!argCheck.ok) {

@@ -1,10 +1,10 @@
 # Phase 5 進捗トラッカー
 
-> **位置づけ**: `docs/harness-engineering-phase5.md` (設計書) の対になる **進捗トラッカー**。
+> **位置づけ**: `docs/archive/harness-engineering-phase5.md` (設計書) の対になる **進捗トラッカー**。
 > 「何を試した / 試していない / リトライ結果」を明示し、ループ運用に耐えるようにする。
 > 設計書 = 不変、本書 = 各イテレーションごとに更新。
 >
-> **2026-10-25 注記**: 本文の `/second ...` は `/model second ...` に、 `todo_write` は `todo_append` / `todo_mark` / `todo_delete` に置き換わった (docs/todo-legacy-ways-cleanup.md T1)。 本文中の旧表記は各イテレーション当時の記録。
+> **2026-10-25 注記**: 本文の `/second ...` は `/model second ...` に、 `todo_write` は `todo_append` / `todo_mark` / `todo_delete` に置き換わった (docs/archive/todo-legacy-ways-cleanup.md T1)。 本文中の旧表記は各イテレーション当時の記録。
 
 ---
 
@@ -1113,7 +1113,7 @@ second_llm_agent({ task: "..." })  ← reason 引数なし
 
 1. ユーザーが `npm run build:deploy` で再ビルド → 起動 → タスク実行
 2. ユーザーがログ (`~/.localllm/logs/sessions/*.jsonl`) を観察し、 残課題 / 副作用を本書「リトライ結果」セクションに追記
-3. 開発側 (Claude Code) が次ラウンドの実装方針を決める。 設計書 (`docs/harness-engineering-phase5.md`) の Phase 番号で参照
+3. 開発側 (Claude Code) が次ラウンドの実装方針を決める。 設計書 (`docs/archive/harness-engineering-phase5.md`) の Phase 番号で参照
 4. 実装後、 本書に新ラウンドのセクションを追加 (旧ラウンドは履歴として残す)
 5. リグレッションが見つかったら本書の「副作用」 にメモし、 必要なら巻き戻し or 修正
 

@@ -1,6 +1,6 @@
 # 依頼の膨らませ方（要件展開）の改善設計
 
-作成: 2026-10-14 / 状態: 設計確定・実装中（進捗は `docs/todo-request-elaboration.md`）
+作成: 2026-10-14 / 状態: 設計確定・実装中（進捗は `docs/archive/todo-request-elaboration.md`）
 
 ## 1. 背景 — goemon 試作で見えた差
 
@@ -141,7 +141,7 @@ Step 1「要件整理」を上記 5 観点の「参照作品の分解」に置�
 
 ## 7. スコープ外として記録した項目の行方
 
-後続の段（`docs/todo-request-elaboration.md` 第 2〜4 段）で扱った。
+後続の段（`docs/archive/todo-request-elaboration.md` 第 2〜4 段）で扱った。
 
 | 項目 | 結果 |
 |---|---|

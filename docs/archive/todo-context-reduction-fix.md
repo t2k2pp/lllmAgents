@@ -8,8 +8,8 @@
 ## タスク一覧
 
 - [x] 1. 設計とToDoの作成
-  - [x] 設計書（`docs/context-reduction-reasoning-model-fix.md`）の作成
-  - [x] ToDoファイル（`docs/todo-context-reduction-fix.md`）の作成
+  - [x] 設計書（`docs/archive/context-reduction-reasoning-model-fix.md`）の作成
+  - [x] ToDoファイル（`docs/archive/todo-context-reduction-fix.md`）の作成
 - [x] 2. プロバイダー層の修正 (`src/providers/openai-compat.ts`)
   - [x] `lastFinishReason` の追跡保持
   - [x] `data: [DONE]` 時に `lastFinishReason` を保持して返却（無条件 `"stop"` 上書きの解消）

@@ -1,5 +1,5 @@
 /**
- * /doctor — 環境診断 (docs/production-readiness.md PR-16)。
+ * /doctor — 環境診断 (docs/archive/production-readiness.md PR-16)。
  *
  * LLM 接続 / セカンド・ビジョン LLM / Playwright / Discord / Slack / 画像生成 /
  * ログ・セッションのディスク使用量を一括チェックして ✔/✖/− の表で出す。

@@ -12,7 +12,7 @@
 第4優先 (ツール description): `src/tools/definitions/*.ts` (重点: second-llm.ts, task.ts, bash.ts, file-edit.ts, file-read.ts, ask-user.ts, response-complete.ts, sandbox-info.ts, plan-mode.ts, todo-write.ts)
 第5優先 (ビルトインスキル): `src/skills/builtin/*/SKILL.md` (全 17 件)
 第6優先 (外部エージェント定義): `src/agents/builtin/*.md` (全 4 件)
-背景資料: `docs/harness-engineering-phase5-progress.md` (1137行), `harness-engineering.md`, `prompt-optimization.md`, `llm-profile-descriptions.md`, `v030_second_llm_design.md`
+背景資料: `docs/archive/harness-engineering-phase5-progress.md` (1137行), `harness-engineering.md`, `prompt-optimization.md`, `llm-profile-descriptions.md`, `v030_second_llm_design.md`
 
 ## サマリ
 - 調査対象ファイル数: 約 44 ファイル (中核 5 / 評価 3 / セカンド 1 / ツール 12 / スキル 17 / 外部 agent 4 / その他 2)
@@ -793,7 +793,7 @@
 > 修正:
 > 1. `DEFAULT_TEMPERATURE_CONSULT` (0.2) / `DEFAULT_TEMPERATURE_AGENT` (0.2) / `DEFAULT_TEMPERATURE_EVALUATOR` (0.1) の 3 定数を切り出し
 > 2. `resolveSampling(fallbackTemperature)` を `resolveSampling(mode: "consult" \| "agent" \| "evaluator")` に変更し、 用途ベースのインタフェースに
-> 3. **D9 (`docs/main-second-subagent-comparison.md`) の決定を反映**: `config.secondLLM.samplingDefaults.{consultTemperature\|agentTemperature\|evaluatorTemperature}` を新規追加 (`src/config/types.ts`)。 優先順位は `endpoint.temperature` → `config.samplingDefaults.*` → ハードコード fallback の 3 段階
+> 3. **D9 (`docs/archive/main-second-subagent-comparison.md`) の決定を反映**: `config.secondLLM.samplingDefaults.{consultTemperature\|agentTemperature\|evaluatorTemperature}` を新規追加 (`src/config/types.ts`)。 優先順位は `endpoint.temperature` → `config.samplingDefaults.*` → ハードコード fallback の 3 段階
 > 4. 各メソッドの呼出は `this.resolveSampling("consult")` / `("agent")` / `("evaluator")` に置換 (`consult:157`, `runAsAgent:223`, `runAsEvaluator:356`)
 - **箇所**: `src/second-llm/second-llm-manager.ts:157, 223, 356`
 - **テキスト断片**:

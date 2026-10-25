@@ -9,7 +9,7 @@
  * / fake file write) を持っていたため、 重複していた。 本モジュールで共通化し、 メイン /
  * サブ両方が同じフォーマットで自己点検を出す。
  *
- * 関連: `docs/prompt-tech-debt-review.md` ID-008 / ID-012
+ * 関連: `docs/archive/prompt-tech-debt-review.md` ID-008 / ID-012
  */
 
 /**

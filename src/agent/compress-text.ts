@@ -71,7 +71,7 @@ export async function compressText(
         messages: [{ role: "user", content: buildPrompt(label, text) }],
         temperature: COMPRESS_TEMPERATURE,
         maxTokens: COMPRESS_MAX_TOKENS,
-        // 思考に枠を取られると圧縮結果が上限で切れる。 思考オフで完結する (docs/context-reduction-reasoning-model-fix.md §5)
+        // 思考に枠を取られると圧縮結果が上限で切れる。 思考オフで完結する (docs/archive/context-reduction-reasoning-model-fix.md §5)
         disableThinking: true,
         stream: true,
       },

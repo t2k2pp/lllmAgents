@@ -60,7 +60,7 @@ ask_user ツール (context.source=slack)
   （リモートからの永続的な権限昇格を防ぐ）
 - autorun / 封じ込め自動許可の分岐はチャネルフローには適用しない（保守的に倒す）
 - allow ルール (rules.allow) もチャネルでは従来どおり評価しない（denyのみ強制）
-  - **2026-10-25 更新 (docs/todo-legacy-ways-cleanup.md T4)**: 権限は security.rules に一本化し、 ルールの先頭 `discord:` / `slack:` (指定なしはすべての面) でチャネルにも効くようにした。 旧コードで CLI でだけ評価していた既存の allow / ask ルールは移行時に `cli:` を付けたので、 移行した設定の判定は変わらない
+  - **2026-10-25 更新 (docs/archive/todo-legacy-ways-cleanup.md T4)**: 権限は security.rules に一本化し、 ルールの先頭 `discord:` / `slack:` (指定なしはすべての面) でチャネルにも効くようにした。 旧コードで CLI でだけ評価していた既存の allow / ask ルールは移行時に `cli:` を付けたので、 移行した設定の判定は変わらない
 
 ## 4. ask_user ブリッジ (A-3)
 
@@ -96,7 +96,7 @@ ask_user ツール (context.source=slack)
   - 未設定: 従来どおり誰でも会話可能（後方互換）。ただし**確認ボタン/回答は常に依頼者本人のみ有効**
     （他ユーザーのクリックは無視し、その旨を ephemeral / 別メッセージで通知）
 - 決定後はメッセージを編集してボタンを除去（後からのクリック・リプレイ防止）
-- REPL: `/integrations` → Slack 連携 / Discord 連携 の「許可ユーザーを表示/追加/削除する」 (直接コマンド `/slack` `/discord` は 2026-10-25 に削除。 docs/todo-legacy-ways-cleanup.md T3)
+- REPL: `/integrations` → Slack 連携 / Discord 連携 の「許可ユーザーを表示/追加/削除する」 (直接コマンド `/slack` `/discord` は 2026-10-25 に削除。 docs/archive/todo-legacy-ways-cleanup.md T3)
 
 ### 6.1 待機リスト（利用申請）— Discord (2026-06-21 追加)
 

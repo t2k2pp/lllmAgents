@@ -1,6 +1,6 @@
 # チャットログ保存機能 設計書
 
-> **2026-10-25 更新**: REPL からの設定は `/integrations` → 会話ログの保存 の画面だけで行う。 直接コマンド `/chatlog` は削除した (docs/todo-legacy-ways-cleanup.md T3)。 対話できる端末が無いときは `~/.localllm/config.json` の `chatLog.enabled` / `chatLog.vaultPath` を直接編集する。
+> **2026-10-25 更新**: REPL からの設定は `/integrations` → 会話ログの保存 の画面だけで行う。 直接コマンド `/chatlog` は削除した (docs/archive/todo-legacy-ways-cleanup.md T3)。 対話できる端末が無いときは `~/.localllm/config.json` の `chatLog.enabled` / `chatLog.vaultPath` を直接編集する。
 
 ## 概要
 

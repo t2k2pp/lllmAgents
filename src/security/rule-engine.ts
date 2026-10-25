@@ -1,6 +1,6 @@
 /**
  * Claude Code 互換のパターンベース権限ルールエンジン。 権限の設定はこのルール (config の security.rules) だけで表す
- * (旧ツール名一覧 autoApproveTools 等は廃止。 docs/todo-legacy-ways-cleanup.md T4)。
+ * (旧ツール名一覧 autoApproveTools 等は廃止。 docs/archive/todo-legacy-ways-cleanup.md T4)。
  *
  * ルール形式:
  *   "bash(npm *)"                  - bash ツール、command が "npm *" にマッチ

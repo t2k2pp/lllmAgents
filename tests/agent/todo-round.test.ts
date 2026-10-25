@@ -10,7 +10,7 @@ import {
 } from "../../src/tools/definitions/todo-write.js";
 import { responseCompleteTool } from "../../src/tools/definitions/response-complete.js";
 
-// ToDo を依頼ごとに区切る (docs/todo-request-elaboration.md 第 3 段 項目 15)。
+// ToDo を依頼ごとに区切る (docs/archive/todo-request-elaboration.md 第 3 段 項目 15)。
 // goemon ログ: 新しい依頼の todo_append 結果に前の依頼の完了済み 4 件が混ざり、
 // response_complete も 8/8 と数えていた。 削除はしない (docs/todo-goal-lifecycle.md の判断を維持)。
 

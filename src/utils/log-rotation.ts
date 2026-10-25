@@ -1,5 +1,5 @@
 /**
- * ログ・セッションの世代管理 (docs/production-readiness.md PR-15)。
+ * ログ・セッションの世代管理 (docs/archive/production-readiness.md PR-15)。
  *
  * 起動時に一度だけ呼ばれる軽量な掃除:
  * - ~/.localllm/logs/ops/*.jsonl      … 保持日数を超えたものを削除 (既定 30日)

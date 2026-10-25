@@ -2,7 +2,7 @@
 
 ## 0. ステータス
 - 状態: **Phase 1 / 1.5 / 2 実装済み + レビュー指摘修正済み + foreground同一turn steering実装済み**
-- 起票: 2026-06-13 / 実装: 2026-06-14 / レビュー反映: 2026-06-14（`docs/room-model-review.md`）
+- 起票: 2026-06-13 / 実装: 2026-06-14 / レビュー反映: 2026-06-14（`docs/archive/room-model-review.md`）
 - 主な実装: `src/agent/room-types.ts` `room-manager.ts` `room-run-queue.ts` `channel-commands.ts`、
   `session-manager.ts`(room/mode タグ)、`config/types.ts`(roomConfig)、Discord/Slack/REPL 配線
 - 関連: `docs/todo-goal-lifecycle.md`, `src/agent/session-manager.ts`
