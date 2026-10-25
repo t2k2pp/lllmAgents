@@ -117,7 +117,7 @@ stateDiagram-v2
 | コマンド | 説明 |
 |----------|------|
 | `/help` | ヘルプや使用可能なコマンド一覧を表示します |
-| `/quit`, `/exit` | エージェントを終了します |
+| `/exit` (別名 `/quit`) | エージェントを終了します |
 | `/clear` | 現在の会話履歴とコンテキストをクリアします |
 | `/context` | 現在のコンテキスト（トークン）使用状況と整理の状態・今 `/compact` した場合の見込みを表示します |
 | `/compact` | コンテキストを今すぐ整理します（段階 0〜3 を最後まで。結果の内訳を表示） |
@@ -169,6 +169,11 @@ stateDiagram-v2
   - `/metrics` `/capability` (→ `/status`)、 `/run pause --durable` (→ `/run pause`。 一時停止は保存して止める 1 方式だけ)
   - `/discord` `/slack` `/chatlog` `/search` (→ `/integrations` の画面)、 `/permission <サブコマンド>` (`auto-add` `rule-add` 等 → 引数なし `/permission` の画面)
   - `/forget` `/forget mode` `/forget status` `/forget dry` (→ `/compact`。 何を忘れるかを LLM に選ばせる忘却は廃止)、 `/context strategy` (区切りでの使い分けの表を廃止。 代わりは無い)。 docs/context-reduction-redesign.md §7
+  - 2026-10-25 (同じ目的のやり方の一本化。 §2.6):
+    `/model setup` `/model second setup` `/model vision setup` (→ `/models` → Add new)、 `/model temperature` `top_p` `top_k` `rep_penalty` `description` と `/model second …` `/model vision description` の同名 (→ `/models` → Edit)、
+    `/model info` `/model second status|info` `/model vision status|info` (→ 引数なし)、 引数なしの `/model second model` (→ `/model second list`)、
+    `/cost model` `/cost provider` (→ `/cost models` / `/cost providers`)、 `/loop stop` (→ `/loop status`。 端末が無いときはエージェントに頼む)、 `--no-alt-screen` `--no-mouse` (→ 環境変数 `LLLMAGENT_DISABLE_*`)
+  - `/quit` は `/exit` の別名として残す (Claude Code と同じ)
 
 #### `/models` (Model Registry) — main / second / vision 統合管理
 
@@ -187,9 +192,13 @@ stateDiagram-v2
 | `/model` | main / second / vision の状態を 1 画面で表示 |
 | `/model list` | main slot の利用可能モデル一覧から選択 |
 | `/model context <値>` | main slot のコンテキスト長を変更 (例: `128k`) |
-| `/model setup` | main slot の新規セットアップ wizard |
-| `/model second <sub>` | second slot 操作 (`setup` / `enable` / `disable` / `list` / `context` / `host` / `port` / `provider` / `description` / `temperature` 等) |
-| `/model vision <sub>` | vision slot 操作 (`status` / `setup` / `list` / `context` / `description` / `clear`) |
+| `/model <名前>` / `/model host` / `port` / `provider` | main slot のモデルの直接指定 / 接続先の変更 |
+| `/model second <sub>` | second slot 操作 (`enable` / `disable` / `list` / `model <名前>` / `context` / `host` / `port` / `provider`) |
+| `/model vision <sub>` | vision slot 操作 (`list` / `context` / `clear`) |
+
+新規の追加 (旧 `/model setup` / `/model second setup` / `/model vision setup`) は `/models` → Add new (スロットとプロバイダを選ぶ wizard) だけ。
+temperature / top_p / top_k / rep_penalty / description の編集 (旧 `/model temperature` 等・`/model [second\|vision] description`) は `/models` → Edit だけ (割り当て中のスロットなら設定に反映してその場で適用)。
+引数なしの `/model` / `/model second` / `/model vision` が状態表示 (旧 `info` / `status` は削除)。
 
 #### `/integrations` — 外部統合の集約 (Discord / Slack / Chatlog / Search)
 
@@ -293,12 +302,32 @@ stateDiagram-v2
 | `--plugin-dir <path>` | 明示的に信頼するローカル plugin bundle を追加 (繰り返し可。 §14) |
 | `--background` | REPL を出さずにチャットボットの受信だけを動かす (先に `/integrations` で設定) |
 | `--slack` | REPL の代わりに Slack bot を動かす |
-| `--alt-screen` / `--no-alt-screen` | 全画面 TUI を使う / 今回は inline 表示 (既定は inline)。 環境変数 `LLLMAGENT_ENABLE_ALTERNATE_SCREEN` より優先 |
-| `--mouse` / `--no-mouse` | 全画面 TUI のマウスホイール履歴を使う (`--alt-screen` を含む) / 今回は使わない。 環境変数 `LLLMAGENT_ENABLE_MOUSE` より優先 |
+| `--alt-screen` | 全画面 TUI を使う (既定は inline。 環境変数 `LLLMAGENT_ENABLE_ALTERNATE_SCREEN=1` でも同じ) |
+| `--mouse` | 全画面 TUI のマウスホイール履歴を使う (`--alt-screen` を含む。 環境変数 `LLLMAGENT_ENABLE_MOUSE=1` でも同じ)。 マウスは全画面のときだけ (Claude Code と同じ) |
+
+環境変数で有効にしている人がその回だけ打ち消すときは `LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1` / `LLLMAGENT_DISABLE_MOUSE=1` (無効化が優先)。 旧 `--no-alt-screen` / `--no-mouse` は削除 (Claude Code も起動フラグではなく環境変数 `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN` / `CLAUDE_CODE_DISABLE_MOUSE` で打ち消す)。
 | `--install-browser` / `--check-browser` | ブラウザの実行環境を入れる / 確かめる (docs/exe-playwright-externalization.md) |
 | `--computer-use` / `--check-computer-use` | このセッションだけ Native Computer Use を有効にする / 依存と見える window を確かめる (docs/native-computer-use.md) |
 
 サブコマンド: `localllm unity setup --project <path> [--revision <SHA>] [--command <executable>]` / `localllm unity doctor --project <path>` (docs/unity-integration.md)。
+
+### 2.6 同じ目的のやり方を 1 つにする規則
+
+同じことをするコマンド・フラグが 2 つあると、 別物か同じものか分からず使い分けを誤る。 新しい方式を入れたら古い方式は消す。
+どちらを残すかは利用者の決めた規則で決める (2026-10-25): **Claude Code に類似があれば Claude Code に、 無ければ Codex に、 両方に無ければ新しく作られた方に合わせる**。
+
+2026-10-25 の判断 (Claude Code は公式ドキュメント code.claude.com/docs/en/commands・/fullscreen・/scheduled-tasks、 Codex は developers.openai.com/codex/cli/slash-commands を同日に確認。 作られた日は git 履歴):
+
+| 重なっていたもの | 残した方 | 根拠 |
+|---|---|---|
+| `/quit` と `/exit` | `/exit` (`/quit` は別名として残す) | Claude Code は `/exit` に別名 `/quit` (Codex も両方で終了) |
+| `/model setup` 系と `/models` の Add new、 `/model temperature` 等と `/models` の Edit、 `info` / `status` と引数なし、 `/model second model` (引数なし) と `/model second list` | Add new / Edit / 引数なし / `list` | docs/model-registry.md §4.6 |
+| `/cost model` `/cost provider` (単数形) と `/cost models` `/cost providers` | 複数形 | 両者に無い (Claude Code の `/cost` は `/usage` の別名でサブコマンドなし)。 複数形は 2026-06-01 の `/cost` の設計で決めた形で、 補完も複数形だけだった |
+| `/loop stop [id\|all]` と `/loop status` の停止 picker | `/loop status` | Claude Code に `/loop` を止めるコマンドは無く、 Claude に頼んで `CronDelete` で止める。 両方の候補とも一致しないので新しい方 (picker は 2026-05-28、 `/loop stop` は 2026-03-15)。 端末が無いときはエージェントに頼む (`schedule_delete`。 Claude Code と同じ止め方) |
+| `--no-alt-screen` / `--no-mouse` と環境変数 | 環境変数 (`LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1` / `LLLMAGENT_DISABLE_MOUSE=1`) | Claude Code は起動フラグを持たず、 環境変数 (`CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN` / `CLAUDE_CODE_DISABLE_MOUSE`) と `/tui` で切り替える |
+| `--mouse` が `--alt-screen` も有効にする重なり | そのまま | Claude Code もマウス捕捉は全画面表示のときだけ (全画面なら既定で有効) |
+
+残っている判断事項: config の `mainLLM` / `secondLLM` / `visionLLM` と model-registry のスロットの二重管理 (2026-10-25 に「今は触らない」 と決定。 docs/archive/todo-legacy-ways-cleanup.md C4)。
 
 ---
 

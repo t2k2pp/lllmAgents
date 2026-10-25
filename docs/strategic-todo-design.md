@@ -3,9 +3,9 @@
 > **ステータス**: 実装済み (2026-05-15 ドラフト)
 > **2026-10-25 注記**: 本書で compat shim として残した `todo_write` は削除した。 ToDo ツールは `todo_append` / `todo_mark` / `todo_delete` だけ (docs/archive/todo-legacy-ways-cleanup.md T1)。 以下の compat shim に関する記述は当時の計画
 > **作成日**: 2026-05-15
-> **位置づけ**: `docs/goal-seek-mode-design.md` Phase 2 の再構成 + `docs/harness-engineering.md` の延長線
+> **位置づけ**: `docs/goal-seek-mode-design.md` Phase 2 の再構成 + `docs/archive/harness-engineering.md` の延長線
 > **関連**:
-> - 上位: `docs/harness-engineering.md` (ハーネス設計の全体方針)
+> - 上位: `docs/archive/harness-engineering.md` (ハーネス設計の全体方針)
 > - 連携: `docs/goal-seek-mode-design.md` (Goal Seek mode)、 `docs/ephemeral-context-design.md` (span 境界)、 `docs/internal_design.md`
 > - 経緯: drawDot 試金石セッション `~/.localllm/logs/sessions/2026-05-13T23-07-30_main.jsonl` で露呈した構造的欠陥が動機
 

@@ -101,7 +101,7 @@ Explore による実コード検証の結果、12 項目中 11 がそのまま�
 | 7 | プロバイダ抽象 | `provider-factory.ts`（12〜14） | n/a |
 | 8 | 機能トグル設定 | `config/types.ts:466,473,480,486`（mcp/skills の global＋個別） | ✅ |
 | 9 | コア反復ループ | `agent-loop.ts`（無改変対象） | n/a |
-| 10 | 受信→実行フロー | `discord/interaction-server.ts:305-336`＝enqueue→runInRoom→agentLoop.run（Slack 同型 `slack-bot.ts:239-287`） | ✅ |
+| 10 | 受信→実行フロー | `discord/discord-bot.ts:305-336`＝enqueue→runInRoom→agentLoop.run（Slack 同型 `slack-bot.ts:239-287`） | ✅ |
 | 11 | 設定 deep-merge | `config-manager.ts:22-58 loadConfig()`（セクション単位マージ＝プロファイル差込口） | n/a |
 | 12 | スキル install CLI | **未実装**（`/skills on\|off\|reload\|toggle` のみ） — §5-4 で新設 | — |
 
@@ -152,7 +152,7 @@ Explore による実コード検証の結果、12 項目中 11 がそのまま�
 
 ### (3) チャネルアダプタ SDK — *難度: 中*
 - **目的**: Discord/Slack 配線を抽象化し、新面（Telegram/Signal 等）をプラグイン化。
-- **接続シーム**: `interaction-server.ts:305-336` と `slack-bot.ts:239-287`（両者は enqueue→runInRoom(bindingFor)→agent.run→イベント収集の**同型**）。
+- **接続シーム**: `discord-bot.ts:305-336` と `slack-bot.ts:239-287`（両者は enqueue→runInRoom(bindingFor)→agent.run→イベント収集の**同型**）。
 - **新規**: `src/channels/channel-adapter.ts`
   ```ts
   export interface InboundMessage { surface: Surface; text: string; userId: string; channelId: string; isDM: boolean; replyContext?: unknown; }
@@ -169,7 +169,7 @@ Explore による実コード検証の結果、12 項目中 11 がそのまま�
   export class ChannelRunner { handle(adapter: ChannelAdapter, msg: InboundMessage): { position: number; result: Promise<void> }; }
   ```
   - `room-types.ts` の `Surface` と bindings を拡張。Room A/B/C は固定のまま、新面は既存 Room（例: Room B）へ多重化。
-- **コア無改変の根拠**: `ChannelRunner` は `roomQueue`/`roomManager`/`agent` 上の薄いオーケストレーション層（Discord/Slack が今 inline でやっていること）。権限ブリッジ（`interaction-server.ts:490`/`slack-bot.ts:376` 実装）をそのまま再利用。
+- **コア無改変の根拠**: `ChannelRunner` は `roomQueue`/`roomManager`/`agent` 上の薄いオーケストレーション層（Discord/Slack が今 inline でやっていること）。権限ブリッジ（`discord-bot.ts:490`/`slack-bot.ts:376` 実装）をそのまま再利用。
 - **工数/リスク**: 中。リスク = 新面は既存 Room へ多重化するため**チャネル横断の文脈混在**（許容だが要明記）。ストリーミング/進捗 UX（`ChannelProgressTracker`）は最小 IF では抽象化せず、初版は「最終回答のみ」で可。
 
 ### (4) ClawHub 互換クライアント — *難度: 低〜中*

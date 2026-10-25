@@ -1,5 +1,7 @@
 # azure-gpt プロバイダ設計書
 
+> **2026-10-25 docs 整理の注記**: `/model setup` / `/model second setup` / `/model vision setup` は削除し、 新規追加は `/models` → Add new (スロット → プロバイダを選ぶ) だけにした。 temperature 等・description の編集は `/models` → Edit だけ (docs/model-registry.md §4.6)。 本文のこれらのコマンドは当時の記録。
+
 Azure OpenAI の **Responses API** ネイティブ対応プロバイダ。
 
 ## 背景

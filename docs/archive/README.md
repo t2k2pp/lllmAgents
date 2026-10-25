@@ -13,6 +13,18 @@
 | [context-reduction-reasoning-model-fix.md](context-reduction-reasoning-model-fix.md) | 忘却・圧縮の思考モデル対応 (対象コードは削除)。 脇の呼び出しの思考オフは [internal_design.md](../internal_design.md) §2.5 |
 | [llm-profiles.md](llm-profiles.md) | `/profiles` → [model-registry.md](../model-registry.md) |
 | [channel-session-queue-design.md](channel-session-queue-design.md) | チャネルのセッション分離とキュー → [room-model-design.md](../room-model-design.md) |
+| [model-setup.md](model-setup.md) | `/model setup` wizard (2026-10-25 に削除) → [model-registry.md](../model-registry.md) §4.2 の Add new |
+| [lightweight-register-anchors-design.md](lightweight-register-anchors-design.md) | 軽いタスクの過剰プラン抑制 → [reactive-intervention-coherence-design.md](../reactive-intervention-coherence-design.md) で抽象化して改訂 |
+| [prompt-optimization.md](prompt-optimization.md) | システムプロンプトの段階的開示 → [system-prompt-redesign.md](../system-prompt-redesign.md) (tool-guides の遅延注入) |
+| [harness-engineering.md](harness-engineering.md) | ハーネス改善 Phase 1〜4 (2026-03〜04) → 今の形は [internal_design.md](../internal_design.md) §16 |
+
+## 初期の文書 (2026-03、 リポジトリ直下から移動)
+
+| 文書 | 内容 |
+|---|---|
+| [DESIGN.md](DESIGN.md) | 初期の設計書 (`MAX_TOOL_ITERATIONS = 100` など今と違う記述を含む)。 今の設計は [internal_design.md](../internal_design.md) |
+| [TODO-mac-build.md](TODO-mac-build.md) | Mac ビルド対応の ToDo (元 `TODO.md`。 完了) |
+| [TODO-process-and-timeout.md](TODO-process-and-timeout.md) | プロセス分離・タイムアウト刷新の ToDo (完了。 設計は [fix-plan-process-and-timeout-management.md](../fix-plan-process-and-timeout-management.md)) |
 
 ## 完了した計画・ToDo
 
@@ -21,7 +33,7 @@
 | [production-readiness.md](production-readiness.md) | 製品品質の改善計画 PR-01〜16 (2026-07-04。 全項目完了) |
 | [issues.md](issues.md) | 2026-03 の設計書レビュー起点の課題一覧 (2026-07-04 棚卸しで凍結) |
 | [harness-engineering-phase5.md](harness-engineering-phase5.md) / [harness-engineering-phase5-progress.md](harness-engineering-phase5-progress.md) | ハーネス Phase 5 の計画と進捗。 第 8 ラウンドで後付けの警告挿入は全廃 (今の形は [internal_design.md](../internal_design.md) §16) |
-| [todo-legacy-ways-cleanup.md](todo-legacy-ways-cleanup.md) | 同じことをする複数のやり方の一本化 T1〜T5 (完了)。 **末尾の「未対応・要判断」 は未解決** (docs/README.md の「未解決の判断事項」) |
+| [todo-legacy-ways-cleanup.md](todo-legacy-ways-cleanup.md) | 同じことをする複数のやり方の一本化 T1〜T5 (完了)。 末尾の「未対応・要判断」 は 2026-10-25 に決着 (C4 を除く。 [external_design.md](../external_design.md) §2.6) |
 | [todo-request-elaboration.md](todo-request-elaboration.md) | 依頼の膨らませ方の改善 (23 項目完了。 設計は [request-elaboration-design.md](../request-elaboration-design.md)) |
 | [todo-context-reduction-fix.md](todo-context-reduction-fix.md) | 忘却・圧縮の思考モデル対応の ToDo (完了。 対象コードは削除) |
 | [todo-cycle-18.md](todo-cycle-18.md) / [todo-cycle-19-model-path-capability-and-startup-error-fix.md](todo-cycle-19-model-path-capability-and-startup-error-fix.md) / [todo-cycle-20-interactive-resume.md](todo-cycle-20-interactive-resume.md) | 比較サイクル 18〜20 の ToDo (完了) |

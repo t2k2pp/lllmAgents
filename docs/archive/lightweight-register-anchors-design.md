@@ -4,7 +4,7 @@
 > **作成日**: 2026-06-07
 > **位置づけ**: `docs/strategic-todo-design.md` の対称的補完。あちらが「過小・計画蒸発」を防ぐ設計なら、本書は「過剰プラン (trivial タスクへの ToDo/standard エスカレーション)」を防ぐ設計
 > **関連**:
-> - 上位: `docs/harness-engineering.md` (ハーネス設計の全体方針)
+> - 上位: `docs/archive/harness-engineering.md` (ハーネス設計の全体方針)
 > - 対称: `docs/strategic-todo-design.md` (drawDot 事件 = 過小側のトラウマが起点)
 > - 経緯: じゃんけんセッション `~/.localllm/sessions/mq2em8es-jufr.json` (2026-06-06、Qwen3.6-27B) で露呈
 

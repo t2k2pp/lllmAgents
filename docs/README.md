@@ -8,6 +8,28 @@
 > - 作業の記録・完了した ToDo・後継に置き換えられた設計は [archive/](archive/README.md) へ移す (`git mv`。 参照も書き換える)
 > - Status 凡例: `implemented` = 実装済みの正 / `in-progress` = 実装の途中 / `proposal` = 未実装の構想・計画 / `reference` = 手順書・参照資料
 
+## どの時にどれを見るか
+
+| やりたいこと | まず読む | あわせて読む |
+|---|---|---|
+| 全体像をつかむ (初めて触る) | [external_design.md](external_design.md) §1〜3 → [internal_design.md](internal_design.md) §1〜2 | [workspace-separation.md](workspace-separation.md) |
+| スラッシュコマンドを足す・変える | [external_design.md](external_design.md) §2.2・§2.6 (同じ目的のやり方を 2 つ作らない) | スキル `add-repl-command`、 `src/cli/commands/` のレジストリ |
+| 起動オプション・キー操作・表示 (TUI) を変える | [external_design.md](external_design.md) §2.4・§2.5 | [tui-alternate-screen.md](tui-alternate-screen.md)、 [stdin-ownership.md](stdin-ownership.md)、 [repl-io-robustness.md](repl-io-robustness.md) |
+| 設定キーを足す・意味を調べる | [config-reference.md](config-reference.md) | `src/config/types.ts` |
+| ツールを足す・権限を変える | [external_design.md](external_design.md) §3・§4 | [security_assessment.md](security_assessment.md)、 [wsl-sandbox-design.md](wsl-sandbox-design.md) |
+| システムプロンプト・モデルへの説明文を変える | [prompt-prefix-stability.md](prompt-prefix-stability.md) (前方一致を壊さない) | [system-prompt-redesign.md](system-prompt-redesign.md)、 [prompt-language-policy.md](prompt-language-policy.md)、 [internal_design.md](internal_design.md) §16 |
+| ハーネスの促し・ToDo・Goal の振る舞い | [internal_design.md](internal_design.md) §16 | [strategic-todo-design.md](strategic-todo-design.md)、 [reactive-intervention-coherence-design.md](reactive-intervention-coherence-design.md)、 [request-elaboration-design.md](request-elaboration-design.md)、 [goal-seek-mode-design.md](goal-seek-mode-design.md) |
+| コンテキストの整理・`/compact`・`/handoff`・キャッシュが外れる | [context-reduction-redesign.md](context-reduction-redesign.md) | [internal_design.md](internal_design.md) §2.5、 [handoff-design.md](handoff-design.md)、 [prompt-prefix-stability.md](prompt-prefix-stability.md) |
+| LLM の動作が遅い (ローカル LLM) | [prompt-prefix-stability.md](prompt-prefix-stability.md) | [todo-local-llm-speed.md](todo-local-llm-speed.md)、 [response-latency-improvement.md](response-latency-improvement.md) |
+| プロバイダ・モデル設定 (`/models`) | [model-registry.md](model-registry.md) | [model-orchestration.md](model-orchestration.md)、 [model-apply-immediacy.md](model-apply-immediacy.md)、 各プロバイダの設計書 |
+| セカンド LLM・サブエージェント・評価 | [v030_second_llm_design.md](v030_second_llm_design.md) | [internal_design.md](internal_design.md) §2.2、 [evaluation-loop.md](evaluation-loop.md)、 [main_second_swap_design.md](main_second_swap_design.md) |
+| Discord / Slack | [room-model-design.md](room-model-design.md) | [discord-gateway-design.md](discord-gateway-design.md)、 [slack-integration.md](slack-integration.md)、 [channel-interaction-bridge-design.md](channel-interaction-bridge-design.md) |
+| スキルを足す | [external_design.md](external_design.md) §10 | スキル `skill-creator`、 [workspace-separation.md](workspace-separation.md) (同期) |
+| コミット・push・CI | [git-hooks.md](git-hooks.md) | CLAUDE.md「コミット前の検査」 |
+| 配布物 (exe) を作る・リリースする | [workspace-separation.md](workspace-separation.md) | [release-workflow.md](release-workflow.md)、 [exe-playwright-externalization.md](exe-playwright-externalization.md)、 [setup-mac.md](setup-mac.md) |
+| セキュリティの影響を確かめる | [security_assessment.md](security_assessment.md) | [nodejs-security-review-2026-10.md](nodejs-security-review-2026-10.md) |
+| 過去の経緯 (なぜこうなったか) を調べる | 該当の機能設計書の改訂履歴 | [archive/README.md](archive/README.md) |
+
 ## まず読むもの (正典。 常に実装と一致させる)
 
 | ドキュメント | 内容 |
@@ -30,15 +52,12 @@ Status の記載が無いものは `implemented`。
 
 | ドキュメント | Status | 内容 |
 |---|---|---|
-| [harness-engineering.md](harness-engineering.md) | | ハーネス改善 Phase 1〜4 (テトリスセッション分析が起点)。 今の形は internal_design §16 |
 | [system-prompt-redesign.md](system-prompt-redesign.md) | | システムプロンプト再構成 (behavioral / rest の 2 層 + tool-guides の遅延注入) |
-| [prompt-optimization.md](prompt-optimization.md) | | システムプロンプトの最適化 (段階的開示) |
 | [prompt-language-policy.md](prompt-language-policy.md) | in-progress | モデル向けは英語が正本 (Phase 1 済み / 2・3 未) |
 | [prompt-cache-cost-reduction.md](prompt-cache-cost-reduction.md) | | プロンプトキャッシュでのコスト削減 (§3.1 は prompt-prefix-stability.md で改訂) |
 | [strategic-todo-design.md](strategic-todo-design.md) | | 準システムプロンプト + 戦略 ToDo (`todo_append` / `todo_mark` / `todo_delete`) |
 | [todo-goal-lifecycle.md](todo-goal-lifecycle.md) | | ToDo / Goal の寿命 (`/clear`・session 復元・`/todo all`) |
-| [lightweight-register-anchors-design.md](lightweight-register-anchors-design.md) | | 軽いタスクの過剰プラン抑制 (具体例は次の文書で抽象化) |
-| [reactive-intervention-coherence-design.md](reactive-intervention-coherence-design.md) | | 反応的介入の整合 (成果物の形を 1 つに決めつけない) |
+| [reactive-intervention-coherence-design.md](reactive-intervention-coherence-design.md) | | 反応的介入の整合 (成果物の形を 1 つに決めつけない。 軽いタスクの過剰プラン抑制も含む) |
 | [request-elaboration-design.md](request-elaboration-design.md) | | 依頼の膨らませ方 (要件展開)・ループ点検 |
 | [env-info-and-app-basics.md](env-info-and-app-basics.md) | | 実行環境情報の補強 (使える Python・git bash のパス) とデータを扱うアプリの土台 |
 | [agent-events-design.md](agent-events-design.md) | | AgentLoop のイベント化 (AgentEventBus) |
@@ -70,7 +89,6 @@ Status の記載が無いものは `implemented`。
 | ドキュメント | Status | 内容 |
 |---|---|---|
 | [model-registry.md](model-registry.md) | | Model Registry (登録一覧 + main / second / vision のスロット。 `/models`) |
-| [model-setup.md](model-setup.md) | | セットアップ wizard (`/model setup`・`/models` の Add new) |
 | [model-orchestration.md](model-orchestration.md) | | 任意のスロットとサブエージェントの結び付け |
 | [model-apply-immediacy.md](model-apply-immediacy.md) | | モデル設定の即時反映と設定のずれの表示 |
 | [v030_second_llm_design.md](v030_second_llm_design.md) | | セカンド LLM (相談 / エージェント / Evaluator への委任) |
@@ -147,10 +165,10 @@ Status の記載が無いものは `implemented`。
 
 ## 未解決の判断事項
 
-- 同じ目的のやり方が 2 つ残っているもの (`/quit` と `/exit`、 `/cost model` と `/cost models` など 9 件): [archive/todo-legacy-ways-cleanup.md](archive/todo-legacy-ways-cleanup.md) の末尾「未対応・要判断」
-- config の `mainLLM` / `secondLLM` / `visionLLM` と model-registry のスロットの二重管理: 同書 C4 で「今は触らない」 と決定済み
+- config の `mainLLM` / `secondLLM` / `visionLLM` と model-registry のスロットの二重管理: 「今は触らない」 と決定済み (external_design §2.6)
+- `/try` の評価役に Generator の作業ログを渡している件 (経緯を断つか): [evaluation-loop.md](evaluation-loop.md) §3.2.1
 - コンテキストの整理の実機での確認 (T2・T13): [context-reduction-redesign.md](context-reduction-redesign.md) §14.3 B
 
 ## アーカイブ
 
-過去の比較・品質サイクルの記録、 完了した ToDo、 置き換えられた設計、 レビューの記録 (50 本) は [archive/README.md](archive/README.md)。
+過去の比較・品質サイクルの記録、 完了した ToDo、 置き換えられた設計、 レビューの記録、 初期の設計書 (DESIGN.md) は [archive/README.md](archive/README.md)。

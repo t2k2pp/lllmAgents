@@ -17,7 +17,7 @@ Discord / Slack アダプタは「run() 完了後に履歴から最後の assist
 ```
 AgentLoop ──emit──> AgentEventBus ──> CliRenderer   (Phase 2 で移設)
                                   ──> SlackBot      (購読: Phase 1 で対応済み)
-                                  ──> DiscordInteractionServer (同上)
+                                  ──> DiscordBot (同上)
                                   ──> (将来) JobRunner / 通知系 (A-6, A-9)
 ```
 
@@ -100,7 +100,7 @@ Promise で、未設定時は従来の headless 動作（拒否 / ツール非�
 | `src/agent/agent-events.ts` | 新規。イベント型・AgentEventBus・InteractionBridge 型 |
 | `src/agent/agent-loop.ts` | `events` フィールド追加、各発火点の併設、run 統計 (outcome/finalText/toolsExecuted) |
 | `src/slack/slack-bot.ts` | `task_complete` 購読で最終応答を取得（履歴スキャン廃止） |
-| `src/discord/interaction-server.ts` | 同上 |
+| `src/discord/discord-bot.ts` | 同上 |
 | `tests/agent/agent-events.test.ts` | 新規。bus の単体テスト |
 
 ## 6. 非目標（Phase 1 ではやらない）

@@ -85,7 +85,7 @@ interface RoomConfig {
 - 新規: `src/agent/room-manager.ts`。専用ファイルは作らず設定は `config.json`（`config/types.ts` に `roomConfig` 追加）。
 - `session-manager.ts`: `SessionMeta.room?` 追加、`SessionData.mode?` 追加。一覧表示に Room 反映。`listSessions` を Room フィルタ可能に。
 - `channel-sessions.ts`: `ConversationStore` を RoomManager 参照へ置換（Discord/Slack の per-channel キーは廃止 or Room へ集約）。
-- `interaction-server.ts` / `slack-bot.ts`: アクティブ化先を RoomManager に。受信開始時の auto-resume。
+- `discord-bot.ts` / `slack-bot.ts`: アクティブ化先を RoomManager に。受信開始時の auto-resume。
 - `repl.ts`: 起動時の Room A バインド、`/room` コマンド追加（completer/help/README の 4 点セット）、`/clear`/`/status` の Room 対応表示。
 - `index.ts`: 起動時に RoomManager 初期化。
 

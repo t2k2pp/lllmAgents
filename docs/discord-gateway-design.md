@@ -7,7 +7,7 @@
 
 `/ask` スラッシュコマンドの受信は、これまで **Interactions Endpoint URL 方式**
 (Discord 側からこちらの HTTPS URL へ POST してくる) で実装されていた
-(`src/discord/interaction-server.ts`、docs/channel-interaction-bridge-design.md)。
+(当時は `src/discord/interaction-server.ts`。 2026-10-25 に `src/discord/discord-bot.ts` (`DiscordBot`) へ改名、docs/channel-interaction-bridge-design.md)。
 
 この方式は「外部から届く公開 HTTPS URL」が必須で、自宅 PC で常駐させる本ツールの
 主用途では ngrok / cloudflared などのトンネルを別途立てる必要があった。
@@ -63,7 +63,7 @@ interaction token が 15 分で失効する既知の制約 (channel-interaction-
 ```
 src/discord/
   gateway-client.ts      … 新規。Gateway v10 への WS 接続を維持する最小クライアント
-  interaction-server.ts  … DiscordInteractionServer を Gateway 受信に書き換え
+  discord-bot.ts  … DiscordBot を Gateway 受信に書き換え
                             (クラス名・ファイル名は呼び出し側の混乱を避けるため当面維持)
   slash-commands.ts      … 変更なし (コマンド登録は元から REST)
 ```
@@ -91,7 +91,7 @@ src/discord/
   表示して停止する
 - `stop()`: 意図的クローズ (code 1000)。再接続しない
 
-### 3.2 interaction-server.ts の変更
+### 3.2 discord-bot.ts の変更
 
 - `http.Server` / 署名検証 / PING(type 1) 応答を削除 (PING は Endpoint 方式の疎通確認)
 - `start()` = GatewayClient 接続 + InteractionBridge 登録、`stop()` = 切断 + 解除

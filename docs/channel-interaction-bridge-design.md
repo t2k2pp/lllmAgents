@@ -35,7 +35,7 @@ ask_user ツール (context.source=slack)
 - **InteractionBridgeRegistry** (`src/agent/interaction-bridge-registry.ts`):
   source → InteractionBridge の module singleton。goal-slot / todo-write と同じ思想で、
   多数のコンストラクタへ bridge を引き回さない
-- SlackBot / DiscordInteractionServer が start() で自分を登録し、stop() で解除する
+- SlackBot / DiscordBot が start() で自分を登録し、stop() で解除する
 - イベント（通知・一方向、A-1）と対話（要求・応答、本書）は別機構
 
 ## 3. 権限フロー (A-2)
@@ -107,7 +107,7 @@ ID と一致せず永遠に拒否される。数値 ID は自分でも分かり�
 対策として待機リストを導入する:
 
 - `DiscordConfig.pendingUsers: PendingUser[]`（`{ id, username, firstSeen, lastSeen, attempts }`）
-- 未許可ユーザーが `/ask` を試みると、`DiscordInteractionServer.recordPendingUser` が
+- 未許可ユーザーが `/ask` を試みると、`DiscordBot.recordPendingUser` が
   正しい数値 ID と表示名を自動で記録し、config を保存（`persistConfig` コールバック経由）して
   REPL コンソールに申請を通知する。本人には ephemeral で「申請を記録しました」と返す。
 - REPL から承認: `/integrations` → Discord 連携 → 「待機リストから利用申請を承認する」で
@@ -131,10 +131,10 @@ ID と一致せず永遠に拒否される。数値 ID は自分でも分かり�
 | `src/tools/definitions/ask-user.ts` | チャネルブリッジ経路 |
 | `src/agent/agent-loop.ts` | getFilteredToolDefs のブリッジ対応 |
 | `src/slack/slack-bot.ts` | ブリッジ実装 (Block Kit / 返信ルーティング / 認可) |
-| `src/discord/interaction-server.ts` | ブリッジ実装 (Components / Modal / 認可) |
+| `src/discord/discord-bot.ts` | ブリッジ実装 (Components / Modal / 認可) |
 | `src/config/types.ts` | allowedUserIds / interactionTimeoutSec / pendingUsers + PendingUser |
 | `src/cli/repl.ts` / `src/cli/integrations-settings.ts` | `/integrations` の Slack / Discord 連携画面: 許可ユーザーの表示/追加/削除、待機リストからの承認/却下 |
-| `src/index.ts` | `--background` の DiscordInteractionServer に persistConfig を渡す |
+| `src/index.ts` | `--background` の DiscordBot に persistConfig を渡す |
 | tests | interaction-bridge-registry / permission channel flow / ask_user 経路 |
 
 ## 9. 既知の制約・後続課題

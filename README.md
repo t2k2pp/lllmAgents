@@ -172,10 +172,10 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/run [status\|pause\|resume\|inspect\|discard]` | foreground runの状態表示・一時停止 (再開地点を保存)・再開・再開地点の診断/破棄。PC再起動を跨ぐ。background taskとsecond LLMは対象外 |
 | `/context` | コンテキストの内訳（トークン数・進捗バー）と整理の状態（次に送る量 P とそれが実数か推定か、予約 R の内訳、整理する点 (規則 1・2)、ひと仕事の増分 G と直近 3 件、直近の整理、今 `/compact` した場合の段階ごとの見込み）。`/context <system|memory|skills|tools|messages>` で各カテゴリの中身をダンプ。詳細: docs/context-reduction-redesign.md §7 |
 | `/compact` | コンテキストを今すぐ整理する（手動の整理はこれ 1 つ。段階 0〜3 を最後まで進め、前後の量・段階ごとの減った量・要約の有無・予熱の有無を表示）。詳細: docs/context-reduction-redesign.md §7 |
-| `/handoff` | 引き継ぎメモを残してコンテキストをリセット（手動のリセット。区切りでの自動リセットは無い）。`/handoff dry` でメモを表示するだけ（リセットしない）。メモの生成に失敗した場合は履歴を変更しない。詳細: docs/context-reduction-redesign.md §7（メモの形は docs/archive/context-strategy.md §2.2） |
-| `/model` | 現在のモデル情報 / `/model list` / `/model <name>` / `/model host <ホスト>` / `/model port <番号>` / `/model provider <type>` / `/model description <text>` / `/model temperature <値>` / `/model top_p <値>` / `/model top_k <値>` / `/model rep_penalty <値>` |
-| `/model second` | セカンドLLM管理 (`setup` / `enable` / `disable` / `list` / `context` / `host` / `port` / `provider` / `description` / `temperature` 等) |
-| `/model vision` | Vision LLM管理 (`setup` / `list` / `context` / `description` / `clear`) |
+| `/handoff` | 引き継ぎメモを残してコンテキストをリセット（手動のリセット。区切りでの自動リセットは無い）。`/handoff dry` でメモを表示するだけ（リセットしない）。メモの生成に失敗した場合は履歴を変更しない。詳細: docs/handoff-design.md |
+| `/model` | 現在のモデル情報 / `/model list` / `/model <name>` / `/model host <ホスト>` / `/model port <番号>` / `/model provider <type>` / `/model context <値>`。 新規追加は `/models` → Add new、 temperature 等・特性説明の編集は `/models` → Edit |
+| `/model second` | セカンドLLM管理 (`enable` / `disable` / `list` / `model <名前>` / `context` / `host` / `port` / `provider`) |
+| `/model vision` | Vision LLM管理 (`list` / `context` / `clear`) |
 | `/swap` | メインLLM ⇔ セカンドLLM を入れ替え (`-y` で確認なし) |
 | `/models` | 登録済みモデルの一覧から main/second への設定・編集・複製・削除・追加。 詳細: docs/model-registry.md |
 | `/todo` | タスクリスト表示 |
@@ -197,7 +197,7 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/parallel` | 並列ツール実行数の設定 |
 | `/stream` | ストリーミング表示の現状表示と切替（引数なし） |
 | `/permission` | 権限の設定画面 (権限ルール `security.rules`。 すべての面 / CLI・Discord・Slack ごと)。対話できる端末専用で、端末が無いときは `~/.localllm/config.json` の `security.rules` を直接編集 |
-| `/loop` | 反復実行モード (`/loop <間隔> <プロンプト>` / `/loop status` で一覧と停止 / `/loop stop [id\|all]`) |
+| `/loop` | 反復実行モード (`/loop <間隔> <プロンプト>` / `/loop status` で一覧と停止。 端末が無いときはエージェントに停止を頼む) |
 | `/goal-seek <goal>` | Goal Seek mode 開始（acceptance criteria を立て合格まで自律実行）。複雑なタスクは通常入力でも自動提案される（`goalSeek.autoPropose: false` で無効化） |
 | `/exit-goal-seek` | Goal Seek mode を抜ける |
 | `/integrations` | 外部サービス連携の設定画面 (Discord / Slack / 会話ログ / Web検索)。設定方法はこの画面だけ (対話できる端末専用。端末が無いときは `~/.localllm/config.json` の `discord` / `slack` / `chatLog` / `search` を直接編集)。Discord の `/ask` 受信は Gateway 方式で公開URL・トンネル不要 (docs/discord-gateway-design.md) |
@@ -527,14 +527,7 @@ Markdownファイルで定義するコーディング規約・ガイドライン
 | `anthropic`  | `ANTHROPIC_API_KEY` (env / 暗号化 / 平文) | Anthropic Messages API を直接叩く。 ツール呼び出し対応 |
 | `claude-cli` | 不要 (`claude login` 済みの subscription を使う) | `claude -p` をサブプロセス起動。 ツールは Claude 内部で完結 (lllmAgents 側ツールには非接続) |
 
-REPL での切替:
-
-```
-/model setup anthropic        Anthropic API (ANTHROPIC_API_KEY)
-/model setup claude-cli       Claude Code CLI (claude -p)
-/model second setup anthropic   セカンドLLM として Anthropic API を設定
-/model second setup claude-cli  セカンドLLM として claude CLI を設定
-```
+REPL での切替: `/models` → `+ Add new...` → 割り当てるスロット (main / second / vision) → プロバイダ (Anthropic API / Claude Code CLI / Claude Agent SDK 等) を選ぶ。
 
 選択可能モデル (`/model list` でハードコード一覧から選ぶ):
 

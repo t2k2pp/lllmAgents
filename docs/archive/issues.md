@@ -123,7 +123,7 @@
 
 ## [ISSUE-08] AgentLoop の最大イテレーション数（50回）の根拠が不明確 — ✅ 解消 (2026-07-04 棚卸し)
 
-> 固定 50 回は廃止され、能力ティア別の `capability.maxIterations` (hard cap) + レジスター別ソフトキャップに置き換わっている。設計は docs/multi-tier-harness-roadmap.md / docs/lightweight-register-anchors-design.md、override は `modelCapabilities` 設定で可能。
+> 固定 50 回は廃止され、能力ティア別の `capability.maxIterations` (hard cap) + レジスター別ソフトキャップに置き換わっている。設計は docs/multi-tier-harness-roadmap.md / docs/archive/lightweight-register-anchors-design.md、override は `modelCapabilities` 設定で可能。
 
 **発見箇所**: `internal_design.md` §2.1
 

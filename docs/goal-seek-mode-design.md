@@ -4,7 +4,7 @@
 > **作成日**: 2026-05-11
 > **タグ**: `pre-goal-seek-mode` (実装開始前の最終地点)
 > **関連**:
-> - 上位構造: `docs/internal_design.md`, `docs/harness-engineering.md`
+> - 上位構造: `docs/internal_design.md`, `docs/archive/harness-engineering.md`
 > - 連携: `docs/archive/agent-loop-efficiency-review.md` (self-check 機構), `docs/ephemeral-context-design.md` (span 境界), `docs/archive/main-second-subagent-comparison.md` (sub-agent 役割)
 > - 既存軸: `docs/multi-tier-harness-roadmap.md` (capability tier), agent-loop.ts:1423 (register table)
 

@@ -1,5 +1,7 @@
 # v0.3.0 セカンドLLM機能 設計書
 
+> **2026-10-25 docs 整理の注記**: `/model setup` / `/model second setup` / `/model vision setup` は削除し、 新規追加は `/models` → Add new (スロット → プロバイダを選ぶ) だけにした。 temperature 等・description の編集は `/models` → Edit だけ (docs/model-registry.md §4.6)。 本文のこれらのコマンドは当時の記録。
+
 > **2026-10-25 docs 整理の注記**: `second_llm_consult` ツールは 2026-06-08 に `second_llm_agent` へ統合した (道具の要らない単発の相談は `second_llm_agent({ task, no_tools: true })`。 内部は `SecondLLMManager.consult()`)。 本文の `second_llm_consult` / `second_llm_evaluator` はツール名としては存在しない (evaluator は `SecondLLMManager.runAsEvaluator()` の内部呼び出し)。 `/second ...` は `/model second ...` に、 `/switch` は `/swap` に一本化済み。
 
 > **ステータス**: 実装済み（2026-03-15）/ **2026-04-30 改訂** (本ドキュメントは現状を反映するため後続改訂が入っている。 §更新履歴 参照)
@@ -10,7 +12,7 @@
 > - `docs/archive/main-second-subagent-comparison.md` — メインLLM / セカンドLLM / サブエージェントの最新の関係整理と決定事項 (2026-04-30)
 > - `docs/main_second_swap_design.md` — main⇔second 入替機能 (型統一による主従の対称化、 2026-04-29)
 > - `docs/llm-profile-descriptions.md` — description によるルーティング誘導
-> - `docs/harness-engineering.md` / `harness-engineering-phase5.md` — Evaluator・ハーネス介入の導入
+> - `docs/archive/harness-engineering.md` / `harness-engineering-phase5.md` — Evaluator・ハーネス介入の導入
 >
 > **実装状況**:
 > - `src/providers/vertex-ai.ts` — Vertex AI プロバイダー ✅

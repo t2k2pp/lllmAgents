@@ -1091,6 +1091,8 @@ LM Studio は thinking コンテンツを `reasoning_content` ではなく `reas
 各サブエージェントは `SubAgentManager.launchForeground()` で独立インスタンスとして起動します。これにより:
 - Generator は前回試行の失敗パターンに引きずられない（Anthropic 推奨のコンテキストリセット）
 - Evaluator は Generator の自己評価バイアスなしに客観的評価できる（Generator/Evaluator 分離）
+- 書き込み後の Evaluator (secondLLM 必須) と違い main LLM を使うのは、 新しい履歴で起動して経緯を持たないため。 Generator の作業ログを評価役に渡している点は
+  論点として残している (docs/evaluation-loop.md §3.2.1)
 
 ### 14.4 主要定数・インターフェース
 
@@ -1144,12 +1146,12 @@ plugin自体はコードとしてimportしない。hookとstdio MCPはlocal comm
 
 ## 16. ハーネスの介入 (モデルへの促し・関門)
 
-モデルの振る舞いを整える仕組みの今の形。 経緯は `docs/harness-engineering.md` (Phase 1〜4) と `docs/archive/harness-engineering-phase5*.md` (Phase 5)。
+モデルの振る舞いを整える仕組みの今の形。 経緯は `docs/archive/harness-engineering.md` (Phase 1〜4) と `docs/archive/harness-engineering-phase5*.md` (Phase 5)。
 
 - **原則は先に伝える**: 行動原則は system prompt (`system-prompt.ts` / `shared-principles.ts`)・ツールの説明・サブエージェントの prompt
   (`buildSubAgentStrategyPrompt`) で伝える。 ツールの説明の詳細は初回使用時に足す (`tool-guides.ts`。 `docs/system-prompt-redesign.md`)。
 - **ツール結果への後付けの警告は入れない**: Phase 5 の第 1〜7 ラウンドで入れた警告の挿入 (同じ失敗の繰り返し・Read→Edit 契約・連続委任など) は
-  第 8 ラウンドで全廃した。 `HarnessState` / `enrichToolResult` (`harness-intervention.ts`) は将来の関門のための何もしない足場として残っている。
+  第 8 ラウンドで全廃した。 その後も何もしない足場として残っていた `HarnessState` / `enrichToolResult` は 2026-10-25 に削除した (`harness-intervention.ts` に残るのはサブエージェント用の prompt だけ)。
 - **前提条件はツールが断る (関門)**: 例 `second_llm_agent` は reason が無いと断る。 `response_complete` は受け入れ条件の ToDo に未完了があると警告を返す (強制する引数あり)。
 - **ループ点検**: §2.1。 作業回数の上限ではなく、 `loopCheckInterval` 回ごとの点検で止める。
 - **応答の終わりの点検**: 自己点検の促し (`self-check-messages.ts`)、 思考と本文の食い違いの検出 (`coherence-check.ts`)、

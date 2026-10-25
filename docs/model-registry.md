@@ -10,7 +10,7 @@
 > - `docs/archive/llm-profiles.md` — 履歴管理 (本書で **registry に昇格**)
 > - `docs/main_second_swap_design.md` — `/swap` (本書では **slot 入替** として整理)
 > - `docs/archive/main-second-subagent-comparison.md` — main / second / subagent の関係 (将来の slot 拡張に影響)
-> - `docs/model-setup.md` — setup wizard (本書で **/models の "Add new..." に統合**)
+> - `docs/archive/model-setup.md` — setup wizard (本書で **/models の "Add new..." に統合**)
 > - `docs/v030_second_llm_design.md` — second LLM 全体 (slot 上の "second" として位置付け)
 
 ---
@@ -208,15 +208,16 @@ modelRef: <registry-id> # この registry entry を直接指定 (slot バイン�
 |---|---|---|
 | `/model` | main + second + vision + 他 named slot の状態を 1 画面で表示 + main slot 操作の入口 | **保持** |
 | `/model second ...` | second slot のサブコマンド (旧 `/second ...` の正準形) | **Phase 4 で追加** |
-| `/model vision ...` | vision slot のサブコマンド (画像認識を含むマルチモーダル言語生成 AI)。 `setup` / `list` / `context` / `description` / `clear`。 未設定なら main LLM にフォールバック | **Phase 5 で追加** |
+| `/model vision ...` | vision slot のサブコマンド (画像認識を含むマルチモーダル言語生成 AI)。 `list` / `context` / `clear`。 未設定なら main LLM にフォールバック | **Phase 5 で追加** |
 | `/models` | レジストリピッカー。 すべての登録・編集・割当はここから | **新規** |
 | `/swap` | main ⇔ second の slot 入替 | **保持** (1 動詞コマンドとして残す) |
 | `/profiles` | (旧) 履歴ピッカー | 2026-10-25 に削除 (`/models` に一本化) |
 | `/second ...` | (旧) second 編集系 | 2026-10-25 に削除 (`/model second ...` に一本化) |
 | `/model info` | (旧) `/model` と完全に同一の重複 | **削除** (`/model` に統一) |
-| `/model setup *` (×9) | (旧) プロバイダ別 setup | 補完から外した (引数なし `/model setup` の wizard は残る。 `/models` の "Add new..." と目的が重なる — docs/archive/todo-legacy-ways-cleanup.md「未対応・要判断」) |
-| `/model host/port/provider/temperature/top_p/top_k/rep_penalty/description` | main 個別編集 | 当初は deprecated 予定だったが、 2026-06-21 に補完へ戻して現行。 `/models` の Edit と目的が重なる (docs/archive/todo-legacy-ways-cleanup.md「未対応・要判断」)。 `/model url` `/model ip` は 2026-10-25 に削除 (`/model host` + `/model port`) |
-| `/second setup *` (×9)、 `/second model/url/provider/temperature/...` 等 | (旧) second 個別編集 | 2026-10-25 に削除。 同じ操作は `/model second setup` / `host` / `port` / `provider` / `temperature` 等 (`/model second url` も削除し host/port に揃えた) |
+| `/model setup` / `/model second setup` / `/model vision setup` | (旧) setup wizard | 2026-10-25 に削除 (`/models` の Add new に一本化。 §4.6) |
+| `/model host/port/provider/context` (main / second) | 接続先の変更 | 現行 (`/models` の Edit は接続先を変えない)。 `/model url` `/model ip` は 2026-10-25 に削除 (`/model host` + `/model port`) |
+| `/model temperature/top_p/top_k/rep_penalty/description` (main / second / vision の description) | (旧) 個別編集 | 2026-10-25 に削除 (`/models` の Edit に一本化。 §4.6) |
+| `/second setup *` (×9)、 `/second model/url/provider/temperature/...` 等 | (旧) second 個別編集 | 2026-10-25 に削除。 同じ操作は `/models` の Add new / Edit と `/model second host` / `port` / `provider` (`/model second url` も削除し host/port に揃えた) |
 
 合計: 170 件超 → 約 40 件削減 (補完候補ベース)。 第 1 階層メニューの肥大化を解消。
 
@@ -258,37 +259,21 @@ modelRef: <registry-id> # この registry entry を直接指定 (slot バイン�
 
 #### Add new... (`a` キー)
 
-provider 選択 → 既存 `setup-wizard.ts` を呼び出して endpoint を構築 → registry に追加。
-**プロバイダ別の専用コマンドは廃止**、 ここで「どのプロバイダ?」 を聞く wizard 1 本に集約。
-
-追加完了時に「main slot に当てる? / second に当てる? / 両方未割当のままにする?」 を聞く。
+割り当てるスロット (main / second / vision) → プロバイダ (クラウド 9 種 + ローカル 4 種) の順に選ぶ → 各プロバイダの setup 手順で endpoint を作って保存し、
+そのスロットに割り当てて実行中へ反映する (`modelsAddNew`)。 **新規追加の入口はこれだけ** (旧 `/model setup` 系は 2026-10-25 に削除)。
+ローカル系は main なら `handleModelSetupLocal` (初回 wizard と同じ流れ)、 second / vision なら `setupLocalSlotLLM` (host / port → モデル一覧から選択)。
+vertex-ai は選択肢に無い (config.json で設定する)。
 
 ### 4.3 Edit ダイアログ
 
-選択された entry の **以下を一括編集** できる:
+選択された entry の **Name / Temperature / Top-p / Top-k / Repetition penalty / Description** を順に入力で編集する (空で未指定。 `modelsEditDialog`)。
+当初の設計にあった Provider / Model / Endpoint / API Key / Context Window / Tags の編集は入っていない
+(接続先は `/model host` / `port` / `provider` / `context`、 別のモデル・プロバイダは Add new か Duplicate)。
 
-```
-  ── Edit: claude-sonnet-4-6 ──
-  Name:           anthropic:claude-sonnet-4-6 @ api.anthropic.com
-  Provider:       anthropic                       (変更不可。 変えるなら Duplicate or Add)
-  Model:          claude-sonnet-4-6
-  Endpoint:       https://api.anthropic.com       (provider による)
-  API Key:        env:ANTHROPIC_API_KEY           (env/encrypted/平文)
-  Context Window: 1000000
-  Temperature:    0.2
-  Top-p:          (未指定)
-  Top-k:          (未指定)
-  Rep Penalty:    (未指定)
-  Description:    要件解釈と全体オーケストレーション向け。 推論精度優先。
-  Tags:           []
-
-  [Save] / [Cancel]
-```
-
-- Provider 変更は別 entry を作るべき行為なので Edit では不可。 Duplicate + Add new を促す
+- Description の入力の前に書き方の目安 (得意/不得意・速度感・用途、 100〜300 文字) を表示する
 - Save 時:
   - registry エントリを更新
-  - **当該 entry が main / second slot に居れば** `config.mainLLM` / `secondLLM` も同期書換 + provider 再接続
+  - **当該 entry が main / second / vision slot に居れば** `config.mainLLM` / `secondLLM.endpoint` / `visionLLM` も同期書換 + provider 再接続 (vision の同期は 2026-10-25 に追加)
 
 ### 4.4 `/model` (ステータス表示)
 
@@ -309,6 +294,18 @@ provider 選択 → 既存 `setup-wizard.ts` を呼び出して endpoint を構�
 
 slot.main と slot.second の id を入れ替えるだけ。 entry そのものは触らない。
 両 slot の provider が再接続される。 (現状の挙動と同じ)
+
+### 4.6 同じ目的のやり方の一本化 (2026-10-25)
+
+利用者の決めた規則: **Claude Code に類似があれば Claude Code に、 無ければ Codex に、 両方に無ければ新しく作られた方に合わせる**。
+Claude Code の仕様は 2026-10-25 に公式ドキュメント (code.claude.com/docs/en/commands, /fullscreen, /scheduled-tasks) で確認した。 作られた日は git 履歴で確認した。
+
+| 重なっていたもの | 残した方 | 根拠 |
+|---|---|---|
+| `/model setup` 系 と `/models` の Add new | Add new | Claude Code / Codex の `/model` はモデルを選ぶだけで接続の登録は持たない → 新しい方 (Add new は 2026-05-27、 `/model setup` は 2026-04-26)。 Add new に無かった「ローカル系を second に追加」 を先に足した |
+| `/model temperature` 等・`description` と `/models` の Edit | Edit | 両者に無い → 新しい方 (Edit は 2026-05-27 の `/models` と同時)。 Edit を vision にも同期するようにした |
+| `/model info` / `/model second status\|info` / `/model vision status\|info` と引数なし | 引数なし | 両者に無い別名。 引数なしの表示が先にあり、 別名は後から足された同義語 |
+| 引数なしの `/model second model` と `/model second list` | `list` | 両者に無い・同じ日 (2026-04-07) に作られた → main の `/model list` / vision の `/model vision list` と揃えた (名前を付けた `/model second model <名前>` は直接指定として残る) |
 
 ---
 
@@ -361,5 +358,5 @@ slot.main と slot.second の id を入れ替えるだけ。 entry そのもの�
 | `docs/archive/llm-profiles.md` | 冒頭に「→ `docs/model-registry.md` に統合 (registry に昇格)」 を追記。 内容は実装が落ち着くまで参照可能なまま残す |
 | `docs/main_second_swap_design.md` | 冒頭に「slot 表現への移行は `docs/model-registry.md` 参照」 を追記。 `/swap` の挙動は不変なので本文はそのまま |
 | `docs/archive/main-second-subagent-comparison.md` | サブエージェントとの将来統合点 (§2.4) を相互参照リンクで結ぶ |
-| `docs/model-setup.md` | 「setup wizard は `/models` の Add new... から呼ばれる形に統合」 と注記 |
+| `docs/archive/model-setup.md` | 「setup wizard は `/models` の Add new... から呼ばれる形に統合」 と注記 |
 | `docs/v030_second_llm_design.md` | second LLM の概念は slot.second として継続。 構成変更は無し、 参照リンクのみ |

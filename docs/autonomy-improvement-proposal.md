@@ -15,7 +15,7 @@
 
 - エージェントコア: `src/agent/` (agent-loop, system-prompt, goal-slot, intent-classifier,
   harness-intervention, capability-tier, progress-judge, tool-call-normalizer ほか)
-- チャネル統合: `src/discord/interaction-server.ts`, `src/slack/slack-bot.ts`, `src/utils/discord.ts`
+- チャネル統合: `src/discord/discord-bot.ts`, `src/slack/slack-bot.ts`, `src/utils/discord.ts`
 - 権限モデル: `src/security/permission-manager.ts` (headless モード、discord/slackAutoApprove)
 - ツール群: `src/tools/definitions/` (24種)、スキル (18種)、README.md、docs 配下の主要設計書
 

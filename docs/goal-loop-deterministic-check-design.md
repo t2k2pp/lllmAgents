@@ -8,7 +8,7 @@
 > - 既存パラダイム: `docs/goal-seek-mode-design.md`
 > - 評価ループ: `docs/evaluation-loop.md`
 > - 反復実行: `docs/loop_feature.md`（`/loop` 時間反復）
-> - 思想: `docs/harness-engineering.md`
+> - 思想: `docs/archive/harness-engineering.md`
 
 ---
 

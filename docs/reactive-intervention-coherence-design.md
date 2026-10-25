@@ -4,8 +4,8 @@
 > **作成日**: 2026-06-07
 > **位置づけ**: ハーネス設計の第3の対称ピース。`strategic-todo-design.md`（過小納品＝計画蒸発を防ぐ／proactive）と `lightweight-register-anchors-design.md`（過剰プランを防ぐ／proactive）に続き、本書は **reactive（自己点検・空応答・諦め）介入レイヤーを proactive と同じ思想に一本化**する
 > **関連**:
-> - 上位: `docs/harness-engineering.md`
-> - 対: `docs/strategic-todo-design.md` §3.3（空応答 nudge の意味反転）、`docs/lightweight-register-anchors-design.md`
+> - 上位: `docs/archive/harness-engineering.md`
+> - 対: `docs/strategic-todo-design.md` §3.3（空応答 nudge の意味反転）、`docs/archive/lightweight-register-anchors-design.md`
 > - 経緯: 為替確認セッション `~/.localllm/sessions/mq2xtzdy-luyv.json`（2026-06-06, Qwen3.6-27B）が**プローブ**として構造欠陥を露呈
 > - 議論: ユーザーとの対話（2026-06-07）で「具体例で引きずらない＝抽象化優先」「成果物は多様（コード/文章/PPTX/Excel/調査/書籍/答え）」という設計信条を確立
 

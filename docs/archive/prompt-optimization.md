@@ -20,7 +20,7 @@
 - 詳細ガイドはツール初回使用時にツール結果に付加して注入
 - 2回目以降は注入しない（`usedToolGuides: Set<string>` で追跡）
 
-**注入タイミング**: `executeSingleTool` / `executeToolsParallel` 内で `enrichToolResult` の後に実行
+**注入タイミング**: `executeSingleTool` / `executeToolsParallel` 内でツール結果を履歴に入れる前に実行
 
 **対象ツール名 → ガイドキーのマッピング**:
 - `second_llm_consult`, `second_llm_agent` → `"secondLLM"`

@@ -219,8 +219,7 @@
 `azure-gpt` / `azure-openai`でGPT-5以降またはo-seriesを使う場合、明示的な
 `temperature` / `top_p`はAPIに拒否されるモデルがある。本アプリは該当モデルではこの2項目を
 送信せず、画面に一度だけ能力差を通知する。Azure OpenAIに存在しない`top_k` /
-`repetition_penalty`も送信しない。設定自体を消すには`/model temperature auto`、
-`/model top_p auto`等を使用する。GPT-4.1など対応モデルの`temperature` / `top_p`は維持する。
+`repetition_penalty`も送信しない。設定自体を消すには`/models` → Edit で該当の値を空にする。GPT-4.1など対応モデルの`temperature` / `top_p`は維持する。
 
 OpenAI公式のモデル移行ガイドでも、GPT-5系のreasoning設定や新しいモデルではこれらの
 パラメータが非対応になり得るため、モデルごとの互換性確認が必要とされている。

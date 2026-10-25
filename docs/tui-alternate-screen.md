@@ -325,7 +325,7 @@ export const select = gate(rawSelect);   // @inquirer/prompts 系も同様にく
 以下は独立した対応モードとしてAlternate Screenを使わない。
 
 1. 通常のTTY起動（既定）
-2. `--no-alt-screen`、または環境変数 `LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1` が設定されている
+2. 環境変数 `LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1` が設定されている (旧 `--no-alt-screen` は 2026-10-25 に削除)
 3. `process.stdout.isTTY` が false (パイプ・リダイレクト・CI)
 
 全画面TUIは`--alt-screen`または`LLLMAGENT_ENABLE_ALTERNATE_SCREEN=1`で明示した場合だけ使う。
@@ -455,7 +455,7 @@ release()     →  所有者がいなくなったら raw mode を解除
 | セッション終了後にログが残らない (現行からの退行) | `stop()` でスクロールバックを通常画面へ書き戻す (§8) |
 | `console.log` 差し替えが外部ライブラリと衝突する | 差し替えは 1 箇所・起動直後のみ。 元の関数を保持し `stop()` で復元 |
 | 全画面再描画が遅い | 16ms のフレーム集約 (§3.5)。 実測で問題が出たら差分描画は**入れない**で描画頻度を下げる (差分描画は不具合 1 の再来を招く) |
-| Windows conhost で ANSI が効かない | 全画面TUIの明示時に`TERM`/`WT_SESSION`/ConPTYの印が無ければ原因と`--no-alt-screen`を示してfail-fastする。能力不明を黙って別表示へ落とさない |
+| Windows conhost で ANSI が効かない | 全画面TUIの明示時に`TERM`/`WT_SESSION`/ConPTYの印が無ければ原因と`LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1`を示してfail-fastする。能力不明を黙って別表示へ落とさない |
 | 日本語入力が右端到達後に1文字ごと改行される | 最終列はDECAWMの折返し待ちを生むため常に1桁空ける。`Intl.Segmenter`で結合文字・ZWJ絵文字を分割せず、端末soft wrapへ依存しない |
 | パイプモードでの検証しかできず TTY 実機の退行に気付けない | 段階ごとに手動 TTY 確認を必須とする。 `CLAUDE.md` の「対話品質はパイプモードで検証できない」 に従う |
 

@@ -43,7 +43,7 @@ truncate** していた。これは「黙って欠損させる」技術的負債
   メイン会話のコンテキストを汚さない・費やさない。
 
 ### 2.5 再ビルド経路での圧縮状態の引き継ぎ (silent 復帰の防止)
-`updateLLMProfiles` (/model description 等) や `restoreSession` は system prompt を再ビルドする。
+`updateLLMProfiles` (/models Edit の description 等) や `restoreSession` は system prompt を再ビルドする。
 ここで圧縮 overrides を渡し忘れると、 **圧縮 ON のまま裏で全量へ戻る** silent な不整合になる
 (実装レビューで検出)。対策: 圧縮済みテキストを `compressionState.compressedText` にキャッシュし、
 `currentCompressionOverrides()` で LLM 再呼出なしに overrides を復元、 全再ビルド経路で渡す。

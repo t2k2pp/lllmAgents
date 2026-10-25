@@ -2,7 +2,7 @@
 
 > **ステータス**: 実装済み（2026-06-02）。A=シャドウ Git オプトイン / D=スモーク Tool＋スキル強化。tsc 通過・ロジック実証済み（手動 TTY での REPL/対話品質確認は別途）
 > **起票日**: 2026-06-02
-> **関連**: ユーザールール「負債貯金はしない」「参考資料と成果物を区別」、`docs/workspace-separation.md`（sandbox 成果物の扱い）、`docs/harness-engineering.md`、`src/agent/hooks.ts`、`src/tools/tool-executor.ts`、`src/skills/builtin/game-development/SKILL.md`、`src/browser/playwright-manager.ts`
+> **関連**: ユーザールール「負債貯金はしない」「参考資料と成果物を区別」、`docs/workspace-separation.md`（sandbox 成果物の扱い）、`docs/archive/harness-engineering.md`、`src/agent/hooks.ts`、`src/tools/tool-executor.ts`、`src/skills/builtin/game-development/SKILL.md`、`src/browser/playwright-manager.ts`
 > **メモリ**: [[feedback_review_focus_ux]]（固まる/中断不能/進捗不可視を最優先）、[[feedback_diagnose_before_speculate]]
 
 ## 改訂履歴

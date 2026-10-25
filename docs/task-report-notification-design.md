@@ -38,7 +38,7 @@
 
 | 箇所 | 内容 |
 |------|------|
-| SlackBot / DiscordInteractionServer | 最終応答の末尾に `formatReportFooter` を付加 |
+| SlackBot / DiscordBot | 最終応答の末尾に `formatReportFooter` を付加 |
 | repl.ts (CLI) | 旧「最後の assistant メッセージを送る」通知を `formatTaskReport` に置換。task_complete 購読に統一し履歴スキャンを廃止 |
 
 ## 5. 通知ゲート (config)

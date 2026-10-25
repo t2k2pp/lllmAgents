@@ -156,14 +156,11 @@ lllmAgents の config には API キーを持たない (= 個人 subscription �
 
 | コマンド                              | 動作                                             |
 |---------------------------------------|--------------------------------------------------|
-| `/model setup anthropic`              | API キー保管方法 (env / encrypted / 平文) → モデル選択 |
-| `/model setup claude-cli`             | モデル選択のみ (認証は claude CLI 側) ※tool calling 不可 |
-| `/model setup claude-agent-sdk`       | モデル選択のみ (認証は claude login 継承) ※tool calling 対応 |
+| `/models` → Add new → スロット → Anthropic API | API キー保管方法 (env / encrypted / 平文) → モデル選択 |
+| `/models` → Add new → スロット → Claude Code CLI | モデル選択のみ (認証は claude CLI 側) ※tool calling 不可 |
+| `/models` → Add new → スロット → Claude Agent SDK | モデル選択のみ (認証は claude login 継承) ※tool calling 対応 |
 | `/model list`                         | CLAUDE_MODELS を選択肢として表示                 |
 | `/model <id>`                         | モデル ID を直接指定 (例: `/model claude-haiku-4-5`) |
-| `/model second setup anthropic`      | セカンドLLM として anthropic を設定              |
-| `/model second setup claude-cli`     | セカンドLLM として claude-cli を設定             |
-| `/model second setup claude-agent-sdk` | セカンドLLM として claude-agent-sdk を設定 (subscription + tool 両立) |
 | `/swap`                               | メインLLM ⇔ セカンドLLM の入れ替え (Claude プロバイダ含む) |
 
 REPL 側の実装は `setupClaudeLLM(target, provider)` (cli/repl.ts) に集約。

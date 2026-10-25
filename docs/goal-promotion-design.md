@@ -53,7 +53,7 @@ user 明示にあたる。承認なしに mode が変わることはない。
 |----------|------|
 | `src/agent/goal-promotion.ts` | 新規。発動判定 / criteria 抽出（共通化）/ 承認 / cooldown |
 | `src/cli/repl.ts` | 通常入力パスで提案を呼ぶ。`/goal-seek` の抽出ロジックを共通関数へ置換 |
-| `src/slack/slack-bot.ts` / `src/discord/interaction-server.ts` | run 前に提案を呼ぶ |
+| `src/slack/slack-bot.ts` / `src/discord/discord-bot.ts` | run 前に提案を呼ぶ |
 | `src/config/types.ts` | `goalSeek?: { autoPropose?: boolean }` |
 | `tests/agent/goal-promotion.test.ts` | 発動条件 / 承認 / 拒否 cooldown / 抽出失敗 |
 

@@ -299,7 +299,7 @@ system prompt に短いブロックを足す。
 | `/models slot clear <name>` | slot を解除 |
 
 予約 slot (`main` / `second` / `vision`) は **一覧には出るが `/models slot` からは変更できない**。
-変更は正規経路 (`/models` の Set as main / `/model second setup` / `/model vision setup`) から行う。
+変更は正規経路 (`/models` の Set as main / second / vision、 新規は Add new) から行う。
 
 表示例:
 
@@ -315,8 +315,7 @@ system prompt に短いブロックを足す。
 ```
 
 `main` / `second` / `vision` を `<name>` に指定した場合は
-「その slot は `/models` の Set as main / `/model second setup` / `/model vision setup`
-から設定してください」 と誘導して終わる (§2.1)。
+「`/models` の Set as main / second / vision (新規は `/models` → Add new) から設定してください」 と誘導して終わる (§2.1)。
 
 ### 7.1 slot 名のバリデーション
 

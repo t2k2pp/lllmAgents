@@ -1,6 +1,6 @@
 # 非同期サーフェス（Discord/Slack）権限・配信・観測性 再設計
 
-実装エージェント向けの作業仕様。状態: implemented (2026-10-25 docs 整理で更新。 当初は「ドラフト・未実装」。 実装は `src/agent/agent-loop.ts` / `src/discord/interaction-server.ts` / `src/config/types.ts` / `src/agent/llm-logger.ts` が本書を参照している)。 本文の `file:行` は起票時点のもの。
+実装エージェント向けの作業仕様。状態: implemented (2026-10-25 docs 整理で更新。 当初は「ドラフト・未実装」。 実装は `src/agent/agent-loop.ts` / `src/discord/discord-bot.ts` / `src/config/types.ts` / `src/agent/llm-logger.ts` が本書を参照している)。 本文の `file:行` は起票時点のもの。
 再現/H-1切り分け用ログ: `~/.localllm/logs/sessions/2026-06-14T00-18-05_main.jsonl` / セッション `mqci53z7-cg4k.json`(room=B)。
 関連: `room-model-design.md` `channel-interaction-bridge-design.md` `goal-seek-mode-design.md`。
 
@@ -12,8 +12,8 @@
 - ⇒ Discord 発 goal-seek は source=discord 固定の長時間1本 run()。`/room B` では止まらず source も変わらない（REPL から救えない）。
 
 **R-2 Discord 返信・権限ボタンが15分失効の interaction token に密結合**
-- 返信は全経路 `/webhooks/{appId}/{interactionToken}`: `interaction-server.ts:542,562,584`（sendFollowUp/postFollowUp/進捗/分割）。
-- Bot Token は存在し Gateway で使用済み: `gateway-client.ts:178` / `interaction-server.ts:92-97`（`channels/{id}/messages` 未使用）。
+- 返信は全経路 `/webhooks/{appId}/{interactionToken}`: `discord-bot.ts:542,562,584`（sendFollowUp/postFollowUp/進捗/分割）。
+- Bot Token は存在し Gateway で使用済み: `gateway-client.ts:178` / `discord-bot.ts:92-97`（`channels/{id}/messages` 未使用）。
 - 未許可ツールは bridge ボタン確認へ: `permission-manager.ts:285`（自動許可セット: `:274-282, :120-121`）。
 
 **R-3 stuck-loop は検出のみで遮断しない**: `agent-loop.ts:1885-1887`（console.log+notice のみ、break 無し。`recentFailures`:`:240`）。
@@ -23,12 +23,12 @@
 - 一方セッションは `meta.room` で Room 別: `session-manager.ts`。記録粒度が割れている。
 
 **R-5 大容量成果物の配達手段と「配達結果のフィードバック」が無い → モデルが偽完了**
-- Discord 分割はあるが失効トークンで全 401: `interaction-server.ts:284`。REPL は端末に出るが生成打切で未完。
+- Discord 分割はあるが失効トークンで全 401: `discord-bot.ts:284`。REPL は端末に出るが生成打切で未完。
 
 ## 直す方向（各 R に対応）
 
 - **5.1 (R-1)** 単一 sticky `currentSource` を廃し、権限/配信の解決時に「この run の実行コンテキスト（Room/面/ポリシー）」を都度引く。→ 決定1。
-- **5.2 (R-2 配信)** 返信を Bot Token `channels/{channelId}/messages` に統一。3秒 defer ack は維持（`interaction-server.ts:201-202`）。進捗はメッセージ PATCH。→ 決定4。
+- **5.2 (R-2 配信)** 返信を Bot Token `channels/{channelId}/messages` に統一。3秒 defer ack は維持（`discord-bot.ts:201-202`）。進捗はメッセージ PATCH。→ 決定4。
 - **5.3 (R-2 権限)** 背景面は同期確認を廃し autorun ポリシー。未許可操作はブロック待ちでなく「正直に中断・報告」。サンドボックス/deny は維持。`bash` は OS 封じ込めゲート、受付は user ID allowlist 必須（fail-closed）。→ 決定2,3。
 - **5.4 (R-3)** 同一(tool,error)が `FAILURE_WINDOW` 反復で run を打ち切り原因つきで報告。恒久失敗（401/認証/権限）は早期 abort。
 - **5.5 (R-4)** 各 jsonl レコードに `roomId`/`surface` を付与（5.1 と同じ情報源）。
@@ -44,7 +44,7 @@
 
 実装状況（2026-06-16）:
 - **P1 `5.5` ログタグ = 済**（`llm-logger.ts` LogContext/setContext、`agent-loop.ts` で roomId=session.meta.room / surface=currentSource を注入。A/B/C・cli/discord/slack に分岐なし。`tests/agent/llm-logger.test.ts`）。
-- **P2 `5.2` Bot Token 配信 = 済**（`interaction-server.ts` postChannelMessage で channels/{id}/messages 送信。3秒 defer ack 維持＋@original 固定 ack。Slack は元々 bot token 配信で対象外）。
+- **P2 `5.2` Bot Token 配信 = 済**（`discord-bot.ts` postChannelMessage で channels/{id}/messages 送信。3秒 defer ack 維持＋@original 固定 ack。Slack は元々 bot token 配信で対象外）。
   - **P2-fix（2026-06-16）**: チャネルコマンド（`/clear` `/context` `/status` `/todo` `/help` `/room`）は結果を別チャンネルメッセージで返していたため deferred ack（@original）が「考え中...」のまま残っていた。コマンドは短時間（15分 token 失効は無関係）なので結果を `sendFollowUp` で @original に編集して返すよう修正。出力が 2000 字を超える場合は @original を畳んでファイル添付で全文配達（silent loss と placeholder 残りの両方を回避）。
 - **P3 `5.3` 権限ポリシー = 済**（`permission-manager.ts` 背景面 autorun。SecurityConfig.discord/slackAutorun 既定 true。deny/サンドボックス/危険block 通過を根拠に自動許可、doomed ボタン廃止。autorun 無効時のみ従来ブリッジ）。
   - **P3-hardening（2026-06-16）**: レビューで fail-open 連鎖を検出し是正。(A) 背景面 autorun を CLI と同じ `checkAutorunPermission` 経由に統一し、`bash` は `isBashNetworkContained()`（OS 封じ込め）が成立する面でのみ自動実行。封じ込め未確立 or 破壊的コマンドは silent block でなく正直拒否（proposal §2.5「封じ込めの保証を確認削減に交換」を厳守）。明示 `discord/slackAutoApproveTools` への `bash` 追加が唯一の opt-in (2026-10-25 以降は allow ルール `discord:bash` / `slack:bash`。 docs/archive/todo-legacy-ways-cleanup.md T4)。(B) `isUserAllowed` を fail-open→fail-closed に変更（proposal §6「allowlist 必須」）。`allowedUserIds` 空時は起動時に警告を出し silent dead-bot を回避。`tests/security/channel-bridge-permission.test.ts` に封じ込めゲート/破壊的拒否/opt-in を追加。

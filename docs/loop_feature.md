@@ -19,14 +19,12 @@ Claude Code の `/loop` と `CronCreate/List/Delete` に相当する、ユーザ
 /loop status                アクティブなループ一覧 + 停止 picker (checkbox 複数選択)
 ```
 
-### picker を使わない停止 (非TTY・スクリプト用)
+### 停止
 
-```
-/loop stop <id>             指定 ID のループを停止 (スクリプト用)
-/loop stop all              全ループを停止 (スクリプト用)
-```
-
-`/loop status` は一覧表示の直後に停止対象を checkbox で複数選択できる。 `/loop stop` は picker を使わずに id 指定 / 全停止する (非TTY でも使える)。 旧 `/loop list` は `/loop status` に一本化して削除した (docs/archive/todo-legacy-ways-cleanup.md)。
+`/loop status` は一覧表示の直後に停止対象を checkbox で複数選択できる。 停止の操作はこれだけ。
+端末が無い (picker を出せない) ときは、 エージェントに「ループ [id] を止めて」 と頼むと `schedule_delete` で止める
+(Claude Code も `/loop` を止める専用コマンドは持たず、 Claude に頼むと `CronDelete` で止める。 2026-10-25 に公式ドキュメントで確認)。
+旧 `/loop list` は `/loop status` に一本化、 旧 `/loop stop [id|all]` は 2026-10-25 に削除した。
 
 ### 間隔指定フォーマット
 
@@ -132,5 +130,5 @@ Node.js は単一スレッドのため、エージェント実行中（`await ag
 - `/loop` はスキルシステムを経由しない（REPL の switch 文で直接処理）
 - ループは REPL セッション内のみ有効（セッション終了時に全タイマーをクリア）
 - モデル向けscheduleも同じくsession内だけで、プロセス再起動後へ永続化しない
-- 実行中のループをまとめてキャンセルする場合は `/loop status` で全選択 → Enter、 または `/loop stop all` を使う
+- 実行中のループをまとめてキャンセルする場合は `/loop status` で全選択 → Enter (端末が無いときはエージェントに全停止を頼む。 `schedule_delete` の `all=true`)
 - CLAUDE.md の「絶対パス使用」ルールは本機能には非該当（パス操作なし）

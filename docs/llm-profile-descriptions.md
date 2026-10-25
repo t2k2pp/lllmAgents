@@ -62,22 +62,17 @@ interface SecondLLMEndpoint {  // セカンドLLM
 
 ### 4. REPL コマンド (`src/cli/repl.ts`)
 
-**2026-05-28 更新**: 個別編集系のコマンドは `/models` (Model Registry) の Edit ダイアログにも統合された。 `/model description` 等は 2026-06-21 に補完へ戻しており、 現在も使える (`/models` の Edit と目的が重なる件は docs/archive/todo-legacy-ways-cleanup.md「未対応・要判断」)。
+**2026-10-25 更新**: 設定の入口は `/models` → エントリ選択 → Edit → Description だけ (`/model description` / `/model second description` / `/model vision description` は削除。 docs/model-registry.md §4.6)。
+入力の前に書き方の目安 (得意/不得意・速度感・用途、 100〜300 文字) を表示する。 割り当て中の main / second / vision なら設定にも反映して適用する。
 
-- `/models` → エントリ選択 → Edit → Description フィールド (canonical)
-- `/model description` — 現在値表示＋使い方＋記載例
-- `/model description <text>` — 設定
-- `/model description clear` — クリア
-- `/model second description` / `/model second description <text>` / `/model second description clear` — second slot 用 (旧 `/second description ...` は 2026-10-25 に削除)
-- `/model vision description` — vision slot 用 (Phase 5 で追加)
-- `/model` の status 出力に各 slot の特性を表示 (旧 `/model info` は `/model` と同義になり、 補完からは削除)
+- `/model` / `/model second` / `/model vision` (引数なし) の状態表示に各 slot の特性を表示
 - 設定直後 `REPL.refreshLLMProfiles()` が `AgentLoop.updateLLMProfiles()` を呼び、 次ターン以降のシステムプロンプトに反映
 
 ### 5. Setup ウィザード (`src/config/setup-wizard.ts`)
 
-メインLLM選択後に任意で description を入力するプロンプトを追加（空のままEnterでスキップ可、 後から `/models` Edit または `/model description` で設定可能）。
+メインLLM選択後に任意で description を入力するプロンプトを追加（空のままEnterでスキップ可、 後から `/models` Edit で設定可能）。
 
-セカンドLLM の description はウィザード対象外。 REPL の `/model second setup` → `/models` Edit (もしくは旧 `/model second description <text>` alias) の流れで設定する。
+セカンドLLM の description はウィザード対象外。 REPL の `/models` → Add new (second) → Edit の流れで設定する。
 
 ## 動作確認
 

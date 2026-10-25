@@ -17,7 +17,7 @@
 > - 元設計: `docs/v030_second_llm_design.md` (Orchestrator-Worker パターン、 階層型委任ルール)
 > - 対称化: `docs/main_second_swap_design.md` (型統一・swap 機能、 主従の対称性)
 > - 補助情報: `docs/llm-profile-descriptions.md` (description によるルーティング誘導)
-> - ハーネス: `docs/harness-engineering.md`, `docs/archive/harness-engineering-phase5.md` (委任ガード、 Evaluator 統合)
+> - ハーネス: `docs/archive/harness-engineering.md`, `docs/archive/harness-engineering-phase5.md` (委任ガード、 Evaluator 統合)
 
 ---
 
@@ -537,5 +537,5 @@ D1, D8, D9 は実装を伴う。 ファイル単位での予定:
 **設計書一覧 (時系列)**:
 1. `docs/v030_second_llm_design.md` (2026-03-15) — Orchestrator-Worker パターン、 階層型委任、 Credential Vault
 2. `docs/llm-profile-descriptions.md` (時期不明) — description によるルーティング誘導
-3. `docs/harness-engineering.md` / `harness-engineering-phase5.md` (Phase 5: 2026 春) — Evaluator・ハーネス介入の導入
+3. `docs/archive/harness-engineering.md` / `harness-engineering-phase5.md` (Phase 5: 2026 春) — Evaluator・ハーネス介入の導入
 4. `docs/main_second_swap_design.md` (2026-04-29) — 型統一・主従対称化
