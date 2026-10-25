@@ -27,15 +27,6 @@ describe("sanitizeParsedConfig", () => {
     expect(r.config).toEqual({ context: {} });
   });
 
-  it("整理の旧キー (context.reduction / forgetting / strategy) は読まないが、 削除の移行 (タスク 11) までは無警告で残る", () => {
-    const input = {
-      context: { reduction: "hybrid", forgetting: { minIntervalTurns: 3 }, strategy: { mode: "auto" } },
-    };
-    const r = sanitizeParsedConfig(input);
-    expect(r.warnings).toEqual([]);
-    expect(r.config).toEqual(input);
-  });
-
   it("未知のトップレベルキーは黙って消さない (将来フィールドの保全)", () => {
     const input = { futureFeature: { anything: 1 }, jpyPerUsd: 150 };
     const r = sanitizeParsedConfig(input);
@@ -143,7 +134,8 @@ describe("sanitizeParsedConfig", () => {
   });
 
   it("削除した設定キー (discord.publicKey 等) が残った旧 config も無警告で読める", () => {
-    // docs/todo-legacy-ways-cleanup.md T1: 型・スキーマから削除したが、 既存 config.json に残っていても起動を止めない
+    // docs/todo-legacy-ways-cleanup.md T1: 型・スキーマから削除したが、 既存 config.json に残っていても起動を止めない。
+    // 実際の読み込み (loadConfig) では検証の前に 1 回だけの移行・削除で消える (permission-migration / context-keys-removal の試験)
     const input = {
       discord: { enabled: false, webhookUrl: "", publicKey: "abc", interactionPort: 3003 },
       context: { compressionThreshold: 0.8, maxHistoryMessages: 100 },

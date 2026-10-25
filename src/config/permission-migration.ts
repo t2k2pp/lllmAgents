@@ -18,10 +18,9 @@
  *   - 既存 rules.allow / rules.ask の面の指定なしルール → "cli:" を付ける (旧コードは CLI でしか評価していなかった)
  *   - 既存 rules.deny → そのまま (旧コードもすべての面で強制していた)
  */
-import * as fs from "node:fs";
-import { hardenFilePermissions } from "../utils/atomic-file.js";
 import { INHERENTLY_SAFE_TOOLS } from "../security/inherently-safe-tools.js";
 import { parseRule, formatRule, type RuleSurface } from "../security/rule-engine.js";
+import type { OneTimeMigration } from "./one-time-migration.js";
 
 export const LEGACY_PERMISSION_KEYS = [
   "autoApproveTools",
@@ -143,25 +142,6 @@ export function migrateLegacyPermissionLists(raw: unknown): PermissionMigrationR
   return { migrated: true, droppedRequireApproval };
 }
 
-/** 移行前の config.json を残す先 (既にあれば上書きせず時刻付きの別名にする) */
-export function migrationBackupPath(configPath: string): string {
-  const base = `${configPath}.before-rules-migration.bak`;
-  if (!fs.existsSync(base)) return base;
-  return `${configPath}.before-rules-migration-${new Date().toISOString().replace(/[:.]/g, "-")}.bak`;
-}
-
-/**
- * 移行前の内容をバックアップする。 元ファイルがあればそのままコピー、 無ければ (破損から .bak で復元した場合など)
- * 読み込んだ内容を書く。 旧形式ではシークレットを含みうるため権限を自ユーザーのみに絞る。 書いたパスを返す。
- */
-export function writeMigrationBackup(configPath: string, originalParsed: unknown): string {
-  const backupPath = migrationBackupPath(configPath);
-  if (fs.existsSync(configPath)) fs.copyFileSync(configPath, backupPath);
-  else fs.writeFileSync(backupPath, JSON.stringify(originalParsed, null, 2), "utf-8");
-  hardenFilePermissions(backupPath);
-  return backupPath;
-}
-
 /** 移行時に 1 回だけ出す告知 */
 export function migrationNotice(backupPath: string, result: PermissionMigrationResult): string {
   const dropped =
@@ -170,3 +150,13 @@ export function migrationNotice(backupPath: string, result: PermissionMigrationR
       : "";
   return `権限の設定 (autoApproveTools 等) を security.rules のルールに移行しました (元の設定: ${backupPath})。${dropped}`;
 }
+
+/** loadConfig が当てる 1 回だけの移行 (バックアップ・保存・告知の仕組みは one-time-migration.ts) */
+export const permissionRulesMigration: OneTimeMigration = {
+  backupName: "rules-migration",
+  saveFailureLabel: "権限設定のルールへの移行",
+  apply(raw) {
+    const result = migrateLegacyPermissionLists(raw);
+    return result.migrated ? (backupPath) => migrationNotice(backupPath, result) : null;
+  },
+};

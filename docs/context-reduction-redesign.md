@@ -1,6 +1,6 @@
 # コンテキスト整理の作り直し 設計書
 
-> **ステータス**: design (2026-10-25 設計 / 実装中。 §13 のタスク 1・3〜10 済み)
+> **ステータス**: design (2026-10-25 設計 / 実装中。 §13 のタスク 1・3〜11 済み)
 > **置き換える設計**: `docs/context-forgetting.md` (忘却) / `docs/context-strategy.md` (区切りでの使い分け)。
 > 実装が済んだら両書の先頭に「現行は本書」 の注記を入れる (§12)。
 > **前提**: `docs/prompt-prefix-stability.md` (一度送ったメッセージは書き換えない) が実装済みであること。
@@ -845,7 +845,29 @@ reason は `not-local-server` / `tail-not-assistant` / `empty-history`) と動�
 
 実装 (タスク 8): 型 `SummaryFailurePolicy` と既定値 `DEFAULT_SUMMARY_FAILURE_POLICY` (`config/types.ts`。 `getDefaultConfig` と読み出しの両方がこれを使う)。
 スキーマ (`config-schema.ts`) は `context.summaryFailure` を `continue` / `stop` に限り、 それ以外は既存の仕組みどおり警告して取り除く (= 既定値)。
-AgentLoop は整理イベントのたびに `loadConfig()` から読む (変更は次の整理から効く)。 変更するコマンドは作らない (config.json を直接書く)。 文書 (`config-reference.md`) への記載はタスク 12。
+AgentLoop は整理イベントのたびに `loadConfig()` から読む (変更は次の整理から効く)。 変更するコマンドは作らない (config.json を直接書く)。 `config-reference.md` の context の表への行はタスク 11 で足した (文書全体の見直しはタスク 12)。
+
+### 11.4 実装 (タスク 11、 2026-10-25)
+
+- **削除するキーの最終一覧** (git の履歴で旧スキーマ・旧型にあったものを確かめた): `context.reduction`、 `context.forgetting` (中身は
+  `keepRecentSegments` / `targetMarginRatio` / `sufficiencyRatio` / `minIntervalTurns` の 4 つだけだった)、 `context.strategy` (`mode` / `minIntervalTurns`)、
+  `modelCapabilities.<id>.compressionThreshold` / `keepRecentMessages`。 加えて (決めたこと) `context.compressionThreshold` / `context.maxHistoryMessages`
+  (割合の閾値と履歴の件数。 旧方式の整理 T1 (`f72a56e`) で型から消したが、 旧既定値として保存されたまま config.json に残っていたもの。
+  同じ整理の旧キーなので一緒に消す)。 `forgetting` / `strategy` は旧キーだけの入れ物なので中身ごと消し、 告知には中のキーを 1 つずつ並べる。
+  `modelCapabilities.<id>` は旧欄だけを消し、 項目 (空になっても) と他の欄は残す。 モデルの登録一覧 (model-registry) 等に同じ旧欄を持つ場所は無かった。
+- **作り**: `src/config/context-keys-removal.ts` (`removeLegacyContextKeys` / `contextKeysRemovalNotice` / `contextKeysRemoval`)。
+  バックアップ・保存・告知の仕組みは権限ルールの移行と共通にし、 `src/config/one-time-migration.ts` に移した
+  (`applyOneTimeMigrations` / `finishOneTimeMigrations` / `writeMigrationBackup` / `migrationBackupPath`)。 `permission-migration.ts` は変換・告知文・
+  `permissionRulesMigration` だけを持つ。 `loadConfig` は 2 つを `sanitizeParsedConfig` の前に順に当てる (権限 → 整理の旧キー)。
+  権限の移行の挙動 (バックアップ名・告知文・失敗の表示) は変えていない。
+- **バックアップ**: `~/.localllm/config.json.before-context-keys-removal.bak` (書き換え前の config.json そのもの。 既にあれば時刻付きの別名)。
+  権限の移行と同時に起きたときは、 それぞれのバックアップ (どちらも書き換え前の内容) を書き、 保存は 1 回。 バックアップが 1 つでも書けなければ保存しない
+  (今回の起動は削除後の内容で動き、 次回また試みる)。
+- **告知** (1 回だけ。 console.log): 「コンテキスト整理の方式を 1 つにしたため、 次の設定を削除しました: <キーをカンマ区切り>。 整理を早めたい場合は
+  contextWindow を小さくしてください (元の設定: <バックアップの場所>)。」
+- 試験: タスク 8 の「旧キーが警告されないこと」 の試験 (`config-schema.test.ts`) は消し、 `tests/config/context-keys-removal.test.ts` に置き換えた
+  (削除・告知・バックアップ・2 回目は何もしない・旧キーが無いと何もしない・modelCapabilities の旧欄・他の値が変わらない・未知のキーの警告が出ない・
+  権限の移行と同時・バックアップ / 保存の失敗)。 `config-reference.md` の context の表は `summaryFailure` の行だけにした。
 
 ---
 

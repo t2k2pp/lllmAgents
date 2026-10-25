@@ -388,13 +388,13 @@ REPL からは `/permission` の設定画面 (すべての面 / CLI / Discord / 
 
 | キー | 型 | デフォルト | 説明 |
 |------|-----|----------|------|
-| `reduction` | string | `"hybrid"` | 自動縮約の手段 (`compress` / `forget` / `hybrid`)。 `/forget mode` で切替。 詳細: docs/context-forgetting.md |
-| `forgetting` | object | — | 忘却の詳細設定。 docs/context-forgetting.md |
-| `strategy` | object | `{ "mode": "auto" }` | 区切りでのコンテキスト整理。 `/context strategy` で切替。 docs/context-strategy.md |
+| `summaryFailure` | `"continue"` \| `"stop"` | `"continue"` | コンテキスト整理の要約 (段階 3) に失敗したときの扱い。 `continue` は失敗を表示したうえで機械的な整理 (段階 0〜2) の分だけで進む (作業の途中で次の呼び出しが入らなければ止める)。 `stop` は履歴を変えずに失敗として止める。 自動の整理と `/compact` の両方に効く。 詳細: docs/context-reduction-redesign.md §6.1 / §11.3 |
 
-自動圧縮を始めるコンテキスト使用率はモデルの能力ティアから決まる (T1=70% / T2=60% / T3=50%)。
-変えたい場合は `modelCapabilities.<モデル名>.compressionThreshold` で指定する。
-(旧キー `context.compressionThreshold` / `context.maxHistoryMessages` は使われていなかったため削除した。 残っていても無視される)
+整理を始める時期は `contextWindow` と能力ティアから決まり、 設定では変えない。 整理を早めたい場合は `contextWindow` を小さくする。
+
+旧キー `context.reduction` / `context.forgetting` / `context.strategy` / `context.compressionThreshold` / `context.maxHistoryMessages` と
+`modelCapabilities.<モデル名>.compressionThreshold` / `keepRecentMessages` は、 整理の方式を 1 つにしたため削除した。
+config.json に残っていると、 起動時に 1 回だけ削除して保存し (元の内容は `config.json.before-context-keys-removal.bak` に残す)、 削除したキーを告知する。 値の読み替えはしない。
 
 ## discord
 

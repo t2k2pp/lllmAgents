@@ -13,7 +13,9 @@ import {
   saveCredentialsFile,
   getCredentialsPath,
 } from "./credentials.js";
-import { migrateLegacyPermissionLists, migrationNotice, writeMigrationBackup } from "./permission-migration.js";
+import { permissionRulesMigration } from "./permission-migration.js";
+import { contextKeysRemoval } from "./context-keys-removal.js";
+import { applyOneTimeMigrations, finishOneTimeMigrations } from "./one-time-migration.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".localllm");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
@@ -48,19 +50,12 @@ export function loadConfig(): Config {
   } catch {
     parsed = recoverFromBrokenConfig();
   }
-  // 旧ツール名一覧 (autoApproveTools 等) を security.rules へ 1 回だけ移行する (docs/todo-legacy-ways-cleanup.md T4)。
-  // 書き換え前の内容をバックアップしてから変換し、 下で保存し直す。 2 回目以降は旧キーが無いので何もしない。
-  // バックアップは他の保存 (下のシークレット分離など) より先に書く
-  const originalParsed = structuredClone(parsed);
-  const permissionMigration = migrateLegacyPermissionLists(parsed);
-  let migrationBackupPath: string | null = null;
-  if (permissionMigration.migrated) {
-    try {
-      migrationBackupPath = writeMigrationBackup(CONFIG_FILE, originalParsed);
-    } catch (e) {
-      console.error(`移行前の設定のバックアップに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
+  // 旧キーの 1 回だけの書き換え (one-time-migration.ts)。 書き換え前の内容をバックアップしてから変換し、 下で保存し直す。
+  // 2 回目以降は旧キーが無いので何もしない。 バックアップは他の保存 (下のシークレット分離など) より先に書き、
+  // スキーマ検証 (sanitizeParsedConfig) より前に当てる。
+  //   - 旧ツール名一覧 (autoApproveTools 等) → security.rules (docs/todo-legacy-ways-cleanup.md T4)
+  //   - コンテキスト整理の旧キー (context.reduction 等) の削除 (docs/context-reduction-redesign.md §11)
+  const migrations = applyOneTimeMigrations(parsed, CONFIG_FILE, [permissionRulesMigration, contextKeysRemoval]);
   // シークレットは credentials.json から合流させる (PR-04 方針2)。
   // config.json 側に残っている旧形式のシークレットは後段のマイグレーションで分離する。
   const hadInlineSecrets = hasInlineSecrets(parsed);
@@ -108,16 +103,8 @@ export function loadConfig(): Config {
     console.log(`config.json は共有・バックアップしても安全な内容になりました。`);
   }
 
-  // バックアップできなかったときは元の config.json を上書きしない (今回の起動だけルールで判定し、 次回また移行を試みる)
-  if (permissionMigration.migrated && migrationBackupPath) {
-    try {
-      saveConfig(merged);
-      console.log(migrationNotice(migrationBackupPath, permissionMigration));
-    } catch (e) {
-      // 保存できなくても今回の起動はルールで判定する (旧キーは読まない)。 次回起動で再び移行を試みる
-      console.error(`権限設定のルールへの移行を保存できませんでした: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
+  // バックアップできなかったときは元の config.json を上書きしない (今回の起動だけ書き換え後の内容で動き、 次回また試みる)
+  finishOneTimeMigrations(migrations, () => saveConfig(merged));
 
   return merged;
 }
