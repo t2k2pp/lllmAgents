@@ -42,7 +42,10 @@ import {
 import {
   type BoundaryKind,
   formatReductionEventLine,
+  type LastReductionEvent,
+  previewReduction,
   type ReductionEventResult,
+  type ReductionStatus,
   type ReductionTrigger,
   runReductionEvent,
 } from "./reduction-event.js";
@@ -335,6 +338,11 @@ export class AgentLoop {
    * セッションに保存し (saveCurrentSession)、 再開で戻す (restoreSession)。 会話の載せ替え (importConversation) では会話ごとに持ち替える。
    */
   private requestGrowth = new RequestGrowthTracker();
+  /**
+   * 直近の整理イベント (/compact と /context の表示用。 利用者向けだけで、 モデルには見せない)。
+   * 整理した履歴オブジェクトと組にして持ち、 会話の載せ替え・再開の後は出さない。
+   */
+  private lastReduction: { history: MessageHistory; event: LastReductionEvent } | null = null;
   /**
    * 規則 2 (§4.4) の、 記録して次の本体呼び出しの直前に判定する強い区切り (ToDo の全部完了・Goal の達成)。
    * 依頼の終わり・新しい依頼の判定をしたら、 それに含まれるので捨てる。
@@ -2689,7 +2697,7 @@ export class AgentLoop {
     const promptSize = size ?? this.measureNextPrompt(toolDefs);
     const budget = computeContextBudget(this.contextWindow, this.capability.tier);
     const raw = this.history.getRawMessages();
-    const requestStart = this.currentRequestMessage ? raw.indexOf(this.currentRequestMessage) : -1;
+    const reducedHistory = this.history;
     const id = `r-${++this.reductionSeq}-${Date.now().toString(36)}`;
     const spinner = createSpinner("コンテキストを整理中...").start();
     // 要約の呼び出しも Esc で切れるようにする (本体呼び出しと同じ AbortController)
@@ -2706,9 +2714,7 @@ export class AgentLoop {
         keepRecentToolUses: TIER_CONTEXT_BUDGETS[this.capability.tier].keepRecentToolUses,
         promptSize,
         growthTokens: this.requestGrowth.resolve(budget).tokens,
-        // 依頼の外 (または依頼の始まりの発言が既に履歴に無い) なら全部を終わった依頼として扱う。
-        // 依頼の始まりが旧方式の圧縮で要約に入った場合は、 残っている全部を今の依頼として扱う (何も返済しない側に倒す)
-        currentRequestStart: this.currentRequestMessage === null ? raw.length : Math.max(0, requestStart),
+        currentRequestStart: this.currentRequestStartIndex(raw),
         buildMainCallRequest: () => this.buildMainCallRequest(toolDefs, signal),
         cacheMissCauses: this.cacheMissCauses,
         growth: this.requestGrowth,
@@ -2746,11 +2752,14 @@ export class AgentLoop {
         : trigger === "manual"
           ? "manual"
           : null;
+    const last: LastReductionEvent = { record: result.record, finishedAt: Date.now(), prewarmSent: false };
+    this.lastReduction = { history: reducedHistory, event: last };
     if (prewarmTrigger === null) {
       this.llmLogger.logReductionEvent(result.record);
       return result;
     }
     const prewarm = this.startPrewarm(prewarmTrigger);
+    last.prewarmSent = prewarm.status === "started";
     if (prewarm.status === "skipped") {
       result.record.prewarm = prewarm.outcome;
       this.llmLogger.logReductionEvent(result.record);
@@ -2761,6 +2770,55 @@ export class AgentLoop {
       });
     }
     return result;
+  }
+
+  /**
+   * 今の依頼が始まる位置 (前処理の境目。 §6.4)。 依頼の外 (待ち受け中) なら全部が終わった依頼 (raw.length)。
+   * 依頼の始まりの発言が既に履歴に無い (旧方式の圧縮で要約に入った) ときは 0 (残っている全部を今の依頼とみなし、 返済しない側に倒す)
+   */
+  private currentRequestStartIndex(raw: readonly Message[]): number {
+    if (this.currentRequestMessage === null) return raw.length;
+    return Math.max(0, raw.indexOf(this.currentRequestMessage));
+  }
+
+  /** 直近の整理イベント (今の会話のもの)。 まだ無い・会話を載せ替えた・再開した後は null */
+  getLastReductionEvent(): LastReductionEvent | null {
+    const last = this.lastReduction;
+    return last !== null && last.history === this.history ? last.event : null;
+  }
+
+  /**
+   * /context に出す整理の状態 (docs/context-reduction-redesign.md §7)。 P・R の内訳・規則 1・2 の発火点・G と直近 3 件・
+   * 直近の整理イベント・今 /compact した場合の見込み (写しに段階 0〜2 を当てはめるだけ。 要約は呼ばない)。
+   * 履歴は変えない。 利用者向けだけで、 モデルには見せない (§8)。
+   */
+  getReductionStatus(): ReductionStatus {
+    const toolDefs = this.getFilteredToolDefs();
+    const promptSize = this.measureNextPrompt(toolDefs);
+    const budget = computeContextBudget(this.contextWindow, this.capability.tier);
+    const tierBudget = TIER_CONTEXT_BUDGETS[this.capability.tier];
+    const growth = this.requestGrowth.resolve(budget);
+    const raw = this.history.getRawMessages();
+    return {
+      budget,
+      keepRecentToolUses: tierBudget.keepRecentToolUses,
+      toolResultLimitTokens: tierBudget.toolResultLimitTokens,
+      promptSize,
+      growth,
+      recentGrowths: this.requestGrowth.recentGrowths(),
+      forcedLimitTokens: budget.contextWindow - budget.reserveTokens,
+      boundaryLimitTokens: budget.contextWindow - budget.reserveTokens - growth.tokens,
+      summaryFailurePolicy: loadConfig().context?.summaryFailure ?? DEFAULT_SUMMARY_FAILURE_POLICY,
+      preview: previewReduction({
+        messages: raw,
+        budget,
+        promptSize,
+        growthTokens: growth.tokens,
+        keepRecentToolUses: tierBudget.keepRecentToolUses,
+        currentRequestStart: this.currentRequestStartIndex(raw),
+      }),
+      lastEvent: this.getLastReductionEvent(),
+    };
   }
 
   // ─── 予熱 (docs/context-reduction-redesign.md §9) ───
@@ -2786,9 +2844,12 @@ export class AgentLoop {
         this.reportPrewarmOutcome(outcome);
         return outcome;
       });
-    console.log(
-      chalk.dim("  予熱を送りました (次の呼び出しに備えて、 サーバに会話を読み込ませています。 結果は使いません)"),
-    );
+    // /compact は結果の表示 (src/cli/commands/compact.ts) に予熱の有無を含めるので、 ここでは出さない
+    if (trigger !== "manual") {
+      console.log(
+        chalk.dim("  予熱を送りました (次の呼び出しに備えて、 サーバに会話を読み込ませています。 結果は使いません)"),
+      );
+    }
     return { status: "started", done };
   }
 
@@ -3725,6 +3786,8 @@ export class AgentLoop {
     }
     this.pendingBoundary = null;
     this.requestEndSettled = false;
+    // 直近の整理イベントは再開前の会話のもの (表示しない)
+    this.lastReduction = null;
   }
 
   /**

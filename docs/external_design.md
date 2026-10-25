@@ -119,8 +119,8 @@ stateDiagram-v2
 | `/help` | ヘルプや使用可能なコマンド一覧を表示します |
 | `/quit`, `/exit` | エージェントを終了します |
 | `/clear` | 現在の会話履歴とコンテキストをクリアします |
-| `/context` | 現在のコンテキスト（トークン）使用状況を表示します |
-| `/compact` | コンテキストの手動圧縮を実行します |
+| `/context` | 現在のコンテキスト（トークン）使用状況と整理の状態・今 `/compact` した場合の見込みを表示します |
+| `/compact` | コンテキストを今すぐ整理します（段階 0〜3 を最後まで。結果の内訳を表示） |
 | `/model` | 現在のスロット (main / second / vision) 状況を表示します。 編集は `/models` (登録レジストリ) または `/model <slot> <verb>` |
 | `/models` | 登録モデルの一覧 → アクション (Set as main/second/vision / Edit / Duplicate / Delete / Add new) |
 | `/swap` | main ⇔ second のスロット入れ替え |

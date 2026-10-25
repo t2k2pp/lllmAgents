@@ -11,12 +11,6 @@ import { setDisplayJpyRate } from "../cost/money-format.js";
 import { displayHelp, type SkillSummary } from "./renderer.js";
 import { estimateMessageTokens } from "../agent/token-counter.js";
 import { TIER_CONTEXT_BUDGETS } from "../agent/capability-tier.js";
-import {
-  buildContextBreakdown,
-  formatContextBreakdown,
-  formatContextDetail,
-  normalizeContextSection,
-} from "./context-breakdown.js";
 import { formatTodos, formatTodosActive, clearTodos, archiveCompletedTodos } from "../tools/definitions/todo-write.js";
 import type { GoalDefinition } from "../agent/goal-slot.js";
 import { getGoal as getGoalSlot } from "../agent/goal-slot.js";
@@ -4491,6 +4485,7 @@ export class REPL {
           awaitRunContinuation: (continuation) => this.awaitRunContinuation(continuation),
           skillRegistry: this.skillRegistry,
           workflowLearner: this.workflowLearner,
+          mcpManager: this.mcpManager,
         },
         args,
       );
@@ -4679,33 +4674,6 @@ export class REPL {
         }
         break;
       }
-
-      case "/context": {
-        // 引数なし: カテゴリ別内訳。 引数あり: そのカテゴリの中身をダンプ (ドリルダウン)
-        const sectionArg = args[0]?.trim();
-        if (sectionArg) {
-          const section = normalizeContextSection(sectionArg);
-          if (!section) {
-            console.log(chalk.yellow(`  不明な section: ${sectionArg}`));
-            console.log(chalk.dim("  使い方: /context [system|memory|skills|tools|messages]"));
-            break;
-          }
-          process.stdout.write(
-            formatContextDetail(this.agent, this.skillRegistry, section, process.cwd(), args[1]?.trim()),
-          );
-          break;
-        }
-        // Claude Code 互換のカテゴリ別内訳: System prompt / Memory files / Skills / System tools / Messages / Free space
-        const breakdown = buildContextBreakdown(this.agent, this.skillRegistry, this.mcpManager);
-        process.stdout.write(formatContextBreakdown(breakdown));
-        break;
-      }
-
-      case "/compact":
-        // 手動の整理 (docs/context-reduction-redesign.md §7)。 整理イベントを今すぐ行い、 段階 0〜3 を最後まで進める。
-        // 結果 (成功・失敗・減らせるものが無い) は整理イベントが 1 行で示す。 表示の作り直しはタスク 10
-        await this.agent.runReductionEvent("manual");
-        break;
 
       case "/checkpoint": {
         // 自動チェックポイント (シャドウ Git)。 docs/checkpoint-and-smoke-design.md §4

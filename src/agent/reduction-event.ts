@@ -3,7 +3,8 @@
  *
  * 流れ:
  *   1. 履歴の写しに前処理 (借りの返済) → 段階 0 → 1 → 2 を最後まで当てはめる (reduction-stages.ts)
- *   2. まだ目標と最低量に届かなければ段階 3: 書き換え前の現在の並び + 指示で要約を得る (reduction-summary.ts)
+ *   2. まだ目標と最低量に届かなければ段階 3: 書き換え前の現在の並び + 指示で要約を得る (reduction-summary.ts)。
+ *      手動の /compact は届いていても、 要約してよい最大の範囲を要約する (段階 0〜3 を最後まで。 §7)
  *   3. 写しに要約を当てはめ、 忘却の記録を 1 件にまとめて入れる (既存の記録があれば追記)
  *   4. ツールの対を検証して、 MessageHistory.replaceMessages() で 1 回だけ差し替える
  *      (書き換え理由は "reduction:<イベント ID>" の 1 件)
@@ -26,6 +27,8 @@ import {
   computeReductionGoal,
   exceedsForcedLimit,
   type PromptSize,
+  type ReductionGoal,
+  type RequestGrowth,
   type RequestGrowthTracker,
 } from "./context-budget.js";
 import { findToolPairingError, type MessageHistory } from "./message-history.js";
@@ -43,6 +46,7 @@ import {
   requestSummary,
   type SummaryAttempt,
   type SummaryFailureReason,
+  type SummaryRangeResult,
   selectSummaryRange,
 } from "./reduction-summary.js";
 
@@ -241,15 +245,9 @@ export async function runReductionEvent(input: ReductionEventInput): Promise<Red
   const continueAfterSummaryFailure = (): boolean =>
     input.summaryFailure === "continue" && input.signal?.aborted !== true;
 
-  // 2〜3. 足りなければ段階 3 (書き換え前の並び + 指示で要約を得て、 写しに当てはめる)
-  if (stages.needsSummary) {
-    const rangeResult = selectSummaryRange({
-      messages: stages.messages,
-      originalIndices: stages.originalIndices,
-      originalLength: raw.length,
-      keepRecentToolUses: input.keepRecentToolUses,
-      shortfall: stages.shortfall,
-    });
+  // 2〜3. 足りなければ (手動の /compact なら必ず) 段階 3 (書き換え前の並び + 指示で要約を得て、 写しに当てはめる)
+  const rangeResult = selectStage3Range(input.trigger, stages, raw.length, input.keepRecentToolUses);
+  if (rangeResult !== null) {
     if (!rangeResult.ok) {
       // 要約しても減らない (要約してよい範囲が小さい)。 段階 0〜2 の分だけで進める。
       // 規則 1 で入らないなら下の検査で失敗にする
@@ -353,6 +351,139 @@ export async function runReductionEvent(input: ReductionEventInput): Promise<Red
   record.promptTokensAfter = promptTokensAfter;
   record.durationMs = Date.now() - startedAt;
   return { ok: true, record };
+}
+
+/**
+ * 段階 3 の範囲 (§5.6)。 規則 1・2 は段階 0〜2 の後も目標と最低量に届かないときだけ、 届く最小の範囲を要約する。
+ * 手動の /compact は届いていても、 要約してよい最大の範囲を要約する (段階 0〜3 を最後まで進める。 §7)。
+ * 要約しないなら null。 整理イベントと /context の見込み (previewReduction) が同じものを使う。
+ */
+function selectStage3Range(
+  trigger: ReductionTrigger,
+  stages: ReductionStagesResult,
+  originalLength: number,
+  keepRecentToolUses: number,
+): SummaryRangeResult | null {
+  const manual = trigger === "manual";
+  if (!stages.needsSummary && !manual) return null;
+  return selectSummaryRange({
+    messages: stages.messages,
+    originalIndices: stages.originalIndices,
+    originalLength,
+    keepRecentToolUses,
+    shortfall: stages.shortfall,
+    widest: manual,
+  });
+}
+
+// ─── 見込み・状態 (/context) ───
+
+/** 直近の整理イベント (AgentLoop が持つ。 /compact と /context の表示に使う) */
+export interface LastReductionEvent {
+  /** 記録 (予熱を送ったときは、 予熱が終わると record.prewarm が埋まる) */
+  record: ReductionEventRecord;
+  /** 終わった時刻 (Date.now()) */
+  finishedAt: number;
+  /** 予熱を送ったか (送らなかった理由は record.prewarm の skipped) */
+  prewarmSent: boolean;
+}
+
+/** /context に出す整理の状態 (利用者向けだけ。 モデルには見せない。 §8) */
+export interface ReductionStatus {
+  budget: ContextBudget;
+  /** K と、 ツール結果 1 件の上限 */
+  keepRecentToolUses: number;
+  toolResultLimitTokens: number;
+  promptSize: PromptSize;
+  growth: RequestGrowth;
+  /** G のもとになる直近の依頼の増分 (古い順。 3 件まで) */
+  recentGrowths: readonly number[];
+  /** 規則 1 の発火点 W − R (P がこれを超えたら次の本体呼び出しの前に整理する) */
+  forcedLimitTokens: number;
+  /** 規則 2 の発火点 W − R − G (強い区切りで P がこれを超えたら整理する) */
+  boundaryLimitTokens: number;
+  summaryFailurePolicy: SummaryFailurePolicy;
+  preview: ReductionPreview;
+  lastEvent: LastReductionEvent | null;
+}
+
+export interface ReductionPreviewInput {
+  /** 履歴 (getRawMessages())。 変更しない */
+  messages: readonly Message[];
+  budget: ContextBudget;
+  /** いまの P */
+  promptSize: PromptSize;
+  /** いまの G */
+  growthTokens: number;
+  keepRecentToolUses: number;
+  currentRequestStart: number;
+  caseInsensitivePaths?: boolean;
+}
+
+export type ReductionPreview =
+  | {
+      ok: true;
+      goal: ReductionGoal;
+      /** 段階 0〜2 と前処理で減る量の見込み (送る形の推定) */
+      freedTokens: ReductionStagesResult["freedTokens"];
+      repaid: ReductionStagesResult["repaid"];
+      forgottenCalls: number;
+      clearedCurrentThinking: number;
+      /** 段階 2 の後の P の見込み */
+      promptTokensAfterStages: number;
+      /** 段階 0〜2 だけでは目標・最低量に届かないか (規則 1・2 の整理なら段階 3 が要る) */
+      needsSummary: boolean;
+      shortfall: ReductionStagesResult["shortfall"];
+      /**
+       * 今 /compact したときの段階 3。 要約の呼び出しはしない (範囲を決めるだけ)。
+       * would-summarize = 要約の呼び出しを送る (区間の数と、 見込みの減る量)、 nothing-to-summarize = 要約できる範囲が無い
+       */
+      summary:
+        | { status: "would-summarize"; segments: number; estimatedFreedTokens: number }
+        | { status: "nothing-to-summarize"; detail: string };
+    }
+  | { ok: false; error: string };
+
+/**
+ * 今 /compact したら段階ごとにどれだけ減るかの見込み (§7 の /context)。 写しに前処理・段階 0〜2 を当てはめ、
+ * 段階 3 は範囲を決めるだけで要約の呼び出しはしない。 履歴は変えない (純粋な関数)。
+ */
+export function previewReduction(input: ReductionPreviewInput): ReductionPreview {
+  const goal = computeReductionGoal(input.budget, input.growthTokens);
+  let stages: ReductionStagesResult;
+  try {
+    stages = applyReductionStages({
+      messages: input.messages,
+      currentRequestStart: input.currentRequestStart,
+      keepRecentToolUses: input.keepRecentToolUses,
+      promptTokens: input.promptSize.tokens,
+      goal,
+      caseInsensitivePaths: input.caseInsensitivePaths,
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  const range = selectStage3Range("manual", stages, input.messages.length, input.keepRecentToolUses);
+  const summary: Extract<ReductionPreview, { ok: true }>["summary"] =
+    range?.ok === true
+      ? {
+          status: "would-summarize",
+          segments: range.range.segments.length,
+          estimatedFreedTokens: range.range.estimatedFreedTokens,
+        }
+      : { status: "nothing-to-summarize", detail: range?.ok === false ? range.detail : "要約できる範囲がありません" };
+  return {
+    ok: true,
+    goal,
+    freedTokens: stages.freedTokens,
+    repaid: stages.repaid,
+    forgottenCalls: stages.forgotten.length,
+    clearedCurrentThinking: stages.clearedCurrentThinking,
+    promptTokensAfterStages: stages.promptTokensAfter,
+    needsSummary: stages.needsSummary,
+    shortfall: stages.shortfall,
+    summary,
+  };
 }
 
 function sumUsage(

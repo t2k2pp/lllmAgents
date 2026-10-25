@@ -1,6 +1,6 @@
 # コンテキスト整理の作り直し 設計書
 
-> **ステータス**: design (2026-10-25 設計 / 実装中。 §13 のタスク 1・3〜9 済み)
+> **ステータス**: design (2026-10-25 設計 / 実装中。 §13 のタスク 1・3〜10 済み)
 > **置き換える設計**: `docs/context-forgetting.md` (忘却) / `docs/context-strategy.md` (区切りでの使い分け)。
 > 実装が済んだら両書の先頭に「現行は本書」 の注記を入れる (§12)。
 > **前提**: `docs/prompt-prefix-stability.md` (一度送ったメッセージは書き換えない) が実装済みであること。
@@ -624,14 +624,44 @@ Goal 昇格の提案 (`maybePromoteToGoal`。 REPL / Slack / Discord が `run()`
 
 | コマンド | 新しい動き |
 |---|---|
-| `/compact` | **手動の整理はこの 1 つだけ** (2026-10-25 利用者と決定)。 整理イベントを今すぐ行い、 段階 0〜3 を最後まで進める。 終わったら予熱する。 タスク 8 で `runReductionEvent("manual")` に付け替え済み。 予熱はタスク 9 で済み (§9.4)。 表示はタスク 10 |
-| `/context` | 内訳表示に加えて、 P (実数か推定か)、 R の内訳、 規則 1・2 の発火点、 G と直近 3 件、 直近の整理イベント、 今 `/compact` した場合の段階ごとの減る量の見込みを表示 |
+| `/compact` | **手動の整理はこの 1 つだけ** (2026-10-25 利用者と決定)。 整理イベントを今すぐ行い、 段階 0〜3 を最後まで進める。 終わったら予熱する。 タスク 8 で `runReductionEvent("manual")` に付け替え済み。 予熱はタスク 9 で済み (§9.4)。 表示はタスク 10 で済み (§7.1) |
+| `/context` | 内訳表示に加えて、 P (実数か推定か)、 R の内訳、 規則 1・2 の発火点、 G と直近 3 件、 直近の整理イベント、 今 `/compact` した場合の段階ごとの減る量の見込みを表示。 タスク 10 で済み (§7.1) |
 | `/forget` | **削除** (LLM に選ばせる忘却が無くなるため。 決まった段階は `/compact` に含まれる)。 タスク 8 で削除済み |
 | `/forget mode` / `/forget status` / `/forget dry` | 削除 |
 | `/context strategy` | 削除 (区切りの決定表が無くなるため)。 タスク 8 で削除済み |
 | `/handoff` / `/clear` | 変更なし (手動のリセット。 整理とは別の機能) |
 
 自動の `clear` (区切りで引き継ぎメモを作ってリセット) も廃止する。 リセットは利用者が `/handoff` で決める (タスク 8 で削除済み)。
+
+### 7.1 実装 (タスク 10、 2026-10-25)
+
+- **レジストリ方式に移した**: `/compact` は `src/cli/commands/compact.ts`、 `/context` は `src/cli/commands/context.ts`。 repl.ts の switch の case、
+  completer.ts の静的な補完候補、 renderer.ts の `BUILTIN_HELP_ENTRIES` からは消した (二重に載せない)。 `ReplCommandContext` に `mcpManager` を足した。
+  表示の組み立ては `src/cli/reduction-view.ts` (`formatCompactResult` / `formatReductionStatus`)。
+- **手動は段階 3 まで必ず進める** (決めたこと): 規則 1・2 は段階 0〜2 の後も目標と最低量に届かないときだけ、 届く最小の範囲を要約する (§5)。
+  手動の `/compact` は届いていても、 要約してよい最大の範囲 (保護部分の手前まで) を要約する (`selectSummaryRange` の `widest`)。
+  要約してよい範囲が無い (見込みが 0 以下) ときは要約を呼ばず、 段階 0〜2 の分だけで整理する (`nothing-to-summarize`)。
+  要約の失敗の扱いは規則 1・2 と同じく設定 `context.summaryFailure` に従う。
+- **/compact の表示**: 整理イベントの 1 行 (スピナーの結果。 他の発火と同じ) の後に、 前後の P (実数か推定か)、 減った量の合計と段階ごと
+  (前処理・0・1・2・3)、 要約 (した区間の数 / しなかった理由 / 失敗の中身と、 設定 continue なら「段階 0〜2 の分だけで整理」、 stop なら「取りやめた」)、
+  予熱 (送った / 送らなかった理由 / 失敗で履歴を変えていないので送らない) を出す。 予熱を送ったことの 1 行 (`startPrewarm`) は /compact では出さず、 この表示に含める。
+  引数は受け付けない (`/compact dry` は作らない。 見込みは `/context`)。
+- **/context の表示**: 既存の内訳の後に「コンテキストの整理」 の欄。 P (実数か推定か)、 R = O + T + M + S の内訳、 規則 1 (W − R) と規則 2 (W − R − G) の
+  発火点といまの P との距離、 G (既定値か直近 3 件の最大か・頭打ち) と直近の依頼の増分、 直近の整理イベント、 今 `/compact` した場合の見込み、 要約の失敗の扱いの設定。
+  見込みは `previewReduction` (`reduction-event.ts`。 純粋な関数) が写しに前処理・段階 0〜2 を当てはめ、 段階 3 は `/compact` と同じ範囲の決め方で
+  区間の数と見込みの減る量を出すだけ (要約は呼ばない)。 段階 0〜2 だけで目標・最低量に届くか (届かなければ不足量) も出す。
+  整理イベントと見込みは段階 3 の範囲の決め方 (`selectStage3Range`) を共有する。
+- **直近の整理イベント**: `AgentLoop.getLastReductionEvent()`。 整理した履歴オブジェクトと組で持ち、 会話の載せ替え (`importConversation`) の後は出さない。
+  再開 (`restoreSession`) では捨てる。 予熱を送ったかを持ち、 予熱の結果は記録 (`record.prewarm`) が埋まり次第出る。 状態は `AgentLoop.getReductionStatus()`。
+- **チャネル** (Slack / Discord) の `/context` も同じ欄を返す (`channel-commands.ts`。 意味は全サーフェス共通)。
+- **履歴に入らないこと**: どちらの表示も `console.log` / `process.stdout.write` とチャネルの返信だけで、 履歴 (`MessageHistory`) に足す経路は無い
+  (コマンドの出力をモデルに渡す経路は REPL・チャネルとも無いことを確かめた)。 モデルに残量を伝えない (§8)。
+- **削除の確認** (grep): `/forget` と `/context strategy` は src・tests の補完・ヘルプ・レジストリに無い (`tests/cli/compact-context-commands.test.ts` で固定)。
+  README のコマンド表と `external_design.md` のコマンド表の `/forget`・`/context strategy` の記述も直した。 `config-reference.md` の
+  `context.reduction` / `context.strategy` の行 (`/forget mode` / `/context strategy` に触れている) はキーの削除と合わせてタスク 11・12 で消す。
+- 試験: `tests/cli/compact-context-commands.test.ts` (/compact の表示: 成功・要約あり・要約失敗 continue / stop・減るもの無し・予熱を送らない理由。
+  /context の各欄: 実数 / 推定、 R の内訳、 発火点、 G、 直近の整理、 見込み。 登録と削除。 ハンドラ。 チャネル)、
+  `tests/agent/reduction-event.test.ts` (手動は足りていても最大の範囲を要約する・範囲が無ければ呼ばない、 `previewReduction` の量が整理イベントと一致し履歴を変えない)。
 
 ---
 

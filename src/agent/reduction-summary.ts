@@ -100,6 +100,11 @@ export interface SummaryRangeInput {
   keepRecentToolUses: number;
   /** 段階 0〜2 の後に足りない量 (ReductionStagesResult.shortfall) */
   shortfall: { toTarget: number; toMinimum: number };
+  /**
+   * true なら足りない量にかかわらず、 範囲に入れてよい最大まで要約する (手動の /compact。 段階 0〜3 を最後まで進める。
+   * docs/context-reduction-redesign.md §7)。 足りない量は requiredTokens と meetsShortfall の判定にだけ使う
+   */
+  widest?: boolean;
 }
 
 /** 要約で 1 つのメッセージに置き換える区間 (利用者の発言・system ノート・保護するツールの組の間の連続) */
@@ -215,7 +220,7 @@ export function selectSummaryRange(input: SummaryRangeInput): SummaryRangeResult
     throw new Error("[reduction-summary] originalIndices の長さが写しと一致しません");
   }
   const requiredTokens = Math.max(input.shortfall.toTarget, input.shortfall.toMinimum, 0);
-  if (requiredTokens <= 0) {
+  if (requiredTokens <= 0 && input.widest !== true) {
     return { ok: false, reason: "not-needed", detail: "段階 0〜2 で目標と最低量を満たしています" };
   }
 
@@ -242,12 +247,12 @@ export function selectSummaryRange(input: SummaryRangeInput): SummaryRangeResult
     if (!isPairSafeBoundary(messages, end)) continue;
     const freed = sum - segmentCount * segmentCost - ESTIMATED_OVERALL_SUMMARY_TOKENS;
     largest = { end, freed };
-    if (freed >= requiredTokens) {
+    if (freed >= requiredTokens && chosen === null) {
       chosen = largest;
-      break;
+      if (input.widest !== true) break;
     }
   }
-  const pick = chosen ?? largest;
+  const pick = input.widest === true ? largest : (chosen ?? largest);
   if (!pick || pick.freed <= 0) {
     return {
       ok: false,
@@ -287,7 +292,7 @@ export function selectSummaryRange(input: SummaryRangeInput): SummaryRangeResult
       segments,
       requiredTokens,
       estimatedFreedTokens: pick.freed,
-      meetsShortfall: chosen !== null,
+      meetsShortfall: pick.freed >= requiredTokens,
     },
   };
 }

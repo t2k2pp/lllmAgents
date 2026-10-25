@@ -19,6 +19,8 @@ import { renameCommand } from "./rename.js";
 import { tasksCommand } from "./tasks.js";
 import { learnCommand } from "./learn.js";
 import { runControlCommand } from "./run-control.js";
+import { contextCommand } from "./context.js";
+import { compactCommand } from "./compact.js";
 
 const COMMANDS: ReplCommandDef[] = [
   parallelCommand,
@@ -31,6 +33,8 @@ const COMMANDS: ReplCommandDef[] = [
   tasksCommand,
   learnCommand,
   runControlCommand,
+  contextCommand,
+  compactCommand,
 ];
 
 let lookupCache: Map<string, ReplCommandDef> | null = null;

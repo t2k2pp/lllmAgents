@@ -7,6 +7,7 @@ import {
   type ReductionEventInput,
   buildReductionTombstoneText,
   formatReductionEventLine,
+  previewReduction,
   runReductionEvent,
 } from "../../src/agent/reduction-event.js";
 import { TOMBSTONE_MARKER } from "../../src/agent/reduction-stages.js";
@@ -110,7 +111,7 @@ function eventInput(
   const { behavior = "valid", sent = [], ...rest } = overrides;
   return {
     id: "r-1",
-    trigger: "manual",
+    trigger: "boundary:request-end",
     history,
     provider: summaryProvider(behavior, sent),
     budget,
@@ -182,7 +183,7 @@ describe("整理イベント (要約なし)", () => {
     const r = result.record;
     expect(r).toMatchObject({
       id: "r-1",
-      trigger: "manual",
+      trigger: "boundary:request-end",
       ok: true,
       promptTokensBefore: 150_000,
       promptBasis: "usage",
@@ -390,6 +391,108 @@ describe("整理イベント: 要約に失敗したとき、 設定 continue (�
     expect(result.reason).toBe("summary-error");
     expect(result.record.continuedWithoutSummary).toBe(false);
     expect(history.getRawMessages()).toEqual(raw);
+  });
+});
+
+// ─── 手動の /compact と /context の見込み (タスク 10) ───
+
+/** 古いツール結果が多く (段階 1 だけで目標と最低量に届く)、 モデルの長い発言もある履歴 */
+function toolAndReplyHistory(): Message[] {
+  const out: Message[] = [user("U1 を調べて")];
+  for (let i = 0; i < 25; i++) out.push(...read(`/f${i}`));
+  for (let i = 0; i < 6; i++) out.push(reply(`説明 ${i} ${BIG}`));
+  out.push(user("U2 も説明して"));
+  for (let i = 0; i < 6; i++) out.push(reply(`説明 ${i} ${BIG}`));
+  out.push(...read("/last"));
+  return out;
+}
+
+describe("手動の /compact: 段階 0〜3 を最後まで進める (§7)", () => {
+  it("規則による整理は段階 0〜2 で足りれば要約しないが、 手動は要約してよい最大の範囲を要約する", async () => {
+    const boundarySent: ChatWithToolsParams[] = [];
+    const boundary = await runReductionEvent(
+      eventInput(historyWith(toolAndReplyHistory()), { sent: boundarySent, trigger: "boundary:request-end" }),
+    );
+    expect(boundary.ok).toBe(true);
+    expect(boundary.record.summary.status).toBe("not-needed");
+    expect(boundarySent).toHaveLength(0);
+
+    const history = historyWith(toolAndReplyHistory());
+    const sent: ChatWithToolsParams[] = [];
+    const manual = await runReductionEvent(eventInput(history, { sent, trigger: "manual" }));
+    expect(manual.ok).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(manual.record).toMatchObject({ reachedStage: 3, summary: { status: "done" } });
+    expect(manual.record.freedTokens.stage3).toBeGreaterThan(0);
+    // 最大の範囲: 保護部分 (直近 K=1 回のツール呼び出し) の手前までのモデルの長い発言は全部要約に入る
+    const after = history.getRawMessages();
+    expect(after.filter((m) => m.role === "assistant" && String(m.content).includes(BIG))).toHaveLength(0);
+    expect(after.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["U1 を調べて", "U2 も説明して"]);
+  });
+
+  it("手動でも要約してよい範囲が無ければ要約を呼ばず、 段階 0〜2 の分だけで整理する", async () => {
+    const sent: ChatWithToolsParams[] = [];
+    const result = await runReductionEvent(eventInput(historyWith(toolHeavyHistory()), { sent, trigger: "manual" }));
+    expect(result.ok).toBe(true);
+    expect(sent).toHaveLength(0);
+    expect(result.record.summary.status).toBe("nothing-to-summarize");
+  });
+});
+
+describe("previewReduction: 今 /compact した場合の見込み (要約は呼ばない)", () => {
+  const previewInput = (messages: Message[]) => ({
+    messages,
+    budget,
+    promptSize: { tokens: 150_000, basis: "usage" as const },
+    growthTokens: 80_000,
+    keepRecentToolUses: 1,
+    currentRequestStart: messages.length,
+    caseInsensitivePaths: true,
+  });
+
+  it("段階 0〜2 の量は整理イベントと同じで、 要約は範囲を決めるだけ。 履歴は変えない", async () => {
+    const history = historyWith(toolAndReplyHistory());
+    const raw = history.getRawMessages();
+    const revision = history.getRevision();
+    const preview = previewReduction(previewInput(raw));
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+    expect(history.getRawMessages()).toEqual(raw);
+    expect(history.getRevision()).toBe(revision);
+    expect(preview.goal).toEqual({ targetPromptTokens: 262_144 - 67_584 - 80_000, minimumReductionTokens: 40_000 });
+    expect(preview.needsSummary).toBe(false);
+    expect(preview.shortfall).toEqual({ toTarget: 0, toMinimum: 0 });
+    expect(preview.summary.status).toBe("would-summarize");
+    if (preview.summary.status === "would-summarize") {
+      expect(preview.summary.segments).toBeGreaterThan(0);
+      expect(preview.summary.estimatedFreedTokens).toBeGreaterThan(0);
+    }
+
+    const event = await runReductionEvent(
+      eventInput(historyWith(toolAndReplyHistory()), { trigger: "boundary:request-end" }),
+    );
+    const f = event.record.freedTokens;
+    expect(preview.freedTokens).toEqual({
+      preprocess: f.preprocess,
+      stage0: f.stage0,
+      stage1: f.stage1,
+      stage2: f.stage2,
+      total: preview.freedTokens.total,
+    });
+    expect(preview.freedTokens.stage1).toBeGreaterThan(0);
+    expect(preview.forgottenCalls).toBe(event.record.forgottenCalls);
+  });
+
+  it("段階 0〜2 で足りないときは不足量を返し、 要約できる範囲が無ければそう返す", () => {
+    const messages = [user("こんにちは"), reply("こんにちは")];
+    const preview = previewReduction(previewInput(messages));
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+    expect(preview.needsSummary).toBe(true);
+    expect(preview.shortfall.toTarget).toBe(150_000 - (262_144 - 67_584 - 80_000));
+    expect(preview.shortfall.toMinimum).toBe(40_000);
+    expect(preview.summary.status).toBe("nothing-to-summarize");
+    expect(preview.freedTokens.total).toBe(0);
   });
 });
 

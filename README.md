@@ -170,9 +170,8 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/queue` | 受信順キューの待ち状況を表示（`/queue clear` でturn後に実行するtype-ahead command等を破棄） |
 | `/tui mouse <on\|off\|status>` | 全画面TUIのmouse captureを実行中に切替。`off`はnative選択・コピー、`on`はホイール内部履歴を優先 |
 | `/run [status\|pause\|resume\|inspect\|discard]` | foreground runの状態表示・一時停止 (再開地点を保存)・再開・再開地点の診断/破棄。PC再起動を跨ぐ。background taskとsecond LLMは対象外 |
-| `/context` | コンテキスト使用状況の内訳（トークン数・進捗バー）。`/context <system\|memory\|skills\|tools\|messages>` で各カテゴリの中身をダンプ。`/context strategy [off\|auto\|aggressive]` で区切り整理のモード表示・切替（既定 auto、詳細: docs/context-strategy.md） |
-| `/compact` | コンテキストを手動圧縮 |
-| `/forget` | コンテキストを忘却で整理（要約せず捨てる）。`/forget dry` で何が消えるか事前確認、`/forget mode <compress\|forget\|hybrid>` で自動縮約の手段を切替（既定 hybrid）、`/forget status` で実績確認。詳細: docs/context-forgetting.md |
+| `/context` | コンテキストの内訳（トークン数・進捗バー）と整理の状態（次に送る量 P とそれが実数か推定か、予約 R の内訳、整理する点 (規則 1・2)、ひと仕事の増分 G と直近 3 件、直近の整理、今 `/compact` した場合の段階ごとの見込み）。`/context <system|memory|skills|tools|messages>` で各カテゴリの中身をダンプ。詳細: docs/context-reduction-redesign.md §7 |
+| `/compact` | コンテキストを今すぐ整理する（手動の整理はこれ 1 つ。段階 0〜3 を最後まで進め、前後の量・段階ごとの減った量・要約の有無・予熱の有無を表示）。詳細: docs/context-reduction-redesign.md §7 |
 | `/handoff` | 引き継ぎメモを残してコンテキストをリセット。`/handoff dry` でメモを表示するだけ（リセットしない）。メモの生成に失敗した場合は履歴を変更しない。詳細: docs/context-strategy.md |
 | `/model` | 現在のモデル情報 / `/model list` / `/model <name>` / `/model host <ホスト>` / `/model port <番号>` / `/model provider <type>` / `/model description <text>` / `/model temperature <値>` / `/model top_p <値>` / `/model top_k <値>` / `/model rep_penalty <値>` |
 | `/model second` | セカンドLLM管理 (`setup` / `enable` / `disable` / `list` / `context` / `host` / `port` / `provider` / `description` / `temperature` 等) |

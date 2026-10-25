@@ -12,6 +12,7 @@
  */
 
 import { buildContextBreakdown, formatContextBreakdown } from "../cli/context-breakdown.js";
+import { formatReductionStatus } from "../cli/reduction-view.js";
 import { formatTodos, clearTodos } from "../tools/definitions/todo-write.js";
 import type { AgentLoop } from "./agent-loop.js";
 import type { RoomManager } from "./room-manager.js";
@@ -46,7 +47,7 @@ const HELP = [
   "利用できるコマンド (先頭に `/` を付けて送信):",
   "  `/help`    — この一覧",
   "  `/clear`   — この Room の会話履歴・ToDo・Goal をクリア",
-  "  `/context` — コンテキスト使用状況の内訳",
+  "  `/context` — コンテキストの内訳と整理の状態",
   "  `/status`  — 接続・モデル・Room・キューの状態",
   "  `/todo`    — 現在の ToDo",
   "  `/room`    — Room (A/B/C) の状態",
@@ -78,8 +79,10 @@ export async function runChannelCommand(line: string, deps: ChannelCommandDeps):
         clearTodos();
         return `🧹 Room ${deps.room} の会話履歴・ToDo・Goal をクリアしました。`;
       case "context": {
+        // REPL の /context と同じ中身 (内訳 + 整理の状態)。 返信は利用者にだけ届き、 履歴には入らない
         const b = buildContextBreakdown(deps.agent, deps.skillRegistry, deps.mcpManager);
-        return codeBlock(formatContextBreakdown(b)) || "(コンテキスト情報なし)";
+        const text = formatContextBreakdown(b) + formatReductionStatus(deps.agent.getReductionStatus());
+        return codeBlock(text) || "(コンテキスト情報なし)";
       }
       case "todo": {
         const todos = codeBlock(formatTodos());

@@ -49,20 +49,6 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/tui", description: "TUI表示とmouse captureの状態" },
   { command: "/tui mouse off", description: "全画面TUIで端末選択・コピーを優先する" },
   { command: "/tui mouse on", description: "全画面TUIでmouse captureとホイール履歴を有効にする" },
-  {
-    command: "/context",
-    description: "コンテキスト使用状況 (System prompt / Memory / Skills / Tools / Messages 内訳)",
-  },
-  { command: "/context system", description: "システムプロンプト本文の内訳をダンプ" },
-  { command: "/context memory", description: "メモ・プロジェクト指示の本文をダンプ" },
-  { command: "/context skills", description: "注入中スキル一覧 (trigger/description) をダンプ" },
-  {
-    command: "/context tools",
-    description: "ツール定義をトークン降順で一覧 (/context tools <name> で全文スキーマ)",
-    needsArg: true,
-  },
-  { command: "/context messages", description: "会話履歴をメッセージ単位でダンプ" },
-  { command: "/compact", description: "コンテキストを今すぐ整理する" },
   // /capability /metrics /cost は /status に集約 (Phase optimize #4、 2026-05-28)
   { command: "/mcp status", description: "MCP サーバの接続状態を表示" },
   { command: "/mcp on", description: "MCP 全体を有効化 (/mcp reload で接続)" },
