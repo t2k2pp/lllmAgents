@@ -8,8 +8,9 @@ import * as httpClient from "../../src/utils/http-client.js";
  * 背景 (2026-05-04):
  *   agent-loop / second-llm-manager が `maxTokens: contextWindow` を渡しており、
  *   Azure AI Foundry (Kimi-K2 等) で `input + max_tokens > context_length` の 400 を誘発した。
- *   呼び出し側で maxTokens を渡さない方針 + provider 側は params.maxTokens 未指定なら
- *   max_tokens フィールド自体を省略 (= サーバ既定 = 残コンテキスト全部) する仕様を保証する。
+ *   provider 側は params.maxTokens 未指定なら max_tokens フィールド自体を省略する仕様を保証する。
+ *   (2026-10-25 以降、 本体呼び出しはティアの出力上限 O を必ず渡す。 contextWindow は渡さない。
+ *   全 provider で載ることは max-tokens-all-providers.test.ts)
  */
 describe("OpenAICompatProvider: max_tokens 送信ポリシー", () => {
   let capturedBody: Record<string, unknown> | undefined;

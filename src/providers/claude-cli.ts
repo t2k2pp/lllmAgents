@@ -14,11 +14,13 @@
  *  - lllmAgents の tool calling は橋渡しせず、 tools が渡された場合は明示エラーで止める
  *    (claude -p には外部 tool 定義を注入する経路が無いため)。
  *    ツール付きエージェントループには `anthropic` または `claude-agent-sdk` プロバイダを使う
- *  - max_tokens / temperature 等のサンプリングパラメータは無視される (claude 側が制御)
+ *  - temperature 等のサンプリングパラメータは無視される (claude 側が制御)。 出力上限 (maxTokens) だけは
+ *    環境変数 CLAUDE_CODE_MAX_OUTPUT_TOKENS で渡す (utils/claude-code-env.ts)
  *  - 認証は claude CLI が事前に `claude login` 済みである必要がある
  */
 
 import { spawn } from "node:child_process";
+import { claudeCodeEnv } from "./utils/claude-code-env.js";
 import type {
   LLMProvider,
   ChatParams,
@@ -139,7 +141,8 @@ export class ClaudeCliProvider implements LLMProvider {
     try {
       proc = spawn(this.config.binPath ?? DEFAULT_BIN, args, {
         stdio: ["pipe", "pipe", "pipe"],
-        env: process.env,
+        // 出力上限 (params.maxTokens) は環境変数で渡す (claude -p に max_tokens の引数は無い)
+        env: claudeCodeEnv(params.maxTokens),
         signal: params.signal,
       });
     } catch (e) {

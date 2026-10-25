@@ -38,10 +38,17 @@ import {
   resolveCapability,
   formatCapabilityLabel,
   extractModelCandidates,
+  TIER_CONTEXT_BUDGETS,
   type CapabilityProfile,
 } from "./capability-tier.js";
-import { checkContextWindowFits, formatContextWindowTooSmall } from "./context-budget.js";
-import { estimateMessageTokens, estimateToolDefinitionTokens } from "./token-counter.js";
+import {
+  checkContextWindowFits,
+  checkUserInputFits,
+  formatContextWindowTooSmall,
+  formatUserInputTooLarge,
+} from "./context-budget.js";
+import { ToolResultBatch } from "./tool-result-limit.js";
+import { estimateMessageTokens, estimateTokens, estimateToolDefinitionTokens } from "./token-counter.js";
 import { normalizeToolCalls } from "./tool-call-normalizer.js";
 import { classifyTaskComplexity, recommendTier, explainRecommendation } from "./task-complexity.js";
 import { buildSystemPrompt, type SkillInfo, type LLMProfiles, type SystemPromptOverrides } from "./system-prompt.js";
@@ -204,33 +211,6 @@ function isGarbageResponse(text: string): boolean {
   // その他の明らかなアーティファクト（短い特殊文字のみ）
   if (t.length < 5 && /^[<>\[\]@#|{}]+$/.test(t)) return true;
   return false;
-}
-
-/**
- * P2-B + Phase C-3: 巨大 tool_result を頭尾要約に置換する。
- *
- * - 閾値: tier 別 (T1=20KB / T2=12KB / T3=6KB)。 短 ctx の T3 はノイズ感受性高。
- * - 加工: 先頭 60% + 末尾 30% を残し、 中央を「...(N bytes truncated for history)」 に置換
- * - 対象外: file_edit (P0-B で自前にスニペット同梱しており短い)、 file_write
- *
- * docs/agent-loop-efficiency-review.md §4.8 / docs/multi-tier-harness-roadmap.md §4 Phase C 参照。
- */
-function truncateLargeToolResult(toolName: string, content: string, threshold: number): string {
-  if (!content) return content;
-  // file_edit は P0-B で自前にスニペット同梱しており、 既に短い
-  if (toolName === "file_edit" || toolName === "file_write") return content;
-  if (content.length <= threshold) return content;
-  // 閾値の 60%/30% で頭尾、 残り 10% は truncate メッセージ
-  const headBytes = Math.floor(threshold * 0.6);
-  const tailBytes = Math.floor(threshold * 0.3);
-  const head = content.slice(0, headBytes);
-  const tail = content.slice(-tailBytes);
-  const truncated = content.length - headBytes - tailBytes;
-  return (
-    head +
-    `\n\n...(${truncated} bytes truncated for history; full output was ${content.length} bytes from "${toolName}")...\n\n` +
-    tail
-  );
 }
 
 export const MAX_STEERING_MESSAGE_CHARS = 4000;
@@ -833,14 +813,22 @@ export class AgentLoop {
     this.planTodoWarned = false;
     // P3-A: レジスターは user 発話ごとに再判定 (前タスクのレジスターを引き継がない)
     this.currentRegister = "unknown";
-    // 依頼の洗い出しガイドは依頼ごとに出し直す (docs/request-elaboration-design.md §5.5)
-    if (!durableResume) {
-      resetPerRequestGuides();
-      // ToDo を依頼ごとに区切る: 前の依頼で完了した項目を一覧・完了カウントから外す (削除はしない)
-      beginTodoRound();
-    }
     try {
-      if (!durableResume) this.history.addUserMessage(userMessage);
+      if (!durableResume) {
+        // 入りきらない入力は履歴に入れずに断る (ToDo の区切りなど依頼ごとの準備もしない)
+        const refusal = this.checkUserInput(userMessage);
+        if (refusal) {
+          console.log(chalk.red(`\n  ${refusal}`));
+          this.notice("error", refusal);
+          this.runStats.outcome = "error";
+          return;
+        }
+        // 依頼の洗い出しガイドは依頼ごとに出し直す (docs/request-elaboration-design.md §5.5)
+        resetPerRequestGuides();
+        // ToDo を依頼ごとに区切る: 前の依頼で完了した項目を一覧・完了カウントから外す (削除はしない)
+        beginTodoRound();
+        this.history.addUserMessage(userMessage);
+      }
       // チャットログ記録
       if (this.chatLogger && !durableResume) {
         const userText =
@@ -1122,12 +1110,12 @@ export class AgentLoop {
                   `前回 ${prefixInfo.previousTotal} 件)。プロンプトキャッシュが外れています。`,
               );
             }
-            // maxTokens は意図的に渡さない:
-            //   - openai-compat (Azure Foundry / vLLM 等): 省略すると「残りコンテキスト全部」がサーバ既定値となる。
-            //     contextWindow をそのまま渡すと、サーバによっては input + max_tokens > context で 400 を返す
-            //     (例: Kimi-K2 で 13991 input + 256000 max_tokens > 262144 → BadRequest)。
-            //   - azure-anthropic: max_tokens 必須だが provider 側に DEFAULT_MAX_TOKENS=64000 のフォールバックあり。
-            //   - azure-gpt (Responses API): max_output_tokens 省略時はサーバ既定 (= 残コンテキスト) が適用される。
+            // 出力上限 O (ティアの outputTokenLimit) を必ず渡す (docs/context-reduction-redesign.md §4.2 / §4.3)。
+            // 役割は (1) 同じ文を繰り返し続ける生成の暴走の歯止め、 (2) 予約 R の計算 (次の呼び出しが必ず入る)。
+            // contextWindow そのものは渡さない (input + max_tokens > context で 400 を返すサーバがある。
+            // 例: Kimi-K2 で 13991 input + 256000 max_tokens > 262144)。 O で切れたときは finish_reason="length" になり、
+            // 下の「続きを出力」 の処理が次の本体呼び出しとして続ける。
+            const maxTokens = TIER_CONTEXT_BUDGETS[this.capability.tier].outputTokenLimit;
             // 呼び出しごとに AbortController を作り直す。 abort() がこれを切断することで
             // Esc 中断が HTTP 層まで届く (ストリーム待機中でも即座に reject される)。
             this.llmAbortController = new AbortController();
@@ -1140,6 +1128,7 @@ export class AgentLoop {
                     stream: true,
                     signal: this.llmAbortController.signal,
                     ...this.samplingParams,
+                    maxTokens,
                   })
                 : this.provider.chat({
                     model: this.model,
@@ -1147,6 +1136,7 @@ export class AgentLoop {
                     stream: true,
                     signal: this.llmAbortController.signal,
                     ...this.samplingParams,
+                    maxTokens,
                   });
 
             // LLM待機スピナー: リクエスト送信〜最初のチャンク受信まで
@@ -1761,7 +1751,7 @@ export class AgentLoop {
 
           let shouldAbort = false;
           if (toolCalls.length === 1) {
-            shouldAbort = await this.executeSingleTool(toolCalls[0]);
+            shouldAbort = await this.executeSingleTool(toolCalls[0], this.newToolResultBatch());
           } else {
             shouldAbort = await this.executeToolsParallel(toolCalls);
           }
@@ -2130,13 +2120,14 @@ export class AgentLoop {
             );
             this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
             let shouldAbort = false;
+            const batch = this.newToolResultBatch();
             for (const fw of fakeWrites) {
               const syntheticCall: ToolCall = {
                 id: `synthetic_fw_${Date.now()}`,
                 type: "function",
                 function: { name: "file_write", arguments: JSON.stringify(fw) },
               };
-              shouldAbort = await this.executeSingleTool(syntheticCall);
+              shouldAbort = await this.executeSingleTool(syntheticCall, batch);
               if (shouldAbort) {
                 this.purgeEphemeralAtSpanEnd("synthetic_write_abort");
                 return;
@@ -3060,8 +3051,36 @@ export class AgentLoop {
     this.planTodoWarned = true;
   }
 
+  /**
+   * 1 回の応答のツール結果の上限 (1 件の上限と合計 T) を数える入れ物。 応答ごとに 1 つ作り、
+   * その応答の結果を履歴に入れるときに必ず通す (docs/context-reduction-redesign.md §4.3)。
+   */
+  private newToolResultBatch(): ToolResultBatch {
+    const budget = TIER_CONTEXT_BUDGETS[this.capability.tier];
+    return new ToolResultBatch({
+      perResultTokens: budget.toolResultLimitTokens,
+      totalTokens: budget.toolResultTotalTokens,
+    });
+  }
+
+  /**
+   * ツール結果を上限に合わせて履歴に入れる。 切ったときは結果の中に注記が入る。
+   * 合計の上限で切ったときは、 利用者にも 1 行で知らせる (1 件の上限での切り詰めは従来どおり注記だけ)。
+   */
+  private addLimitedToolResult(batch: ToolResultBatch, toolCall: ToolCall, content: string): void {
+    const fit = batch.fit(toolCall.function.name, content);
+    if (fit.truncation?.reason === "response-total") {
+      console.log(
+        chalk.dim(
+          `  (同じ応答のツール結果の合計が上限に近いため、 ${toolCall.function.name} の結果を約 ${fit.truncation.originalTokens} → ${fit.truncation.keptTokens} トークンに切りました)`,
+        ),
+      );
+    }
+    this.history.addToolResult(toolCall.id, fit.content);
+  }
+
   /** Execute a single tool call, returning whether to abort the rest of the run loop */
-  private async executeSingleTool(toolCall: ToolCall): Promise<boolean> {
+  private async executeSingleTool(toolCall: ToolCall, batch: ToolResultBatch): Promise<boolean> {
     if (!(await this.runApiGate.waitUntilRunning()) || this._aborted) return true;
     const summary = formatToolCall(toolCall);
     this.events.emit("tool_start", { callId: toolCall.id, name: toolCall.function.name, summary });
@@ -3162,15 +3181,8 @@ export class AgentLoop {
       if (failGuide) resultContent += "\n\n" + failGuide;
     }
 
-    // P2-B + Phase C-3: 巨大 tool_result はコンテキスト膨張の主因。 履歴格納時に頭尾を残して
-    // 中央を要約。 閾値は tier 別 (T1=20KB / T2=12KB / T3=6KB)。
-    resultContent = truncateLargeToolResult(
-      toolCall.function.name,
-      resultContent,
-      this.capability.toolResultTruncateBytes,
-    );
-
-    this.history.addToolResult(toolCall.id, resultContent);
+    // 1 件の上限と同じ応答の合計の上限に合わせて、 頭と尻尾を残して入れる (tool-result-limit.ts)
+    this.addLimitedToolResult(batch, toolCall, resultContent);
 
     // P0-A: 失敗時に sliding-window で「同じ轍」 を検出して self-check 注入
     if (!result.success) {
@@ -3190,9 +3202,11 @@ export class AgentLoop {
   private async executeToolsParallel(toolCalls: ToolCall[]): Promise<boolean> {
     if (!(await this.runApiGate.waitUntilRunning()) || this._aborted) return true;
     const limit = this.maxParallelTools;
+    // 結果を履歴に入れる順 (= toolCalls の順) で合計を数えるので、 並列でも切り方は決定的
+    const batch = this.newToolResultBatch();
     if (limit === 1) {
       for (let i = 0; i < toolCalls.length; i++) {
-        if (await this.executeSingleTool(toolCalls[i])) {
+        if (await this.executeSingleTool(toolCalls[i], batch)) {
           for (const pending of toolCalls.slice(i + 1)) {
             this.history.addToolResult(pending.id, "Error: 前のツールで停止したため未実行です。");
           }
@@ -3305,14 +3319,8 @@ export class AgentLoop {
           if (failGuide) resultContent += "\n\n" + failGuide;
         }
 
-        // P2-B + Phase C-3: 巨大 tool_result の頭尾要約 (並列ルートも同様に適用)
-        resultContent = truncateLargeToolResult(
-          toolCall.function.name,
-          resultContent,
-          this.capability.toolResultTruncateBytes,
-        );
-
-        this.history.addToolResult(toolCall.id, resultContent);
+        // 1 件の上限と同じ応答の合計の上限 (並列ルートも settled の順 = toolCalls の順に数える)
+        this.addLimitedToolResult(batch, toolCall, resultContent);
 
         // P0-A: 並列ルートでも同じ sliding-window 失敗検出を適用
         if (!result.success) {
@@ -3975,16 +3983,39 @@ export class AgentLoop {
    * 固定部分はいまの system と、 登録済みのツール定義の全部 (絞り込み前。 多い方で確かめる)。
    */
   private assertContextWindowFits(capability: CapabilityProfile, contextWindow: number, modelId: string): void {
-    const system = this.history.getMessages()[0];
-    const fixedTokens =
-      estimateMessageTokens([system]) + estimateToolDefinitionTokens(this.toolRegistry.getDefinitions());
     const fit = checkContextWindowFits({
       contextWindow,
       tier: capability.tier,
-      fixedTokens,
-      toolResultLimitChars: capability.toolResultTruncateBytes,
+      fixedTokens: this.estimateFixedTokens(),
     });
     if (!fit.ok) throw new Error(formatContextWindowTooSmall(fit, modelId, capability.tier));
+  }
+
+  /** 固定部分 = いまの system + 登録済みのツール定義の全部 (絞り込み前。 多い方で確かめる) の推定 */
+  private estimateFixedTokens(): number {
+    const system = this.history.getMessages()[0];
+    return estimateMessageTokens([system]) + estimateToolDefinitionTokens(this.toolRegistry.getDefinitions());
+  }
+
+  /**
+   * 送信時の利用者の入力の検査 (docs/context-reduction-redesign.md §4.3)。 入らなければ利用者に示す文を返す。
+   * 数えるのはテキスト部分だけ (画像の大きさはサーバの数え方によるので推定しない)。
+   */
+  private checkUserInput(userMessage: string | ContentPart[]): string | null {
+    const text =
+      typeof userMessage === "string"
+        ? userMessage
+        : userMessage
+            .filter((p): p is { type: "text"; text: string } => p.type === "text")
+            .map((p) => p.text)
+            .join("\n");
+    const fit = checkUserInputFits({
+      inputTokens: estimateTokens(text),
+      contextWindow: this.contextWindow,
+      tier: this.capability.tier,
+      fixedTokens: this.estimateFixedTokens(),
+    });
+    return fit.ok ? null : formatUserInputTooLarge(fit);
   }
 
   /**

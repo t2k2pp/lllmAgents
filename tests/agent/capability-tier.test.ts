@@ -209,30 +209,27 @@ describe("CapabilityProfile — フィールド整合性", () => {
 });
 
 describe("Phase C tunables — ループ制御チューナブル", () => {
-  it("T1 のループ制御値: 点検 30 回ごと / self-check 3 / 0.7 / 20KB / keepRecent 10", () => {
+  it("T1 のループ制御値: 点検 30 回ごと / self-check 3 / 0.7 / keepRecent 10", () => {
     const p = resolveCapability("claude-opus-4-7");
     expect(p.loopCheckInterval).toBe(30);
     expect(p.maxSelfCheckRounds).toBe(3);
     expect(p.compressionThreshold).toBe(0.7);
-    expect(p.toolResultTruncateBytes).toBe(20 * 1024);
     expect(p.keepRecentMessages).toBe(10);
   });
 
-  it("T2 のループ制御値: 点検 20 回ごと / self-check 2 / 0.6 / 12KB / keepRecent 8", () => {
+  it("T2 のループ制御値: 点検 20 回ごと / self-check 2 / 0.6 / keepRecent 8", () => {
     const p = resolveCapability("kimi-k2.6");
     expect(p.loopCheckInterval).toBe(20);
     expect(p.maxSelfCheckRounds).toBe(2);
     expect(p.compressionThreshold).toBe(0.6);
-    expect(p.toolResultTruncateBytes).toBe(12 * 1024);
     expect(p.keepRecentMessages).toBe(8);
   });
 
-  it("T3 のループ制御値: 点検 15 回ごと / self-check 1 / 0.5 / 6KB / keepRecent 5", () => {
+  it("T3 のループ制御値: 点検 15 回ごと / self-check 1 / 0.5 / keepRecent 5", () => {
     const p = resolveCapability("phi-4");
     expect(p.loopCheckInterval).toBe(15);
     expect(p.maxSelfCheckRounds).toBe(1);
     expect(p.compressionThreshold).toBe(0.5);
-    expect(p.toolResultTruncateBytes).toBe(6 * 1024);
     expect(p.keepRecentMessages).toBe(5);
   });
 

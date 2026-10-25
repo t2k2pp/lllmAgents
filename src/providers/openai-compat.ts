@@ -11,7 +11,11 @@ import type {
 } from "./base-provider.js";
 import { httpGet, httpPostStream } from "../utils/http-client.js";
 import { inferContextLength } from "./utils/context-length.js";
-import { compatibleOpenAISamplingParameters, warnOmittedSamplingParameters } from "./openai-sampling-compat.js";
+import {
+  compatibleOpenAISamplingParameters,
+  isOpenAIReasoningModel,
+  warnOmittedSamplingParameters,
+} from "./openai-sampling-compat.js";
 
 /** chat_template_kwargs.enable_thinking を解釈するセルフホスト系サーバ (ChatParams.disableThinking) */
 const THINKING_TOGGLE_PROVIDERS = new Set<string>(["llamacpp", "vllm"]);
@@ -149,16 +153,22 @@ export class OpenAICompatProvider implements LLMProvider {
     const sampling = compatibleOpenAISamplingParameters(this.providerType, params.model, params);
     Object.assign(body, sampling.fields);
     warnOmittedSamplingParameters(this.providerType, params.model, sampling.omitted);
-    // max_tokens は呼び出し側が明示指定したときだけ送信する。
+    // 出力上限は呼び出し側が明示指定したときだけ送信する。 本体呼び出しはティアの出力上限 O を必ず渡す
+    // (docs/context-reduction-redesign.md §4.2)。 脇の呼び出しは呼び出し側が決める。
     //
-    // 重要: 「contextWindow をそのまま渡してサーバが自動調整する」 と思い込んではいけない。
-    // OpenAI 互換サーバの大半 (vLLM / Azure AI Foundry / llama.cpp 等) は max_tokens を
-    // **完了側専用枠** として扱い、 input + max_tokens > context_length で 400 を返す。
+    // 重要: contextWindow をそのまま渡してはいけない。 OpenAI 互換サーバの大半 (vLLM / Azure AI Foundry /
+    // llama.cpp 等) は max_tokens を **完了側専用枠** として扱い、 input + max_tokens > context_length で 400 を返す。
     //   実例: Kimi-K2 (262144 ctx) で input=13991, max_tokens=256000 → 400 BadRequest
-    // 省略すればサーバ既定値 = 「残コンテキスト全部」 が使われるため、 上限まで出力させたい
-    // ケースこそ省略が正解。 finish_reason="length" が返った場合はエージェント側で自動継続する。
+    // finish_reason="length" が返った場合はエージェント側で自動継続する。
+    //
+    // Azure OpenAI の推論モデル (GPT-5 / o 系) は max_tokens を受け付けず max_completion_tokens を求める
+    // (思考の分も含む出力の上限)。 temperature を外すのと同じ判定 (isOpenAIReasoningModel) で欄の名前を選ぶ。
     if (params.maxTokens) {
-      body.max_tokens = params.maxTokens;
+      if (this.providerType === "azure-openai" && isOpenAIReasoningModel(params.model)) {
+        body.max_completion_tokens = params.maxTokens;
+      } else {
+        body.max_tokens = params.maxTokens;
+      }
     }
     // 思考オフ: chat template の enable_thinking を倒す (Qwen3 系等の慣例)。
     // 未知フィールドで 400 を返し得る商用 API には送らない。

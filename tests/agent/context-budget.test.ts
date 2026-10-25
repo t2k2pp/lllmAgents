@@ -2,17 +2,18 @@ import { describe, expect, it } from "vitest";
 import { TIER_CONTEXT_BUDGETS } from "../../src/agent/capability-tier.js";
 import {
   checkContextWindowFits,
+  checkUserInputFits,
   computeContextBudget,
   computeReductionGoal,
   DEFAULT_REQUEST_GROWTH_TOKENS,
   exceedsBoundaryLimit,
   exceedsForcedLimit,
   formatContextWindowTooSmall,
+  formatUserInputTooLarge,
   MIN_CONVERSATION_TOKENS,
   measurePromptSize,
   RequestGrowthTracker,
   resolveRequestGrowth,
-  toolResultLimitTokens,
 } from "../../src/agent/context-budget.js";
 import { estimateMessageTokens, estimateToolDefinitionTokens } from "../../src/agent/token-counter.js";
 import type { Message, ToolDefinition } from "../../src/providers/base-provider.js";
@@ -232,33 +233,53 @@ describe("ひと仕事の増分 G (§4.5)", () => {
 
 describe("起動時の検査 (§6.3)", () => {
   it("固定部分 + K × 1 件の上限 + 16,384 + R ≤ W なら通る", () => {
-    // T2: K=5、 12KB の切り詰め、 R=67,584
+    // T2: K=5、 1 件の上限 5,120 トークン、 R=67,584
     const fit = checkContextWindowFits({
       contextWindow: W_1M,
       tier: "T2",
       fixedTokens: 20_000,
-      toolResultLimitChars: 12 * 1024,
     });
-    const perItem = toolResultLimitTokens(12 * 1024);
     expect(fit).toEqual({
       ok: true,
       contextWindow: W_1M,
-      requiredTokens: 20_000 + 5 * perItem + MIN_CONVERSATION_TOKENS + 67_584,
+      requiredTokens: 20_000 + 5 * 5_120 + MIN_CONVERSATION_TOKENS + 67_584,
       fixedTokens: 20_000,
       keepRecentToolUses: 5,
-      recentToolResultTokens: 5 * perItem,
+      toolResultLimitTokens: 5_120,
+      recentToolResultTokens: 5 * 5_120,
       conversationTokens: 16_384,
       reserveTokens: 67_584,
     });
   });
 
-  it("1 件の上限は推定で最も多く数える場合 (全角 1 文字 = 1.1 トークン) をとる", () => {
-    // 6KB の閾値 + 注記 200 字
-    expect(toolResultLimitTokens(6 * 1024)).toBe(Math.ceil((6 * 1024 + 200) * 1.1));
+  it("1 件の上限は切り詰めと同じトークン数 (最悪値に直さない。 2026-10-25 利用者の決定)", () => {
+    expect(TIER_CONTEXT_BUDGETS.T1.toolResultLimitTokens).toBe(8_192);
+    expect(TIER_CONTEXT_BUDGETS.T2.toolResultLimitTokens).toBe(5_120);
+    expect(TIER_CONTEXT_BUDGETS.T3.toolResultLimitTokens).toBe(2_048);
+    for (const tier of ["T1", "T2", "T3"] as const) {
+      const fit = checkContextWindowFits({ contextWindow: W_1M, tier, fixedTokens: 0 });
+      expect(fit.recentToolResultTokens).toBe(
+        TIER_CONTEXT_BUDGETS[tier].keepRecentToolUses * TIER_CONTEXT_BUDGETS[tier].toolResultLimitTokens,
+      );
+    }
+  });
+
+  // 固定部分 約 11k (いまの system + ツール定義の実測に近い値) で、 各ティアが起動できる最小の枠
+  it.each([
+    // T1: 11,000 + 6 × 8,192 + 16,384 + 71,680 = 148,216 → 200K 枠 (Claude 等) で起動できる
+    ["T1", 200_000, 148_216],
+    // T2: 11,000 + 5 × 5,120 + 16,384 + 67,584 = 120,568 → 128K 枠で起動できる
+    ["T2", 128_000, 120_568],
+    // T3: 11,000 + 3 × 2,048 + 16,384 + 17,408 = 50,936 → 64K 枠で起動できる
+    ["T3", 65_536, 50_936],
+  ] as const)("固定部分 11k のとき %s は %i の枠で起動できる (必要量 %i)", (tier, window, required) => {
+    const fit = checkContextWindowFits({ contextWindow: window, tier, fixedTokens: 11_000 });
+    expect(fit.requiredTokens).toBe(required);
+    expect(fit.ok).toBe(true);
   });
 
   it("ちょうど W に等しければ通り、 1 でも超えれば止める", () => {
-    const base = { tier: "T3" as const, fixedTokens: 5_000, toolResultLimitChars: 6 * 1024 };
+    const base = { tier: "T3" as const, fixedTokens: 5_000 };
     const required = checkContextWindowFits({ ...base, contextWindow: 1 }).requiredTokens;
     expect(checkContextWindowFits({ ...base, contextWindow: required }).ok).toBe(true);
     const tooSmall = checkContextWindowFits({ ...base, contextWindow: required - 1 });
@@ -274,8 +295,35 @@ describe("起動時の検査 (§6.3)", () => {
       contextWindow: 32_768,
       tier: "T3",
       fixedTokens: 0,
-      toolResultLimitChars: 6 * 1024,
     });
+    expect(fit.ok).toBe(false);
+  });
+});
+
+describe("利用者の入力の検査 (§4.3)", () => {
+  it("入力 + 固定部分 + 最小限の保護部分 + R ≤ W なら受け付ける (境目ちょうどは通る)", () => {
+    // T1、 200K 枠、 固定部分 11k: 起動時の必要量 148,216 → 入力は 51,784 まで
+    const base = { contextWindow: 200_000, tier: "T1" as const, fixedTokens: 11_000 };
+    const atLimit = checkUserInputFits({ ...base, inputTokens: 51_784 });
+    expect(atLimit).toEqual({ ok: true, inputTokens: 51_784, maxInputTokens: 51_784, contextWindow: 200_000 });
+    const over = checkUserInputFits({ ...base, inputTokens: 51_785 });
+    expect(over.ok).toBe(false);
+    expect(over.maxInputTokens).toBe(51_784);
+  });
+
+  it("断るときはファイルにして渡すよう案内する", () => {
+    const fit = checkUserInputFits({ contextWindow: 65_536, tier: "T3", fixedTokens: 11_000, inputTokens: 20_000 });
+    expect(fit.ok).toBe(false);
+    const message = formatUserInputTooLarge(fit);
+    expect(message).toContain("受け付けませんでした");
+    expect(message).toContain("20,000");
+    expect(message).toContain((65_536 - 50_936).toLocaleString("en-US"));
+    expect(message).toContain("ファイルに保存");
+  });
+
+  it("枠が起動時の必要量より小さければ入れられる量は 0 (負にしない)", () => {
+    const fit = checkUserInputFits({ contextWindow: 32_768, tier: "T3", fixedTokens: 0, inputTokens: 1 });
+    expect(fit.maxInputTokens).toBe(0);
     expect(fit.ok).toBe(false);
   });
 });

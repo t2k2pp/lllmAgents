@@ -54,8 +54,6 @@ export interface CapabilityProfile {
   maxSelfCheckRounds: number;
   /** ContextManager の圧縮発火閾値 (0..1, 例: 0.7 = 70% で圧縮) */
   compressionThreshold: number;
-  /** 履歴格納時に tool_result を truncate する閾値 (バイト数) */
-  toolResultTruncateBytes: number;
   /**
    * P1-A bash 累積警告を有効化するか。
    * 2026-05-09: 全 tier で OFF に変更。 単発で長い bash (pygame の lingering 等で
@@ -91,7 +89,6 @@ export interface CapabilityOverride {
   maxIterations?: number;
   maxSelfCheckRounds?: number;
   compressionThreshold?: number;
-  toolResultTruncateBytes?: number;
   bashCumulativeWarnEnabled?: boolean;
   planTodoOveruseEnabled?: boolean;
   // Phase D-4
@@ -105,11 +102,10 @@ const TIER_DEFAULTS: Record<Tier, Omit<CapabilityProfile, "tier" | "contextWindo
     supportsParallelTools: true,
     reliableInstructionFollowing: true,
     promptStyle: "concise",
-    // Phase C: T1 はループ点検 30 回ごと、 自己点検 3 回まで、 圧縮閾値 0.7、 truncate 20KB
+    // Phase C: T1 はループ点検 30 回ごと、 自己点検 3 回まで、 圧縮閾値 0.7
     loopCheckInterval: 30,
     maxSelfCheckRounds: 3,
     compressionThreshold: 0.7,
-    toolResultTruncateBytes: 20 * 1024,
     // 2026-05-09: 誤発火 + T1 が response_complete を呼んで作業を畳む副作用を観測したため OFF
     bashCumulativeWarnEnabled: false,
     // T1 は plan/todo を自然に最小限で運用するため過多検知は OFF (= 賢い LLM の足枷にしない)
@@ -122,11 +118,10 @@ const TIER_DEFAULTS: Record<Tier, Omit<CapabilityProfile, "tier" | "contextWindo
     supportsParallelTools: true,
     reliableInstructionFollowing: true,
     promptStyle: "standard",
-    // Phase C: T2 はループ点検 20 回ごと、 自己点検 2 回、 圧縮 0.6、 truncate 12KB
+    // Phase C: T2 はループ点検 20 回ごと、 自己点検 2 回、 圧縮 0.6
     loopCheckInterval: 20,
     maxSelfCheckRounds: 2,
     compressionThreshold: 0.6,
-    toolResultTruncateBytes: 12 * 1024,
     // 2026-05-09: T1 で観測した誤発火と作業中断の副作用は T2 でもリスクが高いため OFF
     bashCumulativeWarnEnabled: false,
     planTodoOveruseEnabled: true,
@@ -137,11 +132,10 @@ const TIER_DEFAULTS: Record<Tier, Omit<CapabilityProfile, "tier" | "contextWindo
     supportsParallelTools: false,
     reliableInstructionFollowing: false,
     promptStyle: "verbose+examples",
-    // Phase C: T3 はループ点検 15 回ごと、 自己点検 1 回、 圧縮 0.5、 truncate 6KB
+    // Phase C: T3 はループ点検 15 回ごと、 自己点検 1 回、 圧縮 0.5
     loopCheckInterval: 15,
     maxSelfCheckRounds: 1,
     compressionThreshold: 0.5,
-    toolResultTruncateBytes: 6 * 1024,
     // T3 は scaffolding 自体が判断負荷を上げるため P1-A/B は両方 OFF
     bashCumulativeWarnEnabled: false,
     planTodoOveruseEnabled: false,
@@ -162,6 +156,11 @@ export interface TierContextBudget {
   outputTokenLimit: number;
   /** T: 1 回の応答で足されるツール結果の合計の上限 (タスク 4) */
   toolResultTotalTokens: number;
+  /**
+   * ツール結果 1 件の上限 (切り詰めの注記を含む。 estimateTokens で数える。 タスク 4)。
+   * 起動時検査の「K × 1 件の上限」 にもこの値をそのまま使う (切り方と見積もりが同じ数え方なので保証が保たれる)。
+   */
+  toolResultLimitTokens: number;
   /** M: 推定の誤差の余白 */
   estimateMarginTokens: number;
   /** S: 整理そのものに要る余白 (段階 3 の要約呼び出しと整理後の状態通知) */
@@ -175,6 +174,7 @@ export const TIER_CONTEXT_BUDGETS: Readonly<Record<Tier, Readonly<TierContextBud
   T1: {
     outputTokenLimit: 32_768,
     toolResultTotalTokens: 24_576,
+    toolResultLimitTokens: 8_192,
     estimateMarginTokens: 8_192,
     reductionMarginTokens: 6_144,
     keepRecentToolUses: 6,
@@ -182,6 +182,7 @@ export const TIER_CONTEXT_BUDGETS: Readonly<Record<Tier, Readonly<TierContextBud
   T2: {
     outputTokenLimit: 32_768,
     toolResultTotalTokens: 24_576,
+    toolResultLimitTokens: 5_120,
     estimateMarginTokens: 4_096,
     reductionMarginTokens: 6_144,
     keepRecentToolUses: 5,
@@ -189,6 +190,7 @@ export const TIER_CONTEXT_BUDGETS: Readonly<Record<Tier, Readonly<TierContextBud
   T3: {
     outputTokenLimit: 4_096,
     toolResultTotalTokens: 8_192,
+    toolResultLimitTokens: 2_048,
     estimateMarginTokens: 2_048,
     reductionMarginTokens: 3_072,
     keepRecentToolUses: 3,

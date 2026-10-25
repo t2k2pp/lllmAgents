@@ -211,8 +211,9 @@ export class SecondLLMManager {
       log.nextTurn();
       log.logRequest(messages, this.endpoint.model);
 
-      // maxTokens は渡さない: agent-loop.ts と同じ理由 (contextWindow を max_tokens として渡すと
-      // サーバによって input + max_tokens > context で 400 を返す)。 provider 側既定値に委ねる。
+      // maxTokens は渡さない (provider 側既定値に委ねる)。 contextWindow を max_tokens として渡すと
+      // サーバによって input + max_tokens > context で 400 を返す。 出力上限 O を渡すのは本体呼び出しだけ
+      // (docs/context-reduction-redesign.md §4.3)。
       const stream = sideCall("second-llm", this.provider, {
         method: "chat",
         params: {

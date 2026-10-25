@@ -51,18 +51,18 @@ describe("AgentLoop live model binding", () => {
     });
 
     it("モデル切替: 新しいティアで入らなければ切り替えない", () => {
-      const loop = new AgentLoop(provider, "qwen-old-7b", new ToolRegistry(), new PermissionManager(security), 128_000);
-      // T2 は R = 67,584、 K = 5 × 12KB で 128,000 に入らない
+      const loop = new AgentLoop(provider, "qwen-old-7b", new ToolRegistry(), new PermissionManager(security), 100_000);
+      // T2 は R = 67,584 + 直近 5 回 × 5,120 + 会話の最小限 16,384 = 109,568 (+ 固定部分) で 100,000 に入らない
       expect(() => loop.setModel("qwen3-32b")).toThrow(/ティア T2/);
       expect(loop.getModel()).toBe("qwen-old-7b");
       expect(loop.capability.tier).toBe("T3");
     });
 
     it("接続先の切替: endpoint の contextWindow と新しいモデルの組で確かめてから反映する", () => {
-      const loop = new AgentLoop(provider, "qwen-old-7b", new ToolRegistry(), new PermissionManager(security), 128_000);
+      const loop = new AgentLoop(provider, "qwen-old-7b", new ToolRegistry(), new PermissionManager(security), 100_000);
       const next = { providerType: "ollama" } as unknown as LLMProvider;
       expect(() =>
-        loop.setProvider(next, "qwen3-32b", { providerType: "ollama", model: "qwen3-32b", contextWindow: 128_000 }),
+        loop.setProvider(next, "qwen3-32b", { providerType: "ollama", model: "qwen3-32b", contextWindow: 100_000 }),
       ).toThrow(/ティア T2/);
       expect(loop.getModel()).toBe("qwen-old-7b");
 

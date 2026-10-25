@@ -116,7 +116,7 @@ interface CapabilityProfile {
   maxIterations: number;  // 2026-10-14 廃止 → loopCheckInterval (docs/todo-request-elaboration.md 第 4 段)
   maxSelfCheckRounds: number;
   compressionThreshold: number;
-  toolResultTruncateBytes: number;
+  toolResultTruncateBytes: number; // 2026-10-25 廃止 → TIER_CONTEXT_BUDGETS.toolResultLimitTokens (トークン数。 docs/context-reduction-redesign.md §4.2)
   bashCumulativeWarnEnabled: boolean;
   planTodoOveruseEnabled: boolean;
   keepRecentMessages: number;
@@ -192,7 +192,7 @@ tier テーブルが独自の数値を持つと矛盾と保守負担を生む。
 | plan/todo 過多検知 (P1-B) | 🟡 | ✅ | ❌ | T3 は plan-mode 自体を抑制 |
 | browser_snapshot キャッシュ (P2-A) | ✅ | ✅ | ✅ | Tier 非依存 |
 | 圧縮閾値 0.7 (P2-B) | 0.7 | 0.6 | 0.5 | T3 は ctx 狭いため早めに |
-| 大 tool_result 要約 (P2-B) | >20KB | >12KB | >6KB | T3 はノイズ感受性高い |
+| 大 tool_result 要約 (P2-B) | >20KB | >12KB | >6KB | T3 はノイズ感受性高い (2026-10-25 トークン数の上限 8,192 / 5,120 / 2,048 に変更。 context-reduction-redesign.md §4.2) |
 | レジスター別ソフトキャップ (P3-A) | ✅ | ✅ | ❌→ 4.x の hard cap | T3 は単に hard cap で打ち切る |
 | 破壊的 bash の git status 添付 (P3-B) | ✅短文 | ✅標準 | ✅+復旧手順例 | T3 は手順を例示 |
 | **新規機能 (本ロードマップで追加)** | | | | |

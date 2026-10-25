@@ -10,6 +10,7 @@ import { formatSummary, formatModels, formatProviders, fmtMoney } from "./cost-v
 import { setDisplayJpyRate } from "../cost/money-format.js";
 import { displayHelp, type SkillSummary } from "./renderer.js";
 import { estimateMessageTokens } from "../agent/token-counter.js";
+import { TIER_CONTEXT_BUDGETS } from "../agent/capability-tier.js";
 import {
   buildContextBreakdown,
   formatContextBreakdown,
@@ -6612,7 +6613,7 @@ export class REPL {
         );
         console.log(
           chalk.dim(
-            `  loopCheck=${cap.loopCheckInterval}回ごと  compress@${Math.round(cap.compressionThreshold * 100)}%  truncate>${Math.round(cap.toolResultTruncateBytes / 1024)}KB  keepRecent=${cap.keepRecentMessages}`,
+            `  loopCheck=${cap.loopCheckInterval}回ごと  compress@${Math.round(cap.compressionThreshold * 100)}%  toolResult≤${TIER_CONTEXT_BUDGETS[cap.tier].toolResultLimitTokens}tok (1 応答で計${TIER_CONTEXT_BUDGETS[cap.tier].toolResultTotalTokens}tok)  maxOutput=${TIER_CONTEXT_BUDGETS[cap.tier].outputTokenLimit}tok  keepRecent=${cap.keepRecentMessages}`,
           ),
         );
         console.log(chalk.dim(`  判定根拠: ${cap.reason}`));

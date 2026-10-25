@@ -28,6 +28,7 @@ import type {
 import type { ModelInfo, ModelDetail, SecondLLMProviderType } from "../config/types.js";
 import { CLAUDE_MODELS } from "../config/types.js";
 import { getOpsLogger } from "../utils/ops-logger.js";
+import { claudeCodeEnv } from "./utils/claude-code-env.js";
 
 interface ClaudeAgentSdkProviderConfig {
   model: string;
@@ -107,6 +108,8 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
       // built-in ツール (Read/Write/Bash/...) は全消去し、 lllmAgent ツールのみ使わせる。
       // 理由: lllmAgent の権限チェック / hook を通したい / 名前衝突回避 (docs/claude-agent-sdk-provider-design.md §3.1)
       tools: [],
+      // 出力上限 (params.maxTokens) は claude の子プロセスに環境変数で渡す (SDK に max_tokens の口は無い)
+      env: claudeCodeEnv(params.maxTokens),
     };
 
     const abortController = new AbortController();

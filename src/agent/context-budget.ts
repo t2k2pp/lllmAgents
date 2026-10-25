@@ -289,25 +289,11 @@ function isTokenCountOrNull(v: unknown): v is number | null {
 /** 整理しても必ず残る会話の最小限 (今の依頼の発話・要約・状態通知) に見込む量 (設計書 §6.3) */
 export const MIN_CONVERSATION_TOKENS = 16_384;
 
-/** 切り詰めの注記 ("...(N bytes truncated for history; …)...") と role の枠に見込む文字数 */
-const TOOL_RESULT_NOTE_ALLOWANCE_CHARS = 200;
-
-/**
- * ツール結果 1 件の上限 (切り詰めの閾値。 文字数) を、 トークン数の上限に直す。
- * 推定 (estimateTokens) で最も多く数える場合 (全部が日本語などの全角文字 = 1 文字 1 トークン × 1.1) をとる。
- * P の推定と同じ数え方の最悪値にしておけば、 中身によらず「整理しても入らない」 が起きない。
- */
-export function toolResultLimitTokens(limitChars: number): number {
-  return Math.ceil((limitChars + TOOL_RESULT_NOTE_ALLOWANCE_CHARS) * 1.1);
-}
-
 export interface ContextWindowFitInput {
   contextWindow: number;
   tier: Tier;
   /** 固定部分 (system + ツール定義) の推定トークン数 */
   fixedTokens: number;
-  /** ツール結果 1 件の切り詰めの閾値 (文字数。 capability.toolResultTruncateBytes) */
-  toolResultLimitChars: number;
 }
 
 export interface ContextWindowFit {
@@ -317,6 +303,8 @@ export interface ContextWindowFit {
   requiredTokens: number;
   fixedTokens: number;
   keepRecentToolUses: number;
+  /** ツール結果 1 件の上限 (TIER_CONTEXT_BUDGETS の toolResultLimitTokens。 切り詰めと同じ値) */
+  toolResultLimitTokens: number;
   recentToolResultTokens: number;
   conversationTokens: number;
   reserveTokens: number;
@@ -328,8 +316,10 @@ export interface ContextWindowFit {
  */
 export function checkContextWindowFits(input: ContextWindowFitInput): ContextWindowFit {
   const budget = computeContextBudget(input.contextWindow, input.tier);
-  const keepRecentToolUses = TIER_CONTEXT_BUDGETS[input.tier].keepRecentToolUses;
-  const recentToolResultTokens = keepRecentToolUses * toolResultLimitTokens(input.toolResultLimitChars);
+  const { keepRecentToolUses, toolResultLimitTokens } = TIER_CONTEXT_BUDGETS[input.tier];
+  // 1 件の上限はツール結果を履歴に入れるときの切り詰め (tool-result-limit.ts) と同じトークン数・同じ数え方なので、
+  // 最悪値に直さずにそのまま掛ける (file_write / file_edit は切らないが、 結果は短い)
+  const recentToolResultTokens = keepRecentToolUses * toolResultLimitTokens;
   const requiredTokens = input.fixedTokens + recentToolResultTokens + MIN_CONVERSATION_TOKENS + budget.reserveTokens;
   return {
     ok: requiredTokens <= input.contextWindow,
@@ -337,6 +327,7 @@ export function checkContextWindowFits(input: ContextWindowFitInput): ContextWin
     requiredTokens,
     fixedTokens: input.fixedTokens,
     keepRecentToolUses,
+    toolResultLimitTokens,
     recentToolResultTokens,
     conversationTokens: MIN_CONVERSATION_TOKENS,
     reserveTokens: budget.reserveTokens,
@@ -352,5 +343,54 @@ export function formatContextWindowTooSmall(fit: ContextWindowFit, modelId: stri
     `(固定部分 ${n(fit.fixedTokens)} + 直近 ${fit.keepRecentToolUses} 回のツール結果 ${n(fit.recentToolResultTokens)} + ` +
     `会話の最小限 ${n(fit.conversationTokens)} + 予約 ${n(fit.reserveTokens)})。 ` +
     `サーバ側の枠を ${n(fit.requiredTokens)} トークン以上にして mainLLM.contextWindow を合わせるか、 枠の大きいモデルを使ってください。`
+  );
+}
+
+// ─── 利用者の入力の検査 ───────────────────────────────────
+
+export interface UserInputFitInput {
+  /** 入力 (利用者の発話のテキスト部分) の推定トークン数 */
+  inputTokens: number;
+  contextWindow: number;
+  tier: Tier;
+  /** 固定部分 (system + ツール定義) の推定トークン数 */
+  fixedTokens: number;
+}
+
+export interface UserInputFit {
+  ok: boolean;
+  inputTokens: number;
+  /** この入力を受け付けられる最大 = W − (固定部分 + 最小限の保護部分 + R) */
+  maxInputTokens: number;
+  contextWindow: number;
+}
+
+/**
+ * 送信時の利用者の入力の検査 (設計書 §4.3)。 利用者の発言はどの段階でも原文のまま残す (§5.1) ので、
+ * 「入力 + 固定部分 + 最小限の保護部分 (直近 K 回のツール結果 + 会話の最小限) + R > W」 の入力は、
+ * 整理しても次の呼び出しが入らない。 受け付けずにファイルにして渡すよう案内する (整理の逃げ道ではない)。
+ */
+export function checkUserInputFits(input: UserInputFitInput): UserInputFit {
+  const window = checkContextWindowFits({
+    contextWindow: input.contextWindow,
+    tier: input.tier,
+    fixedTokens: input.fixedTokens,
+  });
+  const maxInputTokens = Math.max(0, input.contextWindow - window.requiredTokens);
+  return {
+    ok: input.inputTokens <= maxInputTokens,
+    inputTokens: input.inputTokens,
+    maxInputTokens,
+    contextWindow: input.contextWindow,
+  };
+}
+
+/** 入力の検査に通らなかったときに利用者へ示す文 */
+export function formatUserInputTooLarge(fit: UserInputFit): string {
+  const n = (v: number) => v.toLocaleString("en-US");
+  return (
+    `入力が大きすぎるため受け付けませんでした (推定 ${n(fit.inputTokens)} トークン。 contextWindow ${n(fit.contextWindow)} では ` +
+    `${n(fit.maxInputTokens)} トークンまで)。 利用者の発言は整理でも縮めずに残すので、 この大きさでは次の呼び出しが入りません。 ` +
+    `内容をファイルに保存し、 そのファイルの絶対パスを書いて「このファイルを読んで …」 のように依頼してください。`
   );
 }
