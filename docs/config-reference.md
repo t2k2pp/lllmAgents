@@ -34,7 +34,7 @@
     "providerType": "ollama",
     "baseUrl": "http://localhost:11434",
     "model": "qwen3:32b",
-    "contextWindow": 40000
+    "contextWindow": 131072
   },
   "visionLLM": null,
   "secondLLM": null,
@@ -160,7 +160,7 @@
 | `providerType` | ProviderType (ローカル) または CloudProviderType | Yes | 推論サーバーの種別。 ローカル: `"ollama"` \| `"lmstudio"` \| `"llamacpp"` \| `"vllm"`。 クラウド: `"vertex-ai"` \| `"azure-openai"` \| `"azure-gpt"` \| `"azure-claude"` \| `"azure-foundry"` \| `"azure-anthropic"` \| `"anthropic"` \| `"claude-cli"` |
 | `baseUrl` | string | Local Only | APIエンドポイントURL (ローカル系のみ)。 クラウド系では `endpoint` / `apiKey` を使う |
 | `model` | string | Yes | モデル名（サーバーに登録されている名前） |
-| `contextWindow` | number | No | コンテキストウィンドウサイズ（トークン数）。未指定時はサーバー値→既知モデル名の順で解決し、どちらも不明なら推測値へ置換せず設定を要求して起動停止 |
+| `contextWindow` | number | No | コンテキストウィンドウサイズ（トークン数）。未指定時はサーバー値→既知モデル名の順で解決し、どちらも不明なら推測値へ置換せず設定を要求して起動停止。小さすぎる枠も起動時に止まる（下限は [context](#context) の「枠の下限」） |
 | `apiKey` | string | Cloud | クラウド系 (`anthropic` / `azure-*`) の認証情報。 `env:VAR_NAME` / `encrypted:...` / 平文。 `anthropic` は省略時 `env:ANTHROPIC_API_KEY` にフォールバック |
 | `endpoint` | string | Azure | Azure 系のリソース endpoint (`https://...`) |
 | `deploymentName` | string | Azure | Azure OpenAI / Azure Claude の deployment 名 (Foundry / Anthropic / GPT-Responses は不要) |
@@ -175,7 +175,7 @@
 ```json
 {
   "modelCapabilities": {
-    "my-private-model": { "tier": "T2", "contextWindow": 48000 }
+    "my-private-model": { "tier": "T2", "contextWindow": 131072 }
   }
 }
 ```
@@ -388,9 +388,34 @@ REPL からは `/permission` の設定画面 (すべての面 / CLI / Discord / 
 
 | キー | 型 | デフォルト | 説明 |
 |------|-----|----------|------|
-| `summaryFailure` | `"continue"` \| `"stop"` | `"continue"` | コンテキスト整理の要約 (段階 3) に失敗したときの扱い。 `continue` は失敗を表示したうえで機械的な整理 (段階 0〜2) の分だけで進む (作業の途中で次の呼び出しが入らなければ止める)。 `stop` は履歴を変えずに失敗として止める。 自動の整理と `/compact` の両方に効く。 詳細: docs/context-reduction-redesign.md §6.1 / §11.3 |
+| `summaryFailure` | `"continue"` \| `"stop"` | `"continue"` | コンテキスト整理の要約 (段階 3) に失敗したときの扱い。 `continue` は失敗を表示したうえで機械的な整理 (段階 0〜2) の分だけで進む (作業の途中で次の呼び出しが入らなければ止める)。 `stop` は履歴を変えずに失敗として止める。 自動の整理と `/compact` の両方に効く。 変える画面・コマンドは無いので config.json を直接書く (次の整理から効く)。 詳細: docs/context-reduction-redesign.md §6.1 / §11.3 |
 
-整理を始める時期は `contextWindow` と能力ティアから決まり、 設定では変えない。 整理を早めたい場合は `contextWindow` を小さくする。
+コンテキスト整理の設定はこの 1 つだけ。 整理を始める時期は `contextWindow` と能力ティアから決まり、 設定では変えない。 整理を早めたい場合は `contextWindow` を小さくする。
+
+**整理の時期の決まり方** (詳細: docs/context-reduction-redesign.md §4):
+- 予約 R = 1 回の出力の上限 O + 1 回の応答のツール結果の合計の上限 T + 推定の誤差の余白 M + 整理そのものに要る余白 S。
+- 規則 1: 本体の呼び出しの直前に「次に送る量 P + R > contextWindow」 なら、 その呼び出しの前に整理する。
+- 規則 2: 依頼の終わり・ToDo の全部完了・Goal の達成・(前の依頼が正常に終わっていないときの) 新しい依頼で、
+  「P + R + ひと仕事の増分 G > contextWindow」 なら先回りして整理する。 G は直近 3 件の依頼で増えた量の最大 (3 件そろうまでは 80,000)。
+- いまの値と発火点は `/context` で見られる。 割合の閾値 (旧 `compressionThreshold`) は無い。
+
+**ティアごとの値** (トークン数。 ティアの既定値で、 `modelCapabilities` では上書きできない):
+
+| | O (出力の上限) | T (ツール結果の合計) | M | S | R | ツール結果 1 件の上限 | 残す直近のツール呼び出し K |
+|---|---|---|---|---|---|---|---|
+| T1 | 32,768 | 24,576 | 8,192 | 6,144 | 71,680 | 8,192 | 6 |
+| T2 | 32,768 | 24,576 | 4,096 | 6,144 | 67,584 | 5,120 | 5 |
+| T3 | 4,096 | 8,192 | 2,048 | 3,072 | 17,408 | 2,048 | 3 |
+
+- O は本体の呼び出しに出力の上限 (`max_tokens` など) として渡す。 上限で切れたら続きを出力させる。
+- ツール結果 1 件の上限はトークン数で数える (以前の文字数 20KB / 12KB / 6KB ではない)。 超えた分は頭と尻尾を残して中央を切り、 注記を入れる。
+  1 回の応答の結果の合計が T を超えそうなときは、 後の結果ほど強く切る (最低 256 トークンは残す。 `file_write` / `file_edit` の結果は切らずに数える)。
+
+**枠の下限** (起動時とモデル・枠の切り替え時に確かめる): `固定部分 (system + ツール定義) + K × ツール結果 1 件の上限 + 16,384 + R ≤ contextWindow`。
+満たさなければ、 必要量と内訳を示して止まる (切り替えなら何も変えない)。 固定部分が約 11,000 トークンのとき、
+T1 は 148,216、 T2 は 120,568、 T3 は 50,936 トークン以上が要る。
+
+**利用者の入力の上限**: 1 回の入力が `contextWindow − 枠の下限の必要量` を超えると受け付けず、 ファイルに保存して絶対パスで読ませるよう案内する。
 
 旧キー `context.reduction` / `context.forgetting` / `context.strategy` / `context.compressionThreshold` / `context.maxHistoryMessages` と
 `modelCapabilities.<モデル名>.compressionThreshold` / `keepRecentMessages` は、 整理の方式を 1 つにしたため削除した。

@@ -26,7 +26,7 @@ graph TD
         AL[AgentLoop]:::core
         PM[PlanManager]:::core
         SM[SubAgentManager]:::core
-        CM[ContextManager]:::core
+        CM[ReductionEvent / ContextBudget]:::core
         Mem[MessageHistory]:::core
     end
 
@@ -79,7 +79,7 @@ graph TD
 
 ```
 src/
-├── agent/          - AgentLoop, PlanManager, ContextManager, MessageHistory, SystemPrompt
+├── agent/          - AgentLoop, PlanManager, MessageHistory, SystemPrompt, コンテキストの整理 (context-budget / reduction-event / reduction-stages / reduction-summary / prewarm / side-call / cache-miss / tool-result-limit)
 ├── agents/         - エージェント定義ファイル (.md) とローダー
 ├── tools/          - ToolRegistry, ToolExecutor, 組み込みツール定義
 ├── providers/      - LLMプロバイダ (Ollama, LMStudio, llama.cpp, vLLM)
@@ -120,23 +120,28 @@ src/
 sequenceDiagram
     participant User
     participant Loop as AgentLoop
-    participant Context as ContextManager
+    participant Context as ReductionEvent
     participant LLM as Provider (LLM)
     participant Exec as ToolExecutor
 
     User->>Loop: メッセージ入力
+    Loop->>Loop: 入力の検査 (入らなければ断る)・新しい依頼の区切り (規則 2)
     Loop->>Loop: Historyに追加
 
-    Loop->>Context: shouldCompress() ?
-    alt 要圧縮
-        Context->>LLM: 圧縮用プロンプト実行
-        LLM-->>Context: 要約結果
-        Context->>Loop: Historyの圧縮置換
-    end
-
-    loop Max Iterations (50)
+    loop Max Iterations
+        Loop->>Loop: 予熱の終わりを待つ・ToDo/Goal の区切り (規則 2)
+        Loop->>Loop: P を測る (直前の usage + その後の推定)
+        alt P + R > W (規則 1)
+            Loop->>Context: runReductionEvent("forced")
+            Context->>Context: 写しに前処理・段階 0〜2
+            opt まだ足りない
+                Context->>LLM: 今の並び + 要約の指示 (summarize)
+                LLM-->>Context: 要約
+            end
+            Context->>Loop: replaceMessages を 1 回 (失敗なら本体を呼ばずに止める)
+        end
         Note over Loop: 🔄 LLM待機スピナー開始
-        Loop->>LLM: chatWithTools(History)
+        Loop->>LLM: chatWithTools(History + 末尾に状態通知, maxTokens = O)
         LLM-->>Loop: Stream Response (Text + ToolCalls)
         Note over Loop: ✔ スピナー停止
 
@@ -144,12 +149,14 @@ sequenceDiagram
             Loop->>Exec: execute(ToolCall 1) (Parallel)
             Loop->>Exec: execute(ToolCall 2) (Parallel)
             Exec-->>Loop: 実行結果 1 & 2
-            Loop->>Loop: Historyに結果を追加 -> (次ループへ)
+            Loop->>Loop: 1 件の上限と合計 T で切って Historyに追加 -> (次ループへ)
         else ToolCallsなし (完了)
             Loop-->>User: 最終回答の出力
             break Loop終了
         end
     end
+
+    Loop->>Loop: 依頼の終わりの区切り (規則 2)。 整理したら予熱を裏で送る
 ```
 
 ### 2.2 サブエージェントのライフサイクル (`SubAgentManager`)
@@ -228,8 +235,9 @@ stateDiagram-v2
 
 ### 2.4 Agent Core のその他の主要コンポーネント
 
-- **ContextManager（自動コンテキスト圧縮機能）**
-  セッション中のトークン使用量を監視し、能力ティアごとの圧縮閾値 (`capability.compressionThreshold`、 T1=70% / T2=60% / T3=50%。 `modelCapabilities.<モデル名>.compressionThreshold` で上書き可) を超えた際に動作します。古いメッセージ群をLLM自身に「簡潔に要約」させ、システムプロンプトの直後に『要約された過去の文脈』として挿入することで、無限に続く会話でもコンテキスト上限をオーバーしない仕組みを提供します。
+- **コンテキストの整理 (整理イベント)**
+  次の本体呼び出しが必ず枠に入るよう、 予約 R で整理の時期を決め、 決まった段階で履歴を 1 回だけ書き換えます。 詳細は §2.5、 正本は `docs/context-reduction-redesign.md`。
+  旧 ContextManager (割合の閾値・圧縮/忘却/hybrid の 3 方式・区切りでの自動リセット) は 2026-10-25 に削除しました。
 
 - **SessionManager（セッション永続化）**
   LLMのプロバイダ情報や会話履歴（Tool executionの結果含む）を JSON 形式で `~/.localllm/sessions/` 配下に自動保存・復元し、ターミナルを再起動しても前回の続きから作業を再開できるライフサイクルを管理します。
@@ -239,6 +247,34 @@ stateDiagram-v2
 
 - **Memory（自動記憶機能）**
   会話コンテキストとは独立した永続記憶（`~/.localllm/memory/MEMORY.md`）を操作します。エージェント自身が必要と判断した知識やユーザーの好みを永続化します。
+
+### 2.5 コンテキストの整理の内部
+
+正本は `docs/context-reduction-redesign.md` (以下「設計書」)。 モジュールと役割:
+
+| モジュール (`src/agent/`) | 役割 |
+|---|---|
+| `context-budget.ts` | 予算の計算。 `computeContextBudget` (R = O + T + M + S)、 `measurePromptSize` (P。 直前の本体呼び出しの usage + その後に足したものの推定、 無ければ全体の推定)、 `exceedsForcedLimit` (規則 1: P + R > W)、 `exceedsBoundaryLimit` (規則 2: P + R + G > W)、 `computeReductionGoal` (目標 W − R − G・最低量 F = max(32,768, G ÷ 2))、 `RequestGrowthTracker` (G = 直近 3 件の依頼の増分の最大。 既定 80,000、 (W − R) ÷ 2 で頭打ち。 `SessionData.requestGrowth` に保存)、 `checkContextWindowFits` (起動時の枠の検査)、 `checkUserInputFits` (入力の検査) |
+| `capability-tier.ts` | `TIER_CONTEXT_BUDGETS`: ティアごとの O / T / M / S / ツール結果 1 件の上限 / K (`modelCapabilities` では上書きできない別の定数) |
+| `tool-result-limit.ts` | `ToolResultBatch`: 1 回の応答のツール結果を、 1 件の上限 (トークン数) と合計 T で頭と尻尾を残して切る |
+| `reduction-stages.ts` | `applyReductionStages`: 写しに前処理 (終わった依頼の揮発メッセージ・思考) と段階 0〜2 を最後まで当てる純粋な関数。 保護するツール、 忘却の記録 (`insertTombstone`) |
+| `reduction-summary.ts` | 段階 3: 範囲の決定 (`selectSummaryRange`)、 今の並び + 指示 1 件での要約の呼び出し (`requestSummary`。 思考の設定は本体と同じ)、 8 見出しの型の検査、 写しへの当てはめ、 状態の渡し直し |
+| `reduction-event.ts` | 整理イベント `runReductionEvent`: 前処理・段階 0〜2 → 必要なら段階 3 → 対の検証 → `MessageHistory.replaceMessages(写し, "reduction:<id>")` を 1 回。 失敗なら写しを捨てる。 `reduction_event` の記録、 `/context` の見込み (`previewReduction`) |
+| `prewarm.ts` | 予熱: 本体と同じ組み立て (`buildMainCallRequest`) の出力上限だけ 1 にして送り、 応答を捨てる (`PrewarmRunner`。 本体・脇の呼び出しは終わりを待つ) |
+| `side-call.ts` | 本体の会話ループ以外の LLM 呼び出しの入口 `sideCall(目的, …)`。 `side_call` を記録し、 予熱中は待つ |
+| `cache-miss.ts` | `diagnoseCacheMiss`: 本体呼び出しの `tokensCached` が「前回の入力 − 4,096」 を下回ったら、 間の整理・書き換え理由・脇の呼び出しを原因として `cache_miss` に記録 |
+
+AgentLoop との組み込み:
+- 本体呼び出しの再試行ループの先頭で、 予熱の終わりを待ち (`PrewarmRunner.wait`)、 記録しておいた区切り (ToDo の全部完了・Goal の達成) を判定し、
+  規則 1 (`enforceForcedLimit`) を状態通知の添付の前に判定する。 規則 1 の整理に失敗したら本体を呼ばずに止める (終わり方 `context_reduction_failed`)。
+- 本体呼び出しには `maxTokens = O` を渡す。 本体・要約・予熱の送り方は `buildMainCallRequest` の 1 つで組み立てる (前方一致を崩さないため)。
+- `run()` の始めに入力の検査 (`checkUserInput`) と新しい依頼の区切り、 終わりに依頼の終わりの区切り (`finishRequest`) を判定する。
+  依頼の終わりの整理と `/compact` (`runReductionEvent("manual")`) が成功したら予熱を送る。 再開 (`--resume` / `/resume` / `/fork`) の後は `prewarmAfterResume()`。
+- 応答のたびの履歴の書き換え (揮発メッセージ・思考の除去) はしない。 揮発の印は `Message.ephemeral` に持ち、 送る前に外す (セッションに保存される)。
+  除くのは次の整理イベントの前処理 (`docs/ephemeral-context-design.md` の 2026-10-25 改訂)。
+- 段階 3 の要約に失敗したときは設定 `context.summaryFailure` (`continue` / `stop`) に従う。
+- 状態は `getReductionStatus()` / `getLastReductionEvent()` で `/context` / `/compact` の表示 (`src/cli/reduction-view.ts`) に渡す。 モデルには残量を伝えない。
+- 旧設定キーは `src/config/context-keys-removal.ts` が起動時に 1 回だけ削除する (バックアップ・告知の仕組みは `one-time-migration.ts` で権限の移行と共通)。
 
 ---
 
@@ -292,7 +328,9 @@ sequenceDiagram
 classDiagram
     class AgentLoop {
         -history: MessageHistory
-        -contextManager: ContextManager
+        -requestGrowth: RequestGrowthTracker
+        -prewarm: PrewarmRunner
+        -cacheMissCauses: CacheMissCauseCollector
         -toolExecutor: ToolExecutor
         -planManager: PlanManager
         -permissions: PermissionManager
@@ -552,14 +590,14 @@ classDiagram
 
 ---
 
-## 7. IntentClassifier / HierarchicalCompressor（2026-04-14 追加）
+## 7. IntentClassifier（2026-04-14 追加）
 
 旧 ContextModeManager は廃止。代わりに以下を導入:
 
-- **IntentClassifier** (`src/agent/intent-classifier.ts`): ユーザーメッセージの意図分類（task/question/conversation）とAI応答の完了判定。ヒューリスティック→LLM判定の2段構え。
-- **HierarchicalCompressor** (`src/agent/hierarchical-compressor.ts`): 3層階層的コンテキスト圧縮（Layer 0: 生データ → Layer 1: ブロック要約 → Layer 2: キーワード圧縮）。
+- **IntentClassifier** (`src/agent/intent-classifier.ts`): ユーザーメッセージの意図分類（task/question/conversation）とAI応答の完了判定。ヒューリスティック→LLM判定の2段構え。LLM 判定は脇の呼び出し (`sideCall("intent" / "completion")`)。
 
-詳細: `docs/context-intelligence.md` を参照。
+詳細: `docs/context-intelligence.md` の A 節を参照。 同時に入れた HierarchicalCompressor (3 層の階層的圧縮。 同書 B 節) は、
+コンテキストの整理の作り直しで 2026-10-25 に削除した (§2.5)。
 
 ---
 

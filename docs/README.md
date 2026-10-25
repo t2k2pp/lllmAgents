@@ -64,8 +64,12 @@
 | [agent-events-design.md](agent-events-design.md) | implemented | AgentLoop イベント化 (AgentEventBus) |
 | [todo-goal-lifecycle.md](todo-goal-lifecycle.md) | implemented | ToDo / Goal Slot のライフサイクル |
 | [ephemeral-context-design.md](ephemeral-context-design.md) | implemented | Ephemeral Context (span スコープの揮発メッセージ) |
-| [context-intelligence.md](context-intelligence.md) | implemented | コンテキストインテリジェンス (圧縮・履歴管理) |
-| [context-reduction-redesign.md](context-reduction-redesign.md) | design | コンテキスト整理の作り直し (次が必ず入る予約で発火・決まった段階で 1 回だけ書き換え・予熱・計測)。 実装後に忘却/区切り戦略の設計を置き換える |
+| [context-intelligence.md](context-intelligence.md) | implemented | コンテキストインテリジェンス (A 節の意図の分類が現行。 B 節の階層圧縮は削除済みで記録扱い) |
+| [context-reduction-redesign.md](context-reduction-redesign.md) | implemented | コンテキスト整理の作り直し (次が必ず入る予約で発火・決まった段階で 1 回だけ書き換え・予熱・計測)。 実機での確認 (§13 の T2・T13) が残る |
+| [handover-2026-10-25-context-reduction.md](handover-2026-10-25-context-reduction.md) | record | 上の作り直しの引き継ぎ書 (進め方の約束・実装の状態・実機で確かめる項目) |
+| [context-forgetting.md](context-forgetting.md) | superseded | 忘却機能 (LLM に忘れるものを選ばせる・`/forget`) (→ [context-reduction-redesign.md](context-reduction-redesign.md)) |
+| [context-strategy.md](context-strategy.md) | superseded | 区切りでの圧縮・忘却・Clear の使い分け (→ [context-reduction-redesign.md](context-reduction-redesign.md)。 `/handoff` のメモの形 §2.2 は現行) |
+| [context-reduction-reasoning-model-fix.md](context-reduction-reasoning-model-fix.md) | record | 忘却・圧縮の思考モデル対応と空応答の扱い (対象コードは削除済み。 脇の呼び出しの思考オフの知見は現行) |
 | [evaluation-loop.md](evaluation-loop.md) | implemented | 評価ループ (/try 試行錯誤モード) |
 | [tool-call-salvage-pipe-format-design.md](tool-call-salvage-pipe-format-design.md) | implemented | ツール呼び出しサルベージ (`<\|tool\|>call:` 形式) |
 | [input-compression-design.md](input-compression-design.md) | implemented | opt-in 入力圧縮モード (/compress-input) |

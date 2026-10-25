@@ -4,6 +4,12 @@
 > **対象**: `src/agent/forgetting.ts`, `src/agent/hierarchical-compressor.ts`, `src/providers/openai-compat.ts`,
 > `src/agent/{intent-classifier,progress-judge,goal-promotion,compress-text,handoff}.ts`
 > **関連**: `docs/context-forgetting.md`, `docs/context-strategy.md`
+>
+> **2026-10-25 の扱い** (`docs/context-reduction-redesign.md` §5.6 / §12): 対象の `forgetting.ts` と `hierarchical-compressor.ts` は、
+> コンテキストの整理の作り直しで削除した。 新しい要約 (段階 3) は **思考をオフにしない**: 今の並び (キャッシュ済み) の末尾に指示を足して
+> 本体と同じ思考設定で送るため、 思考オフにすると system の先頭が変わって全部の読み直しになる。 長さは出力上限で抑え、 出力上限で切れたら失敗として報告する。
+> 本書の「思考オフで呼ぶ」 知見は、 キャッシュを使わない脇の呼び出し (意図の分類・進み具合の判定・Goal 昇格など、 §5) にだけ当てはまる。
+> 応答サイズ 0 の早期判定 (方針 A) と `finishReason` の保持 (方針 C) は引き続き有効。
 
 ---
 

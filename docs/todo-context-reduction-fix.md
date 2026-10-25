@@ -1,5 +1,7 @@
 # ToDo: コンテキスト削減（忘却・圧縮）における思考モデル対応および空応答ハンドリング改善
 
+> 記録 (完了済み)。 忘却・階層圧縮のコードは 2026-10-25 に削除した。 現行は `docs/context-reduction-redesign.md`。
+
 - 課題ID: `FIX-CONTEXT-REDUCTION-01`
 - 目的: 思考モデル使用時における忘却（forget）および階層圧縮（compact）の空応答（`outputChars=0`）の根本解消、`openai-compat` における `finishReason` 保持修正、および応答サイズ0の早期ガードの実装
 

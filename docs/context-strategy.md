@@ -1,5 +1,10 @@
 # コンテキスト戦略 設計書 (区切りでの圧縮・忘却・Clear の使い分け)
 
+> **現行は [context-reduction-redesign.md](context-reduction-redesign.md)** (2026-10-25 実装。 本書は記録扱いで更新しない)。
+> 使用率の帯 × 区切りの強さの決定表 (`context-strategy.ts`)、 弱い区切りの検出、 区切りでの自動リセット (自動の clear)、 `/context strategy`、
+> 設定 `context.strategy.*` は削除した。 区切りの検出 (§3) のうち強い区切り (依頼の終わり・ToDo の全部完了・Goal の達成・新しい依頼) だけを
+> 新しい設計の規則 2 (同書 §4.4) が引き継ぐ。 §2.2 の引き継ぎメモ + Clear は手動の `/handoff` として残り、 メモの形は本書 §2.2 のまま。
+
 > **ステータス**: 2026-08-13 設計 / 実装済み (未実機検証)
 > **前提**: `docs/context-forgetting.md` (F2: 忘却機能) が実装済みであること
 > **関連**: `docs/context-intelligence.md` / `docs/ephemeral-context-design.md`

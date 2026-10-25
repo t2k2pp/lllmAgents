@@ -33,7 +33,7 @@ mindmap
     UX最適化
       REPLインタフェース
       スラッシュコマンド
-      自動コンテキスト圧縮
+      コンテキストの自動整理
 ```
 
 ### 1.2 Claude Code との比較
@@ -78,7 +78,7 @@ graph TD
 | **サブエージェント** | 4タイプ (Task tool) | **4タイプ** を独自実装 |
 | **プランモード** | 組み込み | **組み込み** (idle→planning→awaiting_approval) |
 | **スキルシステム** | Skill tool + `/command` | **対応** (builtin + ユーザー定義) |
-| **コンテキスト管理** | 大容量コンテキスト (200K+) | **自動圧縮機能** (ローカルの制限に対応) |
+| **コンテキスト管理** | 大容量コンテキスト (200K+) | **自動整理** (次の呼び出しが必ず入る予約で時期を決め、 決まった規則で消してから足りないときだけ要約。 書き換えは 1 回の整理で 1 回。 §2.3) |
 | **ブラウザ操作** | 主にファイル操作・コマンド実行 | **Playwright統合** (クリック・入力・スクショ・a11yツリー) |
 
 ---
@@ -121,6 +121,7 @@ stateDiagram-v2
 | `/clear` | 現在の会話履歴とコンテキストをクリアします |
 | `/context` | 現在のコンテキスト（トークン）使用状況と整理の状態・今 `/compact` した場合の見込みを表示します |
 | `/compact` | コンテキストを今すぐ整理します（段階 0〜3 を最後まで。結果の内訳を表示） |
+| `/handoff` | 引き継ぎメモを残してコンテキストをリセットします（手動のリセット。 `/handoff dry` はメモを表示するだけ） |
 | `/model` | 現在のスロット (main / second / vision) 状況を表示します。 編集は `/models` (登録レジストリ) または `/model <slot> <verb>` |
 | `/models` | 登録モデルの一覧 → アクション (Set as main/second/vision / Edit / Duplicate / Delete / Add new) |
 | `/swap` | main ⇔ second のスロット入れ替え |
@@ -147,6 +148,7 @@ stateDiagram-v2
   - `/integration` `/intg` (→ `/integrations`)、 `/switch` (→ `/swap`)、 `/token` (→ `/cost`)、 `/model url` `/model ip` (→ `/model host` + `/model port`)、 `/loop list` (→ `/loop status`)、 `/stream on|off` (→ 引数なし `/stream`)
   - `/metrics` `/capability` (→ `/status`)、 `/run pause --durable` (→ `/run pause`。 一時停止は保存して止める 1 方式だけ)
   - `/discord` `/slack` `/chatlog` `/search` (→ `/integrations` の画面)、 `/permission <サブコマンド>` (`auto-add` `rule-add` 等 → 引数なし `/permission` の画面)
+  - `/forget` `/forget mode` `/forget status` `/forget dry` (→ `/compact`。 何を忘れるかを LLM に選ばせる忘却は廃止)、 `/context strategy` (区切りでの使い分けの表を廃止。 代わりは無い)。 docs/context-reduction-redesign.md §7
 
 #### `/models` (Model Registry) — main / second / vision 統合管理
 
@@ -198,6 +200,47 @@ stateDiagram-v2
 各範囲 → 操作 (ツール全体を許可する [ツール picker] / 引数パターンで許可する / 常に確認するルール / 常に拒否するルール / 削除)。 権限の設定方法はこの画面だけ (旧サブコマンド `auto-add` / `rule-add` 等は削除。 引数を付けると「引数を取りません」と表示)。 画面からの変更は `src/cli/permission-settings.ts` の関数で行う。
 
 対話できる端末 (TTY) が無いときは、 端末が必要なことと、 代わりに `~/.localllm/config.json` で直接編集するキー (`security.rules.allow` / `deny` / `ask`) と面の指定 (`cli:` / `discord:` / `slack:`) の書き方を表示して終わる。
+
+### 2.3 コンテキストの整理 (利用者から見た動き)
+
+正本は `docs/context-reduction-redesign.md`。 ここでは利用者に見える動きだけを書く。
+
+**いつ整理するか** (割合の閾値ではない):
+- 次の本体呼び出しが枠に入らないとき (規則 1): 「次に送る量 + 予約 R > contextWindow」 なら、 その呼び出しの前に整理する。 予約 R はティアごとに決まった
+  出力の上限・ツール結果の合計の上限・余白の和 (値は `docs/config-reference.md` の context)。 作業の途中で整理するのはこのときだけ。
+- 強い区切りでの先回り (規則 2): 依頼の終わり (応答が正常に終わり、 未完了の ToDo も動いている Goal も無い)、 ToDo の全部完了、 Goal の達成、
+  前の依頼が正常に終わっていないときの新しい依頼で、 「次に送る量 + R + ひと仕事の増分 G > contextWindow」 なら整理する。
+  ToDo 1 つの完了・git commit・話題の切り替わりなどの弱い区切りでは整理しない。
+- 手動は `/compact` の 1 つだけ。 区切りでの自動リセット (引き継ぎメモを作って履歴を全部消す) は無い。 リセットしたいときは `/handoff`。
+
+**何をするか** (1 回の整理を「整理イベント」 と呼ぶ): 履歴の写しに次を順に当て、 最後に履歴を 1 回だけ差し替える。
+- 前処理: 終わった依頼の補助メッセージ (ハーネスの促し) と思考を除く (応答のたびには消さず、 整理まで延ばしている)
+- 段階 0: 後で読み直したファイルの古い読み込み、 同じ結果の繰り返し、 後で成功した失敗、 上書きされた書き込みを除く
+- 段階 1: 古いツール結果の本文を消す (呼び出しは残る。 読み直せば取れる)
+- 段階 2: 今の依頼の古い思考を消す (直近 3 件は残す)
+- 段階 3: それでも足りないときだけ、 モデルに古い部分を要約させる。 **利用者の発言はどの段階でも原文のまま残す**
+- 段階 0〜2 は毎回最後まで行う。 消したものは「忘却の記録」 として履歴に 1 件残る。 直近のツール呼び出し (T1=6 / T2=5 / T3=3 回) と
+  `ask_user`・ToDo・plan mode・`response_complete` の結果は消さない
+
+**画面に出るもの**:
+- 整理のたびに 1 行: 「コンテキストを整理しました (<きっかけ>): 約 N トークン減、 … 推定 A → B トークン (<整理の id>)」。 失敗は赤字で
+  「履歴は変えていません」 と理由。 要約に失敗して段階 0〜2 の分だけで進んだときは黄色の行と失敗の中身 (設定 `context.summaryFailure`)。
+- 依頼の終わりの整理・`/compact`・セッションの再開 (`--resume` / `/resume` / `/fork`) の後は、 会話をサーバに読み込ませておく (予熱。 自分のサーバで動く
+  llamacpp / vllm / lmstudio / ollama のときだけ)。 予熱の途中で送信すると、 予熱の終わりを待ってから送ることと Esc で中断できることを 1 行で知らせ、 終わりを待ってから送る。
+  予熱の失敗は黄色の 1 行で、 作業は止めない。
+- `/context` で、 次に送る量 (実数か推定か)・予約 R の内訳・規則 1・2 の発火点までの距離・G・直近の整理・今 `/compact` した場合の見込みが見られる。
+  これらはモデルには伝えない (残量を見せると急いで終わらせる等の振る舞いを招くため)。
+
+**入らないものを受け付けない**:
+- contextWindow が小さすぎて、 整理しても必ず残る部分と予約が入らない枠では、 起動時 (とモデル・枠の切り替え時) に必要量を示して止める。
+- 1 回の入力が大きすぎて入らないときは受け付けず、 ファイルに保存して絶対パスで読ませるよう案内する。
+- ツール結果は 1 件ごとにトークン数の上限で切り、 1 回の応答の合計も上限で切る (切ったときは結果の中に注記)。
+
+**記録** (セッションログ `~/.localllm/logs/sessions/<sid>_main.jsonl`): 整理ごとの `reduction_event`、 キャッシュが外れたときの `cache_miss` (原因つき)、
+脇の呼び出し (意図の分類・要約・サブエージェント・予熱など) ごとの `side_call`。
+
+旧設定 (`context.reduction` / `context.forgetting` / `context.strategy` / `context.compressionThreshold` / `context.maxHistoryMessages`、
+`modelCapabilities.<モデル名>.compressionThreshold` / `keepRecentMessages`) は起動時に 1 回だけ削除し (元の config.json はバックアップに残す)、 削除したキーを告知する。
 
 ---
 
@@ -432,7 +475,7 @@ sequenceDiagram
 | 設定キー | 説明 |
 |---|---|
 | `providerType` | `ollama`, `lmstudio`, `llamacpp`, `vllm`（4種のローカルLLMプロバイダ、すべてOpenAI互換APIで通信）。各プロバイダーのセットアップ要件は §5.2 を参照 |
-| `contextWindow` | トークン上限。この80%（デフォルト）に達すると自動圧縮 |
+| `contextWindow` | トークン上限。 整理の時期はこの値と能力ティアから決まる (次の呼び出しが入らなくなる手前で整理。 §2.3)。 整理を早めたいときはこの値を小さくする。 小さすぎる値は起動時に止まる |
 | `allowedDirectories` | サンドボックスでアクセスを許可する追加のディレクトリリスト |
 | `rules` | 権限ルール（`allow` / `deny` / `ask` の3種。 先頭の `cli:` / `discord:` / `slack:` で面を限定）。 権限の設定はこれだけ |
 | `discord` | Discord連携の設定（`enabled` フラグと `webhookUrl`）|
