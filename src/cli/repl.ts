@@ -2655,6 +2655,8 @@ export class REPL {
       console.log(
         chalk.dim(`  最新セッションを復元しました: ${latest.meta.id} (${latest.meta.messageCount} messages)`),
       );
+      // 再開直後はサーバに今の会話が無いので、 利用者が打つ間に読み込ませる (docs/context-reduction-redesign.md §9)
+      void this.agent.prewarmAfterResume();
       return;
     }
 
@@ -2696,6 +2698,7 @@ export class REPL {
     console.log(
       chalk.dim(`  セッション ${chalk.cyan(sessionId)} を復元しました (${session.meta.messageCount} messages)`),
     );
+    void this.agent.prewarmAfterResume();
   }
 
   /**
@@ -6492,6 +6495,8 @@ export class REPL {
         const forked = forkSession(source);
         saveSession(forked);
         this.agent.restoreSession(forked);
+        // 分岐元の会話がサーバに無いことがある (別のセッションから分岐したとき) ので、 再開と同じく予熱する
+        void this.agent.prewarmAfterResume();
         console.log(
           chalk.dim(
             `  セッションを分岐しました: ${chalk.cyan(source.meta.id)} → ${chalk.cyan(forked.meta.id)} (${forked.meta.messageCount} messages)`,

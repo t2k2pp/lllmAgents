@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { CacheMissDiagnosis } from "./cache-miss.js";
+import type { PrewarmSkipReason, PrewarmTrigger } from "./prewarm.js";
 import type { ReductionEventRecord } from "./reduction-event.js";
 import type { SideCallRecord } from "./side-call.js";
 
@@ -135,6 +136,20 @@ export interface LLMReductionEventLog extends LogContext, ReductionEventRecord {
   type: "reduction_event";
 }
 
+/**
+ * 予熱を送らなかった記録 (理由つき)。 送った予熱は side_call (目的 prewarm) に残る。
+ * docs/context-reduction-redesign.md §9.3。
+ */
+export interface LLMPrewarmSkippedLog extends LogContext {
+  ts: string;
+  turn: number;
+  agentId: string;
+  type: "prewarm_skipped";
+  trigger: PrewarmTrigger;
+  reason: PrewarmSkipReason;
+  detail: string;
+}
+
 /** logRequest() の返り値。 前方一致が保たれたかを呼び出し側が判定するのに使う。 */
 export interface RequestPrefixInfo {
   messageOffset: number;
@@ -149,7 +164,8 @@ export type LLMLogEntry =
   | LLMPrefixBreakLog
   | LLMSideCallLog
   | LLMCacheMissLog
-  | LLMReductionEventLog;
+  | LLMReductionEventLog
+  | LLMPrewarmSkippedLog;
 
 export interface LLMLoggerOptions {
   logsDir?: string;
@@ -307,6 +323,20 @@ export class LLMLogger {
   /** 脇の呼び出しを記録する (turn は直近の本体呼び出しの番号)。 */
   logSideCall(record: SideCallRecord): void {
     this.write({ ts: new Date().toISOString(), turn: this.turn, agentId: this.agentId, type: "side_call", ...record });
+  }
+
+  /**
+   * 予熱を送らなかったことと、 その理由を記録する (docs/context-reduction-redesign.md §9.3)。 送った予熱は side_call
+   * (目的 prewarm) に残る。
+   */
+  logPrewarmSkipped(entry: { trigger: PrewarmTrigger; reason: PrewarmSkipReason; detail: string }): void {
+    this.write({
+      ts: new Date().toISOString(),
+      turn: this.turn,
+      agentId: this.agentId,
+      type: "prewarm_skipped",
+      ...entry,
+    });
   }
 
   /** 本体呼び出しでキャッシュが外れたことを記録する。 */

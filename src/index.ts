@@ -758,6 +758,8 @@ async function main(): Promise<void> {
     const session = resumeResolution.session;
     agent.restoreSession(session);
     console.log(`  Resumed session: ${session.meta.id} (${session.meta.messageCount} messages)`);
+    // 再開直後はサーバに今の会話が無いので、 利用者が打つ間に読み込ませる (docs/context-reduction-redesign.md §9)
+    void agent.prewarmAfterResume();
   }
 
   // Room モデル (docs/room-model-design.md): 固定 3 Room の管理と受信順グローバル FIFO キュー。
@@ -919,6 +921,8 @@ async function main(): Promise<void> {
 
   // Cleanup
   await hookManager.runSessionHooks("stop");
+  // 走っている予熱を切って、 その記録 (reduction_event の予熱の欄など) を書き終えてから終わる
+  await agent.stopPrewarm();
   agent.saveCurrentSession();
   await mcpManager.disconnectAll();
   await playwrightManager?.close();

@@ -1,6 +1,6 @@
 # コンテキスト整理の作り直し 設計書
 
-> **ステータス**: design (2026-10-25 設計 / 実装中。 §13 のタスク 1・3〜8 済み)
+> **ステータス**: design (2026-10-25 設計 / 実装中。 §13 のタスク 1・3〜9 済み)
 > **置き換える設計**: `docs/context-forgetting.md` (忘却) / `docs/context-strategy.md` (区切りでの使い分け)。
 > 実装が済んだら両書の先頭に「現行は本書」 の注記を入れる (§12)。
 > **前提**: `docs/prompt-prefix-stability.md` (一度送ったメッセージは書き換えない) が実装済みであること。
@@ -547,7 +547,7 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
   `freedTokens` {preprocess, stage0, stage1, stage2, stage3, total} / `repaid` {ephemeral, thinking} / `forgottenCalls` / `clearedCurrentThinking` /
   `promptTokensAfter` (推定) / `summary` {status: not-needed | nothing-to-summarize | done | failed | error, failureReason, failureDetail (タスク 8), segments, attempts,
   maxTokens, tokensIn, tokensCached, tokensOut (全試行の合計), durationMs, extraTextChars} / `summaryFailurePolicy` (continue | stop。 タスク 8) /
-  `continuedWithoutSummary` (タスク 8) / `prewarm` (タスク 9 用。 今は常に null) / `durationMs`。
+  `continuedWithoutSummary` (タスク 8) / `prewarm` (タスク 9。 §9.4) / `durationMs`。
 
 **規則 1 の組み込み** (`AgentLoop.enforceForcedLimit`): 本体呼び出しの再試行ループの中で、 一時停止の確認の後、 状態通知の添付
 (`attachDynamicContext`) の前に P を測り、 `exceedsForcedLimit` なら `runReductionEvent("forced", P)`。 失敗したら本体を呼ばずに止める:
@@ -624,7 +624,7 @@ Goal 昇格の提案 (`maybePromoteToGoal`。 REPL / Slack / Discord が `run()`
 
 | コマンド | 新しい動き |
 |---|---|
-| `/compact` | **手動の整理はこの 1 つだけ** (2026-10-25 利用者と決定)。 整理イベントを今すぐ行い、 段階 0〜3 を最後まで進める。 終わったら予熱する。 タスク 8 で `runReductionEvent("manual")` に付け替え済み (表示・予熱はタスク 9・10) |
+| `/compact` | **手動の整理はこの 1 つだけ** (2026-10-25 利用者と決定)。 整理イベントを今すぐ行い、 段階 0〜3 を最後まで進める。 終わったら予熱する。 タスク 8 で `runReductionEvent("manual")` に付け替え済み。 予熱はタスク 9 で済み (§9.4)。 表示はタスク 10 |
 | `/context` | 内訳表示に加えて、 P (実数か推定か)、 R の内訳、 規則 1・2 の発火点、 G と直近 3 件、 直近の整理イベント、 今 `/compact` した場合の段階ごとの減る量の見込みを表示 |
 | `/forget` | **削除** (LLM に選ばせる忘却が無くなるため。 決まった段階は `/compact` に含まれる)。 タスク 8 で削除済み |
 | `/forget mode` / `/forget status` / `/forget dry` | 削除 |
@@ -669,6 +669,61 @@ Goal 昇格の提案 (`maybePromoteToGoal`。 REPL / Slack / Discord が `run()`
 - 予熱中に利用者が送信したら、 本体呼び出しは予熱の終了を待ってから送る (切断するとそれまでの読み込みが無駄になる恐れ)。
   Esc での中断は予熱も切る。
 - スロットが 1 つなので、 予熱中に脇の呼び出しを送らない (送ると予熱した中身を追い出す)。
+
+### 9.3 送らない条件 (タスク 9 で決定、 2026-10-25)
+
+予熱は **自分のサーバで動かす provider (`llamacpp` / `vllm` / `lmstudio` / `ollama`) にだけ** 送る。 それ以外 (クラウドの
+`anthropic` / `azure-*` / `gemini` / `vertex-ai` / `claude-cli` / `claude-agent-sdk`、 種類の分からないもの) には送らない。 根拠:
+- 自分のサーバでは、 予熱の費用は利用者の手が空いている間の計算時間だけで、 お金はかからない。 KV キャッシュもそのサーバにある。
+  usage や `cached_tokens` を返さないサーバ (ollama の一部など) でも送る (結果は捨てるので usage は要らない。 効いたかは次の本体呼び出しの
+  `tokensCached` と所要時間で見る)。
+- クラウドは入力トークンに課金される。 予熱すると全部の入力をもう 1 回払うことになり、 得られるのは待ち時間の短縮だけ。
+  しかもキャッシュの扱いが provider 任せで、 効く保証が無い: Anthropic 系は明示の `cache_control` の書き込み (割増し) が要り、
+  OpenAI 系・Gemini の自動キャッシュは数分で消える (利用者が次を打つまでに消えうる)、 `claude-cli` / `claude-agent-sdk` は子プロセスが
+  自分で並びを組むので同じ並びにならない (使用量の枠も減る)。 クラウドはサーバ側の読み込みも速いので、 待ち時間の得も小さい。
+- 種類の分からない provider は、 課金かどうか分からないので送らない側に倒す。
+- 履歴の末尾が assistant でないとき (一時停止した作業の再開で末尾がツール結果・利用者の発言のときなど) も送らない。
+  次の本体呼び出しはその末尾のメッセージに状態通知を付けるので、 予熱の並びが次の先頭にならない。 履歴が空のときも送らない。
+
+送らないときは黙らない: 理由を `prewarm_skipped` の記録 (`{"type":"prewarm_skipped","trigger":"resume","reason":"not-local-server","detail":"…"}`。
+reason は `not-local-server` / `tail-not-assistant` / `empty-history`) と動作ログ (info) に出し、 整理イベントの後なら `reduction_event` の
+`prewarm` 欄にも `{status:"skipped", reason, detail}` を入れる。 画面には出さない (クラウドの利用者に毎回出ると煩わしく、 害も無いため)。
+
+### 9.4 実装 (タスク 9、 2026-10-25)
+
+`src/agent/prewarm.ts`。
+- **送り方**: `buildPrewarmRequest(本体の送り方)` が `AgentLoop.buildMainCallRequest` (本体・要約と同じ組み立て。 model・ツール定義
+  (`getFilteredToolDefs`)・サンプリング・思考の設定が同じ、 messages = `getMessages()`) の `maxTokens` だけを 1 に差し替え、
+  `sideCall("prewarm")` で送って応答を読み捨てる。 provider ごとの出力上限の欄 (§4.3 の表。 OpenAI 互換は `max_tokens`) にそのまま 1 が載る。
+  llama.cpp でも `/v1/chat/completions` を使い、 `/completion` の `n_predict` は使わない (試験で確認)。
+- **状態通知は付けない**: 予熱の前に `attachDynamicContext()` を呼ばない (送信済みの印も付けない)。 次の本体呼び出しは、 末尾 (assistant) の後ろに
+  利用者の発言を足し、 その発言に状態通知を付けるだけなので (`prompt-prefix-stability.md` §3.2。 末尾が assistant なら添付先は新しい発言)、
+  予熱の並びがそのまま次の先頭になる。 それより前の状態通知は前の本体呼び出しで送ったもので、 そのまま残る。
+- **いつ**: `AgentLoop.runReductionEvent` が、 発火が `boundary:request-end` か `manual` で **成功した** ときだけ送る。 規則 1 (`forced`) と
+  ほかの区切り (ToDo の全部完了・Goal の達成・新しい依頼) はすぐ本体を呼ぶので送らない。 失敗・`nothing-to-reduce` は履歴が変わっていない
+  (キャッシュは元のまま) ので送らない。 再開は `AgentLoop.prewarmAfterResume()` を、 起動時の `--resume` (`index.ts`)・`/resume latest`・
+  `/resume <id>`・`/fork` (分岐元が別のセッションならサーバに無い) の後に呼ぶ。 一時停止した作業の再開 (`/run resume`、 起動時の再開確認) と
+  チャネルの会話の載せ替え (Room) はすぐ本体を呼ぶので呼ばない。
+- **裏で走らせる**: `PrewarmRunner` (AgentLoop に 1 つ) が予熱を 1 つだけ走らせ、 すぐ返す (依頼の終わりでは `isProcessing` を戻してから
+  利用者が打てる。 `/compact` もすぐ入力に戻る)。 新しい予熱を送るときは前の予熱を切り、 その終わりを待ってから送る。
+  `restoreSession` / `importConversation` は走っている予熱を切る (並びが古くなるため)。 終了時 (`index.ts` の後片付け) は `stopPrewarm()` で
+  切って終わりを待ち、 記録を書き終えてから終わる。
+- **待ち合わせ**: 本体呼び出しは再試行ループの先頭 (規則 2・規則 1 の判定の前) で `PrewarmRunner.wait("本体の呼び出し")` を待つ。 脇の呼び出しは
+  `sideCall()` の入口で待つ (`setSideCallGate`。 AgentLoop が生成時に登録。 意図の分類・Goal 昇格・要約・サブエージェントなど全部。
+  目的 `prewarm` は待たない)。 provider を問わず待つ (同じサーバに別の provider オブジェクトで送るものがあるため。 本体呼び出しが待った後なので
+  依頼の中では実際には待たない)。 待ち始めに dim の 1 行と `harness_notice` (info)「予熱 (サーバへの会話の読み込み) が終わるのを待ってから
+  <本体の呼び出し / 脇の呼び出し (目的)> を送ります。 Esc で中断できます」 を出す。 切断はしない。 side_call の所要時間は待ち終えてから数える。
+- **中断**: `AgentLoop.abort()` (Esc) は予熱も切る。 待っていた本体呼び出しは送らず、 従来の中断 (`user_abort`) で止まる。 待ち受け中 (依頼の外) の
+  Esc は REPL が拾わないので、 予熱は最後まで走る (利用者は待たされていない)。
+- **失敗**: 予熱の失敗 (provider のエラー) は作業を止めない。 黄色の 1 行・`harness_notice` (warn)「予熱に失敗しました (作業には影響しません。 …)」・
+  動作ログの警告と、 `side_call` の `error`、 整理イベントの後なら `reduction_event.prewarm` の `{status:"failed", error}` に出す。
+- **記録**: `reduction_event.prewarm` は `{status:"done"|"failed"|"aborted", durationMs, error?}` か `{status:"skipped", reason, detail}`、
+  予熱しない発火では null。 送ったときは予熱が終わってから `reduction_event` を書く (欄を埋めるため。 画面の 1 行は整理が終わった時点で出す)。
+  再開の予熱は整理イベントではないので `side_call` (目的 prewarm) と、 送らなかったときの `prewarm_skipped` だけ。
+- 試験: `tests/agent/prewarm.test.ts` (台本 provider (種類 llamacpp) で、 依頼の終わりの整理・`/compact`・再開の 3 経路で予熱の並びが次の本体
+  呼び出しの先頭と一致し、 違いが出力上限だけであること。 規則 1 では送らないこと。 送らない条件。 予熱中の送信が終わりを待つこと・待ちの 1 行。
+  Esc で切れること。 予熱中に脇の呼び出しが出ないこと。 失敗が作業を止めず記録と 1 行に出ること)、
+  `tests/providers/max-tokens-all-providers.test.ts` (vllm / llamacpp / lmstudio / ollama で `/chat/completions` に `max_tokens: 1`、 `n_predict` なし)。
 
 ---
 
@@ -718,7 +773,7 @@ Goal 昇格の提案 (`maybePromoteToGoal`。 REPL / Slack / Discord が `run()`
   `second-llm` (セカンド LLM の相談・委任・評価 `second-llm-manager.ts`)、 `vision` (画像解析 `vision.ts`)。
   呼び出し元と目的: `intent-classifier.ts` (intent / completion)、 `progress-judge.ts` (progress)、 `goal-promotion.ts` (goal-promotion)、
   `handoff.ts` (handoff)、 `reduction-summary.ts` (summarize。 旧 `hierarchical-compressor.ts` はタスク 8 で削除済み)、 `sub-agent.ts` (subagent)。
-  `prewarm` はタスク 9 で使う。
+  `prewarm` は予熱 (`prewarm.ts`。 §9.4)。 脇の呼び出しは送る前に予熱の終わりを待つ (`setSideCallGate`)。
 
 本節の計測は [todo-local-llm-speed.md](todo-local-llm-speed.md) の T1 を兼ねる。 同書の T4 (依頼の区切りでの書き換え) は本書 §6.2 で扱う。
 
@@ -792,7 +847,7 @@ AgentLoop は整理イベントのたびに `loadConfig()` から読む (変更�
 | 6 | 段階 3: キャッシュ済みの並び + 指示での要約、 要約の型、 状態の渡し直し | 要約の呼び出しが前回の本体呼び出しをそのまま先頭に含む | 台本 provider で前方一致を検証。 型の 8 見出し。 利用者の発言が原文のまま残ること。 ツール呼び出しが返ったときの再送 |
 | 7 | 1 回の書き換え: イベントの流れ、 借りの延期、 `Message.ephemeral` の保存 | 応答の終わりで履歴が書き換わらない | **前方一致テストの拡張**: 台本 provider で AgentLoop を複数の依頼にわたって回し、 小さい W で規則 1 を起こす。 「直前の送信を先頭に含まない送信」 がイベントごとにちょうど 1 回で、 揮発メッセージ・思考がある依頼の境目では 0 回 |
 | 8 | AgentLoop への組み込み: 規則 1 を本体呼び出しの直前に、 規則 2 を依頼の終わり・ToDo 全完了・Goal 達成に。 `ContextStrategy` の自動経路、 `ForgettingEngine` の LLM 経路、 `reduce()` の 3 方式、 `HierarchicalCompressor` を削除 | 旧経路が残っていない (grep で確認) | 既存の `context-strategy.test.ts` / `forgetting.test.ts` / `context-manager-failure-policy.test.ts` を新仕様に置き換え (**済み**: `reduction-boundary.test.ts` ほか。 §4.4 / §6.5) |
-| 9 | 予熱 | 依頼の境目の整理・`/compact`・再開の後に 1 回送る。 予熱中の送信は終了を待つ | 台本 provider で予熱の並びが次の本体呼び出しの先頭と一致 |
+| 9 | 予熱 | 依頼の境目の整理・`/compact`・再開の後に 1 回送る。 予熱中の送信は終了を待つ | 台本 provider で予熱の並びが次の本体呼び出しの先頭と一致 (**済み**: `prewarm.test.ts`。 §9.3 / §9.4) |
 | 10 | コマンド: `/compact` / `/context` の表示 (見込みを含む)、 `/forget` 一式と `/context strategy` の削除 | 補完・help から消える (レジストリ方式) | コマンドの単体テスト |
 | 11 | 設定: キー削除と 1 回だけの扱い、 告知、 バックアップ | 2 回目の起動で何もしない | 移行の単体テスト (`permission-migration` のテストに倣う) |
 | 12 | 文書: README、 `config-reference.md`、 `external_design.md` / `internal_design.md`、 §12 の注記、 索引の Status | 設計書と実装が一致 | — |

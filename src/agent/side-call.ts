@@ -29,7 +29,7 @@ import type {
  * - progress: 進み具合の判定
  * - goal-promotion: Goal 昇格のための受け入れ条件の抽出
  * - handoff: 引き継ぎメモの作成
- * - prewarm: 予熱 (タスク 9)
+ * - prewarm: 予熱 (prewarm.ts。 次の本体呼び出しと同じ並びを出力上限 1 で送る)
  * - subagent: サブエージェント (task ツール) の各呼び出し
  * - second-llm: セカンド LLM (相談・委任・評価) の各呼び出し
  * - vision: 画像の解析 (vision ツール)
@@ -74,6 +74,21 @@ export function setSideCallSink(next: SideCallSink | undefined): void {
   sink = next;
 }
 
+/**
+ * 脇の呼び出しを送る前の待ち合わせ (docs/context-reduction-redesign.md §9.2)。 予熱中は脇の呼び出しを送らない
+ * (スロットが 1 つのサーバでは予熱した中身を追い出す)。 AgentLoop が PrewarmRunner を登録する。
+ */
+export interface SideCallGate {
+  beforeSideCall(purpose: SideCallPurpose): Promise<void>;
+}
+
+let gate: SideCallGate | undefined;
+
+/** 待ち合わせを登録する。 AgentLoop が生成時に呼ぶ。 */
+export function setSideCallGate(next: SideCallGate | undefined): void {
+  gate = next;
+}
+
 export type SideCallRequest =
   | { method: "chat"; params: ChatParams }
   | { method: "chatWithTools"; params: ChatWithToolsParams }
@@ -81,13 +96,14 @@ export type SideCallRequest =
 
 /**
  * 脇の呼び出しの入口。 provider の応答をそのまま流し、 終わったとき (正常・失敗・途中で読むのをやめた、 のどれでも)
- * に 1 件だけ記録する。
+ * に 1 件だけ記録する。 送る前に待ち合わせ (予熱の終わり) を待つ。 所要時間は待ち終えてから数える。
  */
 export async function* sideCall(
   purpose: SideCallPurpose,
   provider: LLMProvider,
   request: SideCallRequest,
 ): AsyncGenerator<ChatChunk> {
+  await gate?.beforeSideCall(purpose);
   const startedAt = Date.now();
   let usage: TokenUsage | undefined;
   let finishReason: string | undefined;

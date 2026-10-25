@@ -20,6 +20,7 @@
 import type { SummaryFailurePolicy } from "../config/types.js";
 import type { LLMProvider, Message } from "../providers/base-provider.js";
 import type { CacheMissCauseCollector } from "./cache-miss.js";
+import type { PrewarmOutcome } from "./prewarm.js";
 import {
   type ContextBudget,
   computeReductionGoal,
@@ -121,8 +122,11 @@ export interface ReductionEventRecord {
   summaryFailurePolicy: SummaryFailurePolicy;
   /** 要約に失敗し、 設定 continue に従って段階 0〜2 の分だけで進めた (成功・失敗のどちらの結果にも付く) */
   continuedWithoutSummary: boolean;
-  /** 予熱 (§9。 タスク 9 で埋める)。 まだ送っていないので null */
-  prewarm: { durationMs: number } | null;
+  /**
+   * 予熱 (§9)。 予熱する契機 (依頼の終わり・/compact) で整理に成功したときだけ、 AgentLoop が予熱の終わりに埋めてから記録する
+   * (送らなかったときは理由)。 それ以外 (規則 1・ほかの区切り・失敗) は null
+   */
+  prewarm: PrewarmOutcome | null;
   durationMs: number;
 }
 

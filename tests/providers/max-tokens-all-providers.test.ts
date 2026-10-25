@@ -167,6 +167,46 @@ describe("出力上限がリクエストに載る (HTTP の provider)", () => {
   });
 });
 
+describe("予熱の出力上限 1 がリクエストに載る (予熱を送る自分のサーバの provider。 §9.2)", () => {
+  let body: Record<string, unknown> | undefined;
+  let url: string | undefined;
+
+  beforeEach(() => {
+    body = undefined;
+    url = undefined;
+    vi.spyOn(httpClient, "httpPostStream").mockImplementation(async (u, b) => {
+      url = String(u);
+      body = b as Record<string, unknown>;
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      });
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ["vllm", () => new VLLMProvider("https://example.test")],
+    ["llamacpp", () => new LlamaCppProvider("https://example.test")],
+    ["lmstudio", () => new LMStudioProvider("https://example.test")],
+    ["ollama", () => new OllamaProvider("https://example.test")],
+  ] as Array<
+    [string, () => LLMProvider]
+  >)("%s は /chat/completions に max_tokens: 1 で送る (n_predict は使わない)", async (_name, make) => {
+    const { buildPrewarmRequest } = await import("../../src/agent/prewarm.js");
+    const request = buildPrewarmRequest({ method: "chat", params: params("qwen") });
+    await drain(make(), request.params);
+    expect(body?.max_tokens).toBe(1);
+    expect(body).not.toHaveProperty("n_predict");
+    expect(url).toMatch(/\/chat\/completions$/);
+  });
+});
+
 describe("出力上限が claude コマンドに渡る (claude-cli / claude-agent-sdk)", () => {
   beforeEach(() => {
     spawnCalls.length = 0;

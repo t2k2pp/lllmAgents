@@ -47,6 +47,7 @@ import {
   runReductionEvent,
 } from "./reduction-event.js";
 import type { MainCallRequest } from "./reduction-summary.js";
+import { type PrewarmOutcome, PrewarmRunner, type PrewarmTrigger, prewarmSkipReason } from "./prewarm.js";
 import { ToolResultBatch } from "./tool-result-limit.js";
 import { estimateMessageTokens, estimateTokens, estimateToolDefinitionTokens } from "./token-counter.js";
 import { normalizeToolCalls } from "./tool-call-normalizer.js";
@@ -79,7 +80,7 @@ import {
   diagnoseCacheMiss,
   mergeCacheMissCauses,
 } from "./cache-miss.js";
-import { setSideCallSink } from "./side-call.js";
+import { setSideCallGate, setSideCallSink } from "./side-call.js";
 import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
 import { formatToolCall, formatToolError } from "../cli/tool-summary.js";
 import { formatBufferedResponseStatus } from "../cli/response-preview.js";
@@ -267,6 +268,17 @@ export class AgentLoop {
    * 走り続け、 後続リクエストが詰まる (llama.cpp はシングルスロット直列処理)。
    */
   private llmAbortController: AbortController | null = null;
+  /**
+   * 予熱 (docs/context-reduction-redesign.md §9)。 裏で 1 つだけ走らせ、 本体呼び出し・脇の呼び出しを終わりまで待たせる。
+   * abort() (Esc) は予熱も切る。
+   */
+  private readonly prewarm = new PrewarmRunner({
+    onWait: (who) => {
+      const line = `予熱 (サーバへの会話の読み込み) が終わるのを待ってから${who}を送ります。 Esc で中断できます`;
+      console.log(chalk.dim(`  ⏳ ${line}`));
+      this.notice("info", line);
+    },
+  });
   /** Phase 5 第2ラウンド: ハーネス介入の状態 (file_edit/壁ドン/Read→Edit/連続委任) を一元管理 */
   private harnessState = new HarnessState();
   /**
@@ -545,6 +557,8 @@ export class AgentLoop {
         this.cacheMissCauses.noteSideCall(record.purpose);
       },
     });
+    // 予熱中は脇の呼び出しを送らない (スロットが 1 つのサーバでは予熱した中身を追い出す。 §9.2)
+    setSideCallGate(this.prewarm);
     this.intentClassifier = new IntentClassifier(this.provider, model);
     this.evaluator = new Evaluator(secondLLMManager, this.provider, model);
     // セカンドLLMにもセッションIDを共有（ログファイル名の統一用）
@@ -622,6 +636,8 @@ export class AgentLoop {
     // HTTP 接続を切断してサーバ側の生成も止める。 これが無いと llama.cpp が
     // 中断済み生成を完走するまで後続リクエストが待たされ「固まった」 ように見える。
     this.llmAbortController?.abort();
+    // 予熱も切る (docs/context-reduction-redesign.md §9.2)
+    this.prewarm.abort();
   }
 
   /** 中断フラグをリセットする（次の run() 開始前に呼ぶ） */
@@ -1051,13 +1067,15 @@ export class AgentLoop {
         while (!success) {
           // context整理中やconnection retry待ちにpause要求が届いた場合も、次のmain APIを出す前に保存する。
           if (!(await pauseAtBoundaryIfRequested(iteration))) return;
+          // 予熱中なら終わるまで待つ (切断しない。 切るとそれまでの読み込みが無駄になる。 §9.2)。 Esc は予熱も切り、 下の中断の確認で止まる
+          await this.prewarm.wait("本体の呼び出し");
           // 規則 2 の記録済みの強い区切り (ToDo の全部完了・Goal の達成) と規則 1 (docs/context-reduction-redesign.md §4.4)。
           // 規則 1: 本体呼び出しの直前に P + R > W なら、 先に整理イベントを行う。 失敗したら入らない呼び出しは送らずに止める。
           // 状態通知の添付 (attachDynamicContext) より前に判定する (要約の呼び出しは、 前回の本体呼び出しの並びをそのまま
           // 先頭に含める必要があるため)。
           await this.judgePendingBoundary();
           if (this._aborted) {
-            // 規則 2 の整理 (要約の呼び出し) の途中で Esc が押された。 本体は呼ばずに止める
+            // 予熱の待ちか、 規則 2 の整理 (要約の呼び出し) の途中で Esc が押された。 本体は呼ばずに止める
             console.log(chalk.yellow("\n  (処理を中断しました)"));
             this.appendAbortMarker("");
             this.recordSpanEnd("user_abort");
@@ -2700,7 +2718,6 @@ export class AgentLoop {
     } finally {
       this.llmAbortController = null;
     }
-    this.llmLogger.logReductionEvent(result.record);
     const line = formatReductionEventLine(result);
     if (result.ok && result.record.continuedWithoutSummary) {
       // 要約に失敗し、 設定 continue に従って段階 0〜2 の分だけで整理した。 失敗は黙らず警告として出す
@@ -2720,7 +2737,96 @@ export class AgentLoop {
       logger.error(`[reduction] ${line}`);
       this.notice("error", line);
     }
+    // 依頼の終わり (規則 2) と /compact の整理の後は予熱する (§9.1)。 規則 1 (作業の途中) とほかの区切りは
+    // すぐ本体を呼ぶので送らない。 記録 (reduction_event) は予熱の欄を埋めてから書く (送ったら終わったとき)
+    const prewarmTrigger: PrewarmTrigger | null = !result.ok
+      ? null
+      : trigger === "boundary:request-end"
+        ? "request-end"
+        : trigger === "manual"
+          ? "manual"
+          : null;
+    if (prewarmTrigger === null) {
+      this.llmLogger.logReductionEvent(result.record);
+      return result;
+    }
+    const prewarm = this.startPrewarm(prewarmTrigger);
+    if (prewarm.status === "skipped") {
+      result.record.prewarm = prewarm.outcome;
+      this.llmLogger.logReductionEvent(result.record);
+    } else {
+      void prewarm.done.then((outcome) => {
+        result.record.prewarm = outcome;
+        this.llmLogger.logReductionEvent(result.record);
+      });
+    }
     return result;
+  }
+
+  // ─── 予熱 (docs/context-reduction-redesign.md §9) ───
+
+  /**
+   * 次の本体呼び出しと同じ並び (本体と同じ組み立て buildMainCallRequest。 状態通知は付けない) を、 出力上限 1 で裏で送る。
+   * 送らない条件 (prewarmSkipReason) に当たれば送らず、 理由をログ (と prewarm の記録) に残す。
+   * 失敗は作業を止めず、 黄色の 1 行と harness_notice (warn) で知らせる。
+   */
+  private startPrewarm(
+    trigger: PrewarmTrigger,
+  ): { status: "skipped"; outcome: PrewarmOutcome } | { status: "started"; done: Promise<PrewarmOutcome> } {
+    const skip = prewarmSkipReason(this.provider.providerType, this.history.getRawMessages());
+    if (skip !== null) {
+      logger.info(`[prewarm] ${skip.detail}`);
+      this.llmLogger.logPrewarmSkipped({ trigger, reason: skip.reason, detail: skip.detail });
+      return { status: "skipped", outcome: { status: "skipped", ...skip } };
+    }
+    const toolDefs = this.getFilteredToolDefs();
+    const done = this.prewarm
+      .start(trigger, this.provider, (signal) => this.buildMainCallRequest(toolDefs, signal))
+      .then((outcome) => {
+        this.reportPrewarmOutcome(outcome);
+        return outcome;
+      });
+    console.log(
+      chalk.dim("  予熱を送りました (次の呼び出しに備えて、 サーバに会話を読み込ませています。 結果は使いません)"),
+    );
+    return { status: "started", done };
+  }
+
+  private reportPrewarmOutcome(outcome: PrewarmOutcome): void {
+    if (outcome.status === "failed") {
+      const line = `予熱に失敗しました (作業には影響しません。 次の呼び出しで会話の読み直しが起きることがあります): ${outcome.error}`;
+      console.log(
+        chalk.yellow(`
+  ⚠ ${line}`),
+      );
+      logger.warn(`[prewarm] ${line}`);
+      this.notice("warn", line);
+    } else if (outcome.status === "aborted") {
+      logger.info("[prewarm] 予熱を中断しました");
+    } else if (outcome.status === "done") {
+      logger.info(`[prewarm] 予熱が終わりました (${outcome.durationMs} ms)`);
+    }
+  }
+
+  /**
+   * セッションを再開した後の予熱 (§9.1。 再開直後はサーバに今の会話が無い)。 整理イベントではないので、
+   * 記録は side_call (目的 prewarm) だけ (送らなかったときは理由の記録)。 /resume・起動時の --resume・/fork の後に呼ぶ。
+   * 一時停止した作業の再開 (/run resume) はすぐ本体を呼ぶので呼ばない。
+   * @returns 予熱の終わり (送らなかったときはすぐ。 reject しない)
+   */
+  prewarmAfterResume(): Promise<PrewarmOutcome> {
+    const prewarm = this.startPrewarm("resume");
+    return prewarm.status === "skipped" ? Promise.resolve(prewarm.outcome) : prewarm.done;
+  }
+
+  /** 走っている予熱の終わりを待つ (表示なし。 終了処理・テスト用) */
+  async waitForPrewarm(): Promise<void> {
+    await this.prewarm.settled();
+  }
+
+  /** 走っている予熱を切って終わりを待つ (終了の前。 予熱の記録を書き終えるため) */
+  async stopPrewarm(): Promise<void> {
+    await this.prewarm.stop();
   }
 
   /**
@@ -3515,6 +3621,8 @@ export class AgentLoop {
   }
 
   restoreSession(sessionData: SessionData, options: { restoreTerminalTranscript?: boolean } = {}): void {
+    // 走っている予熱の並びは古くなるので切る (再開の予熱は呼び出し側が prewarmAfterResume で改めて送る)
+    this.prewarm.abort();
     this.session = sessionData;
     if (this.terminalTranscriptBridge && options.restoreTerminalTranscript !== false) {
       const restored = this.terminalTranscriptBridge.restore(sessionData.terminalTranscript, sessionData.messages);
@@ -3640,6 +3748,8 @@ export class AgentLoop {
    * のためここで同期する。
    */
   importConversation(state: ConversationState | null): void {
+    // 走っている予熱の並びは古くなるので切る
+    this.prewarm.abort();
     if (state) {
       this.history = state.history;
       clearTodos();
