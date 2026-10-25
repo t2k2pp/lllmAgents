@@ -18,7 +18,7 @@ import type { ReductionGoal } from "./context-budget.js";
 import { findToolPairingError, toSentMessage } from "./message-history.js";
 import { estimateMessageTokens, estimateTokens } from "./token-counter.js";
 
-// ─── 目印と、 忘却の写しの書き方 (forgetting.ts と共通。 旧経路の削除後もここに残る) ───
+// ─── 目印と、 忘却の写しの書き方 ───
 
 /** 本文を消したツール結果の目印 */
 export const THINNED_MARKER = "[忘却済み]";
