@@ -1,9 +1,8 @@
 /**
  * コンテキスト整理の予算の計算 (docs/context-reduction-redesign.md §4 / §6.3。 整理の作り直し タスク 3)。
  *
- * ここにあるのは純粋な計算と、 依頼 1 件ごとの増分 G の記録だけ。 整理の発火には使わない
- * (本体呼び出しの直前・依頼の区切りへの組み込みはタスク 8。 それまでは既存の ContextManager の経路が動く)。
- * 例外は起動時・モデル切替時の検査 (checkContextWindowFits) で、 AgentLoop が呼ぶ。
+ * ここにあるのは純粋な計算と、 依頼 1 件ごとの増分 G の記録だけ。 発火の判定 (規則 1・2) は AgentLoop が
+ * 本体呼び出しの直前と強い区切りで、 起動時・モデル切替時の検査 (checkContextWindowFits) も AgentLoop が呼ぶ。
  *
  * 記号 (設計書 §4.1):
  *   W = contextWindow、 P = 次に送るプロンプトの大きさ、 O = 1 回の出力の上限、
@@ -168,7 +167,7 @@ export type RequestGrowthRestoreResult = { ok: true; tracker: RequestGrowthTrack
 /**
  * 1 件の依頼 (利用者の発話から依頼の終わりまで) の増分を測り、 直近 3 件を持つ (設計書 §4.5)。
  *   増分 = 最後の本体呼び出しの入力 P + その出力 − 最初の本体呼び出しの入力 P + 途中の整理で減らした量
- * 依頼の始まり・本体呼び出し・整理・依頼の終わりで呼ぶ組み込みはタスク 8。
+ * 依頼の始まり・本体呼び出し・整理・依頼の終わりで AgentLoop が呼ぶ。
  */
 export class RequestGrowthTracker {
   private recent: number[] = [];

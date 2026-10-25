@@ -209,28 +209,22 @@ describe("CapabilityProfile — フィールド整合性", () => {
 });
 
 describe("Phase C tunables — ループ制御チューナブル", () => {
-  it("T1 のループ制御値: 点検 30 回ごと / self-check 3 / 0.7 / keepRecent 10", () => {
+  it("T1 のループ制御値: 点検 30 回ごと / self-check 3", () => {
     const p = resolveCapability("claude-opus-4-7");
     expect(p.loopCheckInterval).toBe(30);
     expect(p.maxSelfCheckRounds).toBe(3);
-    expect(p.compressionThreshold).toBe(0.7);
-    expect(p.keepRecentMessages).toBe(10);
   });
 
-  it("T2 のループ制御値: 点検 20 回ごと / self-check 2 / 0.6 / keepRecent 8", () => {
+  it("T2 のループ制御値: 点検 20 回ごと / self-check 2", () => {
     const p = resolveCapability("kimi-k2.6");
     expect(p.loopCheckInterval).toBe(20);
     expect(p.maxSelfCheckRounds).toBe(2);
-    expect(p.compressionThreshold).toBe(0.6);
-    expect(p.keepRecentMessages).toBe(8);
   });
 
-  it("T3 のループ制御値: 点検 15 回ごと / self-check 1 / 0.5 / keepRecent 5", () => {
+  it("T3 のループ制御値: 点検 15 回ごと / self-check 1", () => {
     const p = resolveCapability("phi-4");
     expect(p.loopCheckInterval).toBe(15);
     expect(p.maxSelfCheckRounds).toBe(1);
-    expect(p.compressionThreshold).toBe(0.5);
-    expect(p.keepRecentMessages).toBe(5);
   });
 
   it("P1-A/B のティア別 ON/OFF: P1-A は全 tier OFF (2026-05-09)、 P1-B は T2 のみ ON", () => {
@@ -247,19 +241,19 @@ describe("Phase C tunables — ループ制御チューナブル", () => {
   it("ユーザ override で tunables を個別に変更可能", () => {
     const p = resolveCapability("claude-opus-4-7", undefined, {
       loopCheckInterval: 50,
-      compressionThreshold: 0.85,
+      maxSelfCheckRounds: 5,
     });
     expect(p.tier).toBe("T1"); // tier は維持
     expect(p.loopCheckInterval).toBe(50); // override 反映
-    expect(p.compressionThreshold).toBe(0.85);
-    expect(p.maxSelfCheckRounds).toBe(3); // 他のフィールドは T1 default
+    expect(p.maxSelfCheckRounds).toBe(5);
+    expect(p.supportsParallelTools).toBe(true); // 他のフィールドは T1 default
   });
 
   it("tier override で tunables も対応する tier の値に切替", () => {
     const p = resolveCapability("claude-opus-4-7", undefined, { tier: "T3" });
     expect(p.tier).toBe("T3");
     expect(p.loopCheckInterval).toBe(15); // T3 の default
-    expect(p.compressionThreshold).toBe(0.5);
+    expect(p.maxSelfCheckRounds).toBe(1);
   });
 });
 

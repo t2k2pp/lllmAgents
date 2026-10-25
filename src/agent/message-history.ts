@@ -156,7 +156,7 @@ export class MessageHistory {
   /** 直近に添付した状態通知。 key は日時を除いた内容 (変化の判定用)。 */
   private lastContextNote: { key: string; message: Message } | null = null;
   /**
-   * 前回の送信以降に、 送信済みの部分を書き換えた操作の理由 (忘却・圧縮・揮発除去 等)。
+   * 前回の送信以降に、 送信済みの部分を書き換えた操作の理由 (整理イベント・system の更新・/clear 等)。
    * AgentLoop が送信時に takeRewriteReasons() で取り出し、 理由の無い前方の変化を
    * 「予期しないキャッシュ破壊」 として記録する (docs/prompt-prefix-stability.md §7)。
    */
@@ -210,7 +210,7 @@ export class MessageHistory {
    * 一度送ったメッセージは書き換えず、 変わった情報だけを末尾に足す (docs/prompt-prefix-stability.md §3.2)。
    * 添付する条件 (いずれか):
    *   1. 日時を除いた内容が前回の通知と違う
-   *   2. 前回通知を付けたメッセージが履歴から消えた (忘却・圧縮・揮発除去)。 状態を見失わせない
+   *   2. 前回通知を付けたメッセージが履歴から消えた (整理イベント・引き継ぎでのリセット)。 状態を見失わせない
    *   3. 末尾が user メッセージ (新しい依頼の始まり)。 現在日時をここで更新する
    *   4. 渡し直し (queueStateHandover) が待っている
    * 末尾が送信済み・既に通知付き・assistant の時は添付しない (次の呼び出しで再判定する。 渡し直しも待たせたまま)。
@@ -319,31 +319,14 @@ export class MessageHistory {
   }
 
   /**
-   * 履歴の全部の思考をその場で消す。 旧経路の忘却 (forgetting.ts の forgetThinking。 整理の作り直し タスク 8 で削除)
-   * だけが使う。 整理イベントは写しの上で思考を消し、 replaceMessages() で 1 回だけ差し替える。
-   * @returns 削除した thinking 数
-   */
-  clearAllThinking(): number {
-    let cleared = 0;
-    for (const m of this.messages) {
-      if (m.role === "assistant" && m.thinking) {
-        delete m.thinking;
-        cleared++;
-      }
-    }
-    if (cleared > 0) this.noteRewrite("thinking-clear");
-    return cleared;
-  }
-
-  /**
-   * 忘却の結果でメッセージ列を置き換える (docs/context-forgetting.md §5)。
+   * 整理イベントの結果でメッセージ列を置き換える (docs/context-reduction-redesign.md §6.1)。
    * tool_calls / tool_result のペア整合を検証し、 壊れていれば例外を投げて
    * 呼び出し側にロールバックさせる (壊れた履歴を送ると provider が 400 を返すため)。
    *
    * 呼び出し側は写しに対して変換し、 ここで 1 回だけ差し替える。 ここが投げたら履歴は元のまま。
    *
    * @param reason 書き換え理由 (prefix_break / cache_miss の原因欄に出る)。 整理イベントは
-   *   "reduction:<イベント ID>" (docs/context-reduction-redesign.md §6.1)。 旧経路の忘却は既定の "replace"
+   *   "reduction:<イベント ID>" (docs/context-reduction-redesign.md §6.1)。 申告の無い既定は "replace"
    */
   replaceMessages(next: Message[], reason = "replace"): void {
     MessageHistory.assertToolPairing(next);
@@ -355,32 +338,6 @@ export class MessageHistory {
   private static assertToolPairing(messages: Message[]): void {
     const error = findToolPairingError(messages);
     if (error) throw new Error(`[message-history] ${error}`);
-  }
-
-  replaceOlderMessages(summary: string, keepRecent: number): void {
-    if (this.messages.length <= keepRecent) return;
-
-    // 境界が tool_call / tool_result のペアを分断すると、Azure (Responses API) や
-    // OpenAI 系で「対応する tool_call が見つからない」400 エラーになる。
-    // 境界を前方に移動してペアを recent 側にまとめて含める。
-    let boundary = this.messages.length - keepRecent;
-    while (boundary > 0) {
-      const cur = this.messages[boundary];
-      const prev = this.messages[boundary - 1];
-      const startsWithToolResult = cur?.role === "tool";
-      const prevHasToolCalls =
-        prev?.role === "assistant" && Array.isArray(prev.tool_calls) && prev.tool_calls.length > 0;
-      if (startsWithToolResult || prevHasToolCalls) {
-        boundary--;
-      } else {
-        break;
-      }
-    }
-    if (boundary <= 0) return; // 全保持に倒す
-
-    const recent = this.messages.slice(boundary);
-    this.messages = [{ role: "system", content: `[会話履歴の要約]\n${summary}` }, ...recent];
-    this.noteRewrite("compress");
   }
 
   /** 直近 N 往復の会話テキストを返す（意図分類の文脈提供用） */

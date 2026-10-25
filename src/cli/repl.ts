@@ -15,7 +15,6 @@ import {
   buildContextBreakdown,
   formatContextBreakdown,
   formatContextDetail,
-  formatStrategyStatus,
   normalizeContextSection,
 } from "./context-breakdown.js";
 import { formatTodos, formatTodosActive, clearTodos, archiveCompletedTodos } from "../tools/definitions/todo-write.js";
@@ -4681,16 +4680,6 @@ export class REPL {
       case "/context": {
         // 引数なし: カテゴリ別内訳。 引数あり: そのカテゴリの中身をダンプ (ドリルダウン)
         const sectionArg = args[0]?.trim();
-        // /context strategy — 区切り整理のモード表示・切替 (docs/context-strategy.md §5.3)
-        if (sectionArg?.toLowerCase() === "strategy") {
-          const { text, changedTo } = formatStrategyStatus(this.agent, args[1]?.trim());
-          process.stdout.write(text);
-          if (changedTo) {
-            this.config.context.strategy = { ...this.config.context.strategy, mode: changedTo };
-            saveConfig(this.config);
-          }
-          break;
-        }
         if (sectionArg) {
           const section = normalizeContextSection(sectionArg);
           if (!section) {
@@ -4710,9 +4699,9 @@ export class REPL {
       }
 
       case "/compact":
-        console.log(chalk.dim("  コンテキストを圧縮中..."));
-        await this.agent.forceCompress();
-        console.log(chalk.dim("  完了。"));
+        // 手動の整理 (docs/context-reduction-redesign.md §7)。 整理イベントを今すぐ行い、 段階 0〜3 を最後まで進める。
+        // 結果 (成功・失敗・減らせるものが無い) は整理イベントが 1 行で示す。 表示の作り直しはタスク 10
+        await this.agent.runReductionEvent("manual");
         break;
 
       case "/checkpoint": {
@@ -6613,7 +6602,7 @@ export class REPL {
         );
         console.log(
           chalk.dim(
-            `  loopCheck=${cap.loopCheckInterval}回ごと  compress@${Math.round(cap.compressionThreshold * 100)}%  toolResult≤${TIER_CONTEXT_BUDGETS[cap.tier].toolResultLimitTokens}tok (1 応答で計${TIER_CONTEXT_BUDGETS[cap.tier].toolResultTotalTokens}tok)  maxOutput=${TIER_CONTEXT_BUDGETS[cap.tier].outputTokenLimit}tok  keepRecent=${cap.keepRecentMessages}`,
+            `  loopCheck=${cap.loopCheckInterval}回ごと  toolResult≤${TIER_CONTEXT_BUDGETS[cap.tier].toolResultLimitTokens}tok (1 応答で計${TIER_CONTEXT_BUDGETS[cap.tier].toolResultTotalTokens}tok)  maxOutput=${TIER_CONTEXT_BUDGETS[cap.tier].outputTokenLimit}tok  keepRecentToolUses=${TIER_CONTEXT_BUDGETS[cap.tier].keepRecentToolUses}`,
           ),
         );
         console.log(chalk.dim(`  判定根拠: ${cap.reason}`));

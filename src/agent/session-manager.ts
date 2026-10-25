@@ -100,6 +100,12 @@ export interface SessionData {
    * 戻すときは RequestGrowthTracker.restore() で形を検査する。 この欄の無い古いセッションは空の記録から始める。
    */
   requestGrowth?: RequestGrowthSnapshot;
+  /**
+   * 段階 3 の要約の後の状態の渡し直し (最近触ったファイル・いまの作業) で、 まだ本体呼び出しに添えていないもの
+   * (docs/context-reduction-redesign.md §5.8 の 5)。 依頼の終わり・/compact の整理の後に保存・再開をはさんでも失わないよう持つ。
+   * 添えたら消える (無ければ欄ごと無い)。
+   */
+  pendingStateHandover?: string;
   // 注: paradigm モード (forward / goal-seek) は永続化しない。 goal-seek は必ず goal slot を
   // 伴うため、 restoreSession() が goal の有無からモードを一意に導出する (単一情報源)。
   // docs/room-model-design.md §10-3。
@@ -148,6 +154,8 @@ export function forkSession(source: SessionData): SessionData {
     source.terminalTranscript === undefined ? undefined : structuredClone(source.terminalTranscript);
   // 増分 G の記録は会話の進み方の記録なので、 履歴と一緒に分岐へ引き継ぐ
   fork.requestGrowth = source.requestGrowth === undefined ? undefined : structuredClone(source.requestGrowth);
+  // 渡し直しの預かりは履歴 (要約) と組なので、 履歴と一緒に引き継ぐ
+  fork.pendingStateHandover = source.pendingStateHandover;
   // 実行制御状態を別sessionへ複製すると、同じtool/APIを二重再開しうるためforkへは引き継がない。
   fork.meta.messageCount = fork.messages.length;
   return fork;

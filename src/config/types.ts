@@ -168,48 +168,20 @@ export interface SecurityConfig {
 }
 
 /**
- * コンテキスト縮約の手段 (docs/context-forgetting.md §6)。
- *  - compress: 従来通り常に要約圧縮
- *  - forget: 常に忘却。適用不能時は履歴を保持して理由を報告し、別手段へ切り替えない
- *  - hybrid (既定): まず忘却を試し、 削減が目標の 60% に届かなければ続けて圧縮
+ * 段階 3 の要約に失敗したときの扱い (docs/context-reduction-redesign.md §6.1 / §11。 2026-10-25 利用者の決定)。
+ *  - continue (既定): 失敗を画面と reduction_event に必ず出したうえで、 段階 0〜2 の結果だけで履歴を差し替える。
+ *    ただし規則 1 の発火で、 段階 0〜2 だけでは次の本体呼び出しが入らないときは止める
+ *  - stop: 写しを捨てて履歴は元のまま。 規則 1 なら本体を呼ばずに止める
+ * 規則 1・規則 2・手動の /compact のどれにも同じ扱いを使う。
  */
-export type ReductionMode = "compress" | "forget" | "hybrid";
+export type SummaryFailurePolicy = "continue" | "stop";
 
-/** 忘却機能の詳細設定 (docs/context-forgetting.md §4 / §6.1 / §10) */
-export interface ForgettingConfig {
-  /** 直近何セグメントを忘却対象外にするか (既定 6) */
-  keepRecentSegments?: number;
-  /** 目標削減量を閾値の何ポイント下に置くか (既定 0.15 = 15 ポイント) */
-  targetMarginRatio?: number;
-  /** hybrid で圧縮まで続行するかの判定比 (目標に対する達成率、 既定 0.6) */
-  sufficiencyRatio?: number;
-  /** 自動忘却の最短間隔 (ターン数、 既定 3)。 毎ターン忘却が走るのを防ぐ */
-  minIntervalTurns?: number;
-}
-
-/**
- * 区切り検出でのコンテキスト整理モード (docs/context-strategy.md §5.1)。
- *  - off: 区切り検出を行わない (従来通り閾値のみ)
- *  - auto (既定): 区切りで自動実行。 ただし clear は確認を取る
- *  - aggressive: clear も確認なしで実行
- */
-export type ContextStrategyMode = "off" | "auto" | "aggressive";
-
-/** 区切りでのコンテキスト戦略の設定 (docs/context-strategy.md §5) */
-export interface ContextStrategyConfig {
-  /** 未設定なら "auto" */
-  mode?: ContextStrategyMode;
-  /** 区切り整理の最短間隔 (ターン数、 既定 3)。 連続発火で毎ターン待たされるのを防ぐ */
-  minIntervalTurns?: number;
-}
+/** context.summaryFailure の既定値 (getDefaultConfig と、 設定が無いときの読み出しの両方がこれを使う) */
+export const DEFAULT_SUMMARY_FAILURE_POLICY: SummaryFailurePolicy = "continue";
 
 export interface ContextConfig {
-  /** 縮約手段。 未設定なら "hybrid" (docs/context-forgetting.md §6) */
-  reduction?: ReductionMode;
-  /** 忘却機能の詳細設定 */
-  forgetting?: ForgettingConfig;
-  /** 区切り検出での整理 (docs/context-strategy.md)。 未設定なら mode="auto" */
-  strategy?: ContextStrategyConfig;
+  /** 段階 3 の要約に失敗したときの扱い。 未設定なら "continue" */
+  summaryFailure?: SummaryFailurePolicy;
 }
 
 /**
@@ -773,12 +745,8 @@ export function getDefaultConfig(): Config {
       streamCommandOutput: true,
     },
     context: {
-      // docs/context-forgetting.md §6 — 既定は hybrid。 忘却が失敗しても圧縮に落ちるので
-      // 最悪でも従来と同じ動作になる。 従来動作に固定したい場合は /forget mode compress
-      reduction: "hybrid",
-      // docs/context-strategy.md §5.1 — 既定は auto。 forget-thinking は待ち時間がほぼ無く
-      // 失うのも読み直せる情報だけなので自動で困らない。 clear だけは必ず人が承認する。
-      strategy: { mode: "auto" },
+      // docs/context-reduction-redesign.md §6.1 — 要約に失敗しても、 失敗を見せたうえで段階 0〜2 の分だけ整理して進む
+      summaryFailure: DEFAULT_SUMMARY_FAILURE_POLICY,
     },
     discord: {
       enabled: false,

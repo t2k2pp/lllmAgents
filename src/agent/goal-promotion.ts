@@ -28,6 +28,11 @@ export interface GoalPromotionAgent {
   getProvider(): LLMProvider;
   getModel(): string;
   enterGoalSeek(goal: GoalDefinition): void;
+  /**
+   * 利用者の入力の検査 (AgentLoop.checkUserInput。 docs/context-reduction-redesign.md §4.3)。 入らなければ利用者に示す文、 入れば null。
+   * 入らない入力は run() が断るので、 その前に脇の呼び出し (受け入れ条件の抽出) を送らない
+   */
+  checkUserInput(input: string): string | null;
 }
 
 /** 拒否 cooldown: 10 分。 同プロセス 2 回拒否で以後提案しない (設計書 §2) */
@@ -128,6 +133,8 @@ export async function maybePromoteToGoal(opts: {
   try {
     const enabled = opts.enabled ?? loadConfig().goalSeek?.autoPropose ?? true;
     if (!enabled) return false;
+    // 大きすぎる入力は run() が断る (理由の表示も run() が行う)。 断られる入力のために脇の呼び出しを送らない
+    if (agent.checkUserInput(input) !== null) return false;
     if (agent.getMode() === "goal-seek") return false;
     if (Date.now() < _suppressUntil || _declineCount >= MAX_DECLINES) return false;
 

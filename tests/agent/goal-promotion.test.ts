@@ -24,7 +24,10 @@ function mkProvider(
   } as unknown as LLMProvider;
 }
 
-function mkAgent(provider = mkProvider()): { agent: GoalPromotionAgent; entered: GoalDefinition[] } {
+function mkAgent(
+  provider = mkProvider(),
+  inputRefusal: string | null = null,
+): { agent: GoalPromotionAgent; entered: GoalDefinition[] } {
   const entered: GoalDefinition[] = [];
   const agent: GoalPromotionAgent = {
     getMode: () => "forward",
@@ -32,6 +35,7 @@ function mkAgent(provider = mkProvider()): { agent: GoalPromotionAgent; entered:
     getProvider: () => provider,
     getModel: () => "fake-model",
     enterGoalSeek: (g) => entered.push(g),
+    checkUserInput: () => inputRefusal,
   };
   return { agent, entered };
 }
@@ -101,6 +105,23 @@ describe("maybePromoteToGoal (チャネル)", () => {
     expect(entered[0].statement).toBe(COMPLEX_TASK);
     expect(entered[0].acceptance_criteria.length).toBe(3);
     expect(questions[0]).toContain("c1 が動作する");
+  });
+
+  it("入力の検査に通らない (大きすぎる) 入力では、 脇の呼び出し (受け入れ条件の抽出) を送らず提案しない", async () => {
+    const chat = vi.fn(async function* (): AsyncGenerator<ChatChunk> {
+      yield { type: "text", text: '{"criteria": ["c1"]}' };
+      yield { type: "done", finishReason: "stop" };
+    });
+    const { agent, entered } = mkAgent({ providerType: "fake", chat } as unknown as LLMProvider, "入力が大きすぎます");
+    const askUser = vi.fn(async () => ({ answer: "Goal Seek で実行" }));
+    setInteractionBridge("slack", { askUser });
+
+    const promoted = await maybePromoteToGoal({ input: COMPLEX_TASK, source: "slack", agent, enabled: true });
+
+    expect(promoted).toBe(false);
+    expect(chat).not.toHaveBeenCalled();
+    expect(askUser).not.toHaveBeenCalled();
+    expect(entered).toHaveLength(0);
   });
 
   it("拒否されたら通常実行 + cooldown で再提案しない", async () => {

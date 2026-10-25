@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { runHandoff, generateHandoffNote } from "../../src/agent/handoff.js";
 import { MessageHistory } from "../../src/agent/message-history.js";
-import { HierarchicalCompressor } from "../../src/agent/hierarchical-compressor.js";
 import type { ChatChunk, LLMProvider } from "../../src/providers/base-provider.js";
 
 function history() {
@@ -71,18 +70,6 @@ describe("context failure diagnostics", () => {
     await expect(runHandoff(p, "m", h)).rejects.toThrow("429");
     expect(p.chat).toHaveBeenCalledTimes(1);
     expect(h.getRawMessages()).toEqual(old);
-  });
-  it.each([
-    ['{"summary":"ok","keyFacts":[]}', "length", "truncated"],
-    ["", "stop", "empty response"],
-    ['{"summary":"","keyFacts":[]}', "stop", "shape mismatch"],
-    ['{"summary":"ok","keyFacts":[42]}', "stop", "shape mismatch"],
-  ])("不完全な要約を採用せず終了理由と復旧方法を返す", async (text, reason, error) => {
-    const p = provider(text, reason);
-    const c = new HierarchicalCompressor(p, "m");
-    await expect(c.compress(history().getRawMessages())).rejects.toThrow(error);
-    expect(c.getSummaryBlocks()).toEqual([]);
-    expect(p.chat).toHaveBeenCalledTimes(1);
   });
   it("打ち切られた引き継ぎは見出しが揃っても採用しない", async () => {
     const p = provider("## これまでにやったこと\n- 実装済みの内容。\n## 次にやること\n- 次の作業の途中", "length");

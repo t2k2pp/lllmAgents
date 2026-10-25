@@ -6,7 +6,9 @@ import {
   KEEP_RECENT_THINKING,
   PROTECTED_TOOL_NAMES,
   THINNED_MARKER,
+  TOMBSTONE_MARKER,
   applyReductionStages,
+  insertTombstone,
   estimateSentMessageTokens,
   type ReductionStagesInput,
 } from "../../src/agent/reduction-stages.js";
@@ -441,5 +443,28 @@ describe("純粋さと減った量", () => {
     });
     expect(underMinimum.needsSummary).toBe(true);
     expect(underMinimum.shortfall.toMinimum).toBe(10_000_000 - underMinimum.freedTokens.total);
+  });
+});
+
+describe("忘却の記録 (insertTombstone) — 黙った欠損を作らない", () => {
+  it("既存の記録があれば追記して 1 件にまとめ、 履歴の中に散らばらない", () => {
+    const base: Message[] = [
+      { role: "system", content: `${TOMBSTONE_MARKER} 1 回目` },
+      { role: "user", content: "u" },
+    ];
+    const merged = insertTombstone(base, `${TOMBSTONE_MARKER} 2 回目`, 1);
+    expect(merged.filter((m) => String(m.content).startsWith(TOMBSTONE_MARKER)).length).toBe(1);
+    expect(String(merged[0].content)).toContain("1 回目");
+    expect(String(merged[0].content)).toContain("2 回目");
+    expect(merged.length).toBe(2);
+  });
+
+  it("無ければ指定の位置に 1 件入れる", () => {
+    const base: Message[] = [
+      { role: "user", content: "a" },
+      { role: "user", content: "b" },
+    ];
+    const out = insertTombstone(base, "T", 1);
+    expect(out.map((m) => m.content)).toEqual(["a", "T", "b"]);
   });
 });

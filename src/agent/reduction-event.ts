@@ -10,8 +10,14 @@
  *   5. cache_miss の原因に整理イベントを記録し (次の外れが expected になる)、 依頼の増分 G に減らした量を足し戻す
  *
  * 途中で失敗したら写しを捨てるだけで、 履歴は元のまま。 失敗は結果 (ok: false) として返し、 呼び出し側が利用者に見せる。
+ * ただし段階 3 の要約の失敗は設定 context.summaryFailure に従う (2026-10-25 利用者の決定。 §6.1):
+ *   - continue (既定): 失敗を記録と 1 行に必ず出したうえで、 段階 0〜2 の写しだけで差し替える
+ *     (規則 1 で段階 0〜2 だけでは入らないときは still-too-large で止める)
+ *   - stop: イベント全体を失敗にする (写しを捨てる)
+ * Esc で要約が切れたとき (signal が中断済み) は設定にかかわらず失敗にする (利用者が止めた処理を続けない)。
  * 記録 (§10.1 の reduction_event) は成功・失敗のどちらでも返す。 ログへの書き込みと画面の表示は呼び出し側 (AgentLoop)。
  */
+import type { SummaryFailurePolicy } from "../config/types.js";
 import type { LLMProvider, Message } from "../providers/base-provider.js";
 import type { CacheMissCauseCollector } from "./cache-miss.js";
 import {
@@ -41,9 +47,16 @@ import {
 
 /**
  * 発火の種類 (§4.4 / §7)。 forced = 規則 1 (本体呼び出しの直前に入らない)、
- * boundary:<区切りの種類> = 規則 2 (強い区切りでの先回り。 タスク 8)、 manual = /compact (タスク 10)。
+ * boundary:<区切りの種類> = 規則 2 (強い区切りでの先回り)、 manual = /compact。
  */
-export type ReductionTrigger = "forced" | `boundary:${string}` | "manual";
+export type ReductionTrigger = "forced" | `boundary:${BoundaryKind}` | "manual";
+
+/**
+ * 規則 2 の強い区切り (§4.4)。 request-end = 依頼の終わり (応答が正常に終わり、 未完了の ToDo が無く、 Goal も動いていない)、
+ * todos-complete = ToDo が全部完了した、 goal-achieved = Goal を達成した、
+ * new-request = 新しい依頼が届いた (前の依頼の終わりで判定していないときだけ)
+ */
+export type BoundaryKind = "request-end" | "todos-complete" | "goal-achieved" | "new-request";
 
 export type ReductionFailureReason =
   /** 段階 0〜2 の当てはめが例外を投げた (作りの誤り) */
@@ -64,6 +77,8 @@ export interface ReductionSummaryRecord {
   status: "not-needed" | "nothing-to-summarize" | "done" | "failed" | "error";
   /** 失敗の理由 (status が failed のとき) */
   failureReason?: SummaryFailureReason;
+  /** 失敗の中身 (status が failed / error のとき。 利用者に見せた文と同じ) */
+  failureDetail?: string;
   segments?: number;
   attempts?: number;
   maxTokens?: number;
@@ -102,6 +117,10 @@ export interface ReductionEventRecord {
   /** 整理後の P の推定 (= 整理前の P − total)。 書き換えなかったときは整理前と同じ */
   promptTokensAfter: number;
   summary: ReductionSummaryRecord;
+  /** 要約に失敗したときの扱い (設定 context.summaryFailure) */
+  summaryFailurePolicy: SummaryFailurePolicy;
+  /** 要約に失敗し、 設定 continue に従って段階 0〜2 の分だけで進めた (成功・失敗のどちらの結果にも付く) */
+  continuedWithoutSummary: boolean;
   /** 予熱 (§9。 タスク 9 で埋める)。 まだ送っていないので null */
   prewarm: { durationMs: number } | null;
   durationMs: number;
@@ -140,6 +159,10 @@ export interface ReductionEventInput {
   growth: RequestGrowthTracker;
   /** パスの大小文字と区切りを区別しない (省略時は Windows なら true) */
   caseInsensitivePaths?: boolean;
+  /** 段階 3 の要約に失敗したときの扱い (設定 context.summaryFailure。 既定は DEFAULT_SUMMARY_FAILURE_POLICY = continue) */
+  summaryFailure: SummaryFailurePolicy;
+  /** 要約の呼び出しを切る signal (Esc)。 中断済みなら要約の失敗を設定にかかわらず失敗にする */
+  signal?: AbortSignal;
 }
 
 /** 忘却の記録 1 回分の本文 (§5.3 / §5.4 の行に、 見出しと読み直しの案内を付ける) */
@@ -172,6 +195,8 @@ export async function runReductionEvent(input: ReductionEventInput): Promise<Red
     clearedCurrentThinking: 0,
     promptTokensAfter: promptSize.tokens,
     summary: { status: "not-needed" },
+    summaryFailurePolicy: input.summaryFailure,
+    continuedWithoutSummary: false,
     prewarm: null,
     durationMs: 0,
   };
@@ -207,6 +232,10 @@ export async function runReductionEvent(input: ReductionEventInput): Promise<Red
   let next: Message[] = stages.messages;
   let tombstoneAt = stages.firstForgottenIndex;
   let handover: string | null = null;
+  /** 要約に失敗して段階 0〜2 だけで進めるときの、 失敗の中身 (後の失敗の文にも添える) */
+  let summaryFailureNote: string | null = null;
+  const continueAfterSummaryFailure = (): boolean =>
+    input.summaryFailure === "continue" && input.signal?.aborted !== true;
 
   // 2〜3. 足りなければ段階 3 (書き換え前の並び + 指示で要約を得て、 写しに当てはめる)
   if (stages.needsSummary) {
@@ -224,7 +253,7 @@ export async function runReductionEvent(input: ReductionEventInput): Promise<Red
     } else {
       const range = rangeResult.range;
       record.reachedStage = 3;
-      let summaryResult: Awaited<ReturnType<typeof requestSummary>>;
+      let summaryResult: Awaited<ReturnType<typeof requestSummary>> | null;
       try {
         summaryResult = await requestSummary({
           provider: input.provider,
@@ -235,33 +264,48 @@ export async function runReductionEvent(input: ReductionEventInput): Promise<Red
           budget,
         });
       } catch (e) {
-        record.summary = { status: "error", segments: range.segments.length };
-        return fail("summary-error", `要約の呼び出しが失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+        const detail = `要約の呼び出しが失敗しました: ${e instanceof Error ? e.message : String(e)}`;
+        record.summary = { status: "error", segments: range.segments.length, failureDetail: detail };
+        if (!continueAfterSummaryFailure()) return fail("summary-error", detail);
+        summaryResult = null;
+        summaryFailureNote = detail;
       }
-      record.summary = {
-        status: summaryResult.ok ? "done" : "failed",
-        failureReason: summaryResult.ok ? undefined : summaryResult.reason,
-        segments: range.segments.length,
-        attempts: summaryResult.attempts.length,
-        maxTokens: summaryResult.maxTokens,
-        ...sumUsage(summaryResult.attempts),
-        durationMs: summaryResult.durationMs,
-        extraTextChars: summaryResult.ok ? summaryResult.summary.extraTextChars : undefined,
-      };
-      if (!summaryResult.ok) {
-        return fail("summary-failed", `要約を得られませんでした (${summaryResult.reason}): ${summaryResult.detail}`);
-      }
-      try {
-        const applied = applySummaryToCopy(stages.messages, range, summaryResult.summary);
-        next = applied.messages;
-        record.freedTokens.stage3 = applied.freedTokens;
-        if (tombstoneAt !== null) {
-          tombstoneAt = tombstoneAt < applied.newIndexOf.length ? applied.newIndexOf[tombstoneAt] : next.length;
+      if (summaryResult !== null) {
+        record.summary = {
+          status: summaryResult.ok ? "done" : "failed",
+          failureReason: summaryResult.ok ? undefined : summaryResult.reason,
+          failureDetail: summaryResult.ok
+            ? undefined
+            : `要約を得られませんでした (${summaryResult.reason}): ${summaryResult.detail}`,
+          segments: range.segments.length,
+          attempts: summaryResult.attempts.length,
+          maxTokens: summaryResult.maxTokens,
+          ...sumUsage(summaryResult.attempts),
+          durationMs: summaryResult.durationMs,
+          extraTextChars: summaryResult.ok ? summaryResult.summary.extraTextChars : undefined,
+        };
+        if (!summaryResult.ok) {
+          const detail = record.summary.failureDetail ?? "要約を得られませんでした";
+          if (!continueAfterSummaryFailure()) return fail("summary-failed", detail);
+          summaryFailureNote = detail;
         }
-      } catch (e) {
-        return fail("apply-error", e instanceof Error ? e.message : String(e));
       }
-      handover = buildStateHandover(raw, range, summaryResult.summary, input.caseInsensitivePaths);
+      if (summaryFailureNote !== null) {
+        // 設定 continue: 要約は使わず、 段階 0〜2 の写しのまま進める (失敗は記録と 1 行に出す)
+        record.continuedWithoutSummary = true;
+      } else if (summaryResult?.ok) {
+        try {
+          const applied = applySummaryToCopy(stages.messages, range, summaryResult.summary);
+          next = applied.messages;
+          record.freedTokens.stage3 = applied.freedTokens;
+          if (tombstoneAt !== null) {
+            tombstoneAt = tombstoneAt < applied.newIndexOf.length ? applied.newIndexOf[tombstoneAt] : next.length;
+          }
+        } catch (e) {
+          return fail("apply-error", e instanceof Error ? e.message : String(e));
+        }
+        handover = buildStateHandover(raw, range, summaryResult.summary, input.caseInsensitivePaths);
+      }
     }
   }
 
@@ -272,10 +316,11 @@ export async function runReductionEvent(input: ReductionEventInput): Promise<Red
 
   const total = estimateSentMessageTokens(raw) - estimateSentMessageTokens(next);
   record.freedTokens.total = total;
+  const summaryNote = summaryFailureNote === null ? "" : `。 ${summaryFailureNote}`;
   if (total <= 0) {
     return fail(
       "nothing-to-reduce",
-      `減らせるものがありませんでした (段階 0〜2 で ${stages.freedTokens.total.toLocaleString("en-US")} トークン、 要約: ${record.summary.status})`,
+      `減らせるものがありませんでした (段階 0〜2 で ${stages.freedTokens.total.toLocaleString("en-US")} トークン、 要約: ${record.summary.status}${summaryNote})`,
     );
   }
   const promptTokensAfter = promptSize.tokens - total;
@@ -284,7 +329,7 @@ export async function runReductionEvent(input: ReductionEventInput): Promise<Red
     return fail(
       "still-too-large",
       `整理しても次の呼び出しが入りません (整理後の推定 P ${n(promptTokensAfter)} + 予約 R ${n(budget.reserveTokens)} > ` +
-        `contextWindow ${n(budget.contextWindow)}。 要約: ${record.summary.status})`,
+        `contextWindow ${n(budget.contextWindow)}。 要約: ${record.summary.status}${summaryNote})`,
     );
   }
 
@@ -323,9 +368,16 @@ function sumUsage(
 export function formatReductionEventLine(result: ReductionEventResult): string {
   const r = result.record;
   const n = (v: number) => v.toLocaleString("en-US");
-  const label = r.trigger === "forced" ? "次の呼び出しが入らないため" : r.trigger === "manual" ? "手動" : r.trigger;
+  const label = triggerLabel(r.trigger);
   if (!result.ok) {
     return `コンテキストの整理 (${label}) に失敗しました。 履歴は変えていません: ${result.detail}`;
+  }
+  if (r.continuedWithoutSummary) {
+    // 要約の失敗は黙らない: 段階 0〜2 の分だけで進めたことと、 失敗の中身を同じ行に出す
+    return (
+      `コンテキストを整理しました (${label}) が、 要約に失敗したため段階 0〜2 の分だけです: 約 ${n(r.freedTokens.total)} トークン減。 ` +
+      `推定 ${n(r.promptTokensBefore)} → ${n(r.promptTokensAfter)} トークン (${r.id})。 ${r.summary.failureDetail ?? "要約の失敗"}`
+    );
   }
   const parts = [`約 ${n(r.freedTokens.total)} トークン減`];
   if (r.summary.status === "done") parts.push(`要約 ${r.summary.segments} 区間`);
@@ -336,4 +388,26 @@ export function formatReductionEventLine(result: ReductionEventResult): string {
     `コンテキストを整理しました (${label}): ${parts.join("、 ")}。 ` +
     `推定 ${n(r.promptTokensBefore)} → ${n(r.promptTokensAfter)} トークン (${r.id})`
   );
+}
+
+/** 発火の種類の、 利用者向けの言い方 */
+export function triggerLabel(trigger: ReductionTrigger): string {
+  switch (trigger) {
+    case "forced":
+      return "次の呼び出しが入らないため";
+    case "manual":
+      return "手動";
+    case "boundary:request-end":
+      return "依頼の区切り";
+    case "boundary:todos-complete":
+      return "ToDo が全部完了";
+    case "boundary:goal-achieved":
+      return "Goal を達成";
+    case "boundary:new-request":
+      return "新しい依頼の前";
+    default: {
+      const exhaustive: never = trigger;
+      return String(exhaustive);
+    }
+  }
 }

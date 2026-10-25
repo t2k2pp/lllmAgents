@@ -122,6 +122,7 @@ function eventInput(
     cacheMissCauses: new CacheMissCauseCollector(),
     growth: new RequestGrowthTracker(),
     caseInsensitivePaths: true,
+    summaryFailure: "continue",
     ...rest,
   };
 }
@@ -131,6 +132,17 @@ function toolHeavyHistory(): Message[] {
   const out: Message[] = [user("調べて")];
   for (let i = 0; i < 25; i++) out.push(...read(`/f${i}`));
   out.push(reply("調べました"));
+  return out;
+}
+
+/** 古いツール結果が少しと、 モデルの長い発言が多い履歴 (段階 0〜2 で少し減るが、 最低量には要約が要る) */
+function mixedHistory(): Message[] {
+  const out: Message[] = [user("U1 を説明して")];
+  for (let i = 0; i < 6; i++) out.push(...read(`/m${i}`));
+  for (let i = 0; i < 12; i++) out.push(reply(`説明 ${i} ${BIG}`));
+  out.push(user("U2 も説明して"));
+  for (let i = 0; i < 12; i++) out.push(reply(`説明 ${i} ${BIG}`));
+  out.push(...read("/last"));
   return out;
 }
 
@@ -268,17 +280,22 @@ describe("整理イベント (要約あり)", () => {
     expect(formatReductionEventLine(result)).toContain("要約");
   });
 
-  it("要約を得られなければ失敗とし、 履歴は元のまま", async () => {
-    const raw = replyHeavyHistory();
+  it("設定 stop: 要約を得られなければ失敗とし、 履歴は元のまま", async () => {
+    const raw = mixedHistory();
     const history = historyWith(raw);
     const revision = history.getRevision();
-    const input = eventInput(history, { behavior: "garbage", promptSize: { tokens: 100_000, basis: "estimate" } });
+    const input = eventInput(history, {
+      behavior: "garbage",
+      summaryFailure: "stop",
+      promptSize: { tokens: 100_000, basis: "estimate" },
+    });
     const result = await runReductionEvent(input);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toBe("summary-failed");
     expect(result.record.summary).toMatchObject({ status: "failed", failureReason: "format", attempts: 2 });
+    expect(result.record).toMatchObject({ summaryFailurePolicy: "stop", continuedWithoutSummary: false });
     expect(history.getRawMessages()).toEqual(raw);
     expect(history.getRevision()).toBe(revision);
     expect(history.takeRewriteReasons()).toEqual([]);
@@ -287,16 +304,91 @@ describe("整理イベント (要約あり)", () => {
     expect(formatReductionEventLine(result)).toContain("履歴は変えていません");
   });
 
-  it("要約の呼び出しでエラーが起きても、 履歴は元のまま", async () => {
-    const raw = replyHeavyHistory();
+  it("設定 stop: 要約の呼び出しでエラーが起きても、 履歴は元のまま", async () => {
+    const raw = mixedHistory();
     const history = historyWith(raw);
     const result = await runReductionEvent(
-      eventInput(history, { behavior: "throw", promptSize: { tokens: 100_000, basis: "estimate" } }),
+      eventInput(history, {
+        behavior: "throw",
+        summaryFailure: "stop",
+        promptSize: { tokens: 100_000, basis: "estimate" },
+      }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toBe("summary-error");
     expect(result.detail).toContain("サーバに接続できません");
+    expect(history.getRawMessages()).toEqual(raw);
+  });
+});
+
+// ─── 要約の失敗の扱い (設定 context.summaryFailure。 2026-10-25 利用者の決定) ───
+
+describe("整理イベント: 要約に失敗したとき、 設定 continue (既定) は段階 0〜2 の分だけで進める", () => {
+  it.each([
+    { behavior: "garbage" as const, status: "failed", detail: "要約を得られませんでした" },
+    { behavior: "throw" as const, status: "error", detail: "サーバに接続できません" },
+  ])("要約の失敗 ($status) を記録と 1 行に出し、 段階 0〜2 の写しで 1 回だけ差し替える", async ({
+    behavior,
+    status,
+    detail,
+  }) => {
+    const raw = mixedHistory();
+    const history = historyWith(raw);
+    const input = eventInput(history, { behavior, promptSize: { tokens: 100_000, basis: "estimate" } });
+    const result = await runReductionEvent(input);
+
+    expect(result.ok).toBe(true);
+    const r = result.record;
+    expect(r).toMatchObject({ reachedStage: 3, summaryFailurePolicy: "continue", continuedWithoutSummary: true });
+    expect(r.summary.status).toBe(status);
+    expect(r.summary.failureDetail).toContain(detail);
+    expect(r.freedTokens.stage3).toBe(0);
+    expect(r.freedTokens.total).toBeGreaterThan(0);
+    // 要約は入らず、 古いツール結果だけが消える。 利用者の発言は原文のまま
+    const after = history.getRawMessages();
+    expect(after.some(isReductionSummaryMessage)).toBe(false);
+    expect(after.filter((m) => m.role === "tool" && String(m.content).startsWith("[忘却済み]")).length).toBe(6);
+    expect(after.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["U1 を説明して", "U2 も説明して"]);
+    expect(history.takeRewriteReasons()).toEqual(["reduction:r-1"]);
+    expect(history.getPendingStateHandover()).toBeNull();
+    // 黙らない: 利用者向けの 1 行に、 要約に失敗したことと中身が出る
+    const line = formatReductionEventLine(result);
+    expect(line).toContain("要約に失敗");
+    expect(line).toContain(detail);
+  });
+
+  it("規則 1 で、 段階 0〜2 だけでは次の呼び出しが入らなければ止める (入らない呼び出しは送らない)", async () => {
+    const raw = mixedHistory();
+    const history = historyWith(raw);
+    const result = await runReductionEvent(
+      eventInput(history, { behavior: "garbage", trigger: "forced", promptSize: { tokens: 250_000, basis: "usage" } }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("still-too-large");
+    expect(result.record.continuedWithoutSummary).toBe(true);
+    expect(result.detail).toContain("要約を得られませんでした");
+    expect(history.getRawMessages()).toEqual(raw);
+    expect(history.takeRewriteReasons()).toEqual([]);
+  });
+
+  it("Esc で要約が切れたとき (signal が中断済み) は、 continue でも失敗にして履歴を変えない", async () => {
+    const raw = mixedHistory();
+    const history = historyWith(raw);
+    const controller = new AbortController();
+    controller.abort();
+    const result = await runReductionEvent(
+      eventInput(history, {
+        behavior: "throw",
+        signal: controller.signal,
+        promptSize: { tokens: 100_000, basis: "estimate" },
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("summary-error");
+    expect(result.record.continuedWithoutSummary).toBe(false);
     expect(history.getRawMessages()).toEqual(raw);
   });
 });

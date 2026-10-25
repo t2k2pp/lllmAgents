@@ -191,7 +191,7 @@ function protectedTailStart(messages: readonly Message[], keepRecentToolUses: nu
   return Math.min(lastBatchHead, recentHead);
 }
 
-/** ここで切ってもツールの対を分けない位置か (replaceOlderMessages と同じ扱い) */
+/** ここで切ってもツールの対を分けない位置か (assistant の tool_calls と続く tool 結果の間では切らない) */
 function isPairSafeBoundary(messages: readonly Message[], e: number): boolean {
   if (e >= messages.length) return true;
   return messages[e].role !== "tool" && !hasToolCalls(messages[e - 1]);

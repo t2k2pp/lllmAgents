@@ -1,5 +1,5 @@
 /**
- * 引き継ぎメモ + Clear (docs/context-strategy.md §2.2)
+ * 引き継ぎメモ + Clear (手動の /handoff。 docs/context-reduction-redesign.md §7。 メモの形は docs/context-strategy.md §2.2)
  *
  * 「次やることの指示を残して、 一度コンテキストをクリア」 を実現する。
  *

@@ -19,17 +19,7 @@ import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager, RequestSource } from "../security/permission-manager.js";
 import type { HookManager } from "../hooks/hook-manager.js";
 import { MessageHistory, toSentMessage } from "./message-history.js";
-import { ContextManager, type StrategyOutcome } from "./context-manager.js";
-import type { ForgetDryRunReport, ForgetResult } from "./forgetting.js";
-import {
-  ContextStrategy,
-  type BreakSignalId,
-  type PendingBreak,
-  type StrategyDecision,
-  type StrategyMode,
-} from "./context-strategy.js";
-import { generateHandoffNote } from "./handoff.js";
-import type { ReductionMode } from "../config/types.js";
+import { generateHandoffNote, runHandoff, type HandoffResult } from "./handoff.js";
 import {
   resolveCapability,
   formatCapabilityLabel,
@@ -41,6 +31,7 @@ import {
   checkContextWindowFits,
   checkUserInputFits,
   computeContextBudget,
+  exceedsBoundaryLimit,
   exceedsForcedLimit,
   formatContextWindowTooSmall,
   formatUserInputTooLarge,
@@ -49,6 +40,7 @@ import {
   RequestGrowthTracker,
 } from "./context-budget.js";
 import {
+  type BoundaryKind,
   formatReductionEventLine,
   type ReductionEventResult,
   type ReductionTrigger,
@@ -74,7 +66,7 @@ import {
 } from "./session-manager.js";
 import type { RoomId } from "./room-types.js";
 import { PlanManager } from "./plan-mode.js";
-import type { LLMEndpoint, SamplingParams } from "../config/types.js";
+import { DEFAULT_SUMMARY_FAILURE_POLICY, type LLMEndpoint, type SamplingParams } from "../config/types.js";
 import { makeLiveBinding, type LiveModelBinding } from "./model-drift.js";
 import { loadConfig } from "../config/config-manager.js";
 import { CheckpointManager } from "../checkpoint/checkpoint-manager.js";
@@ -147,6 +139,8 @@ export interface ConversationState {
   todos: TodoItem[];
   goal: { definition: GoalDefinition; history: EvaluationRecord[] } | null;
   mode: AgentMode;
+  /** 依頼 1 件ごとの増分 G の記録 (会話ごとに持つ。 docs/context-reduction-redesign.md §4.5) */
+  requestGrowth: RequestGrowthTracker;
 }
 
 /**
@@ -231,7 +225,6 @@ export type QueueSteeringResult = {
 
 export class AgentLoop {
   private history: MessageHistory;
-  private contextManager: ContextManager;
   private toolExecutor: ToolExecutor;
   private session: SessionData;
   private planManager: PlanManager | null = null;
@@ -325,10 +318,22 @@ export class AgentLoop {
     outputTokens: number;
   } | null = null;
   /**
-   * 依頼 1 件ごとの増分 G の記録 (docs/context-reduction-redesign.md §4.5)。 依頼の始まり・本体呼び出し・依頼の終わりと
-   * セッションへの保存の組み込みはタスク 8。 今は整理イベントが noteReduction() を呼び、 G は既定値で決まる。
+   * 依頼 1 件ごとの増分 G の記録 (docs/context-reduction-redesign.md §4.5)。 run() の始めに beginRequest、 本体呼び出しの応答ごとに
+   * noteMainCall、 依頼の途中の整理イベントが noteReduction、 run() が終わり方の決まった終わり方をしたら endRequest。
+   * セッションに保存し (saveCurrentSession)、 再開で戻す (restoreSession)。 会話の載せ替え (importConversation) では会話ごとに持ち替える。
    */
-  private readonly requestGrowth = new RequestGrowthTracker();
+  private requestGrowth = new RequestGrowthTracker();
+  /**
+   * 規則 2 (§4.4) の、 記録して次の本体呼び出しの直前に判定する強い区切り (ToDo の全部完了・Goal の達成)。
+   * 依頼の終わり・新しい依頼の判定をしたら、 それに含まれるので捨てる。
+   */
+  private pendingBoundary: Extract<BoundaryKind, "todos-complete" | "goal-achieved"> | null = null;
+  /**
+   * 前の依頼が正常に終わり、 依頼の終わりの判定 (規則 2) を済ませたか。 済んでいれば「新しい依頼が届いた」 では判定しない。
+   * 中断・エラー・一時停止・セッションの再開・会話の載せ替えのあとは false (= 次の依頼の始まりで判定する)。
+   * ToDo が残ったままの応答完了 (弱い区切り) も「正常に終わった」 に数え、 新しい依頼で改めて判定しない (§4.4 の表)。
+   */
+  private requestEndSettled = false;
   /** 整理イベント ID の通し番号 */
   private reductionSeq = 0;
   /**
@@ -418,23 +423,6 @@ export class AgentLoop {
   /** 自動チェックポイント (シャドウ Git)。 docs/checkpoint-and-smoke-design.md §4 */
   private checkpointManager: CheckpointManager;
   /**
-   * 区切りでのコンテキスト戦略 (docs/context-strategy.md)。
-   * 閾値超過による整理 (contextManager.reduce) とは別経路で、 作業の区切りを検出して
-   * 「捨てられるものが多い瞬間」 に整理する。
-   */
-  private contextStrategy: ContextStrategy;
-  /**
-   * 検出済みの区切りシグナル待ち行列。 消費していた区切りでの整理 (ContextStrategy の自動経路) は外したので、
-   * 依頼の始まりで捨てている。 区切りは規則 2 としてタスク 8 で作り直す (docs/context-reduction-redesign.md §4.4)
-   */
-  private pendingBreaks: PendingBreak[] = [];
-  /** 直前の反復で plan mode だったか (P2: 計画 → 実装の移行検出用) */
-  private wasInPlanMode = false;
-  /** 直前のユーザー発話 (B6: 話題転換の検出用) */
-  private previousUserMessage = "";
-  /** 区切り指紋の採番用カウンタ (同じ区切りを二度確認しないための識別子) */
-  private breakSeq = 0;
-  /**
    * いま動いている provider を生成したときの接続情報 (docs/model-apply-immediacy.md §3.1)。
    * config の設定値と比較して「設定したのに反映されていない」 を検出するために持つ。
    */
@@ -518,26 +506,7 @@ export class AgentLoop {
     this.history.setSystemPromptComposer((base) => this.composeQuasiSystemPrompt(base));
     // 整理しても次の呼び出しが入らない枠なら、 ここで理由と必要量を示して止める (docs/context-reduction-redesign.md §6.3)
     this.assertContextWindowFits(this.capability, contextWindow, model);
-    // Phase C-2 + D-4: 圧縮閾値と keepRecentMessages は tier 由来で設定する。
-    // (ユーザが明示的に変えたい場合は config.json modelCapabilities.<modelId>.* で override 可能)
-    // 縮約手段 (圧縮 / 忘却) は config.context から。 未設定なら hybrid
-    // (docs/context-forgetting.md §6 — 忘却が失敗しても圧縮に落ちるので後退しない)。
-    const ctxCfg = loadConfig().context;
-    this.contextManager = new ContextManager(
-      this.provider,
-      model,
-      contextWindow,
-      this.capability.compressionThreshold,
-      this.capability.keepRecentMessages,
-      ctxCfg?.reduction ?? "hybrid",
-      ctxCfg?.forgetting ?? {},
-    );
-    // 区切り検出でのコンテキスト整理 (docs/context-strategy.md §5.1)。 既定は auto
-    this.contextStrategy = new ContextStrategy({
-      mode: ctxCfg?.strategy?.mode ?? "auto",
-      minIntervalTurns: ctxCfg?.strategy?.minIntervalTurns,
-    });
-    // ToDo 遷移フック (B1 / B4 / P1)。 tool の通り道に検出を 1 本足すだけで新しいループは作らない
+    // ToDo の遷移フック。 全部完了 (規則 2 の強い区切り) を記録する。 tool の通り道に検出を 1 本足すだけで新しいループは作らない
     setTodoChangeListener((before, after) => this.onTodoChange(before, after));
     // 自動チェックポイント。 main ループのみで版管理する。
     // スコープは成果物フォルダ限定 (設計書 §4.5): 既定は <cwd>/sandbox/output、 無ければ cwd。
@@ -854,6 +823,12 @@ export class AgentLoop {
           this.runStats.outcome = "error";
           return;
         }
+        // 規則 2 の「新しい依頼が届いた」 (docs/context-reduction-redesign.md §4.4)。 前の依頼の終わりで判定していないとき
+        // (中断・エラー・再開のあと) だけ、 新しい発言を履歴に入れる前に判定する (前の依頼は全部終わった依頼として扱う)
+        await this.judgeNewRequestBoundary();
+        // 依頼 1 件の増分 G を測り始める (前の依頼が終わっていなければ、 そこまでを 1 件として記録してから)
+        this.requestGrowth.beginRequest();
+        this.requestEndSettled = false;
         // 依頼の洗い出しガイドは依頼ごとに出し直す (docs/request-elaboration-design.md §5.5)
         resetPerRequestGuides();
         // ToDo を依頼ごとに区切る: 前の依頼で完了した項目を一覧・完了カウントから外す (削除はしない)
@@ -866,9 +841,6 @@ export class AgentLoop {
           .getRawMessages()
           .filter((m) => m.role === "user" && m.ephemeral !== true)
           .at(-1) ?? null;
-      // 区切りの待ち行列は、 消費していた区切りでの整理 (ContextStrategy の自動経路) を外したので依頼ごとに捨てる。
-      // 区切りでの整理は規則 2 (docs/context-reduction-redesign.md §4.4) としてタスク 8 で作り直す
-      this.pendingBreaks = [];
       // チャットログ記録
       if (this.chatLogger && !durableResume) {
         const userText =
@@ -920,19 +892,6 @@ export class AgentLoop {
         } catch {
           /* 推奨は best-effort、 失敗しても続行 */
         }
-      }
-      // 区切り / 山場シグナル B6・P3 (docs/context-strategy.md §3.3)。
-      // ユーザー発話を受けた時点で判定する。 山場の直前に先回りして枠を空けるのが狙い。
-      try {
-        if (classifyTaskComplexity(userMessageText) === "complex") {
-          this.queueBreak("P3", `P3:${++this.breakSeq}`);
-        }
-        if (this.detectTopicSwitch(userMessageText, this.previousUserMessage)) {
-          this.queueBreak("B6", `B6:${++this.breakSeq}`);
-        }
-        this.previousUserMessage = userMessageText;
-      } catch (e) {
-        logger.debug(`[strategy] ユーザー発話からの区切り検出に失敗 (無視): ${e}`);
       }
       // <think>タグフィルター（古いOllama向け、ストリーム跨ぎ対応）
       const filterThinkingTags = createThinkingFilter();
@@ -1069,17 +1028,6 @@ export class AgentLoop {
         // 一時停止は、前のAPI応答と開始済みtool resultが履歴へ確定した後、
         // 次のmain LLM APIを開始する直前だけでcheckpointする。
         if (!(await pauseAtBoundaryIfRequested(iteration))) return;
-        this.contextManager.noteTurn();
-        this.contextStrategy.noteTurn();
-        // P2: plan mode を抜けた = 計画から実装への移行 (docs/context-strategy.md §3.2)。
-        // 実装はツール結果で急速に膨らむので、 入る前に枠を確保しておきたい。
-        try {
-          const inPlanMode = this.planManager?.isInPlanMode() ?? false;
-          if (this.wasInPlanMode && !inPlanMode) this.queueBreak("P2", `P2:${++this.breakSeq}`);
-          this.wasInPlanMode = inPlanMode;
-        } catch (e) {
-          logger.warn(`[strategy] plan mode 退出の検出に失敗しました: ${e}`);
-        }
         // Call LLM with retry
         let textContent = "";
         let thinkingContent = "";
@@ -1103,9 +1051,18 @@ export class AgentLoop {
         while (!success) {
           // context整理中やconnection retry待ちにpause要求が届いた場合も、次のmain APIを出す前に保存する。
           if (!(await pauseAtBoundaryIfRequested(iteration))) return;
-          // 規則 1 (docs/context-reduction-redesign.md §4.4): 本体呼び出しの直前に P + R > W なら、 先に整理イベントを行う。
-          // 失敗したら入らない呼び出しは送らずに止める。 状態通知の添付 (attachDynamicContext) より前に判定する
-          // (要約の呼び出しは、 前回の本体呼び出しの並びをそのまま先頭に含める必要があるため)。
+          // 規則 2 の記録済みの強い区切り (ToDo の全部完了・Goal の達成) と規則 1 (docs/context-reduction-redesign.md §4.4)。
+          // 規則 1: 本体呼び出しの直前に P + R > W なら、 先に整理イベントを行う。 失敗したら入らない呼び出しは送らずに止める。
+          // 状態通知の添付 (attachDynamicContext) より前に判定する (要約の呼び出しは、 前回の本体呼び出しの並びをそのまま
+          // 先頭に含める必要があるため)。
+          await this.judgePendingBoundary();
+          if (this._aborted) {
+            // 規則 2 の整理 (要約の呼び出し) の途中で Esc が押された。 本体は呼ばずに止める
+            console.log(chalk.yellow("\n  (処理を中断しました)"));
+            this.appendAbortMarker("");
+            this.recordSpanEnd("user_abort");
+            return;
+          }
           if (!(await this.enforceForcedLimit())) return;
           try {
             const toolDefs = this.getFilteredToolDefs();
@@ -1411,6 +1368,8 @@ export class AgentLoop {
                     });
                     if (miss) this.llmLogger.logCacheMiss(miss);
                     this.previousMainPromptTokens = recordedInput;
+                    // 依頼 1 件の増分 G の材料 (最初と最後の本体呼び出しの実数)
+                    this.requestGrowth.noteMainCall(recordedInput, outputTokens);
                     this.lastMainCall = {
                       history: this.history,
                       revision: sentRevision,
@@ -1865,8 +1824,9 @@ export class AgentLoop {
               const allDone = todos.length > 0 && todos.every((t) => t.status === "completed");
               if (allDone) {
                 console.log(chalk.green(`  ✓ Goal Seek: acceptance 全項目達成 — mode 終了`));
-                // B3: 目標達成 = 最も強い区切り (docs/context-strategy.md §3.1)
-                this.queueBreak("B3", `B3:${++this.breakSeq}`);
+                // 規則 2 の強い区切り (Goal の達成)。 記録して次の本体呼び出しの直前に判定する
+                // (このまま依頼が終われば、 依頼の終わりの判定に含まれる)
+                this.pendingBoundary = "goal-achieved";
                 this.exitGoalSeek("completed");
               } else if (forceFlag) {
                 console.log(chalk.yellow(`  ⚠ Goal Seek: force=true で強制完了 — mode 終了 (acceptance 未充足)`));
@@ -2185,7 +2145,7 @@ export class AgentLoop {
             // 機械的な文字カット (slice) は中途半端な切り取りで意味を壊しノイズになるため避ける。
             // ctx 圧迫の懸念は以下で十分に抑えられている:
             //   - MAX_EMPTY_RETRIES=3 で span 内の積み増し回数が上限固定
-            //   - ContextManager (capability.compressionThreshold) が閾値到達で要約圧縮
+            //   - 次の本体呼び出しが入らなくなれば規則 1 の整理イベントが走る
             //   - ephemeral なので次の整理イベントの前処理で除かれる
             // docs/ephemeral-context-design.md §7.1 参照。
             const placeholder =
@@ -2327,7 +2287,6 @@ export class AgentLoop {
       if (pauseBeforeFinish.state === "pause_requested") {
         console.log(chalk.dim("  ✓ runが次のAPIを必要とせず完了したため、一時停止の予約を終了しました。"));
       }
-      this.isProcessing = false;
       this.currentRequestMessage = null;
       // task_complete は finally で必ず発火する (例外・全 return 経路を含む)。
       // outcome は recordSpanEnd() の reason マッピングで設定済み。
@@ -2365,89 +2324,87 @@ export class AgentLoop {
         tokensOut: this.runStats.tokensOut,
         costUsd: this.runStats.costUsd,
       });
-      // 応答の終わりでは履歴を書き換えない (docs/context-reduction-redesign.md §6.2)。
-      // 依頼の終わりでの整理は規則 2 としてタスク 8 で入れる。
+      // 応答の終わりでは履歴を書き換えない (docs/context-reduction-redesign.md §6.2)。 書き換えるのは規則 2 の整理イベントだけ。
+      // 応答 (task_complete) を先に届け、 利用者が次を打つ前に判定する。 判定の間も処理中として扱う
+      try {
+        await this.finishRequest();
+      } catch (e) {
+        // 判定・整理は作りの上では投げない。 投げたら黙らずに知らせる (履歴は整理イベントが差し替える前なら元のまま)
+        const message = `依頼の終わりのコンテキスト整理の判定に失敗しました: ${e instanceof Error ? e.message : String(e)}`;
+        console.log(chalk.red(`\n  ${message}`));
+        logger.error(`[reduction] ${message}`);
+        this.notice("error", message);
+      } finally {
+        this.isProcessing = false;
+      }
     }
   }
 
-  // ─── 区切り検出とコンテキスト戦略 (docs/context-strategy.md) ───
+  // ─── 規則 2: 強い区切りでの先回りの整理 (docs/context-reduction-redesign.md §4.4) ───
 
-  /** 区切りシグナルを待ち行列に積む。 検出フックはここだけを呼ぶ */
-  private queueBreak(signal: BreakSignalId, fingerprint: string): void {
-    if (!this.contextStrategy.isEnabled()) return;
-    if (this.pendingBreaks.some((p) => p.signal === signal && p.fingerprint === fingerprint)) return;
-    this.pendingBreaks.push({ signal, fingerprint });
+  /**
+   * run() の終わり (応答を届けた後)。 終わり方が決まった依頼は増分 G を記録し、 正常に終わった依頼は
+   * 依頼の終わり (未完了の ToDo が無く、 Goal も動いていない) なら規則 2 で判定する。
+   * 一時停止 (終わり方が incomplete) は同じ依頼が再開で続くので何もしない。
+   */
+  private async finishRequest(): Promise<void> {
+    const outcome = this.runStats.outcome;
+    if (outcome === "incomplete") return;
+    this.requestGrowth.endRequest();
+    if (outcome !== "completed") {
+      // 中断・エラー・ループ停止: 次の依頼の始まりで「新しい依頼が届いた」 として判定する
+      this.requestEndSettled = false;
+      return;
+    }
+    this.requestEndSettled = true;
+    const openTodos = getCurrentTodos().filter((t) => t.status === "pending" || t.status === "in_progress");
+    if (openTodos.length > 0 || this.currentMode === "goal-seek") {
+      // 弱い区切り (ToDo が残る応答完了) / Goal が動いている: 整理しない。
+      // 記録済みの強い区切り (ToDo の全部完了など) は次の本体呼び出しの直前に判定する
+      return;
+    }
+    // 依頼の終わり。 記録済みの強い区切りもこの判定に含まれる
+    this.pendingBoundary = null;
+    await this.judgeBoundary("request-end");
+  }
+
+  /** 新しい依頼が届いたとき。 前の依頼の終わりで判定していなければ判定する */
+  private async judgeNewRequestBoundary(): Promise<void> {
+    if (this.requestEndSettled) return;
+    this.pendingBoundary = null;
+    await this.judgeBoundary("new-request");
+  }
+
+  /** 記録済みの強い区切り (ToDo の全部完了・Goal の達成) を、 本体呼び出しの直前に判定する */
+  private async judgePendingBoundary(): Promise<void> {
+    const kind = this.pendingBoundary;
+    if (kind === null) return;
+    this.pendingBoundary = null;
+    await this.judgeBoundary(kind);
   }
 
   /**
-   * ToDo 遷移から B1 / B4 / P1 を検出する (docs/context-strategy.md §3.3)。
-   * todo-write.ts のリスナから呼ばれる。 失敗しても tool 実行は止めない。
+   * 規則 2: P + R + G > W なら整理イベント (boundary:<種類>) を行う。 先回りなので、 失敗しても作業は止めない
+   * (失敗は整理イベントが画面と記録に出す。 次の本体呼び出しが入らなければ規則 1 が改めて判定する)。
+   * @returns 整理イベントを行ったら、 その結果。 発火しなければ null
+   */
+  private async judgeBoundary(kind: BoundaryKind): Promise<ReductionEventResult | null> {
+    const budget = computeContextBudget(this.contextWindow, this.capability.tier);
+    const size = this.measureNextPrompt(this.getFilteredToolDefs());
+    const growth = this.requestGrowth.resolve(budget).tokens;
+    if (!exceedsBoundaryLimit(size.tokens, budget, growth)) return null;
+    return await this.runReductionEvent(`boundary:${kind}`, size);
+  }
+
+  /**
+   * ToDo の遷移から、 全部完了 (規則 2 の強い区切り) を記録する (docs/context-reduction-redesign.md §4.4)。
+   * todo-write.ts のリスナから呼ばれる。 ToDo 1 つの完了は弱い区切りなので何もしない。
    */
   private onTodoChange(before: TodoItem[], after: TodoItem[]): void {
-    try {
-      const count = (list: TodoItem[], status: TodoItem["status"]): number =>
-        list.filter((t) => t.status === status).length;
-      const completedBefore = count(before, "completed");
-      const completedAfter = count(after, "completed");
-      const wasAllCompleted = before.length > 0 && completedBefore === before.length;
-      const isAllCompleted = after.length > 0 && completedAfter === after.length;
-
-      if (isAllCompleted && !wasAllCompleted) {
-        // B1: 一連の作業が終わった最も明確な証拠
-        this.queueBreak("B1", `B1:${++this.breakSeq}`);
-      } else if (completedAfter > completedBefore) {
-        // B4: 小さな区切り (残りあり)
-        this.queueBreak("B4", `B4:${++this.breakSeq}`);
-      }
-
-      // P1: 3 件以上の pending が新たに積まれた = これから多段の作業が始まる
-      const addedPending = count(after, "pending") - count(before, "pending");
-      if (addedPending >= 3) this.queueBreak("P1", `P1:${++this.breakSeq}`);
-    } catch (e) {
-      logger.debug(`[strategy] ToDo 遷移からの区切り検出に失敗 (無視): ${e}`);
+    const allCompleted = (list: TodoItem[]): boolean => list.length > 0 && list.every((t) => t.status === "completed");
+    if (allCompleted(after) && !allCompleted(before) && this.pendingBoundary === null) {
+      this.pendingBoundary = "todos-complete";
     }
-  }
-
-  /**
-   * B2: bash の結果から git commit の成功を検出する (docs/context-strategy.md §3.1)。
-   * 本プロジェクトの運用そのものが「作業の区切り毎にコミット」 なので、 最も信頼できる強い区切り。
-   * --dry-run は誤爆するので除外し、 成功 (exit 0) を必須にする (docs §8)。
-   */
-  private maybeDetectCommitBreak(toolCall: ToolCall, success: boolean): void {
-    try {
-      if (toolCall.function.name !== "bash" || !success) return;
-      const args = JSON.parse(toolCall.function.arguments || "{}") as Record<string, unknown>;
-      const command = typeof args.command === "string" ? args.command : "";
-      if (!/\bgit\s+(?:-\S+\s+)*commit\b/.test(command)) return;
-      if (command.includes("--dry-run")) return;
-      this.queueBreak("B2", `B2:${++this.breakSeq}`);
-    } catch (e) {
-      logger.debug(`[strategy] git commit の検出に失敗 (無視): ${e}`);
-    }
-  }
-
-  /**
-   * B6: 新しいユーザー発話が直前の話題と連続していないか (docs/context-strategy.md §3.1)。
-   *
-   * 文字 2-gram の Jaccard 係数で判定する。 IntentClassifier に聞くと発話のたびに
-   * LLM 呼び出しが増えて「速さの肝」 を損なうため、 ここは決定論的な近似で済ませる。
-   * 誤検出しても最悪 forget-thinking (失うのは読み直せる情報のみ) なので割に合う。
-   */
-  private detectTopicSwitch(current: string, previous: string): boolean {
-    const bigrams = (text: string): Set<string> => {
-      const flat = text.replace(/\s+/g, "").toLowerCase();
-      const set = new Set<string>();
-      for (let i = 0; i + 2 <= flat.length; i++) set.add(flat.slice(i, i + 2));
-      return set;
-    };
-    if (current.trim().length < 15 || previous.trim().length < 15) return false;
-    const a = bigrams(previous);
-    const b = bigrams(current);
-    if (a.size === 0 || b.size === 0) return false;
-    let shared = 0;
-    for (const g of b) if (a.has(g)) shared++;
-    const jaccard = shared / (a.size + b.size - shared);
-    return jaccard < 0.12;
   }
 
   /** Get tool definitions, filtered by plan mode or Discord source */
@@ -2703,7 +2660,8 @@ export class AgentLoop {
    * 整理イベントを 1 回行う (§6.1)。 写しに前処理・段階 0〜2 (足りなければ段階 3 の要約) を当てはめ、
    * 履歴を 1 回だけ差し替える。 失敗したら履歴は元のまま。 成功・失敗とも reduction_event を記録し、 1 行で利用者に示す。
    *
-   * 呼ぶ側: 規則 1 (本体呼び出しの直前。 enforceForcedLimit)。 規則 2 (区切り) はタスク 8、 /compact (manual) はタスク 10。
+   * 呼ぶ側: 規則 1 (本体呼び出しの直前。 enforceForcedLimit)、 規則 2 (強い区切り。 judgeBoundary)、 /compact (manual。 REPL)。
+   * 段階 3 の要約に失敗したときの扱いは設定 context.summaryFailure (既定 continue) に従う。
    * 要約の呼び出しの前に attachDynamicContext() を呼んでいないこと (呼び出し側の約束)。
    *
    * @param size 整理前の P。 省略時はいま測る
@@ -2736,13 +2694,21 @@ export class AgentLoop {
         buildMainCallRequest: () => this.buildMainCallRequest(toolDefs, signal),
         cacheMissCauses: this.cacheMissCauses,
         growth: this.requestGrowth,
+        summaryFailure: loadConfig().context?.summaryFailure ?? DEFAULT_SUMMARY_FAILURE_POLICY,
+        signal,
       });
     } finally {
       this.llmAbortController = null;
     }
     this.llmLogger.logReductionEvent(result.record);
     const line = formatReductionEventLine(result);
-    if (result.ok) {
+    if (result.ok && result.record.continuedWithoutSummary) {
+      // 要約に失敗し、 設定 continue に従って段階 0〜2 の分だけで整理した。 失敗は黙らず警告として出す
+      spinner.warn(line);
+      logger.warn(`[reduction] ${line}`);
+      this.notice("warn", line);
+      this.chatLogger?.onCompressed();
+    } else if (result.ok) {
       spinner.succeed(line);
       this.notice("info", line);
       this.chatLogger?.onCompressed();
@@ -3168,8 +3134,6 @@ export class AgentLoop {
     // P1-A/B: bash 累積時間と plan/todo 過多を観測
     this.maybeWarnBashCumulative(toolCall, toolDurationMs);
     this.maybeWarnPlanTodoOveruse(toolCall);
-    // 区切りシグナル B2 (git commit 成功) の検出
-    this.maybeDetectCommitBreak(toolCall, result.success);
 
     return result.abortExecution === true;
   }
@@ -3306,8 +3270,6 @@ export class AgentLoop {
         // P1-A/B: 並列ルートでも bash 累積時間 / plan/todo 過多を観測
         this.maybeWarnBashCumulative(toolCall, durationMs);
         this.maybeWarnPlanTodoOveruse(toolCall);
-        // 区切りシグナル B2 (git commit 成功) の検出
-        this.maybeDetectCommitBreak(toolCall, result.success);
 
         if (result.abortExecution) {
           shouldAbort = true;
@@ -3333,77 +3295,23 @@ export class AgentLoop {
     }
   }
 
-  async forceCompress(): Promise<void> {
-    await this.contextManager.compress(this.history);
-    this.chatLogger?.onCompressed();
-  }
-
   /**
-   * 手動忘却 (/forget)。 mode に関係なく忘却だけを試す。
-   * 失敗しても履歴は変わらない (ForgettingEngine がロールバックする)。
-   * docs/context-forgetting.md §8
-   */
-  async forceForget(): Promise<ForgetResult> {
-    return await this.contextManager.forget(this.history);
-  }
-
-  /** 忘却プランだけ出して適用しない (/forget dry)。 何が消えるかの事前確認用 */
-  async forgetDryRun(): Promise<ForgetDryRunReport> {
-    return await this.contextManager.forgetDryRun(this.history);
-  }
-
-  /** 縮約手段の切替 (/forget mode) */
-  setReductionMode(mode: ReductionMode): void {
-    this.contextManager.setReductionMode(mode);
-  }
-
-  getReductionMode(): ReductionMode {
-    return this.contextManager.getReductionMode();
-  }
-
-  /** 直近の忘却実績 (/forget status) */
-  getLastForgetResult(): { result: ForgetResult; at: number } | null {
-    return this.contextManager.getLastForgetResult();
-  }
-
-  /**
-   * 手動の引き継ぎ + リセット (/handoff)。 docs/context-strategy.md §5.3
+   * 手動の引き継ぎ + リセット (/handoff)。 整理イベントとは別の手動の機能 (docs/context-reduction-redesign.md §7)。
    * 「今ここで区切りたい」 という判断はユーザーが一番正確にできるので独立コマンドにする。
    * 引き継ぎメモの生成に失敗したら履歴には触れない。
    */
-  async runHandoffNow(providedNote?: string): Promise<StrategyOutcome> {
-    const outcome = await this.contextManager.applyStrategy(this.history, "clear", {
+  async runHandoffNow(providedNote?: string): Promise<HandoffResult> {
+    return await runHandoff(this.provider, this.model, this.history, {
       providedNote,
       saveSession: () => {
         return this.saveHandoffArchive();
       },
     });
-    if (outcome.applied) this.contextStrategy.noteApplied();
-    return outcome;
   }
 
   /** 引き継ぎメモを作って返すだけ (/handoff dry)。 履歴は変更しない */
   async buildHandoffPreview(): Promise<{ note: string | null; reason?: string }> {
     return await generateHandoffNote(this.provider, this.model, this.history.getRawMessages());
-  }
-
-  /** 区切り整理のモード (/context strategy) */
-  getStrategyMode(): StrategyMode {
-    return this.contextStrategy.getMode();
-  }
-
-  setStrategyMode(mode: StrategyMode): void {
-    this.contextStrategy.setMode(mode);
-  }
-
-  /** 直近の区切り判断ログ (/context strategy) */
-  getStrategyDecisions(): StrategyDecision[] {
-    return this.contextStrategy.getDecisions();
-  }
-
-  /** 現在のコンテキスト使用率 (0.0〜1.0) */
-  getContextUsageRatio(): number {
-    return this.contextManager.getUsageRatio(this.history);
   }
 
   private saveHandoffArchive(): string {
@@ -3420,6 +3328,11 @@ export class AgentLoop {
     this.session.todos = getTodosCurrent();
     const goal = getGoalSlot();
     this.session.goal = goal ? { definition: goal, history: getEvaluationHistory() } : null;
+    // 増分 G の記録と、 まだ添えていない要約後の渡し直しは、 保存・再開をはさんでも失わない (docs/context-reduction-redesign.md §4.5 / §6.4)
+    this.session.requestGrowth = this.requestGrowth.toSnapshot();
+    const handover = this.history.getPendingStateHandover();
+    if (handover === null) delete this.session.pendingStateHandover;
+    else this.session.pendingStateHandover = handover;
     saveSession(this.session);
     logger.debug(`Session saved: ${this.session.meta.id}`);
   }
@@ -3667,6 +3580,7 @@ export class AgentLoop {
         this.history.addSystemNote(typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content));
       }
     }
+    this.restoreReductionState(sessionData);
     // docs/todo-goal-lifecycle.md §2.3 — in-memory slot 復元 (旧 session は optional のためスキップ)
     if (sessionData.todos && sessionData.todos.length > 0) {
       setTodosFromGoal(sessionData.todos);
@@ -3680,6 +3594,32 @@ export class AgentLoop {
   }
 
   /**
+   * セッションから、 整理に使う状態 (増分 G の記録・要約後の渡し直しの預かり) を戻す。 壊れていれば黙って空にせず知らせる。
+   * 再開した直後は前の依頼の終わりで判定したかが分からないので、 次の依頼の始まりで規則 2 を判定する。
+   */
+  private restoreReductionState(sessionData: SessionData): void {
+    const growth = RequestGrowthTracker.restore(sessionData.requestGrowth);
+    if (growth.ok) {
+      this.requestGrowth = growth.tracker;
+    } else {
+      this.requestGrowth = new RequestGrowthTracker();
+      const message = `保存されていた依頼ごとの増分の記録を読めませんでした (${growth.error})。 記録を空にして既定値から測り直します`;
+      console.warn(chalk.yellow(`  [resume] ${message}`));
+      logger.warn(`[resume] ${message}`);
+    }
+    const handover = sessionData.pendingStateHandover;
+    if (typeof handover === "string") {
+      this.history.queueStateHandover(handover);
+    } else if (handover !== undefined) {
+      const message = "保存されていた要約後の渡し直し (pendingStateHandover) が文字列ではないため使いません";
+      console.warn(chalk.yellow(`  [resume] ${message}`));
+      logger.warn(`[resume] ${message}`);
+    }
+    this.pendingBoundary = null;
+    this.requestEndSettled = false;
+  }
+
+  /**
    * A-5: 現用の会話状態への参照を取り出す (チャネル会話スワップ用)。
    * docs/channel-session-queue-design.md §2
    */
@@ -3690,6 +3630,7 @@ export class AgentLoop {
       todos: getTodosCurrent(),
       goal: goal ? { definition: goal, history: getEvaluationHistory() } : null,
       mode: this.currentMode,
+      requestGrowth: this.requestGrowth,
     };
   }
 
@@ -3709,6 +3650,7 @@ export class AgentLoop {
         clearGoalSlot();
       }
       this.currentMode = state.mode;
+      this.requestGrowth = state.requestGrowth;
     } else {
       // 新規会話: 現在の設定でシステムプロンプトを組み直す
       const systemPrompt = buildSystemPrompt(
@@ -3725,7 +3667,11 @@ export class AgentLoop {
       clearTodos();
       clearGoalSlot();
       this.currentMode = "forward";
+      this.requestGrowth = new RequestGrowthTracker();
     }
+    // 載せ替えた会話の前の依頼の終わりで判定したかは分からないので、 次の依頼の始まりで判定する
+    this.pendingBoundary = null;
+    this.requestEndSettled = false;
     // chatLogger コールバックは history オブジェクトに紐づくため再適用する
     this.setChatLogger(this.chatLogger);
   }
@@ -3852,11 +3798,7 @@ export class AgentLoop {
     // 枠に入らない値なら何も変えずに止める (§6.3)
     this.assertContextWindowFits(capability, value, this.model);
     this.contextWindow = value;
-    this.contextManager.setContextWindow(value);
     this.capability = capability;
-    // Phase C-2 + D-4: 圧縮閾値・keepRecentMessages も追従
-    this.contextManager.setThreshold(this.capability.compressionThreshold);
-    this.contextManager.setKeepRecentMessages(this.capability.keepRecentMessages);
   }
 
   setModel(model: string): void {
@@ -3870,14 +3812,10 @@ export class AgentLoop {
       this.liveEndpoint = { ...this.liveEndpoint, model };
       this.liveBinding = makeLiveBinding(this.liveEndpoint, model);
     }
-    // 内部コンポーネントにも伝播（contextManager 内のcompressor、intent-classifier、evaluator）
-    this.contextManager.setProvider(this.provider, model);
+    // 内部コンポーネントにも伝播 (intent-classifier、 evaluator)
     this.intentClassifier.setProvider(this.provider, model);
     this.evaluator.setMainProvider(this.provider, model);
     this.capability = capability;
-    // Phase C-2 + D-4: 圧縮閾値・keepRecentMessages も tier 切替に追従
-    this.contextManager.setThreshold(this.capability.compressionThreshold);
-    this.contextManager.setKeepRecentMessages(this.capability.keepRecentMessages);
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, model)} (${this.capability.reason})`);
   }
 
@@ -3897,23 +3835,16 @@ export class AgentLoop {
     this.rawProvider = provider;
     this.provider = gateLLMProvider(provider, this.runApiGate);
     this.model = nextModel;
-    if (nextWindow !== this.contextWindow) {
-      this.contextWindow = nextWindow;
-      this.contextManager.setContextWindow(nextWindow);
-    }
+    this.contextWindow = nextWindow;
     // 実行中バインディングを更新 (docs/model-apply-immediacy.md §3.1)。
     // endpoint を渡さない旧来の呼び出しでは前の記録を残す (= 誤警告より検出漏れを取る)。
     if (endpoint) {
       this.liveEndpoint = { ...endpoint, model: this.model };
       this.liveBinding = makeLiveBinding(this.liveEndpoint, this.model);
     }
-    this.contextManager.setProvider(this.provider, this.model);
     this.intentClassifier.setProvider(this.provider, this.model);
     this.evaluator.setMainProvider(this.provider, this.model);
     this.capability = capability;
-    // Phase C-2 + D-4: 圧縮閾値・keepRecentMessages も追従
-    this.contextManager.setThreshold(this.capability.compressionThreshold);
-    this.contextManager.setKeepRecentMessages(this.capability.keepRecentMessages);
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, this.model)} (${this.capability.reason})`);
   }
 
@@ -3979,9 +3910,10 @@ export class AgentLoop {
 
   /**
    * 送信時の利用者の入力の検査 (docs/context-reduction-redesign.md §4.3)。 入らなければ利用者に示す文を返す。
+   * run() の最初と、 run() の前に脇の呼び出しを送る Goal 昇格の提案 (goal-promotion.ts) が使う (検査はこの 1 つだけ)。
    * 数えるのはテキスト部分だけ (画像の大きさはサーバの数え方によるので推定しない)。
    */
-  private checkUserInput(userMessage: string | ContentPart[]): string | null {
+  checkUserInput(userMessage: string | ContentPart[]): string | null {
     const text =
       typeof userMessage === "string"
         ? userMessage

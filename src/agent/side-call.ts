@@ -22,9 +22,8 @@ import type {
 
 /**
  * 脇の呼び出しの目的。 必須。 追加したら設計書 §10.3 にも書く。
- * - summarize: 履歴の要約 (段階 3 の requestSummary (reduction-summary.ts)。 旧 HierarchicalCompressor はタスク 8 で削除)
+ * - summarize: 履歴の要約 (段階 3 の requestSummary。 reduction-summary.ts)
  * - compress-instructions: プロジェクト指示・メモの圧縮 (system に入れる前)
- * - forget-select: 忘却で何を消すかを LLM に選ばせる (ForgettingEngine。 タスク 8 で削除)
  * - intent: 利用者の発言の意図の分類
  * - completion: 応答が完了を宣言しているかの分類
  * - progress: 進み具合の判定
@@ -38,7 +37,6 @@ import type {
 export type SideCallPurpose =
   | "summarize"
   | "compress-instructions"
-  | "forget-select"
   | "intent"
   | "completion"
   | "progress"

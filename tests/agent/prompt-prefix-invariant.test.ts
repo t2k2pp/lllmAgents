@@ -273,30 +273,75 @@ function requestScript(tag: string, probes: number, finalPadding = ""): ChatChun
   return script;
 }
 
-describe("前方一致の不変条件: 整理イベント (規則 1) と依頼の境目", () => {
+/** big_probe (1 件の上限 T3 = 2,048 トークンに収まる大きな結果) を足した道具箱。 古い結果は段階 1 で本文が消える */
+function makeBigRegistry(): ToolRegistry {
+  const registry = makeRegistry();
+  registry.register({
+    name: "big_probe",
+    definition: {
+      type: "function",
+      function: { name: "big_probe", description: "big", parameters: { type: "object", properties: {} } },
+    },
+    execute: async () => ({ success: true, output: "x".repeat(7_000) }),
+  });
+  return registry;
+}
+
+/** 起動時の検査に通る最小の W (T3: 固定部分 + 直近 3 回のツール結果 + 会話の最小限 + 予約 R) */
+function minimumWindow(loop: AgentLoop, registry: ToolRegistry): number {
+  const fixed =
+    estimateMessageTokens([loop.getHistory().getMessages()[0]]) +
+    estimateToolDefinitionTokens(registry.getDefinitions());
+  return checkContextWindowFits({ contextWindow: 0, tier: "T3", fixedTokens: fixed }).requiredTokens;
+}
+
+/** 成功した整理イベントの発火の種類と、 そのときまでに送った件数を控える */
+function recordReductions(requests: ChatWithToolsParams[]): {
+  events: Array<{ trigger: string; at: number }>;
+  rewritesAt: number[];
+  restore: () => void;
+} {
+  const events: Array<{ trigger: string; at: number }> = [];
+  const rewritesAt: number[] = [];
+  const realRun = AgentLoop.prototype.runReductionEvent;
+  const run = vi.spyOn(AgentLoop.prototype, "runReductionEvent");
+  run.mockImplementation(async function (this: AgentLoop, trigger, size) {
+    const result = await realRun.call(this, trigger, size);
+    if (result.ok) events.push({ trigger, at: requests.length });
+    return result;
+  });
+  const realReplace = MessageHistory.prototype.replaceMessages;
+  const replace = vi.spyOn(MessageHistory.prototype, "replaceMessages");
+  replace.mockImplementation(function (this: MessageHistory, next, reason) {
+    if (String(reason).startsWith("reduction:")) rewritesAt.push(requests.length);
+    realReplace.call(this, next, reason);
+  });
+  return {
+    events,
+    rewritesAt,
+    restore: () => {
+      run.mockRestore();
+      replace.mockRestore();
+    },
+  };
+}
+
+describe("前方一致の不変条件: 整理イベント (規則 1・規則 2) と依頼の境目", () => {
   afterEach(() => clearTodos());
 
-  // 要約あり: 最後の応答の本文を長くする (段階 1 では消えないモデルの発言が溜まり、 段階 3 の要約の範囲ができる)
+  // 要約あり: 最後の応答の本文を長くする (段階 1 では消えないモデルの発言が溜まり、 段階 3 の要約の範囲ができる)。
+  // 1 件目の依頼はツールを多く呼び、 依頼の途中で規則 1 を起こす。 依頼の終わりでは規則 2 (依頼の区切り) が起きうる
   it.each([
     { label: "要約なし", finalPadding: "", summaryCalls: 0 },
     { label: "要約あり", finalPadding: "y".repeat(12_000), summaryCalls: 1 },
-  ])("キャッシュが外れる送信は整理イベントごとにちょうど 1 回で、 揮発メッセージ・思考がある依頼の境目では 0 回 ($label)", async ({
+  ])("キャッシュが外れる送信は整理イベントごとにちょうど 1 回で、 整理の無い依頼の境目では 0 回 ($label)", async ({
     finalPadding,
     summaryCalls,
   }) => {
-    const registry = makeRegistry();
-    // 1 件の上限 (T3 = 2,048 トークン) に収まる大きな結果。 古いものは段階 1 で本文が消える
-    registry.register({
-      name: "big_probe",
-      definition: {
-        type: "function",
-        function: { name: "big_probe", description: "big", parameters: { type: "object", properties: {} } },
-      },
-      execute: async () => ({ success: true, output: "x".repeat(7_000) }),
-    });
+    const registry = makeBigRegistry();
     const requests: ChatWithToolsParams[] = [];
     const replies = [
-      ...requestScript("q1", 5, finalPadding),
+      ...requestScript("q1", 14, finalPadding),
       ...requestScript("q2", 5, finalPadding),
       ...requestScript("q3", 5, finalPadding),
       ...requestScript("q4", 5, finalPadding),
@@ -305,48 +350,71 @@ describe("前方一致の不変条件: 整理イベント (規則 1) と依頼�
     const loop = makeLoop(provider, registry);
     const outcomes: string[] = [];
     loop.events.on("task_complete", (e) => outcomes.push(e.outcome));
-    // 起動時の検査に通る最小の W + 2,000 (利用者の入力の分) にする (T3: 固定部分 + 直近 3 回のツール結果 +
-    // 会話の最小限 + 予約 R)。 規則 1 は会話が約 24.5k トークンを超えたところで起きる
-    const fixed =
-      estimateMessageTokens([loop.getHistory().getMessages()[0]]) +
-      estimateToolDefinitionTokens(registry.getDefinitions());
-    const fit = checkContextWindowFits({ contextWindow: 0, tier: "T3", fixedTokens: fixed });
-    loop.setContextWindow(fit.requiredTokens + 2_000);
+    // 起動時の検査に通る最小の W + 2,000 (利用者の入力の分)。 規則 1 は会話が約 24.5k トークンを超えたところで起きる
+    loop.setContextWindow(minimumWindow(loop, registry) + 2_000);
 
-    // 整理イベントの差し替えが起きた時点 (それまでに送った件数) を控える
-    const reductionsAt: number[] = [];
     const boundariesAt: number[] = [];
-    const realReplace = MessageHistory.prototype.replaceMessages;
-    const replace = vi.spyOn(MessageHistory.prototype, "replaceMessages");
-    replace.mockImplementation(function (this: MessageHistory, next, reason) {
-      if (String(reason).startsWith("reduction:")) reductionsAt.push(requests.length);
-      realReplace.call(this, next, reason);
-    });
+    const recorded = recordReductions(requests);
     try {
       for (const q of ["1 件目", "2 件目", "3 件目", "4 件目"]) {
+        const eventsBefore = recorded.events.length;
         await loop.run(`${q}を調べてください？`);
         boundariesAt.push(requests.length);
-        // 依頼の境目には揮発メッセージと思考が残っている (応答の終わりで消していない)
-        const raw = loop.getHistory().getRawMessages();
-        expect(raw.some((m) => m.ephemeral === true)).toBe(true);
-        expect(raw.some((m) => m.role === "assistant" && m.thinking)).toBe(true);
+        const atBoundary = recorded.events.slice(eventsBefore).filter((e) => e.at === requests.length);
+        if (atBoundary.length === 0) {
+          // 依頼の境目で整理しなかったなら、 揮発メッセージと思考が残っている (応答の終わりで消していない)
+          const raw = loop.getHistory().getRawMessages();
+          expect(raw.some((m) => m.ephemeral === true)).toBe(true);
+          expect(raw.some((m) => m.role === "assistant" && m.thinking)).toBe(true);
+        } else {
+          // 依頼の境目で整理するのは規則 2 の「依頼の区切り」 だけ
+          expect(atBoundary.map((e) => e.trigger)).toEqual(["boundary:request-end"]);
+        }
       }
     } finally {
-      replace.mockRestore();
+      recorded.restore();
     }
 
-    expect(reductionsAt.length).toBeGreaterThanOrEqual(1);
+    const triggers = recorded.events.map((e) => e.trigger);
+    expect(triggers).toContain("forced");
+    expect(triggers).toContain("boundary:request-end");
+    // 書き換えは成功した整理イベントごとにちょうど 1 回
+    expect(recorded.rewritesAt).toEqual(recorded.events.map((e) => e.at));
     const summaryRequests = requests.filter((r) =>
       String(r.messages.at(-1)?.content ?? "").includes("<context-summary-request>"),
     );
     if (summaryCalls === 0) expect(summaryRequests).toHaveLength(0);
     else expect(summaryRequests.length).toBeGreaterThanOrEqual(summaryCalls);
     // 外れるのは整理イベントの直後の送信だけ。 要約の呼び出しは書き換え前の並びに指示を足すだけなので外れない
-    expect(prefixBreaks(requests)).toEqual(reductionsAt);
-    // 依頼の境目 (次の依頼の最初の送信) では外れない
-    for (const b of boundariesAt.slice(0, -1)) expect(prefixBreaks(requests)).not.toContain(b);
+    // (最後の依頼の終わりの整理は、 その後に送信が無いので数えない)
+    expect(prefixBreaks(requests)).toEqual(recorded.rewritesAt.filter((at) => at < requests.length));
+    // 整理の無かった依頼の境目 (次の依頼の最初の送信) では外れない
+    for (const b of boundariesAt.slice(0, -1)) {
+      if (!recorded.rewritesAt.includes(b)) expect(prefixBreaks(requests)).not.toContain(b);
+    }
     // 台本どおり 4 件とも正常に終わっている (本体呼び出しは台本の数ちょうど)
     expect(outcomes).toEqual(["completed", "completed", "completed", "completed"]);
     expect(requests.length - summaryRequests.length).toBe(replies.length);
+  });
+
+  it("枠に余裕があれば (P + R + G ≤ W)、 揮発メッセージ・思考が残る依頼の境目をまたいでも 1 度も外れない", async () => {
+    const registry = makeBigRegistry();
+    const requests: ChatWithToolsParams[] = [];
+    const replies = [...requestScript("q1", 3), ...requestScript("q2", 3), ...requestScript("q3", 3)];
+    const loop = makeLoop(reductionAwareProvider(replies, requests), registry);
+    const recorded = recordReductions(requests);
+    try {
+      for (const q of ["1 件目", "2 件目", "3 件目"]) {
+        await loop.run(`${q}を調べてください？`);
+        const raw = loop.getHistory().getRawMessages();
+        expect(raw.some((m) => m.ephemeral === true)).toBe(true);
+        expect(raw.some((m) => m.role === "assistant" && m.thinking)).toBe(true);
+      }
+    } finally {
+      recorded.restore();
+    }
+    expect(recorded.events).toEqual([]);
+    expect(prefixBreaks(requests)).toEqual([]);
+    expect(requests.length).toBe(replies.length);
   });
 });

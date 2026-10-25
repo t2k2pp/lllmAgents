@@ -45,14 +45,13 @@ export function getTodos(): TodoItem[] {
 }
 
 /**
- * ToDo の遷移通知 (docs/context-strategy.md §3.3 B1/B4/P1)。
+ * ToDo の遷移通知 (docs/context-reduction-redesign.md §4.4)。
  *
- * 「ToDo が全部 completed になった」 「1 つ completed に遷移した」 「3 件以上の
- * pending を新規作成した」 は作業の区切り / 山場の最も明確な証拠なので、
- * AgentLoop がこれを購読してコンテキスト戦略を判断する。
+ * 「ToDo が全部 completed になった」 は作業の強い区切りの最も明確な証拠なので、
+ * AgentLoop がこれを購読して規則 2 (区切りでの先回りの整理) の判定に記録する。
  *
  * ここは tool 実行の通り道にフックを 1 本足しただけで、 新しいループは作らない。
- * リスナは AgentLoop 側で try/catch されており、 失敗しても tool 実行は止まらない。
+ * リスナの失敗は notifyTodoChange が受け止めるので、 tool 実行は止まらない。
  */
 export type TodoChangeListener = (before: TodoItem[], after: TodoItem[]) => void;
 

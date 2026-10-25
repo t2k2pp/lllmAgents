@@ -1,11 +1,11 @@
 /**
- * /handoff — 引き継ぎメモを残してコンテキストをリセットする (docs/context-strategy.md §5.3)。
+ * /handoff — 引き継ぎメモを残してコンテキストをリセットする (手動のリセット。 docs/context-reduction-redesign.md §7)。
  *
  *   /handoff       引き継ぎメモを作ってコンテキストをリセット
  *   /handoff dry   引き継ぎメモを作って表示するだけ (リセットしない)
  *
- * 自動検出 (区切りシグナル) はあくまで補助で、 「今ここで区切りたい」 という判断は
- * ユーザーが一番正確にできる。 だから独立したコマンドとして置く。
+ * 区切りでの自動リセットは廃止した (docs/context-reduction-redesign.md §14.2 の 5)。 「今ここで区切りたい」 という判断は
+ * ユーザーが一番正確にできるので、 リセットはこの独立したコマンドだけで行う。
  *
  * 引き継ぎ無しで完全に消したい場合は従来通り /clear を使う。
  */
@@ -41,8 +41,8 @@ async function runHandoff(ctx: ReplCommandContext, providedNote?: string): Promi
   );
   const outcome = await ctx.agent.runHandoffNow(providedNote);
   if (!outcome.applied) {
-    // メモを作れなかった場合は履歴に触れていない (docs §8)
-    console.log(chalk.yellow(`  リセットしませんでした: ${outcome.note ?? "引き継ぎメモを生成できませんでした"}`));
+    // メモを作れなかった・保存できなかった場合は履歴に触れていない
+    console.log(chalk.yellow(`  リセットしませんでした: ${outcome.reason ?? "引き継ぎメモを生成できませんでした"}`));
     console.log(
       chalk.dim(
         "  履歴は変更していません。 保存済みメモを使う場合は /handoff from-file <path> でLLMを呼ばずに再開できます。",
@@ -50,16 +50,12 @@ async function runHandoff(ctx: ReplCommandContext, providedNote?: string): Promi
     );
     return;
   }
-  const note = outcome.handoff?.note;
-  if (note) printNote(note);
+  if (outcome.note) printNote(outcome.note);
   console.log(
-    chalk.green(
-      `  コンテキストをリセットしました (約 ${outcome.freedTokens.toLocaleString("en-US")} トークン削減、 ` +
-        `使用率 ${Math.round(outcome.beforeRatio * 100)}% → ${Math.round(outcome.afterRatio * 100)}%)`,
-    ),
+    chalk.green(`  コンテキストをリセットしました (約 ${outcome.freedTokens.toLocaleString("en-US")} トークン削減)`),
   );
-  if (outcome.handoff?.savedSessionId) {
-    console.log(chalk.dim(`  リセット前の完全な履歴: /resume ${outcome.handoff.savedSessionId}`));
+  if (outcome.savedSessionId) {
+    console.log(chalk.dim(`  リセット前の完全な履歴: /resume ${outcome.savedSessionId}`));
   }
   console.log("");
 }

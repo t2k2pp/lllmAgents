@@ -13,7 +13,6 @@ import { parallelCommand } from "./parallel.js";
 import { autorunCommand } from "./autorun.js";
 import { loglevelCommand } from "./loglevel.js";
 import { doctorCommand } from "./doctor.js";
-import { forgetCommand } from "./forget.js";
 import { handoffCommand } from "./handoff.js";
 import { diffCommand } from "./diff.js";
 import { renameCommand } from "./rename.js";
@@ -26,7 +25,6 @@ const COMMANDS: ReplCommandDef[] = [
   autorunCommand,
   loglevelCommand,
   doctorCommand,
-  forgetCommand,
   handoffCommand,
   diffCommand,
   renameCommand,

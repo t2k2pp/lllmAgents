@@ -1,6 +1,6 @@
 # コンテキスト整理の作り直し 設計書
 
-> **ステータス**: design (2026-10-25 設計 / 実装中。 §13 のタスク 1・3〜7 済み)
+> **ステータス**: design (2026-10-25 設計 / 実装中。 §13 のタスク 1・3〜8 済み)
 > **置き換える設計**: `docs/context-forgetting.md` (忘却) / `docs/context-strategy.md` (区切りでの使い分け)。
 > 実装が済んだら両書の先頭に「現行は本書」 の注記を入れる (§12)。
 > **前提**: `docs/prompt-prefix-stability.md` (一度送ったメッセージは書き換えない) が実装済みであること。
@@ -129,7 +129,7 @@ T2 も T1 と同じ O・T にする (2026-10-25。 当初案の T2 O=16,384 で�
   推定のときのツール定義は `estimateToolDefinitionTokens()` (`token-counter.ts`)。
 - 規則は `exceedsForcedLimit(P, budget)` (規則 1) と `exceedsBoundaryLimit(P, budget, G)` (規則 2)。
   目標と最低量は `computeReductionGoal(budget, G)` → `{ targetPromptTokens, minimumReductionTokens }`。
-- この時点ではどこからも発火に使っていない (タスク 8 で旧経路と置き換える)。
+- 発火への組み込みはタスク 7 (規則 1) とタスク 8 (規則 2)。 旧経路 (割合の閾値) はタスク 8 で削除した。
 
 ### 4.3 1 回で増える量を有限にする
 
@@ -186,6 +186,29 @@ T2 も T1 と同じ O・T にする (2026-10-25。 当初案の T2 O=16,384 で�
 使用率の帯 (`USAGE_BANDS`)、 ティアの閾値 (`compressionThreshold`)、 最短間隔 (3 ターン) はすべて廃止する。
 間隔は §4.6 の目標の置き方で自然に空く。
 
+実装 (タスク 8、 2026-10-25): 発火の種類は `boundary:request-end` / `boundary:todos-complete` / `boundary:goal-achieved` /
+`boundary:new-request` (`BoundaryKind`。 `reduction-event.ts`)。 判定は `AgentLoop.judgeBoundary(種類)` の 1 つで、
+P (`measureNextPrompt`) と G (`RequestGrowthTracker.resolve`) で `exceedsBoundaryLimit` を見て、 超えたら `runReductionEvent("boundary:<種類>")`。
+- **依頼の終わり**: `run()` の finally で `task_complete` を出した後 (応答を先に届ける) に `finishRequest()`。
+  終わり方が `completed` (response_complete / 最終の文章 / 自己点検の上限) で、 未完了 (pending / in_progress) の ToDo が無く、
+  Goal Seek でなければ判定する。 判定の間は `isProcessing` を true のままにする (チャネルの直列化を崩さない)。
+  判定や整理が例外を投げたら赤字と `harness_notice` (error) で知らせる (作りの上では投げない)。
+- **ToDo の全部完了**: ToDo の遷移フック (`onTodoChange`) で、 全部 completed になった瞬間に `pendingBoundary = "todos-complete"` を記録。
+  **Goal の達成**: response_complete で Goal Seek の全項目が完了して抜けたときに `pendingBoundary = "goal-achieved"`。
+  どちらも本体呼び出しの再試行ループの中、 規則 1 (`enforceForcedLimit`) の直前に `judgePendingBoundary()` で判定して捨てる。
+  そのまま依頼が終われば、 依頼の終わりの判定に含める (記録を捨てて 1 回だけ判定する)。 判定の後に Esc で中断されていたら本体を呼ばずに止める。
+- **新しい依頼**: `run()` の始め (入力の検査の後、 発言を履歴に入れる前。 再開 `durableResume` では行わない) に `judgeNewRequestBoundary()`。
+  前の依頼が正常に終わった (`requestEndSettled`) ならしない。 済んでいないのは、 前の依頼が中断・エラー・ループ停止で終わったとき、
+  セッションを再開したとき (`restoreSession`)、 会話を載せ替えたとき (`importConversation`)、 起動直後。
+  決めたこと: ToDo が残ったままの応答完了 (弱い区切り) も「正常に終わった」 に数え、 次の新しい依頼で改めて判定しない
+  (§4.4 の表の「依頼の終わりで判定済み」 を「前の依頼が正常に終わった」 と読んだ。 ToDo が残る依頼の続きの発言で整理しないため)。
+- **弱い区切り**: ToDo 1 つの完了・話題の切り替わり・git commit・plan mode を抜けた・複雑な依頼・多段の ToDo の作成の検出
+  (旧 `queueBreak` の B2/B4/B5/B6/P1/P2/P3) は整理に使わなくなったので、 検出ごと削除した。
+- 規則 2 は先回りなので、 整理に失敗しても作業は止めない (失敗は整理イベントが画面と記録に出す。 入らなければ次の規則 1 が判定する)。
+- 試験: `tests/agent/reduction-boundary.test.ts` (依頼の終わり・ToDo の全部完了・Goal の達成・新しい依頼 (再開後)・弱い区切り・
+  Goal が動いている間・P + R + G ≤ W のときに整理しないこと)、 `tests/agent/prompt-prefix-invariant.test.ts` (規則 1 と規則 2 が起きる
+  4 件の依頼で、 キャッシュが外れる送信が整理イベントの直後だけであること、 余裕のある枠では依頼の境目で 1 度も外れないこと)。
+
 ### 4.5 ひと仕事の増分 G の測り方
 
 - 1 件の依頼 (利用者の発話から依頼の終わりまで) の増分 = 最後の本体呼び出しの実数 P + その出力 − 最初の本体呼び出しの実数 P。
@@ -203,6 +226,11 @@ T2 も T1 と同じ O・T にする (2026-10-25。 当初案の T2 O=16,384 で�
   `toSnapshot()` で保存し、 `RequestGrowthTracker.restore(raw)` で戻す。 欄の無い古いセッションは空の記録から始め、
   形が壊れていれば `{ ok: false, error }` を返す (黙って空にしない)。 `forkSession` は履歴と一緒に引き継ぐ。
   AgentLoop の保存・再開への組み込みもタスク 8。
+- 組み込み (タスク 8、 2026-10-25): `beginRequest` は `run()` の始め (新しい依頼の判定の後。 再開 `durableResume` では呼ばない =
+  一時停止をはさんでも同じ依頼として測る)、 `noteMainCall` は本体呼び出しの応答の usage を受けたとき (入力の全体 = cache_miss と同じ値、 出力)、
+  `endRequest` は `run()` の終わり方が決まったとき (`incomplete` = 一時停止以外。 中断・エラーもそこまでを 1 件にする)。
+  `saveCurrentSession` が `toSnapshot()` を `SessionData.requestGrowth` に書き、 `restoreSession` が `restore()` で戻す。
+  壊れていたら黄色の 1 行とログの警告で知らせて空の記録から始める。 チャネルの会話の載せ替え (`ConversationState`) は会話ごとに記録を持つ。
 
 ### 4.6 1 回の整理の目標と最低量
 
@@ -416,8 +444,8 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
    (引数 `file_path`、 新しい順・重複なし・20 件まで、 超えた分は件数) / 要約の Current work)。 `MessageHistory.queueStateHandover(文面)` で預けると、
    次の `attachDynamicContext` が状態通知 (日時・ToDo・Goal) の後ろに **1 回だけ** 添える。 預かりがあることは添付の条件 (§3.2 の 4 番目) になり、
    状態が前回と同じでも添える。 末尾が assistant・送信済みなら待たせたまま次で添える。 変化の判定 (key) には含めない。 `clear()` で捨てる。
-   預かりはセッションに保存しない (差し替えの直後に次の本体呼び出しで添えるため。 タスク 7 で確認: 規則 1 はそのとおりなので保存しない。
-   依頼の境目・`/compact` で保存・再開をはさむかはタスク 8・10 で決める。 §6.4)。
+   預かりは `SessionData.pendingStateHandover` に保存する (タスク 8 で決定。 依頼の終わり・`/compact` の整理の後は、 次の本体呼び出しの前に
+   保存・終了・再開をはさみうるため。 添えたら預かりが消え、 次の保存で欄も消える)。 再開で `queueStateHandover` に戻す。 文字列でなければ警告して使わない。
 
 タスク 7 への申し送り: 要約の呼び出しの `request` は本体呼び出しと同じ組み立て (同じ関数) から作ること (思考・サンプリングの差で前方が変わる)。
 要約を呼ぶ前に `attachDynamicContext()` を呼ばないこと (末尾が送信済みになり、 当てはめ後の写しにも通知が残る。 通知は差し替えの後の本体呼び出しで付ける)。
@@ -440,6 +468,17 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
 
 途中で失敗したら写しを捨てるだけで、 履歴は元のまま。 失敗はそのまま利用者に報告する。
 規則 1 の発火で失敗した場合は本体呼び出しを出さずに止める (入らない呼び出しは送らない)。
+
+**段階 3 の要約に失敗したときの扱いは設定で選ぶ** (2026-10-25 利用者の決定。 設定は §11.3 の `context.summaryFailure`):
+- `continue` (既定): 要約の失敗 (型が揃わない・ツールを呼んだ・出力上限・provider のエラー) を、 利用者に見える 1 行 (黄色の警告と
+  `harness_notice` (warn)) と `reduction_event` の記録 (`summary.status` / `summary.failureDetail` / `continuedWithoutSummary: true`) に
+  必ず出したうえで、 段階 0〜2 の写しだけで履歴を差し替える。 ただし規則 1 の発火で、 段階 0〜2 だけでは次の本体呼び出しが入らない
+  (整理後の P + R > W のまま) ときは止める (`still-too-large`。 失敗の文に要約の失敗の中身も添える。 入らない呼び出しは送らない)。
+  段階 0〜2 で減るものが無ければ `nothing-to-reduce` (同じく要約の失敗を添える)。
+- `stop`: イベント全体を失敗にする (写しを捨て、 履歴は元のまま。 規則 1 なら本体を呼ばずに止める)。 タスク 7 の動き。
+- 手動の `/compact` と規則 2 も同じ設定に従う。
+- Esc で要約の呼び出しが切れたとき (中断の signal が立っている) は、 設定にかかわらず失敗にする (利用者が止めた処理を続けない)。
+- これは利用者が選べる見える形の扱いで、 黙った代替ではない (失敗は必ず出す。 要約を別の手段に切り替えることもしない)。
 
 ### 6.2 応答のたびの書き換えをやめる
 
@@ -492,9 +531,9 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
   本体と同じ `llmAbortController` を使う。 成功したらチャットログのパートを分ける (`onCompressed`)。
 
 決めたこと:
-- **要約に失敗したら、 イベント全体を失敗にする** (段階 0〜2 だけで差し替えて進めることはしない。 §6.1 の「途中で失敗したら写しを捨てる」
-  どおり。 別の手段への切り替えをしない)。 要約の範囲が取れない (`nothing-to-summarize`。 要約しても減らない) のは失敗ではなく、
-  段階 0〜2 の分だけで進める。 規則 1 の発火なら、 そのあと「整理後の P + R ≤ W」 を確かめ、 満たさなければ `still-too-large` で失敗。
+- ~~**要約に失敗したら、 イベント全体を失敗にする**~~ → タスク 8 で利用者の決定により設定 `context.summaryFailure` で選ぶ形にした
+  (既定 `continue`。 §6.1)。 タスク 7 の動きは `stop`。 要約の範囲が取れない (`nothing-to-summarize`。 要約しても減らない) のは失敗ではなく、
+  段階 0〜2 の分だけで進める (設定に関係しない)。 規則 1 の発火なら、 そのあと「整理後の P + R ≤ W」 を確かめ、 満たさなければ `still-too-large` で失敗。
 - 差し替え前後の送る形の推定の差 (`freedTokens.total`。 忘却の記録の分を差し引く) が 0 以下なら `nothing-to-reduce` で書き換えない。
 - 忘却の記録の本文は `[忘却の記録] 整理 <id>: 古いツール結果などを履歴から削除しました。` + 段階 0〜2 の行 (§5.7) + 読み直しの案内。
   行が無い (前処理・要約だけ) ときは記録を入れない (要約は自分の目印 `<summary-of-earlier-turns>` を持つ)。 置く位置は
@@ -506,8 +545,9 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
 - 記録 (§10.1) の欄: `id` / `trigger` / `ok` / `failureReason` / `failureDetail` / `promptTokensBefore` / `promptBasis` (usage | estimate) /
   `targetPromptTokens` / `minimumReductionTokens` / `growthTokens` / `reachedStage` (2 | 3。 段階 0〜2 の前に失敗したら null) /
   `freedTokens` {preprocess, stage0, stage1, stage2, stage3, total} / `repaid` {ephemeral, thinking} / `forgottenCalls` / `clearedCurrentThinking` /
-  `promptTokensAfter` (推定) / `summary` {status: not-needed | nothing-to-summarize | done | failed | error, failureReason, segments, attempts,
-  maxTokens, tokensIn, tokensCached, tokensOut (全試行の合計), durationMs, extraTextChars} / `prewarm` (タスク 9 用。 今は常に null) / `durationMs`。
+  `promptTokensAfter` (推定) / `summary` {status: not-needed | nothing-to-summarize | done | failed | error, failureReason, failureDetail (タスク 8), segments, attempts,
+  maxTokens, tokensIn, tokensCached, tokensOut (全試行の合計), durationMs, extraTextChars} / `summaryFailurePolicy` (continue | stop。 タスク 8) /
+  `continuedWithoutSummary` (タスク 8) / `prewarm` (タスク 9 用。 今は常に null) / `durationMs`。
 
 **規則 1 の組み込み** (`AgentLoop.enforceForcedLimit`): 本体呼び出しの再試行ループの中で、 一時停止の確認の後、 状態通知の添付
 (`attachDynamicContext`) の前に P を測り、 `exceedsForcedLimit` なら `runReductionEvent("forced", P)`。 失敗したら本体を呼ばずに止める:
@@ -519,10 +559,9 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
   の送る形の推定。 間に書き換え・履歴の載せ替え (`restoreSession` / `importConversation`) があった、 usage が無かったときは全体の推定。
   これから添付する状態通知は数えない (小さいので余白 M で吸収する)。
 - 本体呼び出しの送り方は `buildMainCallRequest(toolDefs, signal)` の 1 つにまとめ、 本体呼び出しと要約の呼び出しが同じものを使う。
-- `RequestGrowthTracker` は AgentLoop に 1 つ持ち、 今は整理イベントの `noteReduction` だけ呼ぶ (G は既定値 80,000 と頭打ち)。
-  依頼の始まり・本体呼び出し・依頼の終わり・セッションへの保存の組み込みはタスク 8。
+- `RequestGrowthTracker` は AgentLoop に 1 つ持つ。 依頼の始まり・本体呼び出し・依頼の終わり・セッションへの保存の組み込みはタスク 8 (§4.5)。
 
-**外した旧経路の呼び出し** (本体の削除はタスク 8): 反復の先頭の `runContextStrategy(true)` (区切りでの整理) と
+**外した旧経路の呼び出し** (本体はタスク 8 で削除済み。 §6.5): 反復の先頭の `runContextStrategy(true)` (区切りでの整理) と
 `contextManager.shouldReduce() → reduce()` (割合の閾値での整理)、 依頼の終わり (`run()` の finally) の `runSpanEndStrategy()`。
 使われなくなった AgentLoop の `runContextStrategy` / `runSpanEndStrategy` / `confirmClear` / `reportStrategyOutcome` / `printHandoffNote` /
 `lastSpanEndReason` / `lastCompletionType` は消した (tsc の未使用の検査に掛かるため)。 区切りの検出 (`queueBreak` と ToDo・git commit・
@@ -542,13 +581,42 @@ Claude Code の型にある「利用者の発言の一覧」 は入れない。 
   (以前は思考を捨てていた。 思考も次の整理イベントで返す借りなので戻す)。 状態通知 (`contextNote`) は以前どおり戻さない (再開後の最初の送信で出し直す)。
 - `MessageHistory.replaceMessages(next, reason = "replace")` は書き換え理由を受け取る (整理イベントは `reduction:<id>`、 旧経路の忘却は既定の `replace`)。
   `clearAllThinking()` は旧経路の忘却 (`forgetThinking`) だけが使う。
-- 要約の後の渡し直しの預かりは今もセッションに保存しない。 規則 1 は差し替えの直後に本体を呼んで添えるため。 タスク 8 (依頼の境目) と
-  タスク 10 (`/compact`) で、 差し替えの後に本体を呼ぶ前の保存・再開をはさむなら、 保存するかを決める。
+- 要約の後の渡し直しの預かりは、 タスク 8 でセッションに保存するようにした (§5.8 の 5)。
 
 試験: `tests/agent/reduction-event.test.ts` (要約なし・あり、 失敗で履歴が元のまま、 書き換え理由、 記録の欄、 忘却の記録の追記、 前処理の返済、
 G への足し戻し、 揮発の印の保存・復元と送る形から外れること、 規則 1 の失敗で本体を呼ばないこと)、 `tests/agent/prompt-prefix-invariant.test.ts`
 (台本 provider で 4 件の依頼を回し、 起動時検査の最小 + 2,000 の W で規則 1 を起こす。 要約なし・ありの 2 通りで、 直前の送信を先頭に含まない送信が
 整理イベントの直後の送信とちょうど一致し、 揮発メッセージと思考が残る依頼の境目では外れない)。
+
+### 6.5 旧経路の削除 (タスク 8、 2026-10-25)
+
+削除したもの:
+- ファイル: `src/agent/context-strategy.ts` (区切りの決定表 `USAGE_BANDS` / `decideAction` / ガード / `ContextStrategy`)、
+  `src/agent/forgetting.ts` (`ForgettingEngine` = LLM に忘却を選ばせる経路、 `forgetThinking`、 `buildSegments` 等)、
+  `src/agent/hierarchical-compressor.ts`、 `src/agent/context-manager.ts` (`reduce()` の compress / forget / hybrid、 `applyStrategy`、
+  割合の閾値 `shouldReduce` / `shouldCompress`、 区切りでの自動リセット (自動の clear))、 `src/cli/commands/forget.ts` (`/forget` 一式)。
+  試験の `context-strategy.test.ts` / `forgetting.test.ts` / `context-manager-failure-policy.test.ts` / `hierarchical-compressor-failure.test.ts`。
+- `MessageHistory.clearAllThinking()` と `replaceOlderMessages()` (使う所が無くなった)。 `CapabilityProfile` / `CapabilityOverride` の
+  `compressionThreshold` と `keepRecentMessages`。 脇の呼び出しの目的 `forget-select`。 `/context strategy` (REPL と補完)。
+  AgentLoop の `forceCompress` / `forceForget` / `forgetDryRun` / `setReductionMode` / `getReductionMode` / `getLastForgetResult` /
+  `getStrategyMode` / `setStrategyMode` / `getStrategyDecisions` / `getContextUsageRatio`。 `/context` の「自動縮約の手段」 の行。
+- 設定の型 `ReductionMode` / `ForgettingConfig` / `ContextStrategyMode` / `ContextStrategyConfig` と、 既定値の `context.reduction` / `context.strategy`。
+  旧キーを読むコードは無い (キーの削除・移行はタスク 11)。 config のスキーマ検証 (`sanitizeParsedConfig`) は未知のキーを残したまま
+  警告しない作り (`z.object` の既定) なので、 タスク 11 までの間、 旧キーは黙って読まれないだけになる (警告は出ない。 試験で固定)。
+  `modelCapabilities.<id>.compressionThreshold` / `keepRecentMessages` も読まないが、 上書きの取り込み (`applyOverride`) は欄を丸ごと
+  広げるので、 プロファイルの中に使われない欄として残る (どこも読まない)。
+- 共通の部分は新側に残した: `transformToolBatch` / `[忘却済み]` の文面 / `TOMBSTONE_MARKER` / `insertTombstone` (`reduction-stages.ts`。 タスク 5・7 で移動済み)。
+  `insertTombstone` と `replaceMessages` の対の検証の試験は `reduction-stages.test.ts` / `message-history.test.ts` に移した。
+
+手動コマンドの付け替え (タスク 10 の前倒し・最小限): `/compact` は `AgentLoop.runReductionEvent("manual")` を呼ぶ (結果は整理イベントの 1 行)。
+`/handoff` は `runHandoff` (`handoff.ts`) を直接呼ぶ (`AgentLoop.runHandoffNow` の戻り値は `HandoffResult`。 使用率の表示はやめた)。
+
+Goal 昇格の提案 (`maybePromoteToGoal`。 REPL / Slack / Discord が `run()` の前に呼ぶ脇の呼び出し) は、 最初に `AgentLoop.checkUserInput`
+(`run()` の最初の入力の検査と同じ関数) を呼び、 入らない入力なら提案しない (脇の呼び出しを送らない)。 断りの表示は `run()` が行う。
+
+検証の grep (2026-10-25):
+`grep -rnE "ContextStrategy|context-strategy\.js|USAGE_BANDS|decideAction|ForgettingEngine|forgetting\.js|forget-select|HierarchicalCompressor|hierarchical-compressor|ContextManager|context-manager\.js|shouldReduce|shouldCompress|applyStrategy|compressionThreshold|keepRecentMessages|clearAllThinking|replaceOlderMessages|queueBreak|forceCompress|forceForget|forgetDryRun|setReductionMode|ReductionMode|ForgettingConfig|ContextStrategyMode|strategy\.mode|context\.reduction|maybeDetectCommitBreak|detectTopicSwitch" src tests`
+→ 3 件だけ (`capability-tier.ts` のコメント「旧 keepRecentMessages を置き換えた」、 `config-schema.test.ts` の旧キーが警告されないことの試験データ 2 件)。
 
 ---
 
@@ -556,14 +624,14 @@ G への足し戻し、 揮発の印の保存・復元と送る形から外れ�
 
 | コマンド | 新しい動き |
 |---|---|
-| `/compact` | **手動の整理はこの 1 つだけ** (2026-10-25 利用者と決定)。 整理イベントを今すぐ行い、 段階 0〜3 を最後まで進める。 終わったら予熱する |
+| `/compact` | **手動の整理はこの 1 つだけ** (2026-10-25 利用者と決定)。 整理イベントを今すぐ行い、 段階 0〜3 を最後まで進める。 終わったら予熱する。 タスク 8 で `runReductionEvent("manual")` に付け替え済み (表示・予熱はタスク 9・10) |
 | `/context` | 内訳表示に加えて、 P (実数か推定か)、 R の内訳、 規則 1・2 の発火点、 G と直近 3 件、 直近の整理イベント、 今 `/compact` した場合の段階ごとの減る量の見込みを表示 |
-| `/forget` | **削除** (LLM に選ばせる忘却が無くなるため。 決まった段階は `/compact` に含まれる) |
+| `/forget` | **削除** (LLM に選ばせる忘却が無くなるため。 決まった段階は `/compact` に含まれる)。 タスク 8 で削除済み |
 | `/forget mode` / `/forget status` / `/forget dry` | 削除 |
-| `/context strategy` | 削除 (区切りの決定表が無くなるため) |
+| `/context strategy` | 削除 (区切りの決定表が無くなるため)。 タスク 8 で削除済み |
 | `/handoff` / `/clear` | 変更なし (手動のリセット。 整理とは別の機能) |
 
-自動の `clear` (区切りで引き継ぎメモを作ってリセット) も廃止する。 リセットは利用者が `/handoff` で決める。
+自動の `clear` (区切りで引き継ぎメモを作ってリセット) も廃止する。 リセットは利用者が `/handoff` で決める (タスク 8 で削除済み)。
 
 ---
 
@@ -646,10 +714,10 @@ G への足し戻し、 揮発の印の保存・復元と送る形から外れ�
   ログの形: `{"type":"side_call","turn":12,"purpose":"intent","model":"…","providerType":"llamacpp","tokensIn":812,"tokensOut":9,"tokensCached":0,"durationMs":1530,"finishReason":"stop"}`
   (失敗・中断なら `error`)。 `turn` は直前の本体呼び出しの番号。
 - 目的は上の 8 つに、 実在する呼び出し元に合わせて次の 4 つを足した:
-  `compress-instructions` (プロジェクト指示・メモの圧縮 `compress-text.ts`)、 `forget-select` (忘却の LLM 選択 `forgetting.ts`。 タスク 8 で削除)、
+  `compress-instructions` (プロジェクト指示・メモの圧縮 `compress-text.ts`)、 ~~`forget-select` (忘却の LLM 選択 `forgetting.ts`)~~ (タスク 8 で削除済み)、
   `second-llm` (セカンド LLM の相談・委任・評価 `second-llm-manager.ts`)、 `vision` (画像解析 `vision.ts`)。
   呼び出し元と目的: `intent-classifier.ts` (intent / completion)、 `progress-judge.ts` (progress)、 `goal-promotion.ts` (goal-promotion)、
-  `handoff.ts` (handoff)、 `hierarchical-compressor.ts` (summarize。 タスク 8 で削除)、 `sub-agent.ts` (subagent)。
+  `handoff.ts` (handoff)、 `reduction-summary.ts` (summarize。 旧 `hierarchical-compressor.ts` はタスク 8 で削除済み)、 `sub-agent.ts` (subagent)。
   `prewarm` はタスク 9 で使う。
 
 本節の計測は [todo-local-llm-speed.md](todo-local-llm-speed.md) の T1 を兼ねる。 同書の T4 (依頼の区切りでの書き換え) は本書 §6.2 で扱う。
@@ -682,6 +750,17 @@ G への足し戻し、 揮発の印の保存・復元と送る形から外れ�
   整理を早めたい場合は contextWindow を小さくしてください」。
 - 値の読み替えはしない (対応する設定が無い)。 `compressionThreshold` を下げていた人には上の告知が答えになる。
 - スキーマ検証 (`sanitizeParsedConfig`) が未知のキーとして警告する前に処理する。
+  (タスク 8 で確認: 今の検証は未知のキーを警告せずに残すので、 旧キーはタスク 11 まで黙って読まれないだけになる。 §6.5)
+
+### 11.3 足すキー
+
+| キー | 値 | 既定 | 意味 |
+|---|---|---|---|
+| `context.summaryFailure` | `"continue"` \| `"stop"` | `"continue"` | 段階 3 の要約に失敗したときの扱い (§6.1。 2026-10-25 利用者の決定)。 規則 1・規則 2・`/compact` の全部に効く |
+
+実装 (タスク 8): 型 `SummaryFailurePolicy` と既定値 `DEFAULT_SUMMARY_FAILURE_POLICY` (`config/types.ts`。 `getDefaultConfig` と読み出しの両方がこれを使う)。
+スキーマ (`config-schema.ts`) は `context.summaryFailure` を `continue` / `stop` に限り、 それ以外は既存の仕組みどおり警告して取り除く (= 既定値)。
+AgentLoop は整理イベントのたびに `loadConfig()` から読む (変更は次の整理から効く)。 変更するコマンドは作らない (config.json を直接書く)。 文書 (`config-reference.md`) への記載はタスク 12。
 
 ---
 
@@ -712,7 +791,7 @@ G への足し戻し、 揮発の印の保存・復元と送る形から外れ�
 | 5 | 段階 0〜2 と前処理 (写しに適用し、 減る量を返す純粋な関数) | 規則ごとに対象・非対象が設計どおり。 保護部分に触れない | 0-a〜0-d、 段階 1 の本文ありの扱い、 段階 2 の直近 3 件、 停止条件、 ツールの対の検証 |
 | 6 | 段階 3: キャッシュ済みの並び + 指示での要約、 要約の型、 状態の渡し直し | 要約の呼び出しが前回の本体呼び出しをそのまま先頭に含む | 台本 provider で前方一致を検証。 型の 8 見出し。 利用者の発言が原文のまま残ること。 ツール呼び出しが返ったときの再送 |
 | 7 | 1 回の書き換え: イベントの流れ、 借りの延期、 `Message.ephemeral` の保存 | 応答の終わりで履歴が書き換わらない | **前方一致テストの拡張**: 台本 provider で AgentLoop を複数の依頼にわたって回し、 小さい W で規則 1 を起こす。 「直前の送信を先頭に含まない送信」 がイベントごとにちょうど 1 回で、 揮発メッセージ・思考がある依頼の境目では 0 回 |
-| 8 | AgentLoop への組み込み: 規則 1 を本体呼び出しの直前に、 規則 2 を依頼の終わり・ToDo 全完了・Goal 達成に。 `ContextStrategy` の自動経路、 `ForgettingEngine` の LLM 経路、 `reduce()` の 3 方式、 `HierarchicalCompressor` を削除 | 旧経路が残っていない (grep で確認) | 既存の `context-strategy.test.ts` / `forgetting.test.ts` / `context-manager-failure-policy.test.ts` を新仕様に置き換え |
+| 8 | AgentLoop への組み込み: 規則 1 を本体呼び出しの直前に、 規則 2 を依頼の終わり・ToDo 全完了・Goal 達成に。 `ContextStrategy` の自動経路、 `ForgettingEngine` の LLM 経路、 `reduce()` の 3 方式、 `HierarchicalCompressor` を削除 | 旧経路が残っていない (grep で確認) | 既存の `context-strategy.test.ts` / `forgetting.test.ts` / `context-manager-failure-policy.test.ts` を新仕様に置き換え (**済み**: `reduction-boundary.test.ts` ほか。 §4.4 / §6.5) |
 | 9 | 予熱 | 依頼の境目の整理・`/compact`・再開の後に 1 回送る。 予熱中の送信は終了を待つ | 台本 provider で予熱の並びが次の本体呼び出しの先頭と一致 |
 | 10 | コマンド: `/compact` / `/context` の表示 (見込みを含む)、 `/forget` 一式と `/context strategy` の削除 | 補完・help から消える (レジストリ方式) | コマンドの単体テスト |
 | 11 | 設定: キー削除と 1 回だけの扱い、 告知、 バックアップ | 2 回目の起動で何もしない | 移行の単体テスト (`permission-migration` のテストに倣う) |
@@ -747,6 +826,7 @@ G への足し戻し、 揮発の印の保存・復元と送る形から外れ�
 | 6 | 出力上限 O・ツール結果の合計上限 T | T1・T2 とも O=32,768 / T=24,576 (§4.2) |
 | 7 | 利用者の発言 | どの段階でも原文のまま残し、 要約しない (§5.1, §5.6) |
 | 8 | 補助呼び出し・サブエージェントによるキャッシュの追い出し | 本書では計測まで。 振り分けは todo-local-llm-speed.md T2/T3 (§3 非目標) |
+| 9 | 段階 3 の要約に失敗したとき | 設定 `context.summaryFailure` で選ぶ。 既定 `continue` (失敗を画面と記録に出して段階 0〜2 だけで差し替え。 規則 1 で入らなければ止める)、 `stop` は履歴を変えずに失敗 (§6.1 / §11.3) |
 
 ### 14.3 残る未決事項 (実装中に決めて本書に追記する)
 
@@ -767,4 +847,5 @@ G への足し戻し、 揮発の印の保存・復元と送る形から外れ�
 - 段階 3 の要約の出力上限は `min(O, W − P − 指示 − M)` (§5.8)。 規則 1 の発火時は S − 指示 (T1・T2 で約 5k、 T3 で約 2k) しか残らず、
   思考オン (既定) では思考だけで使い切る恐れがある (`length` で失敗として返す)。 実機の要約の思考の長さを測り、 足りなければ S を見直す
 - 範囲を決めるときの要約の大きさの見込み (区間ごと 256・全体 3,072 トークン)。 実際の大きさで見直す
-- git commit を弱い区切りにすること (§4.4)
+- git commit を弱い区切りにすること (§4.4。 タスク 8 で検出ごと削除した。 強い区切りにするなら検出を作り直す)
+- ToDo が残ったまま終わった依頼の次の発言で「新しい依頼」 の判定をしないこと (§4.4 の実装。 タスク 8 で決めた)

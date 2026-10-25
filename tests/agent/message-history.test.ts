@@ -1,65 +1,54 @@
 import { describe, it, expect } from "vitest";
 import { MessageHistory } from "../../src/agent/message-history.js";
 
-describe("MessageHistory.replaceOlderMessages — tool_call/tool_result の分断防止", () => {
-  it("境界が tool 結果の途中なら、対応する assistant.tool_calls まで遡って recent に含める", () => {
-    const history = new MessageHistory("system");
-    // 0: user
-    history.addUserMessage("話1");
-    // 1: assistant (tool_calls)  ← これと 2 のペアが分断されると 400
-    history.addAssistantMessage("呼ぶ", [{ id: "call_1", type: "function", function: { name: "f", arguments: "{}" } }]);
-    // 2: tool result
-    history.addToolResult("call_1", "結果1");
-    // 3..12: 追加の会話 (recent=10 とした時に 1 と 2 が境界をまたぐ構造)
-    for (let i = 0; i < 10; i++) {
-      history.addUserMessage(`q${i}`);
-    }
+function toolCall(id: string, name: string) {
+  return { id, type: "function" as const, function: { name, arguments: "{}" } };
+}
 
-    history.replaceOlderMessages("[要約]", 10);
-
-    const raw = history.getRawMessages();
-    // 先頭は要約 (system)
-    expect(raw[0].role).toBe("system");
-    // 残りメッセージ群に tool 結果が含まれる場合は、対応する assistant.tool_calls もペアで残っている
-    const toolMsg = raw.find((m) => m.role === "tool");
-    if (toolMsg) {
-      const idx = raw.indexOf(toolMsg);
-      const before = raw.slice(0, idx);
-      const hasMatchingCall = before.some(
-        (m) => m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.some((c) => c.id === "call_1"),
-      );
-      expect(hasMatchingCall).toBe(true);
-    }
+describe("MessageHistory.replaceMessages — ペア整合を検証して壊れた履歴を弾く", () => {
+  it("整合していれば置き換わる", () => {
+    const h = new MessageHistory("sys");
+    h.replaceMessages([
+      { role: "user", content: "u" },
+      { role: "assistant", content: "x", tool_calls: [toolCall("c1", "f")] },
+      { role: "tool", content: "r", tool_call_id: "c1" },
+    ]);
+    expect(h.getRawMessages().length).toBe(3);
   });
 
-  it("recent の先頭が tool 結果単独でも、対応する assistant.tool_calls を巻き取る", () => {
-    const history = new MessageHistory("system");
-    history.addUserMessage("u1");
-    history.addAssistantMessage("a1", [{ id: "call_x", type: "function", function: { name: "f", arguments: "{}" } }]);
-    history.addToolResult("call_x", "r1");
-    history.addAssistantMessage("a2");
-    // keepRecent=2 だと 境界 = length-2 = 2 → recent[0] が tool 結果になり分断される
-
-    history.replaceOlderMessages("[s]", 2);
-
-    const raw = history.getRawMessages();
-    const tool = raw.find((m) => m.role === "tool");
-    expect(tool).toBeTruthy();
-    if (tool) {
-      const idx = raw.indexOf(tool);
-      const prev = raw[idx - 1];
-      expect(prev?.role).toBe("assistant");
-      expect((prev as { tool_calls?: unknown }).tool_calls).toBeTruthy();
-    }
+  it("tool_calls に対応する tool_result が欠けていたら throw", () => {
+    const h = new MessageHistory("sys");
+    expect(() =>
+      h.replaceMessages([
+        { role: "assistant", content: "x", tool_calls: [toolCall("c1", "f")] },
+        { role: "user", content: "u" },
+      ]),
+    ).toThrow(/tool_result が欠落/);
   });
 
-  it("メッセージ数が keepRecent 以下なら何もしない", () => {
-    const history = new MessageHistory("system");
-    history.addUserMessage("a");
-    history.addAssistantMessage("b");
-    const before = history.getRawMessages().length;
-    history.replaceOlderMessages("[s]", 10);
-    expect(history.getRawMessages().length).toBe(before);
+  it("孤立した tool_result は throw", () => {
+    const h = new MessageHistory("sys");
+    expect(() => h.replaceMessages([{ role: "tool", content: "r", tool_call_id: "c1" }])).toThrow(/孤立/);
+  });
+
+  it("tool_call_id が対応しない tool_result は throw", () => {
+    const h = new MessageHistory("sys");
+    expect(() =>
+      h.replaceMessages([
+        { role: "assistant", content: "x", tool_calls: [toolCall("c1", "f")] },
+        { role: "tool", content: "r", tool_call_id: "別の id" },
+      ]),
+    ).toThrow(/対応する tool_call の無い/);
+  });
+
+  it("throw した場合、 履歴は書き換わらず、 書き換えの回数も進まない", () => {
+    const h = new MessageHistory("sys");
+    h.replaceMessages([{ role: "user", content: "u" }]);
+    const before = h.getRawMessages();
+    const revision = h.getRevision();
+    expect(() => h.replaceMessages([{ role: "tool", content: "orphan", tool_call_id: "zz" }])).toThrow();
+    expect(h.getRawMessages()).toEqual(before);
+    expect(h.getRevision()).toBe(revision);
   });
 });
 
@@ -240,7 +229,7 @@ describe("MessageHistory — 前方一致の安定化 (docs/prompt-prefix-stabil
     h.attachDynamicContext(T1);
     h.addAssistantMessage("", callA);
     h.addToolResult("call_a", "R1");
-    h.replaceOlderMessages("要約", 2); // U2 (通知付き) を圧縮で落とす
+    h.replaceMessages(h.getRawMessages().slice(-2), "reduction:r-test2"); // U2 (通知付き) を整理で落とす
     expect(h.attachDynamicContext(T1)).toBe(true);
     expect(h.getMessages().at(-1)?.content as string).toContain("TODO-1");
   });
@@ -276,10 +265,10 @@ describe("MessageHistory — 前方一致の安定化 (docs/prompt-prefix-stabil
     h.addAssistantMessage("", callA, { thinking: "考え中" });
     h.addToolResult("call_a", "R1");
     h.replaceMessages(h.getRawMessages().slice(1), "reduction:r-1");
-    h.clearAllThinking();
     h.updateSystemPrompt("BASE"); // 同じ内容なら書き換えではない
     h.updateSystemPrompt("BASE2");
-    expect(h.takeRewriteReasons()).toEqual(["reduction:r-1", "thinking-clear", "system-prompt"]);
+    h.clear();
+    expect(h.takeRewriteReasons()).toEqual(["reduction:r-1", "system-prompt", "clear"]);
     expect(h.takeRewriteReasons()).toEqual([]);
     expect(h.getRevision()).toBe(3); // 取り出しても書き換えの回数は戻らない
   });

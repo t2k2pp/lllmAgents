@@ -64,7 +64,7 @@ export const BUILTIN_HELP_ENTRIES: ReadonlyArray<{ usage: string; summary: strin
     usage: "/context",
     summary: "コンテキスト使用状況の内訳 (引数で中身をダンプ: system|memory|skills|tools|messages|strategy)",
   },
-  { usage: "/compact", summary: "コンテキストを手動圧縮" },
+  { usage: "/compact", summary: "コンテキストを今すぐ整理する" },
   { usage: "/mcp", summary: "MCP サーバ管理 (status/on/off/reload/toggle <name>)" },
   { usage: "/skills", summary: "スキル管理 (引数なし=一覧。 status/on/off/reload/toggle <name>)" },
   { usage: "/model", summary: "main / second / vision の状態を表示" },

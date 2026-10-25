@@ -2,7 +2,7 @@
  * Goal Slot — Goal Seek mode の不変量を保持する singleton モジュール。
  *
  * `todo-write.ts` の `getTodos()` と同じ思想で、 メッセージ履歴の外側に持つ。
- * これにより HierarchicalCompressor の圧縮対象から外れ、 long session でも
+ * これによりコンテキスト整理 (要約) の対象から外れ、 long session でも
  * goal が劣化せず保持される。
  *
  * 関連: docs/goal-seek-mode-design.md §3.2

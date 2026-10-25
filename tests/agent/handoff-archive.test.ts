@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { AgentLoop } from "../../src/agent/agent-loop.js";
-import { ContextManager } from "../../src/agent/context-manager.js";
+import { RequestGrowthTracker } from "../../src/agent/context-budget.js";
 import { MessageHistory } from "../../src/agent/message-history.js";
 import { createSession, saveSession, type SessionData } from "../../src/agent/session-manager.js";
 import type { LLMProvider } from "../../src/providers/base-provider.js";
@@ -19,12 +19,13 @@ it("引き継ぎ後の通常保存が復元先を上書きしない", async () =
   const agent = Object.assign(Object.create(AgentLoop.prototype), {
     history,
     session,
-    contextManager: new ContextManager({} as LLMProvider, "m", 100_000),
-    contextStrategy: { noteApplied: vi.fn() },
+    provider: {} as LLMProvider,
+    model: "m",
+    requestGrowth: new RequestGrowthTracker(),
   }) as AgentLoop;
   const result = await agent.runHandoffNow("次の作業と保持する制約");
   expect(result.applied).toBe(true);
-  const archiveId = result.handoff?.savedSessionId;
+  const archiveId = result.savedSessionId;
   expect(archiveId).toBeTruthy();
   expect(archiveId).not.toBe(session.meta.id);
   agent.saveCurrentSession();

@@ -52,8 +52,6 @@ export interface CapabilityProfile {
   loopCheckInterval: number;
   /** 自己点検の最大連続発動回数 (text-only / verification / evaluator 共通) */
   maxSelfCheckRounds: number;
-  /** ContextManager の圧縮発火閾値 (0..1, 例: 0.7 = 70% で圧縮) */
-  compressionThreshold: number;
   /**
    * P1-A bash 累積警告を有効化するか。
    * 2026-05-09: 全 tier で OFF に変更。 単発で長い bash (pygame の lingering 等で
@@ -65,11 +63,6 @@ export interface CapabilityProfile {
   bashCumulativeWarnEnabled: boolean;
   /** P1-B plan/todo 過多検知を有効化するか (T1/T3 では抑制) */
   planTodoOveruseEnabled: boolean;
-  /**
-   * Phase D-4: 圧縮時に手元に残す直近メッセージ数。 短 ctx の T3 ほど少なく。
-   * docs/multi-tier-harness-roadmap.md §4 Phase D-4 参照。
-   */
-  keepRecentMessages: number;
 }
 
 /**
@@ -88,11 +81,8 @@ export interface CapabilityOverride {
   /** 廃止 (2026-10-14): 作業回数の上限は撤廃。 設定されていても無視し、 起動時に警告する */
   maxIterations?: number;
   maxSelfCheckRounds?: number;
-  compressionThreshold?: number;
   bashCumulativeWarnEnabled?: boolean;
   planTodoOveruseEnabled?: boolean;
-  // Phase D-4
-  keepRecentMessages?: number;
 }
 
 /** 各ティアのデフォルトプロファイル (override 適用前のベース) */
@@ -102,45 +92,37 @@ const TIER_DEFAULTS: Record<Tier, Omit<CapabilityProfile, "tier" | "contextWindo
     supportsParallelTools: true,
     reliableInstructionFollowing: true,
     promptStyle: "concise",
-    // Phase C: T1 はループ点検 30 回ごと、 自己点検 3 回まで、 圧縮閾値 0.7
+    // Phase C: T1 はループ点検 30 回ごと、 自己点検 3 回まで
     loopCheckInterval: 30,
     maxSelfCheckRounds: 3,
-    compressionThreshold: 0.7,
     // 2026-05-09: 誤発火 + T1 が response_complete を呼んで作業を畳む副作用を観測したため OFF
     bashCumulativeWarnEnabled: false,
     // T1 は plan/todo を自然に最小限で運用するため過多検知は OFF (= 賢い LLM の足枷にしない)
     planTodoOveruseEnabled: false,
-    // Phase D-4: 圧縮時に残す直近メッセージ数 (T1 は ctx 広いので余裕あり)
-    keepRecentMessages: 10,
   },
   T2: {
     supportsToolCalling: "native",
     supportsParallelTools: true,
     reliableInstructionFollowing: true,
     promptStyle: "standard",
-    // Phase C: T2 はループ点検 20 回ごと、 自己点検 2 回、 圧縮 0.6
+    // Phase C: T2 はループ点検 20 回ごと、 自己点検 2 回
     loopCheckInterval: 20,
     maxSelfCheckRounds: 2,
-    compressionThreshold: 0.6,
     // 2026-05-09: T1 で観測した誤発火と作業中断の副作用は T2 でもリスクが高いため OFF
     bashCumulativeWarnEnabled: false,
     planTodoOveruseEnabled: true,
-    keepRecentMessages: 8,
   },
   T3: {
     supportsToolCalling: "json-mode",
     supportsParallelTools: false,
     reliableInstructionFollowing: false,
     promptStyle: "verbose+examples",
-    // Phase C: T3 はループ点検 15 回ごと、 自己点検 1 回、 圧縮 0.5
+    // Phase C: T3 はループ点検 15 回ごと、 自己点検 1 回
     loopCheckInterval: 15,
     maxSelfCheckRounds: 1,
-    compressionThreshold: 0.5,
     // T3 は scaffolding 自体が判断負荷を上げるため P1-A/B は両方 OFF
     bashCumulativeWarnEnabled: false,
     planTodoOveruseEnabled: false,
-    // Phase D-4: T3 は短 ctx (8K-32K) なので直近 5 件だけ残して積極的に圧縮
-    keepRecentMessages: 5,
   },
 };
 
@@ -165,7 +147,7 @@ export interface TierContextBudget {
   estimateMarginTokens: number;
   /** S: 整理そのものに要る余白 (段階 3 の要約呼び出しと整理後の状態通知) */
   reductionMarginTokens: number;
-  /** K: 整理で必ず残す直近のツール呼び出しの回数 (keepRecentMessages を置き換える。 タスク 5) */
+  /** K: 整理で必ず残す直近のツール呼び出しの回数 (旧 keepRecentMessages を置き換えたもの。 タスク 5) */
   keepRecentToolUses: number;
 }
 
