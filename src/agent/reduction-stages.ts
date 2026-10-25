@@ -237,6 +237,11 @@ export interface ForgottenItem {
 export interface ReductionStagesResult {
   /** 変換後の写し。 ツールの対の検証を通っている */
   messages: Message[];
+  /**
+   * 写しの各メッセージが元の履歴 (入力の messages) の何番目から来たか (messages と同じ長さ・昇順)。
+   * 段階 3 (reduction-summary.ts) が写しで決めた範囲を、 サーバに送る元の履歴の位置に対応させるのに使う
+   */
+  originalIndices: number[];
   /** 段階ごとの減った量 (送る形 = 思考の inline 化を含む estimateMessageTokens の差) */
   freedTokens: { preprocess: number; stage0: number; stage1: number; stage2: number; total: number };
   /** 前処理で返した借り (§5.2): 除いた揮発メッセージと、 消した終わった依頼の思考の件数 */
@@ -396,6 +401,7 @@ export function applyReductionStages(input: ReductionStagesInput): ReductionStag
 
   return {
     messages,
+    originalIndices: s2.map((e) => e.orig),
     freedTokens,
     repaid: { ephemeral: repaidEphemeral, thinking: repaidThinking },
     clearedCurrentThinking: clearAt.size,

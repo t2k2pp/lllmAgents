@@ -167,6 +167,11 @@ export class MessageHistory {
    * 「予期しないキャッシュ破壊」 として記録する (docs/prompt-prefix-stability.md §7)。
    */
   private rewriteReasons: string[] = [];
+  /**
+   * 次の状態通知に 1 回だけ添える渡し直し (段階 3 の要約の後の、 最近触ったファイル・いまの作業。
+   * docs/context-reduction-redesign.md §5.6)。 添えたら空にする。
+   */
+  private pendingStateHandover: string | null = null;
 
   constructor(systemPrompt: string) {
     this.systemPrompt = systemPrompt;
@@ -207,9 +212,11 @@ export class MessageHistory {
    *   1. 日時を除いた内容が前回の通知と違う
    *   2. 前回通知を付けたメッセージが履歴から消えた (忘却・圧縮・揮発除去)。 状態を見失わせない
    *   3. 末尾が user メッセージ (新しい依頼の始まり)。 現在日時をここで更新する
-   * 末尾が送信済み・既に通知付き・assistant の時は添付しない (次の呼び出しで再判定する)。
+   *   4. 渡し直し (queueStateHandover) が待っている
+   * 末尾が送信済み・既に通知付き・assistant の時は添付しない (次の呼び出しで再判定する。 渡し直しも待たせたまま)。
    *
-   * 通知の中身 = 現在日時 + composer の dynamic (Goal 節 / ToDo 節)。
+   * 通知の中身 = 現在日時 + composer の dynamic (Goal 節 / ToDo 節) + 待っている渡し直し。
+   * 渡し直しは変化の判定 (key) に含めない (1 回限りのものなので、 次の通知で消えても「変わった」 とはしない)。
    * @returns 添付したら true
    */
   attachDynamicContext(now: Date = new Date()): boolean {
@@ -219,15 +226,32 @@ export class MessageHistory {
       const state = this.compose().dynamic.trim();
       const last = this.lastContextNote;
       const lastGone = last !== null && !this.messages.includes(last.message);
-      if (last === null || last.key !== state || lastGone || tail.role === "user") {
-        const datetime = `# Current datetime\n${formatLocalDatetime(now)}`;
-        tail.contextNote = state.length > 0 ? `${datetime}\n\n${state}` : datetime;
+      const handover = this.pendingStateHandover;
+      if (last === null || last.key !== state || lastGone || tail.role === "user" || handover !== null) {
+        const parts = [`# Current datetime\n${formatLocalDatetime(now)}`];
+        if (state.length > 0) parts.push(state);
+        if (handover !== null) parts.push(handover);
+        tail.contextNote = parts.join("\n\n");
         this.lastContextNote = { key: state, message: tail };
+        this.pendingStateHandover = null;
         attached = true;
       }
     }
     for (const m of this.messages) this.sentMessages.add(m);
     return attached;
+  }
+
+  /**
+   * 次の状態通知に 1 回だけ添える渡し直しを預ける (段階 3 の要約の後。 文面は reduction-summary.ts の
+   * buildStateHandover())。 前のものが未添付のまま残っていれば置き換える (古い要約の渡し直しは意味がない)。
+   */
+  queueStateHandover(note: string): void {
+    this.pendingStateHandover = note.trim().length > 0 ? note.trim() : null;
+  }
+
+  /** 添付を待っている渡し直し (無ければ null)。 テスト・表示用 */
+  getPendingStateHandover(): string | null {
+    return this.pendingStateHandover;
   }
 
   getRawMessages(): Message[] {
@@ -431,6 +455,7 @@ export class MessageHistory {
   clear(): void {
     this.messages = [];
     this.rewriteReasons.push("clear");
+    this.pendingStateHandover = null;
     // WeakSet は参照消失で自動 GC されるので明示クリア不要だが、 防御的に新規化
     this.ephemeralMessages = new WeakSet<Message>();
     this.displayedMessages = new WeakSet<Message>();
