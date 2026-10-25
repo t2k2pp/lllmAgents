@@ -102,10 +102,10 @@ src/discord/
 
 | 項目 | 変更 |
 |---|---|
-| `discord.publicKey` | 不要になる。型には残すが未使用 (旧設定があっても無害) |
+| `discord.publicKey` | 不要になる。 2026-10-25 に型・スキーマからも削除 (旧設定に残っていても無視される) |
 | `discord.interactionPort` | 同上 |
 | 必須設定 | applicationId + botToken の 2 つに減る |
-| `/discord public-key` `/discord port` | 「Gateway 方式では不要になった」案内を表示 |
+| `/discord public-key` `/discord port` | 2026-10-25 に削除 (何もしない残骸だったため。 docs/todo-legacy-ways-cleanup.md) |
 | `/discord listen start/stop` | 受信の開始/停止 (意味は同じ、中身が WS 接続に) |
 | `/discord status` | Public Key / ポート行を削除し「Bot 接続」行を表示 |
 | `--background` モード | publicKey 必須チェックを botToken 必須チェックに変更 |

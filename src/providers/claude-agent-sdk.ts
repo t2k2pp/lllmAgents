@@ -5,9 +5,8 @@
  *
  * claude-cli プロバイダとの違い:
  *  - subprocess を spawn せず、 lllmAgent と同じ Node プロセス内で SDK を実行
- *  - lllmAgent のツールを in-process MCP server として SDK に公開 (createSdkMcpServer)
- *  - tool calling が「動く」: tool 呼び出しは SDK 内部で MCP 経由で lllmAgent の
- *    ToolExecutor に届き、 結果が Claude に返される
+ *  - tool の実行は outer の agent-loop が行う (SDK 内部ループは使わない。
+ *    docs/claude-agent-sdk-provider-design.md 改訂節)
  *  - 認証は claude login 済みの subscription を継承 (API キー不要)
  *
  * 制約:
@@ -28,24 +27,12 @@ import type {
 } from "./base-provider.js";
 import type { ModelInfo, ModelDetail, SecondLLMProviderType } from "../config/types.js";
 import { CLAUDE_MODELS } from "../config/types.js";
-import type { ToolExecutor } from "../tools/tool-executor.js";
-import type { ToolRegistry } from "../tools/tool-registry.js";
 import { getOpsLogger } from "../utils/ops-logger.js";
 
 interface ClaudeAgentSdkProviderConfig {
   model: string;
   /** claude バイナリへのパス (SDK のバンドルが動かない環境向け) */
   pathToClaudeCodeExecutable?: string;
-  /**
-   * lllmAgent ツールを SDK に公開する際に使う ToolRegistry。
-   * 未指定なら lllmagents MCP server は登録せず、 SDK の built-in ツールのみを使う。
-   */
-  toolRegistry?: ToolRegistry;
-  /**
-   * lllmAgent ツール実行に使う ToolExecutor。
-   * toolRegistry を渡すなら必須 (権限チェック / hook を通すため)。
-   */
-  toolExecutor?: ToolExecutor;
 }
 
 export class ClaudeAgentSdkProvider implements LLMProvider {
@@ -54,20 +41,6 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
 
   constructor(config: ClaudeAgentSdkProviderConfig) {
     this.config = config;
-  }
-
-  /**
-   * 2026-05-23 改訂以降は no-op に近い。 旧実装では SDK 内部 MCP server に
-   * lllmAgent ツールを公開していたが、 SDK 内部ループが起きず tool_use が
-   * テキストとして outer にリークする問題があったため、 tool 実行は outer
-   * agent-loop に戻した (docs/claude-agent-sdk-provider-design.md 改訂節)。
-   *
-   * 後方互換のため method は残す。 渡された registry / executor は参照のみ
-   * 保持し、 doChat では使わない。
-   */
-  attachToolBridge(registry: ToolRegistry, executor: ToolExecutor): void {
-    this.config.toolRegistry = registry;
-    this.config.toolExecutor = executor;
   }
 
   async testConnection(): Promise<boolean> {
@@ -112,9 +85,7 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
   }
 
   async *chatWithTools(params: ChatWithToolsParams): AsyncGenerator<ChatChunk> {
-    // tools は SDK 側の MCP 経由で公開する (ChatParams.tools の ToolDefinition[] ではなく
-    // ToolRegistry / ToolExecutor 経由で渡す設計)。
-    // ChatParams.tools は agent-loop からの定義リストだが、 ここでは ToolRegistry をそのまま使う。
+    // tool 名だけを doChat に渡す。 tool の実行は outer の agent-loop が行う。
     yield* this.doChat(
       params,
       params.tools.map((t) => t.function.name),

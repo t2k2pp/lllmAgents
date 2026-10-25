@@ -168,19 +168,6 @@ const T3_FEW_SHOTS: Record<string, string> = {
 - ヒット 0 で同じ pattern を再試行 → pattern を緩める ("*" → "**/*"、 拡張子を変える)
 - 全ディレクトリを再帰検索 (\`ls -R\` 相当) は使わない (スコープ違反)`,
 
-  todo_write: `[T3向け — todo_write は deprecated。 todo_append を使う]
-良い例 (新規):
-  todo_append({"items": [
-    {"content": "main.py を file_write で作成", "status": "in_progress"},
-    {"content": "node --check で構文確認", "status": "pending"},
-    {"content": "python main.py で動作確認", "status": "pending"}
-  ]})
-原則:
-- 3 項目で十分。 細かく分けすぎない
-- "in_progress" は同時に 1 つだけ
-- 状態変更は todo_mark(id, status)。 全部 completed で response_complete
-- 行き詰まったら todo_mark(id, "blocked") で自己宣言`,
-
   todo_append: `[T3向け 例: todo_append]
 複数の作業ステップを ToDo に commit する。 思考 → 戦略 → 実行 のリズムで使う。
 良い例:

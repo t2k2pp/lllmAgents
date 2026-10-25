@@ -15,7 +15,7 @@ description: 既存 lllmAgents コードベースに手を入れる時の作業�
 | ファイルの一部を変更 | `file_edit` | bash の `sed` / `awk` |
 | 新規ファイル作成 / 全体書き直し | `file_write` | テキスト応答にコード貼り付け |
 | パターン検索 | `glob` (パス) / `grep` (内容) | bash の `find` (遅い・出力が冗長) |
-| ToDo 管理 | `todo_write` | テキスト応答の箇条書きで管理 |
+| ToDo 管理 | `todo_append` (追加) / `todo_mark` (状態更新) / `todo_delete` (削除) | テキスト応答の箇条書きで管理 |
 | 構文チェック | `bash node --check` 等 | LLM の目視チェックだけ |
 
 `bash` は git / npm / 構文チェック等で使うが、 ファイル操作には使わない。

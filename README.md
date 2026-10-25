@@ -174,20 +174,20 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/compact` | コンテキストを手動圧縮 |
 | `/forget` | コンテキストを忘却で整理（要約せず捨てる）。`/forget dry` で何が消えるか事前確認、`/forget mode <compress\|forget\|hybrid>` で自動縮約の手段を切替（既定 hybrid）、`/forget status` で実績確認。詳細: docs/context-forgetting.md |
 | `/handoff` | 引き継ぎメモを残してコンテキストをリセット。`/handoff dry` でメモを表示するだけ（リセットしない）。メモの生成に失敗した場合は履歴を変更しない。詳細: docs/context-strategy.md |
-| `/model` | 現在のモデル情報 / `/model list` / `/model <name>` / `/model url <URL>` / `/model provider <type>` / `/model description <text>` / `/model temperature <値>` / `/model top_p <値>` / `/model top_k <値>` / `/model rep_penalty <値>` |
-| `/second` | セカンドLLM管理 (status/enable/disable/setup/url/provider/model/context/description) |
-| `/profiles` | LLM 接続プロファイル履歴 (`/profiles` で選択、`list` / `delete` / `help`)。 詳細: docs/llm-profiles.md |
+| `/model` | 現在のモデル情報 / `/model list` / `/model <name>` / `/model host <ホスト>` / `/model port <番号>` / `/model provider <type>` / `/model description <text>` / `/model temperature <値>` / `/model top_p <値>` / `/model top_k <値>` / `/model rep_penalty <値>` |
+| `/model second` | セカンドLLM管理 (`setup` / `enable` / `disable` / `list` / `context` / `host` / `port` / `provider` / `description` / `temperature` 等) |
+| `/model vision` | Vision LLM管理 (`setup` / `list` / `context` / `description` / `clear`) |
+| `/swap` | メインLLM ⇔ セカンドLLM を入れ替え (`-y` で確認なし) |
+| `/models` | 登録済みモデルの一覧から main/second への設定・編集・複製・削除・追加。 詳細: docs/model-registry.md |
 | `/todo` | タスクリスト表示 |
-| `/sessions` | 保存済みセッション一覧（直近10件） |
-| `/resume <id>` | セッションの会話・確定済み標準出力を復元（旧sessionは会話から表示を再構成） |
-| `/continue` | 最新セッションを復元 |
+| `/resume [id]` | セッションの会話・確定済み標準出力を復元（引数なしで選択、旧sessionは会話から表示を再構成）。`/resume latest` で最新、`/resume list [N]` で一覧 |
 | `/fork [id\|latest]` | 現在または保存済み会話を新しいセッションへ分岐（元セッションは不変） |
 | `/rename <name>` | 現在のセッションへ名前を付け、`/resume list` と再開pickerへ保存 |
 | `/memory` | 永続メモリ表示 |
 | `/remember <text>` | メモリに追記 |
 | `/diff` | stage済み・未stage・未追跡を含むworking treeの実Git差分を表示 |
 | `/plan` | プランモードに入る |
-| `/skills` | 利用可能なスキル一覧 |
+| `/skills` | スキル一覧と管理 (`status` / `on` / `off` / `reload` / `toggle <name>`) |
 | `/learn [status\|start\|finish\|cancel]` | browser/computer操作の明示記録を管理し、秘密値を除いた手動起動skillとして保存 |
 | `/status` | 全体ステータス（モデル・コンテキスト・タスク等） |
 | `/cost` | セッションのトークン使用量・コスト表示（画像生成コスト含む） |
@@ -196,11 +196,10 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/doctor` | 環境診断 — LLM接続 / Playwright / Discord / Slack / 画像生成 / ディスク使用量を一括チェック。トラブル報告時はこの出力を添える |
 | `/compress-input` | 入力圧縮モード切替（project指示/メモが閾値超過時に意図保持で圧縮、縮まなければ原文、既定OFF） |
 | `/parallel` | 並列ツール実行数の設定 |
-| `/second` | セカンドLLM委任の設定 |
-| `/stream` | ストリーミング表示切替 |
+| `/stream` | ストリーミング表示の現状表示と切替（引数なし） |
 | `/search` | Web検索 |
 | `/permission` | 権限設定の管理 |
-| `/loop` | 反復実行モード |
+| `/loop` | 反復実行モード (`/loop [間隔] <プロンプト>` / `/loop status` で一覧と停止 / `/loop stop [id\|all]`) |
 | `/goal-seek <goal>` | Goal Seek mode 開始（acceptance criteria を立て合格まで自律実行）。複雑なタスクは通常入力でも自動提案される（`goalSeek.autoPropose: false` で無効化） |
 | `/exit-goal-seek` | Goal Seek mode を抜ける |
 | `/integrations` | 外部サービス連携の設定メニュー (Discord / Slack / 会話ログ / Web検索)。Discord の `/ask` 受信は Gateway 方式で公開URL・トンネル不要 (docs/discord-gateway-design.md) |
@@ -281,7 +280,7 @@ LLMが自律的に呼び出すツール:
 | `web_search` | 自動 | Web検索（SearXNG／DuckDuckGo）。provider障害を0件と区別し、保存設定を変えない1回限りの明示overrideに対応 |
 | `web_fetch` | 自動 | URL取得（HTML→テキスト変換） |
 | `ask_user` | 自動 | ユーザーへの質問・選択肢提示 |
-| `todo_write` | 自動 | タスクリスト管理 |
+| `todo_append` / `todo_mark` / `todo_delete` | 自動 | タスクリストへの追加・状態更新・削除 |
 | `enter_plan_mode` | 自動 | プランモード開始 |
 | `exit_plan_mode` | 自動 | プラン承認リクエスト |
 | `task` | 自動 | サブエージェントへのタスク委譲（model / max turns / preload skills / `shared`・`worktree` isolation指定可） |
@@ -435,7 +434,7 @@ src/
 
 | レベル | ツール | 説明 |
 |--------|--------|------|
-| 自動許可 | file_read, glob, grep, web_search, web_fetch, ask_user, todo_write 等 | 読み取り・内部操作 |
+| 自動許可 | file_read, glob, grep, web_search, web_fetch, ask_user, todo_append / todo_mark / todo_delete 等 | 読み取り・内部操作 |
 | 要確認 | file_write, file_edit, bash, browser操作 | 変更を伴う操作 |
 | 禁止 | サンドボックス外のファイル操作 | 安全性のため |
 
@@ -515,9 +514,6 @@ Markdownファイルで定義するコーディング規約・ガイドライン
   "security": {
     "allowedDirectories": [],
     "autoApproveTools": ["file_read", "glob", "grep"]
-  },
-  "context": {
-    "compressionThreshold": 0.8
   }
 }
 ```
@@ -536,8 +532,8 @@ REPL での切替:
 ```
 /model setup anthropic        Anthropic API (ANTHROPIC_API_KEY)
 /model setup claude-cli       Claude Code CLI (claude -p)
-/second setup anthropic       セカンドLLM として Anthropic API を設定
-/second setup claude-cli      セカンドLLM として claude CLI を設定
+/model second setup anthropic   セカンドLLM として Anthropic API を設定
+/model second setup claude-cli  セカンドLLM として claude CLI を設定
 ```
 
 選択可能モデル (`/model list` でハードコード一覧から選ぶ):
@@ -553,7 +549,7 @@ REPL での切替:
 | パス | 内容 |
 |------|------|
 | `~/.localllm/config.json` | 設定ファイル |
-| `~/.localllm/llm-profiles.json` | LLM 接続プロファイル履歴 (`/profiles` で管理) |
+| `~/.localllm/model-registry.json` | 登録済みモデルと main/second 等の割当 (`/models` で管理。 旧 `llm-profiles.json` は初回起動時に自動移行) |
 | `~/.localllm/sessions/` | セッション履歴 |
 | `~/.localllm/memory/MEMORY.md` | 永続メモリ |
 | `~/.localllm/plans/` | プランモードの計画書 |

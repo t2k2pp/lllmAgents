@@ -1,6 +1,6 @@
 # Slack統合 設計書
 
-> **2026-05-28 更新**: REPL からの設定は `/integrations` (短縮: `/intg`) → Slack の picker 経由が canonical (Phase optimize #3 で Discord / Slack / Chatlog / Search を統合)。 本書中の `/slack xxx` は dispatcher 互換で引き続き動作するが、 補完候補からは外れている。 Slack-auto-approve ツールも `/permission` の picker から編集可能になった (旧 `/permission slack-add` は完全互換のため残存)。
+> **2026-05-28 更新**: REPL からの設定は `/integrations` → Slack の picker 経由が canonical (Phase optimize #3 で Discord / Slack / Chatlog / Search を統合)。 本書中の `/slack xxx` は dispatcher 互換で引き続き動作するが、 補完候補からは外れている。 Slack-auto-approve ツールも `/permission` の picker から編集可能になった (旧 `/permission slack-add` は完全互換のため残存)。
 
 ## 概要
 

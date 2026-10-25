@@ -149,7 +149,6 @@ function createProviderFromEndpoint(endpoint: LLMEndpoint | SecondLLMEndpoint, p
         if (!endpoint.model) {
           throw new Error("Missing model for claude-agent-sdk provider");
         }
-        // ツール公開 (in-process MCP bridge) は agent-loop 初期化時に attachToolBridge() で行う
         return new ClaudeAgentSdkProvider({
           model: endpoint.model,
         });

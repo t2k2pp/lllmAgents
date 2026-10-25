@@ -312,7 +312,7 @@ ${skillLines}`);
       sections.push("");
       sections.push(`Second LLM: ${s.model} (${s.providerType}${s.baseUrl ? ` @ ${s.baseUrl}` : ""})${parallelNote}`);
       sections.push(
-        secDesc ? `Traits: ${secDesc}` : `Traits: (unset — the user can set it via /second description <text>)`,
+        secDesc ? `Traits: ${secDesc}` : `Traits: (unset — the user can set it via /model second description <text>)`,
       );
 
       sections.push("");

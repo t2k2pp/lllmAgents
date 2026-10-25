@@ -41,9 +41,6 @@
   "security": {
     "allowedDirectories": [],
     "autoApproveTools": ["file_read", "glob", "grep"]
-  },
-  "context": {
-    "compressionThreshold": 0.8
   }
 }
 ```
@@ -68,9 +65,6 @@
   "security": {
     "allowedDirectories": [],
     "autoApproveTools": ["file_read", "glob", "grep", "web_search", "web_fetch"]
-  },
-  "context": {
-    "compressionThreshold": 0.8
   }
 }
 ```
@@ -108,9 +102,6 @@
   "security": {
     "allowedDirectories": [],
     "autoApproveTools": ["file_read", "glob", "grep", "web_search", "web_fetch"]
-  },
-  "context": {
-    "compressionThreshold": 0.8
   }
 }
 ```
@@ -143,9 +134,6 @@
       "deny": ["bash(rm -rf *)"],
       "ask": ["bash(git push *)"]
     }
-  },
-  "context": {
-    "compressionThreshold": 0.8
   },
   "discord": {
     "enabled": true,
@@ -382,8 +370,13 @@ API キー不要 (claude CLI 側の `claude login` 済みセッションを再�
 
 | キー | 型 | デフォルト | 説明 |
 |------|-----|----------|------|
-| `compressionThreshold` | number | 0.8 | コンテキスト使用率がこの値を超えたら自動圧縮 (0.0〜1.0) |
-| `maxHistoryMessages` | number | 100 | 保持する最大メッセージ数 |
+| `reduction` | string | `"hybrid"` | 自動縮約の手段 (`compress` / `forget` / `hybrid`)。 `/forget mode` で切替。 詳細: docs/context-forgetting.md |
+| `forgetting` | object | — | 忘却の詳細設定。 docs/context-forgetting.md |
+| `strategy` | object | `{ "mode": "auto" }` | 区切りでのコンテキスト整理。 `/context strategy` で切替。 docs/context-strategy.md |
+
+自動圧縮を始めるコンテキスト使用率はモデルの能力ティアから決まる (T1=70% / T2=60% / T3=50%)。
+変えたい場合は `modelCapabilities.<モデル名>.compressionThreshold` で指定する。
+(旧キー `context.compressionThreshold` / `context.maxHistoryMessages` は使われていなかったため削除した。 残っていても無視される)
 
 ## discord
 
@@ -396,7 +389,7 @@ API キー不要 (claude CLI 側の `claude login` 済みセッションを再�
 | `attachGeneratedImages` | boolean | `image_generate` で生成した画像を webhook に自動添付するか（未設定/`true`=添付、`false`=無効）。docs/image-generation.md |
 | `maxAttachmentMb` | number | 添付画像の目標サイズ上限（MB、デフォルト 8）。超過する画像はコードで自動縮小してから添付する（オリジナルは無加工） |
 
-CLI からは `/integrations` (短縮: `/intg`) → Discord の picker で対話設定 (canonical)。 旧 `/discord url <URL>` → `/discord enable` → `/discord test` も dispatcher 互換のため動作する。
+CLI からは `/integrations` → Discord の picker で対話設定 (canonical)。 旧 `/discord url <URL>` → `/discord enable` → `/discord test` も dispatcher 互換のため動作する。
 
 生成画像の自動添付: `enabled` かつ `webhookUrl` 設定済みで `attachGeneratedImages` が `false` でなければ、`image_generate` の完了ごとに生成画像を Discord へ添付投稿する。サイズ上限を超える画像は「リサイズ優先 → 必要時のみ JPEG 変換」でコード側が自動縮小する（生成 AI には縮小させない）。REPL からは `/discord images on|off` で切替（`/discord status` に状態を表示）。
 
@@ -405,9 +398,7 @@ CLI からは `/integrations` (短縮: `/intg`) → Discord の picker で対話
 | キー | 型 | 説明 |
 |------|-----|------|
 | `applicationId` | string | Discord Developer PortalのApplication ID |
-| `publicKey` | string | Ed25519公開鍵（署名検証用） |
 | `botToken` | string | Botトークン（コマンド登録・応答送信） |
-| `interactionPort` | number | HTTPサーバーポート (デフォルト: 3003) |
 | `listenEnabled` | boolean | 起動時にInteractionサーバーを自動起動するか |
 | `allowedUserIds` | string[] | コマンド・確認ボタンを受け付けるユーザーID。未設定=全員（確認ボタンは常に依頼者のみ有効）。`/discord user-add <ID>` で設定 |
 | `interactionTimeoutSec` | number | 権限確認ボタンのタイムアウト秒（デフォルト300。ask_user はこの2倍）。詳細: docs/channel-interaction-bridge-design.md |

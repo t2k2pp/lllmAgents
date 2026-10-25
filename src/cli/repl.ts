@@ -76,19 +76,13 @@ import {
 import { isBashNetworkContained } from "../security/containment.js";
 import { runLocalLLMSetup, connectAndListModels } from "../config/setup-wizard.js";
 import {
-  recordLLMProfile,
-  listLLMProfiles,
-  deleteLLMProfiles,
-  touchProfile,
-  type LLMProfile,
-} from "../config/llm-profiles.js";
-import {
   setSlot as setRegistrySlot,
   listEntries as listRegistryEntries,
   getEntry as getRegistryEntry,
   updateEntry as updateRegistryEntry,
   deleteEntry as deleteRegistryEntry,
   recordEntry as recordRegistryEntry,
+  touchEntry as touchRegistryEntry,
   getSlots as getRegistrySlots,
   clearSlot as clearRegistrySlot,
   listNamedSlots,
@@ -496,7 +490,7 @@ export class REPL {
    * 暗号化済み apiKey の復号に必要な合言葉を確保する。
    * 既存の this.passphrase で復号できれば再利用、できなければプロンプトで取得して保持する。
    * 暗号化されていない apiKey の場合は何もしない。
-   * /swap や /second setup 後に Provider を再生成する際、起動時に取得した合言葉を使い回すための共通処理。
+   * /swap や /model second setup 後に Provider を再生成する際、起動時に取得した合言葉を使い回すための共通処理。
    */
   private async ensurePassphraseFor(
     apiKey: string | undefined,
@@ -614,7 +608,7 @@ export class REPL {
     this.refreshLLMProfiles();
     // Model Registry に記録 + main slot を更新 (失敗しても本体動作には影響させない)
     try {
-      const entry = recordLLMProfile(this.config.mainLLM);
+      const entry = recordRegistryEntry(this.config.mainLLM);
       if (entry) setRegistrySlot("main", entry.id);
     } catch {
       /* ignore */
@@ -1367,142 +1361,11 @@ export class REPL {
     console.log(chalk.dim("    疎通確認: /image test  /  試し生成: /image gen <プロンプト>\n"));
   }
 
-  // ─── LLM プロファイル履歴 (/profiles) ────────────────────────────
-
-  /**
-   * `/profiles` コマンドハンドラ。
-   *
-   *   /profiles              対話的に履歴一覧 → 選んで main/second に適用
-   *   /profiles list         一覧表示のみ (適用なし)
-   *   /profiles delete       チェックボックスで複数選択削除
-   *   /profiles help         使い方表示
-   *
-   * プロファイル選択 → 適用先 (main/second) を選ぶ → 該当 endpoint を書き戻し → applyXxxEndpoint で反映。
-   */
-  private async handleProfilesCommand(args: string[]): Promise<void> {
-    const sub = (args[0] ?? "").toLowerCase();
-    const profiles = listLLMProfiles();
-
-    if (sub === "help" || sub === "--help" || sub === "-h") {
-      console.log(chalk.bold("\n  ── /profiles ──"));
-      console.log(chalk.dim("    /profiles            履歴から選んで main/second に適用"));
-      console.log(chalk.dim("    /profiles list       一覧のみ表示"));
-      console.log(chalk.dim("    /profiles delete     複数選択して削除"));
-      console.log(chalk.dim("    /profiles help       このヘルプ"));
-      console.log(chalk.dim("\n  ※ メイン/セカンドLLM を変更するたびに自動で履歴に記録されます。"));
-      console.log(chalk.dim("  ※ 同じ接続情報 (providerType + model + URL/endpoint) は自動マージされます。"));
-      console.log();
-      return;
-    }
-
-    if (profiles.length === 0) {
-      console.log(chalk.dim("  履歴はまだありません。"));
-      console.log(
-        chalk.dim("  /model setup や /second setup でメイン/セカンドLLM を設定すると自動的に履歴が残ります。"),
-      );
-      return;
-    }
-
-    if (sub === "list") {
-      this.printProfilesList(profiles);
-      return;
-    }
-
-    if (sub === "delete" || sub === "del" || sub === "rm") {
-      try {
-        const targets = await checkbox({
-          message: "削除するプロファイルを選択 (スペースで複数選択):",
-          choices: profiles.map((p) => ({
-            name: `${p.name}  ${chalk.dim(`(last used: ${formatRelativeTime(p.lastUsedAt)})`)}`,
-            value: p.id,
-          })),
-        });
-        if (targets.length === 0) {
-          console.log(chalk.dim("  削除対象が選択されませんでした。"));
-          return;
-        }
-        const removed = deleteLLMProfiles(targets);
-        console.log(chalk.green(`  ${removed} 件のプロファイルを削除しました。`));
-      } catch (e) {
-        if (!(e instanceof Error && e.message.includes("User force closed"))) {
-          console.log(chalk.red(`  削除に失敗: ${e instanceof Error ? e.message : String(e)}`));
-        }
-      }
-      return;
-    }
-
-    // デフォルト動作: プロファイル選択 → 適用先選択
-    if (sub && sub !== "switch" && sub !== "apply") {
-      console.log(chalk.yellow(`  未知のサブコマンド: ${sub}`));
-      console.log(chalk.dim("  /profiles help で使い方を表示"));
-      return;
-    }
-
-    const curMain = this.config.mainLLM;
-    const curSec = this.config.secondLLM?.endpoint;
-    try {
-      const chosenId = await select({
-        message: "適用するプロファイルを選択:",
-        choices: profiles.map((p) => {
-          const isMain = curMain && profileMatchesEndpoint(p, curMain);
-          const isSec = curSec && profileMatchesEndpoint(p, curSec);
-          const tag =
-            isMain && isSec
-              ? chalk.cyan("  [main + second]")
-              : isMain
-                ? chalk.cyan("  [main]")
-                : isSec
-                  ? chalk.cyan("  [second]")
-                  : "";
-          const used = chalk.dim(`  (${formatRelativeTime(p.lastUsedAt)})`);
-          return { name: `${p.name}${tag}${used}`, value: p.id };
-        }),
-      });
-
-      const chosen = profiles.find((p) => p.id === chosenId);
-      if (!chosen) return;
-
-      const target = await select({
-        message: `「${chosen.name}」 をどこに適用しますか?`,
-        choices: [
-          { name: "メインLLM に適用", value: "main" },
-          { name: "セカンドLLM に適用", value: "second" },
-          { name: "キャンセル", value: "cancel" },
-        ],
-        default: "main",
-      });
-      if (target === "cancel") {
-        console.log(chalk.dim("  キャンセルしました。"));
-        return;
-      }
-      await this.applyProfileTo(chosen, target as "main" | "second");
-    } catch (e) {
-      if (!(e instanceof Error && e.message.includes("User force closed"))) {
-        console.log(chalk.red(`  操作失敗: ${e instanceof Error ? e.message : String(e)}`));
-      }
-    }
-  }
-
-  private printProfilesList(profiles: LLMProfile[]): void {
-    console.log(chalk.bold(`\n  ── LLM プロファイル履歴 (${profiles.length} 件) ──`));
-    const curMain = this.config.mainLLM;
-    const curSec = this.config.secondLLM?.endpoint;
-    for (const p of profiles) {
-      const tags: string[] = [];
-      if (curMain && profileMatchesEndpoint(p, curMain)) tags.push(chalk.cyan("main"));
-      if (curSec && profileMatchesEndpoint(p, curSec)) tags.push(chalk.cyan("second"));
-      const tagStr = tags.length > 0 ? `  [${tags.join(", ")}]` : "";
-      console.log(`  ${chalk.bold(p.name)}${tagStr}`);
-      console.log(chalk.dim(`    id: ${p.id}  /  last used: ${formatRelativeTime(p.lastUsedAt)}`));
-    }
-    console.log();
-  }
-
   /**
    * 選んだプロファイルを main または second に書き戻して反映する。
    * apiKey が暗号化済みの場合は applyXxxEndpoint 側で合言葉を要求する。
    */
-  private async applyProfileTo(profile: LLMProfile, target: "main" | "second" | "vision"): Promise<void> {
+  private async applyProfileTo(profile: LLMRegistryEntry, target: "main" | "second" | "vision"): Promise<void> {
     const ep = { ...profile.endpoint };
     if (target === "main") {
       this.config.mainLLM = ep;
@@ -1528,16 +1391,14 @@ export class REPL {
       await this.applySecondLLMEndpoint();
       console.log(chalk.green(`  セカンドLLM を 「${profile.name}」 に切り替えました。`));
     }
-    touchProfile(profile.id);
+    touchRegistryEntry(profile.id);
   }
 
   // ─── Model Registry (/models) ─────────────────────────────────
   //
   // docs/model-registry.md
-  // /profiles を一般化したコマンド: registry エントリ一覧 → アクション選択
+  // registry エントリ一覧 → アクション選択
   // (Set as main / Set as second / Edit / Duplicate / Delete / Add new)
-  //
-  // 互換: /profiles は alias として残し、 deprecation 注記を出す。
 
   private async handleModelsCommand(args: string[]): Promise<void> {
     const sub = (args[0] ?? "").toLowerCase();
@@ -2055,14 +1916,9 @@ export class REPL {
   }
 
   /**
-   * セカンドLLM (second slot) のサブコマンドハンドラ。
+   * セカンドLLM (second slot) のサブコマンドハンドラ。`/model second ...` から呼ばれる。
    *
-   * 2026-05-27: /model second ... と /second ... の両方から呼ばれる共通実装。
-   * docs/model-registry.md §4.1 で /second を /model のサブに統合した結果、
-   * dispatch だけ 2 経路あり、 ロジックは本メソッドに集約される。
-   *
-   * args は subcommand 部分 (`/model second context 128k` なら ["context", "128k"]、
-   * `/second context 128k` なら同じ ["context", "128k"])。
+   * args は subcommand 部分 (`/model second context 128k` なら ["context", "128k"])。
    */
   private async handleSecondLLMCommand(args: string[]): Promise<void> {
     const subCmd = args[0];
@@ -2231,22 +2087,10 @@ export class REPL {
           chalk.dim(`  セカンドLLMコンテキスト長: ${chalk.yellow(oldLabel)} → ${chalk.cyan(newLabel)} トークン`),
         );
       }
-    } else if (subCmd === "url") {
-      const newUrl = args.slice(1).join(" ").trim();
-      if (!newUrl) {
-        console.log(chalk.dim(`  現在のURL: ${this.config.secondLLM?.endpoint.baseUrl ?? "(未設定)"}`));
-        console.log(chalk.dim(`  使い方: /model second url <URL>`));
-        console.log(chalk.dim(`  例: /model second url http://192.168.1.201:8000`));
-      } else if (this.config.secondLLM) {
-        const oldUrl = this.config.secondLLM.endpoint.baseUrl ?? "(未設定)";
-        this.config.secondLLM.endpoint.baseUrl = newUrl;
-        saveConfig(this.config);
-        await this.applySecondLLMEndpoint();
-        console.log(chalk.dim(`  URL: ${chalk.yellow(oldUrl)} → ${chalk.cyan(newUrl)}`));
-        console.log(chalk.green(`  実行時に反映しました。`));
-      } else {
-        console.log(chalk.red("  Second LLM の設定が存在しません。/model second setup で初期設定してください。"));
-      }
+    } else if (subCmd === "host") {
+      await this.handleModelHostCommand("second", args.slice(1).join(" ").trim());
+    } else if (subCmd === "port") {
+      await this.handleModelPortCommand("second", args.slice(1).join(" ").trim());
     } else if (subCmd === "provider") {
       const newProvider = args[1]?.trim();
       const validProviders = [
@@ -2437,9 +2281,10 @@ export class REPL {
       console.log(chalk.dim("    /model second disable         無効化"));
       console.log(chalk.dim("    /model second list            利用可能モデル一覧から選択"));
       console.log(chalk.dim("    /model second context <128k>  コンテキスト長変更"));
+      console.log(chalk.dim("    /model second host <ホスト>   接続先ホスト/IP を変更 (ポートは保持)"));
+      console.log(chalk.dim("    /model second port <番号>     接続先ポートを変更"));
       console.log(chalk.dim("    /model second description <text>  特性説明"));
       console.log(chalk.dim("\n  詳細編集 (temperature / top_p / 等) は /models Edit を推奨。"));
-      console.log(chalk.dim("  互換: /second ... も alias として動作中。"));
     }
   }
 
@@ -2690,13 +2535,12 @@ export class REPL {
   }
 
   /**
-   * /resume サブコマンドの共通ハンドラ (Phase optimize #2、 2026-05-28)。
-   * /sessions と /continue を alias として吸収。
+   * /resume サブコマンドのハンドラ (Phase optimize #2、 2026-05-28)。
    *
    *   /resume               → 対話 picker で選択
    *   /resume <id>          → ID 直接指定
-   *   /resume latest        → 最新セッションを即復元 (旧 /continue)
-   *   /resume list [<n>]    → 一覧表示のみ (旧 /sessions)
+   *   /resume latest        → 最新セッションを即復元
+   *   /resume list [<n>]    → 一覧表示のみ
    */
   private async handleResumeCommand(args: string[]): Promise<void> {
     const sub = args[0]?.toLowerCase();
@@ -3390,13 +3234,15 @@ export class REPL {
    */
   private async maybeOfferProfileHistory(
     target: "main" | "second" | "vision",
-    matchProvider?: string | ((p: LLMProfile) => boolean),
+    matchProvider?: string | ((p: LLMRegistryEntry) => boolean),
   ): Promise<boolean> {
-    const allProfiles = listLLMProfiles();
+    const allProfiles = listRegistryEntries();
     if (allProfiles.length === 0) return false;
 
     const filter =
-      typeof matchProvider === "string" ? (p: LLMProfile) => p.endpoint.providerType === matchProvider : matchProvider;
+      typeof matchProvider === "string"
+        ? (p: LLMRegistryEntry) => p.endpoint.providerType === matchProvider
+        : matchProvider;
     const candidates = filter ? allProfiles.filter(filter) : allProfiles;
     if (candidates.length === 0) return false;
 
@@ -3816,7 +3662,7 @@ export class REPL {
     // Model Registry に記録 + second slot を更新 (失敗しても本体動作には影響させない)
     if (this.config.secondLLM?.endpoint) {
       try {
-        const entry = recordLLMProfile(this.config.secondLLM.endpoint);
+        const entry = recordRegistryEntry(this.config.secondLLM.endpoint);
         if (entry) setRegistrySlot("second", entry.id);
       } catch {
         /* ignore */
@@ -3841,7 +3687,7 @@ export class REPL {
         this.visionService.setProvider(newProvider, ep.model);
         // registry に記録 + vision slot 更新
         try {
-          const entry = recordLLMProfile(ep);
+          const entry = recordRegistryEntry(ep);
           if (entry) setRegistrySlot("vision", entry.id);
         } catch {
           /* ignore */
@@ -3867,7 +3713,7 @@ export class REPL {
   /**
    * LLMプロファイル (main/second の description・baseUrl等) を Config から再構築し、
    * AgentLoop のシステムプロンプトを差し替える。
-   * /model description, /second description 等、profile に影響する設定を変更した直後に呼ぶ。
+   * /model description, /model second description 等、profile に影響する設定を変更した直後に呼ぶ。
    */
   private refreshLLMProfiles(): void {
     const hasSecondLLM = this.secondLLMManager?.isAvailable() ?? false;
@@ -3922,12 +3768,31 @@ export class REPL {
   }
 
   /**
+   * host/port を変更する対象 slot の endpoint とラベル・コマンド名を返す。
+   * second は未設定なら null (呼び出し側で setup へ案内する)。
+   */
+  private endpointForHostPort(
+    slot: "main" | "second",
+  ): { ep: LLMEndpoint; label: string; cmd: string; listCmd: string } | null {
+    if (slot === "main") {
+      return { ep: this.config.mainLLM, label: "メインLLM", cmd: "/model", listCmd: "/model list" };
+    }
+    if (!this.config.secondLLM) return null;
+    return {
+      ep: this.config.secondLLM.endpoint,
+      label: "セカンドLLM",
+      cmd: "/model second",
+      listCmd: "/model second list",
+    };
+  }
+
+  /**
    * host/port 変更後に接続テスト + モデル一覧件数をプレビュー表示する。
    * 「URL を入れたのに /model list で何も出ない」 という不信感を払拭する目的。
    * 失敗しても設定は保持する (ユーザーがサーバー起動順を後回しにするケースに配慮)。
    */
-  private async previewConnectionAfterEndpointChange(): Promise<void> {
-    const providerType = this.config.mainLLM.providerType;
+  private async previewConnectionAfterEndpointChange(ep: LLMEndpoint, listCmd: string): Promise<void> {
+    const providerType = ep.providerType;
     if (
       providerType !== "ollama" &&
       providerType !== "lmstudio" &&
@@ -3937,12 +3802,12 @@ export class REPL {
       // クラウド系は host/port では設定しない
       return;
     }
-    const baseUrl = this.config.mainLLM.baseUrl;
+    const baseUrl = ep.baseUrl;
     if (!baseUrl) return;
     try {
       const models = await connectAndListModels(providerType as ProviderType, baseUrl);
       if (models.length > 0) {
-        console.log(chalk.dim(`  ${models.length} 個のモデルが利用可能です。 /model list で選択できます。`));
+        console.log(chalk.dim(`  ${models.length} 個のモデルが利用可能です。 ${listCmd} で選択できます。`));
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -3951,45 +3816,67 @@ export class REPL {
     }
   }
 
-  private async handleModelHostCommand(arg: string): Promise<void> {
-    const cur = this.parseBaseUrl(this.config.mainLLM.baseUrl);
+  /** baseUrl を書き換えて保存し、 対象 slot の実行中 endpoint に反映する */
+  private async applyHostPortChange(slot: "main" | "second", ep: LLMEndpoint, label: string, newUrl: string) {
+    const oldUrl = ep.baseUrl;
+    ep.baseUrl = newUrl;
+    saveConfig(this.config);
+    console.log(chalk.dim(`  ${label} URL: ${chalk.yellow(oldUrl ?? "(未設定)")} → ${chalk.cyan(newUrl)}`));
+    if (slot === "main") {
+      await this.applyMainLLMEndpoint();
+    } else {
+      await this.applySecondLLMEndpoint();
+    }
+  }
+
+  /** `/model host` と `/model second host` の共通実装 */
+  private async handleModelHostCommand(slot: "main" | "second", arg: string): Promise<void> {
+    const target = this.endpointForHostPort(slot);
+    if (!target) {
+      console.log(chalk.red("  Second LLM の設定が存在しません。/model second setup で初期設定してください。"));
+      return;
+    }
+    const { ep, label, cmd, listCmd } = target;
+    const cur = this.parseBaseUrl(ep.baseUrl);
     if (!arg) {
       console.log(chalk.dim(`  現在のホスト: ${cur.host ?? "(未設定)"}`));
       console.log(chalk.dim(`  現在のポート: ${cur.port ?? "(未設定)"}`));
-      console.log(chalk.dim(`  使い方: /model host <ホスト名またはIPアドレス>`));
-      console.log(chalk.dim(`  例: /model host 192.168.1.201`));
-      console.log(chalk.dim(`      /model host localhost`));
+      console.log(chalk.dim(`  使い方: ${cmd} host <ホスト名またはIPアドレス>`));
+      console.log(chalk.dim(`  例: ${cmd} host 192.168.1.201`));
+      console.log(chalk.dim(`      ${cmd} host localhost`));
       console.log(
-        chalk.dim(`  ※ ポートは現状値を維持します。 ポートも変えるなら /model port、 全部やり直すなら /model setup`),
+        chalk.dim(`  ※ ポートは現状値を維持します。 ポートも変えるなら ${cmd} port、 全部やり直すなら ${cmd} setup`),
       );
       return;
     }
     // ホスト名らしさの簡易チェック (先頭がスキームっぽければ案内)
     if (/^https?:\/\//i.test(arg)) {
-      console.log(chalk.yellow("  /model host にはスキーム (http://) を含めないでください。"));
-      console.log(chalk.dim("  例: /model host 192.168.1.201"));
+      console.log(chalk.yellow(`  ${cmd} host にはスキーム (http://) を含めないでください。`));
+      console.log(chalk.dim(`  例: ${cmd} host 192.168.1.201`));
       return;
     }
-    const port = cur.port ?? DEFAULT_PORTS[this.config.mainLLM.providerType as ProviderType] ?? 8080;
-    const newUrl = `http://${arg}:${port}`;
-    const oldUrl = this.config.mainLLM.baseUrl;
-    this.config.mainLLM.baseUrl = newUrl;
-    saveConfig(this.config);
-    console.log(chalk.dim(`  メインLLM URL: ${chalk.yellow(oldUrl ?? "(未設定)")} → ${chalk.cyan(newUrl)}`));
-    await this.applyMainLLMEndpoint();
-    await this.previewConnectionAfterEndpointChange();
+    const port = cur.port ?? DEFAULT_PORTS[ep.providerType as ProviderType] ?? 8080;
+    await this.applyHostPortChange(slot, ep, label, `http://${arg}:${port}`);
+    await this.previewConnectionAfterEndpointChange(ep, listCmd);
   }
 
-  private async handleModelPortCommand(arg: string): Promise<void> {
-    const cur = this.parseBaseUrl(this.config.mainLLM.baseUrl);
+  /** `/model port` と `/model second port` の共通実装 */
+  private async handleModelPortCommand(slot: "main" | "second", arg: string): Promise<void> {
+    const target = this.endpointForHostPort(slot);
+    if (!target) {
+      console.log(chalk.red("  Second LLM の設定が存在しません。/model second setup で初期設定してください。"));
+      return;
+    }
+    const { ep, label, cmd, listCmd } = target;
+    const cur = this.parseBaseUrl(ep.baseUrl);
     if (!arg) {
       console.log(chalk.dim(`  現在のホスト: ${cur.host ?? "(未設定)"}`));
       console.log(chalk.dim(`  現在のポート: ${cur.port ?? "(未設定)"}`));
-      console.log(chalk.dim(`  使い方: /model port <番号>`));
-      console.log(chalk.dim(`  例: /model port 8090`));
-      const port = DEFAULT_PORTS[this.config.mainLLM.providerType as ProviderType];
+      console.log(chalk.dim(`  使い方: ${cmd} port <番号>`));
+      console.log(chalk.dim(`  例: ${cmd} port 8090`));
+      const port = DEFAULT_PORTS[ep.providerType as ProviderType];
       if (port) {
-        console.log(chalk.dim(`  ${this.config.mainLLM.providerType} のデフォルトポート: ${port}`));
+        console.log(chalk.dim(`  ${ep.providerType} のデフォルトポート: ${port}`));
       }
       return;
     }
@@ -3999,13 +3886,8 @@ export class REPL {
       return;
     }
     const host = cur.host ?? "localhost";
-    const newUrl = `http://${host}:${portNum}`;
-    const oldUrl = this.config.mainLLM.baseUrl;
-    this.config.mainLLM.baseUrl = newUrl;
-    saveConfig(this.config);
-    console.log(chalk.dim(`  メインLLM URL: ${chalk.yellow(oldUrl ?? "(未設定)")} → ${chalk.cyan(newUrl)}`));
-    await this.applyMainLLMEndpoint();
-    await this.previewConnectionAfterEndpointChange();
+    await this.applyHostPortChange(slot, ep, label, `http://${host}:${portNum}`);
+    await this.previewConnectionAfterEndpointChange(ep, listCmd);
   }
 
   /**
@@ -5624,25 +5506,14 @@ export class REPL {
       }
 
       case "/stream": {
-        // 2026-05-28: /stream は引数なし toggle / picker 化 (Phase optimize #5)。
-        // 旧 /stream on / /stream off は dispatcher 互換のため残すが補完候補からは外す。
+        // /stream は引数なしで現状表示 + 確認付き toggle の 1 方式のみ。
+        if (args.length > 0) {
+          console.log(
+            chalk.yellow("  /stream は引数を取りません。 引数なしで実行すると現状表示と切り替え確認を行います。"),
+          );
+          break;
+        }
         const current = this.agent.getStreamingDisplay();
-        const sub = args[0]?.toLowerCase();
-        if (sub === "on") {
-          this.agent.setStreamingDisplay(true);
-          this.config.streamingDisplay = true;
-          saveConfig(this.config);
-          console.log(chalk.dim("  ストリーミング表示モードに切り替えました。（設定を保存しました）"));
-          break;
-        }
-        if (sub === "off") {
-          this.agent.setStreamingDisplay(false);
-          this.config.streamingDisplay = false;
-          saveConfig(this.config);
-          console.log(chalk.dim("  スピナー+Markdownレンダリングモードに切り替えました。（設定を保存しました）"));
-          break;
-        }
-        // 引数なし → 現状表示 + toggle
         console.log(chalk.bold("\n  ── Stream display ──"));
         console.log(
           chalk.dim(
@@ -5670,7 +5541,7 @@ export class REPL {
       }
 
       case "/model": {
-        // 2026-05-27: /model second ... を /second の正準形として処理する (docs/model-registry.md §4.1)。
+        // /model second ...: セカンドLLM の操作 (docs/model-registry.md §4.1)。
         // 残りの args (= second 以降) を handleSecondLLMCommand に委譲。
         if (args[0] === "second") {
           await this.handleSecondLLMCommand(args.slice(1));
@@ -5958,26 +5829,10 @@ export class REPL {
               );
             }
           }
-        } else if (args[0] === "host" || args[0] === "ip") {
-          await this.handleModelHostCommand(args.slice(1).join(" ").trim());
+        } else if (args[0] === "host") {
+          await this.handleModelHostCommand("main", args.slice(1).join(" ").trim());
         } else if (args[0] === "port") {
-          await this.handleModelPortCommand(args.slice(1).join(" ").trim());
-        } else if (args[0] === "url") {
-          // 非推奨: 表記揺れ解消のため /model host + /model port または /model setup を推奨
-          console.log(chalk.yellow("  /model url は非推奨です。"));
-          console.log(chalk.dim("  代わりに /model host <ホスト名/IP>、 /model port <番号>、"));
-          console.log(chalk.dim("  または /model setup (ウィザード) をご利用ください。"));
-          const newUrl = args.slice(1).join(" ").trim();
-          if (!newUrl) {
-            console.log(chalk.dim(`  現在のURL: ${this.config.mainLLM.baseUrl}`));
-          } else {
-            const oldUrl = this.config.mainLLM.baseUrl;
-            this.config.mainLLM.baseUrl = newUrl;
-            saveConfig(this.config);
-            console.log(chalk.dim(`  メインLLM URL: ${chalk.yellow(oldUrl)} → ${chalk.cyan(newUrl)}`));
-            await this.applyMainLLMEndpoint();
-            console.log(chalk.green(`  実行時に反映しました。`));
-          }
+          await this.handleModelPortCommand("main", args.slice(1).join(" ").trim());
         } else if (args[0] === "provider") {
           const newProvider = args[1]?.trim();
           const localProviders: ProviderType[] = ["ollama", "lmstudio", "llamacpp", "vllm"];
@@ -6264,30 +6119,19 @@ export class REPL {
         break;
       }
 
-      case "/second": {
-        // 2026-05-27: /model second ... に統合 (docs/model-registry.md §4.1)。
-        // /second 系は alias として動作するが deprecation を 1 行表示する。
-        console.log(
-          chalk.dim(
-            "  ℹ /second は /model second ... に統合されました (alias として動作中)。 詳細: docs/model-registry.md",
-          ),
-        );
-        await this.handleSecondLLMCommand(args);
-        break;
-      }
-
-      case "/swap":
-      case "/switch": {
+      case "/swap": {
         // メインLLM ⇔ セカンドLLM の入れ替え
         if (!this.config.secondLLM) {
-          console.log(chalk.red("\n  セカンドLLM が未設定です。先に /second setup で設定してください。\n"));
+          console.log(chalk.red("\n  セカンドLLM が未設定です。先に /model second setup で設定してください。\n"));
           break;
         }
         const cur = this.config.mainLLM;
         const sec = this.config.secondLLM.endpoint;
         if (!sec.model || !sec.providerType) {
           console.log(
-            chalk.red("\n  セカンドLLM のモデル/プロバイダーが未設定です。先に /second model 等で設定してください。\n"),
+            chalk.red(
+              "\n  セカンドLLM のモデル/プロバイダーが未設定です。先に /model second list 等で設定してください。\n",
+            ),
           );
           break;
         }
@@ -6334,36 +6178,18 @@ export class REPL {
         await this.applySecondLLMEndpoint();
         const isAvail = this.secondLLMManager?.isAvailable() ?? false;
         if (!isAvail && this.config.secondLLM.enabled) {
-          console.log(
-            chalk.yellow("  ※ セカンドLLM の接続テストに失敗しています。/second status で確認してください。"),
-          );
+          console.log(chalk.yellow("  ※ セカンドLLM の接続テストに失敗しています。/model second で確認してください。"));
         }
         console.log();
         break;
       }
 
-      case "/models":
-      case "/model-registry":
-      case "/registry": {
+      case "/models": {
         await this.handleModelsCommand(args);
         break;
       }
 
-      case "/profiles":
-      case "/profile": {
-        // 2026-05-27: /models へ統合された。 alias として動作するが deprecation を表示。
-        console.log(
-          chalk.dim(
-            "  ℹ /profiles は /models に名称変更されました (alias として動作中)。 詳細: docs/model-registry.md",
-          ),
-        );
-        await this.handleProfilesCommand(args);
-        break;
-      }
-
-      case "/integrations":
-      case "/integration":
-      case "/intg": {
+      case "/integrations": {
         // 2026-05-28: Discord / Slack / Chatlog / Search の設定パネルを 1 つの picker に
         // 集約 (Phase optimize #3)。 旧 4 コマンドは dispatcher 互換維持。
         await this.handleIntegrationsCommand();
@@ -6465,12 +6291,6 @@ export class REPL {
             saveConfig(this.config);
             console.log(chalk.green(`  ✅ Application ID を設定しました: ${id}`));
           }
-        } else if (subCmd === "public-key") {
-          // Gateway 方式 (docs/discord-gateway-design.md) への移行で署名検証が不要になった
-          console.log(
-            chalk.dim("  Public Key の設定は不要になりました (受信方式の変更により署名検証を使わなくなったため)。"),
-          );
-          console.log(chalk.dim("  必要な設定は Application ID と Bot Token の 2 つだけです。"));
         } else if (subCmd === "bot-token") {
           // Bot Token 設定 (コマンド登録・follow-up 送信用)
           const token = args[1];
@@ -6483,11 +6303,6 @@ export class REPL {
             saveConfig(this.config);
             console.log(chalk.green("  ✅ Bot Token を設定しました。"));
           }
-        } else if (subCmd === "port") {
-          // Gateway 方式への移行で受信ポートが不要になった
-          console.log(
-            chalk.dim("  ポート設定は不要になりました (Bot がこちらから Discord に接続する方式に変わったため)。"),
-          );
         } else if (subCmd === "register") {
           // スラッシュコマンドを Discord に登録
           const guildId = args[1]; // 省略時はグローバル登録
@@ -7332,20 +7147,6 @@ export class REPL {
         break;
       }
 
-      case "/sessions": {
-        // 2026-05-28: /sessions は /resume list の alias に集約 (Phase optimize #2)。
-        console.log(chalk.dim("  ℹ /sessions は /resume list に統合されました (alias として動作中)。"));
-        await this.handleResumeCommand(["list", ...args]);
-        break;
-      }
-
-      case "/continue": {
-        // 2026-05-28: /continue は /resume latest の alias に集約 (Phase optimize #2)。
-        console.log(chalk.dim("  ℹ /continue は /resume latest に統合されました (alias として動作中)。"));
-        await this.handleResumeCommand(["latest"]);
-        break;
-      }
-
       case "/resume": {
         await this.handleResumeCommand(args);
         break;
@@ -7520,10 +7321,9 @@ export class REPL {
         break;
       }
 
-      // /cost (alias /token): クラウド/ローカル LLM 使用量の可視化。
+      // /cost: クラウド/ローカル LLM 使用量の可視化。
       // 設計: docs/cost-token-command-design.md
-      case "/cost":
-      case "/token": {
+      case "/cost": {
         const lower = args.map((a) => a.toLowerCase());
         const a0 = lower[0] ?? "";
         const subs = ["models", "model", "providers", "provider", "reset", "export", "rate"];
@@ -7625,9 +7425,8 @@ export class REPL {
       case "/loop": {
         const subCmd = args[0]?.toLowerCase();
 
-        // /loop status (新): アクティブループ一覧 + 各ループに対する Stop checkbox の picker。
-        // /loop list は status の alias として残す (引数なし表示のみ)。
-        if (subCmd === "status" || subCmd === "list") {
+        // /loop status: アクティブループ一覧 + 各ループに対する Stop checkbox の picker。
+        if (subCmd === "status") {
           const entries = this.loopManager.list();
           if (entries.length === 0) {
             console.log(chalk.dim("  アクティブなループはありません。"));
@@ -7645,9 +7444,6 @@ export class REPL {
             );
           }
           console.log();
-          // /loop list は一覧表示のみで終了 (旧挙動)。
-          // /loop status は続けて停止 picker を出す。
-          if (subCmd === "list") break;
           try {
             const toStop = await checkbox<string>({
               message: "停止するループを選択 (スペースで選択、 Enter で確定、 Esc で何もしない):",
@@ -7670,7 +7466,7 @@ export class REPL {
           break;
         }
 
-        // /loop stop [id|all] (旧形式): dispatcher 互換維持
+        // /loop stop [id|all]: picker を使わずに id 指定 / 全停止する (非TTYでも使える)
         if (subCmd === "stop") {
           const target = args[1];
           if (!target || target === "all") {
@@ -7761,18 +7557,6 @@ function formatSamplingHint(ep: LLMEndpoint): string {
   if (ep.top_k !== undefined) parts.push(`top_k=${ep.top_k}`);
   if (ep.repetition_penalty !== undefined) parts.push(`rep_p=${ep.repetition_penalty}`);
   return parts.join(" ");
-}
-
-/** プロファイルが endpoint と「同じ接続」 を指しているか判定 */
-function profileMatchesEndpoint(profile: LLMProfile, ep: LLMEndpoint): boolean {
-  const a = profile.endpoint;
-  return (
-    a.providerType === ep.providerType &&
-    (a.model ?? "") === (ep.model ?? "") &&
-    (a.baseUrl ?? "") === (ep.baseUrl ?? "") &&
-    (a.endpoint ?? "") === (ep.endpoint ?? "") &&
-    (a.deploymentName ?? "") === (ep.deploymentName ?? "")
-  );
 }
 
 function progressBar(pct: number): string {

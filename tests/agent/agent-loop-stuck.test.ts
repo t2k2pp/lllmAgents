@@ -16,7 +16,7 @@ function makeLoop(): AgentLoop {
     slackAutoApproveTools: [],
     rules: { allow: [], deny: [], ask: [] },
   };
-  return new AgentLoop(provider, "test-model-7b", new ToolRegistry(), new PermissionManager(security), 8192, 0.8);
+  return new AgentLoop(provider, "test-model-7b", new ToolRegistry(), new PermissionManager(security), 8192);
 }
 
 interface StuckLoopSubject {

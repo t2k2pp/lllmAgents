@@ -7,9 +7,11 @@
  *   "web_fetch(domain:github.com)" - web_fetch ツール、URL が github.com ドメイン
  *   "bash"                         - bash ツール（引数問わず）
  *
- * Claude Code スタイルのエイリアスも対応:
- *   Bash / Read / Write / Edit / Glob / Grep / WebFetch / WebSearch / Agent
+ * Claude Code スタイルのツール名 (Bash / Read / Write / Edit / Glob / Grep / WebFetch / WebSearch / Agent) も
+ * 使える。 対応表は src/tools/tool-name-aliases.ts。
  */
+
+import { resolveToolAlias } from "../tools/tool-name-aliases.js";
 
 export type RuleAction = "allow" | "deny" | "ask";
 
@@ -18,25 +20,6 @@ export interface SecurityRuleConfig {
   deny: string[];
   ask: string[];
 }
-
-// Claude Code スタイルのエイリアス → 内部ツール名
-const TOOL_ALIASES: Record<string, string> = {
-  bash: "bash",
-  read: "file_read",
-  write: "file_write",
-  edit: "file_edit",
-  glob: "glob",
-  grep: "grep",
-  webfetch: "web_fetch",
-  websearch: "web_search",
-  agent: "sub_agent",
-  // file_ 系もそのまま通す
-  file_read: "file_read",
-  file_write: "file_write",
-  file_edit: "file_edit",
-  web_fetch: "web_fetch",
-  web_search: "web_search",
-};
 
 /**
  * パターン文字列をパースして { toolName, argPattern } に分解する。
@@ -47,11 +30,11 @@ function parsePattern(pattern: string): { toolName: string; argPattern: string |
   const parenMatch = pattern.match(/^([^(]+)\((.+)\)$/);
   if (parenMatch) {
     const rawTool = parenMatch[1].trim().toLowerCase();
-    const toolName = TOOL_ALIASES[rawTool] ?? rawTool;
+    const toolName = resolveToolAlias(rawTool);
     return { toolName, argPattern: parenMatch[2].trim() };
   }
   const rawTool = pattern.trim().toLowerCase();
-  const toolName = TOOL_ALIASES[rawTool] ?? rawTool;
+  const toolName = resolveToolAlias(rawTool);
   return { toolName, argPattern: null };
 }
 

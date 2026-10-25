@@ -17,7 +17,7 @@ function makeConfig(imageGen?: ImageGenConfig): Config {
       discordAutoApproveTools: [],
       slackAutoApproveTools: [],
     },
-    context: { compressionThreshold: 0.8, maxHistoryMessages: 100 },
+    context: {},
     imageGen,
   } as Config;
 }

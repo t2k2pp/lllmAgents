@@ -7,10 +7,6 @@
  *  - 登録された全 LLM 接続を `~/.localllm/model-registry.json` に永続化
  *  - main / second slot (および将来の named slot) への割当を同ファイルに保持
  *  - 旧 `llm-profiles.json` (LLMProfile[]) からの透過的な移行 (1 リリースの間は併存)
- *
- * 旧 `src/config/llm-profiles.ts` の export API は同名 facade として本ファイルへ
- * 委譲される (`LLMProfile = LLMRegistryEntry`、 record/list/get/delete 等は名前を
- * そのまま温存)。 移行が落ち着いたら facade は撤去予定。
  */
 
 import * as fs from "node:fs";

@@ -206,7 +206,7 @@ export function buildSdkToolsFromRegistry(
 
 ```
 /model setup claude-agent-sdk    # モデル選択のみ (認証は claude CLI 側)
-/second setup claude-agent-sdk   # セカンドLLM として設定
+/model second setup claude-agent-sdk   # セカンドLLM として設定
 ```
 
 `setupClaudeLLM(target, provider)` を `claude-agent-sdk` 対応に拡張する。

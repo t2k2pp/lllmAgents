@@ -65,7 +65,6 @@ function makeLoop(provider: LLMProvider, registry = new ToolRegistry()): AgentLo
     registry,
     new PermissionManager(securityConfig(registry.getToolNames())),
     128_000,
-    0.8,
   );
 }
 

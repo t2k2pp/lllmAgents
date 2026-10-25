@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { SkillDefinition } from "./skill-registry.js";
+import { resolveToolAlias } from "../tools/tool-name-aliases.js";
 
 /** SKILL.md は UTF-8 を正規形式とし、不正バイトを置換文字へ黙って変換しない。 */
 export function decodeSkillFileUtf8(bytes: Uint8Array, filePath: string): string {
@@ -75,20 +76,7 @@ export function parseSkillFile(content: string, filePath: string, builtIn: boole
     ? toolsRaw
         .replace(/^\[|\]$/g, "")
         .split(",")
-        .map((t) => {
-          const tool = t.trim();
-          const aliases: Record<string, string> = {
-            Bash: "bash",
-            Read: "file_read",
-            Write: "file_write",
-            Edit: "file_edit",
-            Glob: "glob",
-            Grep: "grep",
-            WebFetch: "web_fetch",
-            WebSearch: "web_search",
-          };
-          return aliases[tool] ?? tool;
-        })
+        .map((t) => resolveToolAlias(t.trim()))
         .filter(Boolean)
     : undefined;
   if (tools?.some((tool) => !/^[a-zA-Z0-9_-]+$/.test(tool))) return null;

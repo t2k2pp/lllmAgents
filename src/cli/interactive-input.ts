@@ -27,10 +27,6 @@ import { screen } from "./screen-manager.js";
 import { layoutInputBuffer } from "./input-layout.js";
 import { MouseKeypressFilter } from "./terminal-input.js";
 
-// 幅計算は共通実装を使う (docs/tui-alternate-screen.md §11: 幅計算を 2 箇所に書かない)。
-// 既存の import 元を壊さないよう、ここから再エクスポートする。
-export { getDisplayWidth } from "../utils/display-width.js";
-
 // ─── 公開型 ─────────────────────────────────────────────
 
 export interface MenuItem {

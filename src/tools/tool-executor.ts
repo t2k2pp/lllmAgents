@@ -18,7 +18,15 @@ import {
 } from "../agent/workspace-context.js";
 
 const WORKTREE_AWARE_CORE = new Set(["file_read", "file_write", "file_edit", "glob", "grep", "bash"]);
-const WORKTREE_AGNOSTIC_CORE = new Set(["web_fetch", "web_search", "todo_write", "ask_user", "current_datetime"]);
+const WORKTREE_AGNOSTIC_CORE = new Set([
+  "web_fetch",
+  "web_search",
+  "todo_append",
+  "todo_mark",
+  "todo_delete",
+  "ask_user",
+  "current_datetime",
+]);
 
 function prepareWorkspaceParams(
   toolName: string,

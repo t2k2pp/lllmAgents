@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { getDisplayWidth } from "./interactive-input.js";
+import { getDisplayWidth } from "../utils/display-width.js";
 import { formatMoney } from "../cost/money-format.js";
 import type { TokenUsageRecord } from "../cost/token-tracker.js";
 import { aggregate, modelUnitPrice, type UsageAggregate, type PeriodSpec, type UsageRow } from "../cost/usage-store.js";

@@ -101,7 +101,7 @@ export const federatedDelegateTool: ToolHandler = {
         "Supervisor (= あなた = main LLM) が routine な実装を Worker (= second LLM) に委譲し、 期待出力で自動 validate する。 " +
         "second_llm_agent との違いは「期待出力の明示」 と「結果の自動検証」。 worker が期待を満たさなければ自動で失敗を返し、 supervisor がやり直しを判断できる。\n" +
         "[使うべき場面] (1) 自分 (T1) のコンテキスト消費が惜しい routine 実装。 (2) 期待出力が明確に検証可能 (= ファイル生成 + 中身パターン)。 (3) 失敗時に supervisor が引き取れる粒度。\n" +
-        "[使うべきでない] (1) 設計判断・複雑な推論 → supervisor 自身でやる。 (2) 期待出力が曖昧 → second_llm_agent (期待検証なし) を使う。 (3) second LLM 未設定 → エラーになるので /second setup を先に。\n" +
+        "[使うべきでない] (1) 設計判断・複雑な推論 → supervisor 自身でやる。 (2) 期待出力が曖昧 → second_llm_agent (期待検証なし) を使う。 (3) second LLM 未設定 → エラーになるので /model second setup を先に。\n" +
         '[期待出力の例] expected_file_path=/abs/main.py + expected_file_contains="def main" + expected_min_bytes=100。\n' +
         "[validation 失敗時] worker のレスポンス本文 + 失敗理由が返る。 supervisor は: (a) より具体的な指示で再委譲 / (b) 自分でやり直し / (c) ask_user で確認。",
       parameters: {
@@ -143,7 +143,7 @@ export const federatedDelegateTool: ToolHandler = {
         success: false,
         output: "",
         error:
-          "Error: federated_delegate は second LLM が必要ですが未設定/未起動です。 /second setup で構成するか、 supervisor 自身でタスクを実行してください。",
+          "Error: federated_delegate は second LLM が必要ですが未設定/未起動です。 /model second setup で構成するか、 supervisor 自身でタスクを実行してください。",
       };
     }
     const task = String(params.task ?? "").trim();

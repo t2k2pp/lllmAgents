@@ -88,7 +88,7 @@ function generateTodoId(): string {
   return `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
-/** 全 todo に id を確保 (compat shim 経由で id 無しが入った場合の補完) */
+/** 全 todo に id を確保 (setTodos で id 無しの項目が入った場合の補完) */
 function ensureIds(): void {
   for (const t of todos) {
     if (!t.id) t.id = generateTodoId();
@@ -339,70 +339,5 @@ export const todoDeleteTool: ToolHandler = {
     const removed = before.length - todos.length;
     notifyTodoChange(before);
     return { success: true, output: `${removed} 項目を削除しました。\n\n${formatTodosCurrent()}` };
-  },
-};
-
-// ─── 既存 todo_write は compat shim として残す (案 C 後方互換) ───
-
-export const todoWriteTool: ToolHandler = {
-  name: "todo_write",
-  definition: {
-    type: "function",
-    function: {
-      name: "todo_write",
-      description:
-        "[deprecated — 新規開発では `todo_append` / `todo_mark` / `todo_delete` を推奨] " +
-        "タスクリスト全体を置換する compat shim。 内部で「全削除 → append」 と等価動作する。 " +
-        "戦略の部分更新は分離 tool を使うこと (意図信号が明確になり偶発的戦略破壊を防げる)。",
-      parameters: {
-        type: "object",
-        properties: {
-          todos: {
-            type: "array",
-            description: "タスクリスト全体 (既存は全て置換される)",
-            items: {
-              type: "object",
-              properties: {
-                content: { type: "string", description: "タスクの説明" },
-                status: {
-                  type: "string",
-                  enum: STATUS_ENUM,
-                  description: "ステータス",
-                },
-              },
-              required: ["content", "status"],
-            },
-          },
-        },
-        required: ["todos"],
-      },
-    },
-  },
-  async execute(params: Record<string, unknown>): Promise<ToolResult> {
-    const newTodos = params.todos;
-    if (!Array.isArray(newTodos)) {
-      return {
-        success: false,
-        output: "",
-        error:
-          "todosパラメータが配列ではありません。todos: [{content: '...', status: 'pending'}] の形式で渡してください。",
-      };
-    }
-    // 全削除 + append 等価。 status は valid 値に絞る (旧呼出が "completed" 等を期待していた互換性)
-    const before = getTodos();
-    todos = [];
-    for (const raw of newTodos) {
-      if (typeof raw !== "object" || raw === null) continue;
-      const r = raw as Record<string, unknown>;
-      const content = typeof r.content === "string" ? r.content : "";
-      const status =
-        typeof r.status === "string" && STATUS_ENUM.includes(r.status)
-          ? (r.status as TodoStatus)
-          : ("pending" as TodoStatus);
-      if (!content) continue;
-      todos.push({ id: generateTodoId(), content, status, round: currentRound });
-    }
-    notifyTodoChange(before);
-    return { success: true, output: formatTodosCurrent() };
   },
 };

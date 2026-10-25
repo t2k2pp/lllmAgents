@@ -34,7 +34,6 @@ function setup(execute: () => Promise<ToolResult>, name = "vision_analyze", back
     registry,
     new PermissionManager(security),
     8192,
-    0.8,
   );
   const calls: ToolCall[] = [1, 2, 3].map((id) => ({
     id: `call-${id}`,

@@ -3,6 +3,9 @@ title: LLM 接続プロファイル履歴 (/profiles)
 status: 2026-05-18 提案 / 同日実装 (2026-05-27 — model-registry に昇格予定)
 ---
 
+> **2026-10-25**: `/profiles` コマンドと `src/config/llm-profiles.ts` (model-registry への委譲 facade) は削除した。
+> 現在は `/models` と `src/config/model-registry.ts` が唯一の入口。 本書は経緯の記録として残す。
+>
 > **後継設計**: `docs/model-registry.md` (2026-05-27 提案)
 > 本書の「プロファイル」 は今後 **registry エントリ** として一般化される。 `/profiles`
 > コマンドは `/models` の alias 扱いに移行し、 サンプリング違いを別エントリで持つ等の

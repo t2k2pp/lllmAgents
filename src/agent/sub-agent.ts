@@ -717,7 +717,7 @@ export class SubAgentManager {
 
   /**
    * サブエージェント起動に使うProvider/Modelを差し替える。
-   * /model url, /model provider 等でメインLLMの接続先が変わったときに呼ぶ。
+   * /model host・/model port・/model provider 等でメインLLMの接続先が変わったときに呼ぶ。
    */
   setProvider(provider: LLMProvider, model: string): void {
     this.provider = provider;
@@ -729,7 +729,7 @@ export class SubAgentManager {
    *
    * 優先順位: 呼出時の明示指定 > エージェント定義の modelRef > main (自分の provider)。
    * 解決先が main slot と同じ entry なら自分の provider をそのまま使う
-   * (/model url 等でランタイム差し替えされた接続を尊重するため)。
+   * (/model host 等でランタイム差し替えされた接続を尊重するため)。
    *
    * 明示された参照を解決できない場合は起動を停止し、別モデルへ自動で切り替えない。
    */

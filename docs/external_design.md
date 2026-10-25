@@ -140,12 +140,11 @@ stateDiagram-v2
 | `/autorun` | 自律実行モードの toggle |
 
 ※ `/setup` は REPL コマンドではなく、 CLI 起動時のフラグ `--setup` で実行します。
-※ 旧コマンドの alias は dispatcher 互換のため動作しますが、 補完候補からは外れています:
-  - `/sessions` → `/resume list`、 `/continue` → `/resume latest`
-  - `/second xxx` → `/model second xxx`
-  - `/profiles` → `/models`
-  - `/discord` `/slack` `/chatlog` `/search` の各サブ → `/integrations` 配下
-  - `/metrics` `/cost` `/capability` → `/status` に集約 (完全削除)
+※ 同じことをするコマンドは 1 つだけにしている (docs/todo-legacy-ways-cleanup.md)。 次の旧コマンドは削除済みで、 入力しても動かない:
+  - `/sessions` `/continue` (→ `/resume list` / `/resume latest`)、 `/second` (→ `/model second`)、 `/profiles` `/profile` `/model-registry` `/registry` (→ `/models`)
+  - `/integration` `/intg` (→ `/integrations`)、 `/switch` (→ `/swap`)、 `/token` (→ `/cost`)、 `/model url` `/model ip` (→ `/model host` + `/model port`)、 `/loop list` (→ `/loop status`)、 `/stream on|off` (→ 引数なし `/stream`)
+  - `/metrics` `/capability` (→ `/status`)
+  - `/discord` `/slack` `/chatlog` `/search` の各サブは `/integrations` 配下が正。 直接コマンドの削除は T3 で行う
 
 #### `/models` (Model Registry) — main / second / vision 統合管理
 
@@ -165,12 +164,12 @@ stateDiagram-v2
 | `/model list` | main slot の利用可能モデル一覧から選択 |
 | `/model context <値>` | main slot のコンテキスト長を変更 (例: `128k`) |
 | `/model setup` | main slot の新規セットアップ wizard |
-| `/model second <sub>` | second slot 操作 (`status` / `enable` / `disable` / `setup` / `list` / `context` / `description`) |
+| `/model second <sub>` | second slot 操作 (`setup` / `enable` / `disable` / `list` / `context` / `host` / `port` / `provider` / `description` / `temperature` 等) |
 | `/model vision <sub>` | vision slot 操作 (`status` / `setup` / `list` / `context` / `description` / `clear`) |
 
 #### `/integrations` — 外部統合の集約 (Discord / Slack / Chatlog / Search)
 
-`/integrations` (短縮: `/intg`) で 4 系統の状態を一覧表示し、 picker で対象を選択 → そのプロバイダの設定画面に入る。 内部的には旧 `/discord ...` 等の dispatcher が再利用されるため、 旧コマンドはそのまま動作する (補完候補からは除外)。
+`/integrations` で 4 系統の状態を一覧表示し、 picker で対象を選択 → そのプロバイダの設定画面に入る。 内部的には旧 `/discord ...` 等の dispatcher が再利用されるため、 旧コマンドはそのまま動作する (補完候補からは除外)。
 
 #### `/permission` — 権限設定 picker
 
@@ -229,7 +228,7 @@ graph TD
     end
 
     subgraph AgentTools [タスク・エージェント管理 - 13ツール]
-        A1(todo_write):::safe
+        A1(todo_append / todo_mark / todo_delete):::safe
         A2(task):::ask
         A3(task_output):::safe
         A4(task_list):::safe
@@ -272,7 +271,7 @@ graph TD
 ツールの権限は2種類あります。
 
 - **`auto`（自動許可）**: 常にユーザー確認なしで実行されます。以下の2層で決定されます。
-  - `INHERENTLY_SAFE_TOOLS`（コード定数）: `ask_user`, `todo_write`, `enter_plan_mode`, `exit_plan_mode`, `task_output`, `task_list`, `task_send`, `task_cancel`, `task_diff`, `schedule_create`, `schedule_list`, `schedule_delete`, `current_datetime`, `sandbox_info` — 設定に関わらず **常に** auto
+  - `INHERENTLY_SAFE_TOOLS`（コード定数）: `ask_user`, `todo_append`, `todo_mark`, `todo_delete`, `enter_plan_mode`, `exit_plan_mode`, `task_output`, `task_list`, `task_send`, `task_cancel`, `task_diff`, `schedule_create`, `schedule_list`, `schedule_delete`, `current_datetime`, `sandbox_info` — 設定に関わらず **常に** auto
   - `autoApproveTools`（設定ファイル）: デフォルトは `file_read`, `glob`, `grep`, `browser_snapshot`, `vision_analyze`, `web_search`, `web_fetch`
 - **`ask`（要確認）**: 実行前にインタラクティブな承認ダイアログを表示します。明示的に指定されていないツールはすべて `ask` にフォールバックします。
 
@@ -310,7 +309,7 @@ graph TD
 | | `workflow_learn_finish` | ask | 失敗のない記録を秘密値placeholder化済みの手動起動project skillへ保存します。 |
 | | `workflow_learn_cancel` | ask | 現在の記録だけを破棄します。操作対象と既存skillは変更しません。 |
 | **画像解析** | `vision_analyze` | auto | スクリーンショットやローカル画像を、画像解析専用のサブLLM（OllamaのLlava等）に渡して状態を視覚的に説明させます。 |
-| **タスク管理** | `todo_write` | auto (常時) | エージェント自身が行動計画を整理するためのTODOリストをワークスペースに作成・更新します。 |
+| **タスク管理** | `todo_append` / `todo_mark` / `todo_delete` | auto (常時) | エージェント自身が行動計画を整理するためのTODOリストをワークスペースに作成・更新します。 |
 | | `task` | ask | 独立したコンテキストを持つ **子エージェント（SubAgent）** を生成し、スコープを限定したタスクを並列で実行・委譲します。 |
 | | `task_output` | auto (常時) | バックグラウンドで起動したサブエージェントの実行結果を取得します。 |
 | | `task_list` | auto (常時) | background taskの状態・type・description・開始/完了時刻・追加指示累計を一覧します。prompt・指示・結果本文は返しません。 |
@@ -625,7 +624,7 @@ You are a codebase exploration specialist. Your job is to quickly find files, se
 |:---|:---|:---|
 | `explore` | コードベース探索（読取専用） | file_read, glob, grep, web_fetch, web_search |
 | `plan` | 実装計画・アーキテクチャ設計（読取専用） | file_read, glob, grep, web_fetch, web_search |
-| `general-purpose` | 全ツール使用可能な汎用エージェント | file_read, file_write, file_edit, glob, grep, bash, web_fetch, web_search, todo_write, ask_user |
+| `general-purpose` | 全ツール使用可能な汎用エージェント | file_read, file_write, file_edit, glob, grep, bash, web_fetch, web_search, todo_append, todo_mark, todo_delete, ask_user |
 | `bash` | command/build/test実行 | bash, file_read, glob, grep |
 | `code-reviewer` | コード品質・セキュリティレビュー | file_read, glob, grep, bash |
 

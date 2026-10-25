@@ -39,7 +39,7 @@ import { bashTool } from "./tools/definitions/bash.js";
 import { webFetchTool } from "./tools/definitions/web-fetch.js";
 import { createWebSearchTool } from "./tools/definitions/web-search.js";
 import { sandboxInfoTool } from "./tools/definitions/sandbox-info.js";
-import { todoWriteTool, todoAppendTool, todoMarkTool, todoDeleteTool } from "./tools/definitions/todo-write.js";
+import { todoAppendTool, todoMarkTool, todoDeleteTool } from "./tools/definitions/todo-write.js";
 import { askUserTool } from "./tools/definitions/ask-user.js";
 import { createBrowserTools } from "./tools/definitions/browser.js";
 import { createComputerTools } from "./tools/definitions/computer.js";
@@ -115,9 +115,9 @@ Options:
   --safe-mode         Start without customizations
   --no-mcp            Start without MCP servers
   --alt-screen        Enable the full-screen TUI (inline native scrollback is the default)
-  --no-alt-screen     Explicitly keep the inline display (legacy compatibility)
+  --no-alt-screen     Keep the inline display for this run (overrides LLLMAGENT_ENABLE_ALTERNATE_SCREEN)
   --mouse             Enable full-screen TUI mouse-wheel history (implies --alt-screen)
-  --no-mouse          Explicitly keep the copy-first default (legacy compatibility)
+  --no-mouse          Keep mouse capture off for this run (overrides LLLMAGENT_ENABLE_MOUSE)
   --install-browser   Install the browser runtime
   --check-browser     Verify the browser runtime
   --computer-use      Enable native OS window capture/input for this session
@@ -366,7 +366,6 @@ async function main(): Promise<void> {
   }
 
   // Interactive tools
-  toolRegistry.register(todoWriteTool);
   // 戦略 ToDo Phase 1 (docs/strategic-todo-design.md §3.2): 分離 tool 群
   toolRegistry.register(todoAppendTool);
   toolRegistry.register(todoMarkTool);
@@ -587,7 +586,7 @@ async function main(): Promise<void> {
       }
     }
     // 初期化失敗（設定不備など）でアプリ自体が起動不能になるのを防ぐ。
-    // セカンドLLMは無効化したまま起動を続行し、ユーザーが /second-llm で設定を直せるようにする。
+    // セカンドLLMは無効化したまま起動を続行し、ユーザーが /model second で設定を直せるようにする。
     try {
       if (passphrase) {
         secondLLMManager.initialize(secondLlmConfig, passphrase);
@@ -598,7 +597,7 @@ async function main(): Promise<void> {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(
         `\n⚠️  セカンドLLMの初期化に失敗しました: ${msg}\n` +
-          `   セカンドLLMを無効化して起動を続行します。/second で設定を確認してください。\n`,
+          `   セカンドLLMを無効化して起動を続行します。/model second で設定を確認してください。\n`,
       );
     }
     if (secondLLMManager.isAvailable()) {
@@ -677,7 +676,6 @@ async function main(): Promise<void> {
     toolRegistry,
     permissions,
     contextWindow,
-    config.context.compressionThreshold,
     hookManager,
     skillInfos,
     "main",
@@ -890,7 +888,7 @@ async function main(): Promise<void> {
   // Room モデル: REPL の現セッション (新規 or resume 済み) を Room A にバインドする。
   roomManager.initReplSession();
 
-  // Start REPL (sharedPassphrase は /swap や /second setup 後の Provider 再生成で使い回す)
+  // Start REPL (sharedPassphrase は /swap や /model second setup 後の Provider 再生成で使い回す)
   const loopManager = new LoopManager();
   const repl = new REPL(
     agent,

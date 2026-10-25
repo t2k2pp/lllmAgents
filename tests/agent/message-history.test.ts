@@ -207,14 +207,6 @@ describe("MessageHistory — 前方一致の安定化 (docs/prompt-prefix-stabil
     expect(sys[0].content).toBe("BASE");
   });
 
-  it("文字列を返す旧シグネチャ composer は全量 stable 扱い (1 メッセージ)", () => {
-    const h = new MessageHistory("BASE");
-    h.setSystemPromptComposer((base) => `${base}\n\nEXTRA`);
-    const sys = h.getMessages().filter((m) => m.role === "system");
-    expect(sys.length).toBe(1);
-    expect(sys[0].content).toBe("BASE\n\nEXTRA");
-  });
-
   it("新しい user メッセージには日時と状態を添付し、 本文の後ろに描画する", () => {
     const h = withState({ value: "TODO-1" });
     h.addUserMessage("U1");

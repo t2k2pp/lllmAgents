@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { getDisplayWidth } from "../../src/cli/interactive-input.js";
 import {
+  getDisplayWidth,
   nextGraphemeBoundary,
   previousGraphemeBoundary,
   stripAnsi,

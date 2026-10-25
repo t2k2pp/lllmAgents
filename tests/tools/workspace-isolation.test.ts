@@ -7,6 +7,13 @@ import { createSharedWorkspace, type WorkspaceContext } from "../../src/agent/wo
 import { PermissionManager } from "../../src/security/permission-manager.js";
 import { bashTool } from "../../src/tools/definitions/bash.js";
 import { fileWriteTool } from "../../src/tools/definitions/file-write.js";
+import {
+  clearTodos,
+  getTodos,
+  todoAppendTool,
+  todoDeleteTool,
+  todoMarkTool,
+} from "../../src/tools/definitions/todo-write.js";
 import { ToolExecutor } from "../../src/tools/tool-executor.js";
 import { ToolRegistry } from "../../src/tools/tool-registry.js";
 
@@ -109,6 +116,36 @@ describe("ToolExecutor worktree boundary", () => {
       function: { name: "bash", arguments: JSON.stringify({ command: `git -C "${main}" status` }) },
     });
     expect(redirect.error).toMatch(/Git directory redirection/i);
+  });
+
+  it("ToDo ツール (todo_append / todo_mark / todo_delete) は worktree agent からも実行できる", async () => {
+    const { main, workspace } = fixture();
+    clearTodos();
+    const registry = new ToolRegistry();
+    for (const t of [todoAppendTool, todoMarkTool, todoDeleteTool]) registry.register(t);
+    const executor = new ToolExecutor(
+      registry,
+      new PermissionManager(security(path.dirname(main))),
+      undefined,
+      undefined,
+      undefined,
+      workspace,
+    );
+    const append = await executor.execute({
+      id: "append",
+      type: "function",
+      function: { name: "todo_append", arguments: JSON.stringify({ items: [{ content: "a", status: "pending" }] }) },
+    });
+    expect(append.success).toBe(true);
+    const id = getTodos()[0]?.id ?? "";
+    for (const call of [
+      { name: "todo_mark", arguments: JSON.stringify({ id, status: "completed" }) },
+      { name: "todo_delete", arguments: JSON.stringify({ ids: [id] }) },
+    ]) {
+      const r = await executor.execute({ id: call.name, type: "function", function: call });
+      expect(r.success, r.error).toBe(true);
+    }
+    clearTodos();
   });
 
   it("検証済みpolicyの無いplugin/MCP toolをworktree agentから実行しない", async () => {

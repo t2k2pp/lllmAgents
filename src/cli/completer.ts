@@ -76,6 +76,7 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/skills status", description: "ロード済スキル一覧と有効/無効を表示" },
   { command: "/skills on", description: "全スキル有効化" },
   { command: "/skills off", description: "全スキル無効化 (= 設定残したまま読み飛ばし)" },
+  { command: "/skills reload", description: "スキルを再読み込み" },
   { command: "/skills toggle", description: "個別スキルの有効/無効切替", needsArg: true },
   { command: "/try", description: "試行錯誤モード: 自動的に評価・改善を繰り返す", needsArg: true },
   { command: "/try 3", description: "最大3回試行（デフォルト）", needsArg: true },
@@ -92,7 +93,6 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   //   - dispatcher (repl.ts の /model ハンドラ) は元から全サブコマンドを処理している。
   //   - 補完に出すのは現在値表示も兼ねる編集系: description / temperature / top_p / top_k /
   //     rep_penalty / host / port / provider（bare で現在値、引数で更新）。
-  //   - 除外: /model url（dispatcher 内で非推奨明示）、ip（host の alias）。
   //   - 個別編集をまとめて行う集約 UI は引き続き /models Edit。
   //   - /model setup <provider> の各バリアントは /models Add new... の wizard へ集約 → 補完から除外。
   { command: "/model", description: "main / second / 他 slot の状態を 1 画面で表示 (詳細編集は /models)" },
@@ -117,12 +117,14 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   },
   { command: "/model setup", description: "main slot の新規セットアップ wizard (プロバイダ選択は wizard 内で)" },
   // /model second 系 (docs/model-registry.md §4.1)
-  { command: "/model second", description: "second slot の状態表示・サブコマンド (旧 /second)" },
+  { command: "/model second", description: "second slot の状態表示・サブコマンド" },
   { command: "/model second enable", description: "second slot を有効化" },
   { command: "/model second disable", description: "second slot を無効化" },
   { command: "/model second setup", description: "second slot の新規セットアップ wizard" },
   { command: "/model second list", description: "second slot の利用可能モデル一覧から選択" },
   { command: "/model second context", description: "second slot のコンテキスト長を変更 (例: 128k)", needsArg: true },
+  { command: "/model second host", description: "second slot の接続先ホスト/IP を変更", needsArg: true },
+  { command: "/model second port", description: "second slot の接続先ポートを変更", needsArg: true },
   {
     command: "/model second description",
     description: "second slot の特性説明 (サブエージェント選択の材料)",
@@ -143,12 +145,10 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   },
   { command: "/exit-goal-seek", description: "Goal Seek mode を抜ける (acceptance 未達成でも user 明示で中断)" },
   { command: "/resume", description: "セッション復元 (引数なしで picker / latest = 最新 / list = 一覧)" },
-  { command: "/resume latest", description: "最新セッションを即復元 (旧 /continue)" },
-  { command: "/resume list", description: "保存セッション一覧 (旧 /sessions)" },
+  { command: "/resume latest", description: "最新セッションを即復元" },
+  { command: "/resume list", description: "保存セッション一覧" },
   { command: "/fork", description: "現在の会話を新しいセッションへ分岐 (元セッションは不変)" },
   { command: "/fork latest", description: "最新の保存セッションから分岐" },
-  { command: "/sessions", description: "[非推奨] /resume list の alias" },
-  { command: "/continue", description: "[非推奨] /resume latest の alias" },
   { command: "/memory", description: "メモリ表示" },
   { command: "/remember", description: "メモリに追記", needsArg: true },
   { command: "/plan", description: "プランモード" },
@@ -192,7 +192,6 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
     description: "為替レート設定でコストを円表示 (例: /cost rate 150)。 /cost rate off でドル表示に戻す",
     needsArg: true,
   },
-  { command: "/token", description: "/cost の alias (token / コスト可視化)" },
   // /image: 画像生成 (Azure GPT Images / SD WebUI / ComfyUI)。設計: docs/image-generation.md
   { command: "/image", description: "画像生成の状態表示 (機能トグル / プロファイル一覧)" },
   { command: "/image on", description: "画像生成機能を有効化 (image_generate ツール登録)" },
@@ -212,11 +211,8 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
     command: "/status",
     description: "セッション状態を 1 画面で表示 (slot / context / capability / metrics / cost / tasks)",
   },
-  // /second は /model second の alias として動作 (Phase 4)。 補完には alias のみ残す。
-  { command: "/second", description: "[非推奨] /model second の alias。 新規には /model second を推奨" },
   { command: "/swap", description: "メインLLM ⇔ セカンドLLM を入れ替え (確認あり)" },
   { command: "/swap -y", description: "メインLLM ⇔ セカンドLLM を入れ替え (確認なし)" },
-  { command: "/switch", description: "メインLLM ⇔ セカンドLLM を入れ替え (/swap と同じ)" },
   {
     command: "/models",
     description: "Model Registry: 登録済モデル一覧 → Set as main/second / Edit / Duplicate / Delete / Add new",
@@ -231,11 +227,6 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
     needsArg: true,
   },
   { command: "/models help", description: "/models の使い方を表示" },
-  { command: "/profiles", description: "[非推奨] /models の alias。 旧 LLM プロファイル履歴コマンド" },
-  { command: "/profiles list", description: "[非推奨] 保存済みプロファイル一覧を表示" },
-  { command: "/profiles delete", description: "[非推奨] プロファイルを複数選択して削除" },
-  { command: "/profiles help", description: "[非推奨] /profiles の使い方を表示" },
-  { command: "/profile", description: "[非推奨] /profiles の alias" },
   { command: "/knowledge", description: "Obsidianナレッジベース" },
   { command: "/knowledge vault", description: "Vaultパスを設定", needsArg: true },
   { command: "/knowledge tags", description: "タグ一覧" },
@@ -243,14 +234,13 @@ const BUILTIN_COMMAND_DEFS: CommandDef[] = [
   { command: "/knowledge search", description: "ナレッジ検索", needsArg: true },
   { command: "/knowledge open", description: "フォルダを開く" },
   // /integrations (Phase optimize #3、 2026-05-28): Discord / Slack / Chatlog / Search を 1 picker に集約。
-  // 旧 4 系統 (/discord /slack /chatlog /search) は dispatcher 互換のため case 本体を残すが、
-  // /integrations の各サブメニューが内部呼び出しする実装専用とし、補完候補からは除外する
-  // (cleanup 2026-06-20: 統廃合済みのため [非推奨] alias を補完から削除)。
+  // /discord /slack /chatlog /search は /integrations の各サブメニューが内部呼び出しする実装で、
+  // 補完候補には出さない (対話画面への一本化は docs/todo-legacy-ways-cleanup.md T3)。
   { command: "/integrations", description: "外部統合 (Discord / Slack / Chatlog / Search) を 1 画面で設定" },
-  { command: "/intg", description: "/integrations の短縮形" },
   // /search のサブコマンド (duckduckgo / ddg / test / status) は /integrations 配下に集約済み
   { command: "/loop", description: "プロンプトを定期実行 (例: /loop 5m /pr-review)", needsArg: true },
-  { command: "/loop status", description: "アクティブなループ一覧 + 停止 picker (旧 /loop list の発展形)" },
+  { command: "/loop status", description: "アクティブなループ一覧 + 停止 picker" },
+  { command: "/loop stop", description: "ループを停止 (id 指定 / all または省略で全停止)", needsArg: true },
   // /permission は引数なしで対話 picker (Phase optimize #1)。
   // 旧サブコマンド (auto-add / require-add / rule-add allow / 等) は dispatcher 互換のため残存するが、
   // 補完候補からは外して 1 件に集約。

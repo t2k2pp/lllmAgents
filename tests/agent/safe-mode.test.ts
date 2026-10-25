@@ -57,7 +57,6 @@ function createSafeLoop(provider: LLMProvider): AgentLoop {
     new ToolRegistry(),
     new PermissionManager({ autoApproveTools: [], allowedDirectories: [], rules: [] }),
     8192,
-    0.8,
     undefined,
     [],
     "main",

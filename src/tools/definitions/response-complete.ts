@@ -10,7 +10,7 @@ import { getCurrentTodos, formatTodosCurrent } from "./todo-write.js";
  * このツールを呼ばず、かつツールも呼ばずテキスト応答だけを返すと、
  * ハーネスが自己点検を最大3回まで要求する。上限到達でターン終了。
  *
- * Phase 5-O2: Acceptance Checklist (todo_write) に未完了項目があれば警告を返し、
+ * Phase 5-O2: Acceptance Checklist (todo_append で立てた ToDo) に未完了項目があれば警告を返し、
  * 完了報告をブロック。 「ファイル存在 = 完了」 のような薄い完了報告を防ぐ。
  */
 export const responseCompleteTool: ToolHandler = {

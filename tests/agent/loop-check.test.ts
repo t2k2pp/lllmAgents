@@ -62,14 +62,7 @@ async function run(argsFor: (n: number) => unknown, execute: (calls: number, loo
   };
   const registry = new ToolRegistry();
   registry.register(tool);
-  const loop = new AgentLoop(
-    callsWork(argsFor),
-    "test-model-7b",
-    registry,
-    new PermissionManager(security),
-    128_000,
-    0.8,
-  );
+  const loop = new AgentLoop(callsWork(argsFor), "test-model-7b", registry, new PermissionManager(security), 128_000);
   loopRef = loop;
   const cap = (loop as unknown as { capability: Record<string, unknown> }).capability;
   Object.assign(cap, { loopCheckInterval: 4 });

@@ -22,12 +22,11 @@ Claude Code の `/loop` と `CronCreate/List/Delete` に相当する、ユーザ
 ### 旧コマンドとの互換 (dispatcher 経由でのみ動作、 補完候補からは外れる)
 
 ```
-/loop list                  アクティブなループ一覧のみ表示 (picker は出ない)
 /loop stop <id>             指定 ID のループを停止 (スクリプト用)
 /loop stop all              全ループを停止 (スクリプト用)
 ```
 
-`/loop status` は一覧表示の直後に停止対象を checkbox で複数選択できるため、 通常の運用ではこちらが推奨。 `/loop list` と `/loop stop` は旧仕様との互換のため残されている。
+`/loop status` は一覧表示の直後に停止対象を checkbox で複数選択できる。 `/loop stop` は picker を使わずに id 指定 / 全停止する (非TTY でも使える)。 旧 `/loop list` は `/loop status` に一本化して削除した (docs/todo-legacy-ways-cleanup.md)。
 
 ### 間隔指定フォーマット
 

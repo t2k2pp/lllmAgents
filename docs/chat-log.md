@@ -1,6 +1,6 @@
 # チャットログ保存機能 設計書
 
-> **2026-05-28 更新**: REPL からの操作は `/integrations` (短縮: `/intg`) の picker 経由が canonical (Phase optimize #3 で Discord / Slack / Chatlog / Search を統合)。 本書中の `/chatlog xxx` は dispatcher 互換として引き続き動作するが、 補完候補からは外れている。
+> **2026-05-28 更新**: REPL からの操作は `/integrations` の picker 経由が canonical (Phase optimize #3 で Discord / Slack / Chatlog / Search を統合)。 本書中の `/chatlog xxx` は dispatcher 互換として引き続き動作するが、 補完候補からは外れている。
 
 ## 概要
 

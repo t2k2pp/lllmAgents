@@ -328,8 +328,8 @@ export class AgentLoop {
   private bashCumulativeWarned = false;
   /** P1-B: 1 user span 内の enter_plan_mode 呼出回数 */
   private planModeEntries = 0;
-  /** P1-B: 1 user span 内の todo_write 呼出回数 */
-  private todoWriteCount = 0;
+  /** P1-B: 1 user span 内の ToDo 計画の書き換え回数 (todo_append / todo_delete) */
+  private todoUpdateCount = 0;
   /** P1-B: plan/todo の過多警告を既に注入したか (1 user span に 1 回だけ) */
   private planTodoWarned = false;
   /**
@@ -428,7 +428,6 @@ export class AgentLoop {
     private toolRegistry: ToolRegistry,
     private permissions: PermissionManager,
     contextWindow: number,
-    compressionThreshold: number,
     hookManager?: HookManager,
     skills?: SkillInfo[],
     agentId: string = "main",
@@ -490,10 +489,8 @@ export class AgentLoop {
     // Goal / ToDo は system ではなく、 変化時に末尾へ添付する状態通知になる (docs/prompt-prefix-stability.md)。
     this.history = new MessageHistory(systemPrompt);
     this.history.setSystemPromptComposer((base) => this.composeQuasiSystemPrompt(base));
-    // Phase C-2 + D-4: 圧縮閾値と keepRecentMessages を tier 由来で設定。
-    // 引数の compressionThreshold は無視され、 capability の値が常に勝つ。
+    // Phase C-2 + D-4: 圧縮閾値と keepRecentMessages は tier 由来で設定する。
     // (ユーザが明示的に変えたい場合は config.json modelCapabilities.<modelId>.* で override 可能)
-    void compressionThreshold; // 後方互換: 引数は受け付けるが capability 由来を使う
     // 縮約手段 (圧縮 / 忘却) は config.context から。 未設定なら hybrid
     // (docs/context-forgetting.md §6 — 忘却が失敗しても圧縮に落ちるので後退しない)。
     const ctxCfg = loadConfig().context;
@@ -531,15 +528,6 @@ export class AgentLoop {
     //    確定した後に runCheckpointMaintenance() で実行する (復元対象を誤って消さないため)。
     this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager, undefined, this.checkpointManager);
     this.toolExecutor.setParallelExecutionAllowed(this.maxParallelTools > 1);
-    // claude-agent-sdk プロバイダの場合、 lllmAgent ツールを in-process MCP として
-    // SDK に公開する (docs/claude-agent-sdk-provider-design.md §3.3)。
-    // duck typing で attach メソッドを持つプロバイダのみに適用。
-    const bridgeable = this.rawProvider as unknown as {
-      attachToolBridge?: (r: ToolRegistry, e: ToolExecutor) => void;
-    };
-    if (typeof bridgeable.attachToolBridge === "function") {
-      bridgeable.attachToolBridge(toolRegistry, this.toolExecutor);
-    }
     this.session = createSession(model);
     // チェックポイントは resume を跨いで安定な session.meta.id で採番する (H1)
     this.checkpointManager.rebind(this.session.meta.id);
@@ -815,7 +803,7 @@ export class AgentLoop {
     this.bashCumulativeMs = 0;
     this.bashCumulativeWarned = false;
     this.planModeEntries = 0;
-    this.todoWriteCount = 0;
+    this.todoUpdateCount = 0;
     this.planTodoWarned = false;
     // P3-A: レジスターは user 発話ごとに再判定 (前タスクのレジスターを引き継がない)
     this.currentRegister = "unknown";
@@ -873,7 +861,7 @@ export class AgentLoop {
                 `  [model 推奨] ${this.capability.tier} → ${recommended} (complexity=${complexity}). ${reason}`,
               ),
             );
-            console.log(chalk.dim(`  → 切替する場合: /model <name> または /second swap`));
+            console.log(chalk.dim(`  → 切替する場合: /model <name> または /swap`));
           }
         } catch {
           /* 推奨は best-effort、 失敗しても続行 */
@@ -2978,7 +2966,7 @@ export class AgentLoop {
    */
   private static readonly BASH_CUMULATIVE_WARN_MS = 5 * 60 * 1000; // 5 分
   private static readonly PLAN_MODE_LIMIT = 2;
-  private static readonly TODO_WRITE_LIMIT = 5;
+  private static readonly TODO_UPDATE_LIMIT = 5;
   private maybeWarnBashCumulative(toolCall: ToolCall, durationMs: number): void {
     if (toolCall.function.name !== "bash") return;
     // Phase C-3: tier で feature gating。 T3 では判断負荷増になるため抑制。
@@ -3004,10 +2992,12 @@ export class AgentLoop {
     if (!this.capability.planTodoOveruseEnabled) return;
     const name = toolCall.function.name;
     if (name === "enter_plan_mode") this.planModeEntries++;
-    if (name === "todo_write") this.todoWriteCount++;
+    // 計画の書き換え (項目の追加・削除) だけを数える。 todo_mark は 1 項目ずつ状態を進める
+    // 通常の使い方 (着手 → 完了) なので数えない。
+    if (name === "todo_append" || name === "todo_delete") this.todoUpdateCount++;
     if (this.planTodoWarned) return;
     const planOver = this.planModeEntries > AgentLoop.PLAN_MODE_LIMIT;
-    const todoOver = this.todoWriteCount > AgentLoop.TODO_WRITE_LIMIT;
+    const todoOver = this.todoUpdateCount > AgentLoop.TODO_UPDATE_LIMIT;
     if (!planOver && !todoOver) return;
     const reasons: string[] = [];
     if (planOver) {
@@ -3017,7 +3007,7 @@ export class AgentLoop {
     }
     if (todoOver) {
       reasons.push(
-        `todo_write を ${this.todoWriteCount} 回呼んでいます (上限 ${AgentLoop.TODO_WRITE_LIMIT})。 細切れの todo 更新で反復が嵩みます。`,
+        `todo_append / todo_delete を ${this.todoUpdateCount} 回呼んでいます (上限 ${AgentLoop.TODO_UPDATE_LIMIT})。 細切れの計画書き換えで反復が嵩みます。`,
       );
     }
     console.log(chalk.yellow(`\n  ⚠ 計画/Todo 過多検知: ${reasons.join(" / ")}`));
@@ -3440,7 +3430,7 @@ export class AgentLoop {
 
   /**
    * LLMプロファイル（description等）を差し替えてシステムプロンプトを再構築する。
-   * REPL で /model description / /second description を実行した直後に呼ぶと、
+   * REPL で /model description / /model second description を実行した直後に呼ぶと、
    * 次ターン以降のLLM呼び出しで新しい特性説明が反映される。
    */
   updateLLMProfiles(profiles: LLMProfiles, skills?: SkillInfo[], hasSecondLLM?: boolean, hasObsidian?: boolean): void {
@@ -3740,7 +3730,7 @@ export class AgentLoop {
     bashCumulativeMs: number;
     bashWarned: boolean;
     planModeEntries: number;
-    todoWriteCount: number;
+    todoUpdateCount: number;
     planTodoWarned: boolean;
     recentFailures: number;
     register: string;
@@ -3755,7 +3745,7 @@ export class AgentLoop {
       bashCumulativeMs: this.bashCumulativeMs,
       bashWarned: this.bashCumulativeWarned,
       planModeEntries: this.planModeEntries,
-      todoWriteCount: this.todoWriteCount,
+      todoUpdateCount: this.todoUpdateCount,
       planTodoWarned: this.planTodoWarned,
       recentFailures: this.recentFailures.length,
       register: this.currentRegister,
@@ -3859,7 +3849,7 @@ export class AgentLoop {
   }
 
   /**
-   * メインLLMのProviderを差し替える。/model url, /model provider 経由で
+   * メインLLMのProviderを差し替える。/model host・/model port・/model provider 経由で
    * 接続先を実行時に変更する際に呼ぶ。modelも同時に渡せば一括反映される。
    */
   setProvider(provider: LLMProvider, model?: string, endpoint?: LLMEndpoint): void {
@@ -3875,15 +3865,6 @@ export class AgentLoop {
     this.contextManager.setProvider(this.provider, this.model);
     this.intentClassifier.setProvider(this.provider, this.model);
     this.evaluator.setMainProvider(this.provider, this.model);
-    // 新 provider が attachToolBridge を持つなら (例: claude-agent-sdk) ToolRegistry を注入する。
-    // ランタイム切替時に MCP bridge を再 attach しないと、 SDK に lllmAgent ツールが届かず
-    // Claude が XML 形式の擬似 tool_use を text として吐き続ける状態になる。
-    const bridgeable = this.rawProvider as unknown as {
-      attachToolBridge?: (r: ToolRegistry, e: ToolExecutor) => void;
-    };
-    if (typeof bridgeable.attachToolBridge === "function") {
-      bridgeable.attachToolBridge(this.toolRegistry, this.toolExecutor);
-    }
     // Phase A-3: provider 切替でも (model が変わる可能性あるため) capability を再解決 (override 反映)
     this.capability = resolveCapability(this.model, this.contextWindow, this.getCapabilityOverride(this.model));
     // Phase C-2 + D-4: 圧縮閾値・keepRecentMessages も追従

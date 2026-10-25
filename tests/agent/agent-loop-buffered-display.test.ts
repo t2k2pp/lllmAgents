@@ -81,7 +81,7 @@ describe("AgentLoop buffered response display", () => {
         { type: "done", finishReason: "tool_calls" },
       ],
     ]);
-    const loop = new AgentLoop(provider, "test-model-7b", registry, new PermissionManager(security), 128_000, 0.8);
+    const loop = new AgentLoop(provider, "test-model-7b", registry, new PermissionManager(security), 128_000);
     const output: string[] = [];
     const log = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => output.push(args.join(" ")));
 

@@ -211,8 +211,8 @@ modelRef: <registry-id> # この registry entry を直接指定 (slot バイン�
 | `/model vision ...` | vision slot のサブコマンド (画像認識を含むマルチモーダル言語生成 AI)。 `setup` / `list` / `context` / `description` / `clear`。 未設定なら main LLM にフォールバック | **Phase 5 で追加** |
 | `/models` | レジストリピッカー。 すべての登録・編集・割当はここから | **新規** |
 | `/swap` | main ⇔ second の slot 入替 | **保持** (1 動詞コマンドとして残す) |
-| `/profiles` | (旧) 履歴ピッカー | **alias** として `/models` を呼ぶ (deprecation 注記) |
-| `/second ...` | (旧) second 編集系 | **alias** として `/model second ...` を呼ぶ (deprecation 注記) |
+| `/profiles` | (旧) 履歴ピッカー | 2026-10-25 に削除 (`/models` に一本化) |
+| `/second ...` | (旧) second 編集系 | 2026-10-25 に削除 (`/model second ...` に一本化) |
 | `/model info` | (旧) `/model` と完全に同一の重複 | **削除** (`/model` に統一) |
 | `/model setup *` (×9) | (旧) プロバイダ別 setup | **補完から外す**。 `/models` の "Add new..." に統合 |
 | `/model host/port/url/provider/temperature/top_p/top_k/rep_penalty/description` | (旧) main 個別編集 | **deprecated 警告**。 `/models` の Edit を推奨。 1 リリース後に削除 |

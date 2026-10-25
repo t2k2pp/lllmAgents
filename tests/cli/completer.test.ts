@@ -43,11 +43,11 @@ describe("createCompleter (readline fallback)", () => {
       expect(matches).toContain("/quit");
     });
 
-    it("/co → /context, /compact, /continue", () => {
+    it("/co → /context, /compact (旧 /continue は削除済み)", () => {
       const [matches] = completer("/co");
       expect(matches).toContain("/context");
       expect(matches).toContain("/compact");
-      expect(matches).toContain("/continue");
+      expect(matches).not.toContain("/continue");
     });
 
     it("/ → 全コマンド一覧", () => {
@@ -161,7 +161,11 @@ describe("createCommandMenuProvider", () => {
     expect(labels).toContain("/model second setup");
     expect(labels).toContain("/model second list");
     expect(labels).toContain("/model second context");
+    expect(labels).toContain("/model second host");
+    expect(labels).toContain("/model second port");
     expect(labels).toContain("/model second description");
+    // second 側も main と同じく url ではなく host / port で接続先を変える
+    expect(labels).not.toContain("/model second url");
   });
 
   it("/model vision 系の主要サブコマンドが補完候補に出る (Phase 5)", () => {
@@ -197,18 +201,33 @@ describe("createCommandMenuProvider", () => {
     expect(matches).toEqual(["/context tools bash"]);
   });
 
-  it("/second は alias として補完に残るが [非推奨] 表記", () => {
+  it("削除した別名コマンドは補完候補に出ない (docs/todo-legacy-ways-cleanup.md T1)", () => {
     const provider = createCommandMenuProvider();
-    const items = provider("second");
-    const second = items.find((i) => i.label === "/second");
-    expect(second).toBeDefined();
-    expect(second!.description).toContain("非推奨");
-    // 個別サブ (enable/disable/...) は /second 側からは消えている
-    const labels = items.map((i) => i.label);
-    expect(labels).not.toContain("/second enable");
-    expect(labels).not.toContain("/second setup");
-    expect(labels).not.toContain("/second list");
-    expect(labels).not.toContain("/second context");
+    const allLabels = provider("").map((i) => i.label);
+    for (const removed of [
+      "/second",
+      "/sessions",
+      "/continue",
+      "/profiles",
+      "/profile",
+      "/model-registry",
+      "/registry",
+      "/integration",
+      "/intg",
+      "/switch",
+      "/token",
+      "/model url",
+      "/model ip",
+      "/loop list",
+      "/stream on",
+      "/stream off",
+    ]) {
+      expect(allLabels, removed).not.toContain(removed);
+      expect(
+        allLabels.some((l) => l.startsWith(`${removed} `)),
+        `${removed} のサブコマンド`,
+      ).toBe(false);
+    }
   });
 
   it("main-slot /model 編集系サブコマンドは補完候補に出る (2026-06-21 discoverability 復活)", () => {
@@ -229,23 +248,11 @@ describe("createCommandMenuProvider", () => {
     expect(desc?.value).toBe("/model description ");
   });
 
-  it("非推奨/集約済みコマンドは引き続き補完候補から除外 (dispatcher 互換は維持)", () => {
-    // docs/model-registry.md §4.1 — /models Edit に統合済み
+  it("プロバイダ別 setup バリアントは補完候補に出さない (wizard 内で選ぶ)", () => {
     const provider = createCommandMenuProvider();
     const allLabels = provider("").map((i) => i.label);
-    // /model url は dispatcher 内で非推奨明示 → 補完には出さない
-    expect(allLabels).not.toContain("/model url");
-    // 旧 /second 個別編集 (/model second へ集約済み)
-    expect(allLabels).not.toContain("/second model");
-    expect(allLabels).not.toContain("/second url");
-    expect(allLabels).not.toContain("/second provider");
-    expect(allLabels).not.toContain("/second description");
-    expect(allLabels).not.toContain("/second temperature");
-    expect(allLabels).not.toContain("/second top_p");
-    // プロバイダ別 setup variants
     expect(allLabels).not.toContain("/model setup azure-openai");
     expect(allLabels).not.toContain("/model setup gemini");
-    expect(allLabels).not.toContain("/second setup gemini");
   });
 
   it("/models コマンドが補完候補に出る", () => {
@@ -264,8 +271,6 @@ describe("createCommandMenuProvider", () => {
     const items = provider("integrations");
     const labels = items.map((i) => i.label);
     expect(labels).toContain("/integrations");
-    // 短縮形
-    expect(provider("intg").map((i) => i.label)).toContain("/intg");
   });
 
   it("旧 /discord /slack /chatlog /search は補完から完全除外 (dispatcher 互換は維持)", () => {
@@ -291,15 +296,14 @@ describe("createCommandMenuProvider", () => {
   });
 
   it("/loop の主要サブコマンドは引き続き補完候補に出る (B-2 統合後)", () => {
-    // B-2 (2026-05-28): /loop list と /loop stop は /loop status の picker に集約。
-    // 補完候補は /loop と /loop status の 2 件のみ。 /loop list / /loop stop は
-    // dispatcher 互換維持 (補完からは外れる)。
+    // /loop status (一覧 + 停止 picker) と /loop stop (id 指定 / 全停止、 picker 不要) を載せる。
+    // 旧 /loop list は /loop status に一本化して削除済み。
     const provider = createCommandMenuProvider();
     const loopItems = provider("loop").map((i) => i.label);
     expect(loopItems).toContain("/loop");
     expect(loopItems).toContain("/loop status");
+    expect(loopItems).toContain("/loop stop");
     expect(loopItems).not.toContain("/loop list");
-    expect(loopItems).not.toContain("/loop stop");
   });
 
   it("スキルトリガーも候補に含む", () => {

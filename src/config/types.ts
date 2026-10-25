@@ -202,8 +202,6 @@ export interface ContextStrategyConfig {
 }
 
 export interface ContextConfig {
-  compressionThreshold: number;
-  maxHistoryMessages: number;
   /** 縮約手段。 未設定なら "hybrid" (docs/context-forgetting.md §6) */
   reduction?: ReductionMode;
   /** 忘却機能の詳細設定 */
@@ -232,9 +230,7 @@ export interface DiscordConfig {
   webhookUrl: string;
   // Slash Command 受信用 (Discord Developer Portal で取得)
   applicationId?: string;
-  publicKey?: string; // [未使用] 旧 Endpoint 方式の署名検証用。 Gateway 方式移行で不要 (後方互換のため型に残す)
   botToken?: string; // Bot トークン (Gateway 接続・コマンド登録・follow-up 送信)
-  interactionPort?: number; // [未使用] 旧 Endpoint 方式の HTTP ポート。 Gateway 方式移行で不要 (後方互換のため型に残す)
   listenEnabled?: boolean; // 起動時に受信 (Gateway 接続) を自動開始するか
   /** コマンド・確認ボタンを受け付けるユーザー ID。 未設定/空 = 全員拒否 (fail-closed, proposal §6)。 利用には設定が必須 */
   allowedUserIds?: string[];
@@ -760,7 +756,9 @@ export function getDefaultConfig(): Config {
         "browser_snapshot",
         "vision_analyze",
         "ask_user",
-        "todo_write",
+        "todo_append",
+        "todo_mark",
+        "todo_delete",
         "enter_plan_mode",
         "exit_plan_mode",
         "task_output",
@@ -801,8 +799,6 @@ export function getDefaultConfig(): Config {
       streamCommandOutput: true,
     },
     context: {
-      compressionThreshold: 0.8,
-      maxHistoryMessages: 100,
       // docs/context-forgetting.md §6 — 既定は hybrid。 忘却が失敗しても圧縮に落ちるので
       // 最悪でも従来と同じ動作になる。 従来動作に固定したい場合は /forget mode compress
       reduction: "hybrid",

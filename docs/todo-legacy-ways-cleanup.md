@@ -1,6 +1,6 @@
 # ToDo: 同じことをする複数のやり方 (旧方式の残り) を一本化する
 
-> 作成日: 2026-10-25 / ステータス: **実施中** (洗い出し・判断済み。 T1〜T4 を順に実装)
+> 作成日: 2026-10-25 / ステータス: **実施中** (洗い出し・判断済み。 T1 完了、 T2〜T4 を順に実装)
 
 ## 背景
 `/run pause` と `/run pause --durable` のように、同じ目的に 2 つのやり方が残っていると、
@@ -64,7 +64,39 @@ config.json のシークレット分離移行、 llm-profiles.json → registry 
 - C5 (こちらで判断): `/stream on|off` と `/intg` は別名なので削除。 `--mouse` が `--alt-screen` も有効にする件は動作変更を伴うため記録のみ
 
 ## 実装タスク (順に 1 つずつ、 各タスクで CI 手順を通して push)
-- [ ] T1: A の削除 (コマンド別名・何もしない残骸・`/help` を補完と同じ一覧に・`todo_write`・ツール名別名表の統合・コード上だけの互換) + C5
+- [x] T1: A の削除 (コマンド別名・何もしない残骸・`/help` を補完と同じ一覧に・`todo_write`・ツール名別名表の統合・コード上だけの互換) + C5 (2026-10-25、 下記「T1 実施内容」)
 - [ ] T2: C2 起動フラグ
 - [ ] T3: C3 設定コマンドを対話画面に一本化
 - [ ] T4: C1 権限を rules に一本化
+
+## T1 実施内容 (2026-10-25)
+
+### 削除したもの (互換 alias・案内 shim は残していない)
+- コマンド: `/second` `/sessions` `/continue` `/profiles` `/profile` `/model-registry` `/registry` `/integration` `/intg` `/switch` `/token`、
+  `/model url` `/model ip`、 `/loop list`、 `/stream on|off` (引数付き `/stream` は「引数を取りません」 と表示)、 `/discord public-key` `/discord port`
+- `/profiles` の旧 UI (handleProfilesCommand / printProfilesList) と `src/config/llm-profiles.ts` (model-registry への委譲 facade)。
+  `src/agent/llm-profiles.ts` (buildLLMProfiles) はシステムプロンプト用の実処理で別物なので残す
+- 設定キー: `discord.publicKey` / `discord.interactionPort`、 `context.compressionThreshold` / `context.maxHistoryMessages` (どれも読まれていなかった)。
+  config-schema は未知キーを検証対象外として読み飛ばすため、 既存 config.json に残っていても起動できる
+- `todo_write` ツール。 先に WORKTREE_AGNOSTIC_CORE・既定 autoApproveTools・plan mode 許可一覧・general-purpose エージェントの tools を
+  todo_append / todo_mark / todo_delete に置き換えた。 INHERENTLY_SAFE_TOOLS からも外した。
+  計画/Todo 過多検知は todo_append / todo_delete (計画の書き換え) を数える (todo_mark は 1 項目ずつ進める通常操作なので数えない)
+- コード上だけの互換: AgentLoop の未使用引数 `compressionThreshold`、 SystemPromptComposer の文字列戻り値、 `webSearchTool` export、
+  interactive-input.ts の `getDisplayWidth` 再 export、 claude-agent-sdk の何もしない `attachToolBridge` (と config の toolRegistry / toolExecutor)
+
+### 一本化・修正したもの
+- second 側の接続先変更を main と同じ `/model second host` / `/model second port` にした (`/model second url` は削除)
+- 削除したコマンドを指していた案内文 (`/second setup` 等。 federated_delegate のモデル向け説明、 システムプロンプトの second 特性未設定の案内を含む) を正規の書き方に直した
+- `/help`: 削除済み `/capability` `/metrics`、 旧名、 `/skills` の重複を除き、 実在コマンドだけにした。 一覧は `BUILTIN_HELP_ENTRIES` (renderer.ts) に持ち、
+  補完と一致していることを tests/cli/help-consistency.test.ts で検査する。 `/stream` `/permission` `/model second|vision` `/models` 等の抜けも補った
+- ツール名の別名表: rule-engine.ts と skill-loader.ts の 2 つを `src/tools/tool-name-aliases.ts` に統合。 `Agent` は実在しない `sub_agent` ではなく `task` を指すよう直した (`Task` も同じ)
+- C5: `/stream on|off` と `/intg` を削除。 `--mouse` が `--alt-screen` も有効にする件は記録のみ (変更なし)
+
+### 確認した上で残したもの
+- `--no-alt-screen` / `--no-mouse`: 環境変数 `LLLMAGENT_ENABLE_ALTERNATE_SCREEN` / `LLLMAGENT_ENABLE_MOUSE` を常用している人がその回だけ打ち消す用途がある。
+  --help の「legacy compatibility」 表記をこの用途の説明に直した
+- `/loop stop [id|all]`: `/loop status` の停止 picker と目的は重なるが、 picker を使えない非TTY でも止められる唯一の手段なので残し、 補完とヘルプに載せた (要ユーザー判断)
+- `/discord` `/slack` `/search` `/chatlog` `/permission` の直接サブコマンド: T3 で扱う
+- 本表に無いが同種の別名として気づいたもの (未対応): `/quit` と `/exit`、 `/model second status|info` と引数なし `/model second`、
+  `/model second model <名前>` と `/model second list`、 `/cost model|provider` (単数形) と `/cost models|providers`
+

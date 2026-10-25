@@ -5,8 +5,6 @@
  * ScreenManager (docs/tui-alternate-screen.md §3.5) も同じ幅計算を必要とするが、
  * 幅計算を 2 箇所に書くと片方だけズレて描画が崩れる (§11 のリスク表)。
  * 新規に書き直さず、ここへ共通化して両方から使う。
- *
- * interactive-input.ts は互換のため `getDisplayWidth` を再エクスポートしている。
  */
 
 /** ANSI の色指定 (SGR) を取り除く */

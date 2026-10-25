@@ -123,4 +123,16 @@ describe("sanitizeParsedConfig", () => {
     expect(r.warnings).toHaveLength(3);
     expect(r.config).toEqual({ mainLLM: { model: "m" } });
   });
+
+  it("削除した設定キー (discord.publicKey 等) が残った旧 config も無警告で読める", () => {
+    // docs/todo-legacy-ways-cleanup.md T1: 型・スキーマから削除したが、 既存 config.json に残っていても起動を止めない
+    const input = {
+      discord: { enabled: false, webhookUrl: "", publicKey: "abc", interactionPort: 3003 },
+      context: { compressionThreshold: 0.8, maxHistoryMessages: 100 },
+      security: { autoApproveTools: ["todo_write"] },
+    };
+    const r = sanitizeParsedConfig(input);
+    expect(r.warnings).toEqual([]);
+    expect(r.config).toEqual(input);
+  });
 });

@@ -121,9 +121,7 @@ const discordSchema = z
     enabled: z.boolean(),
     webhookUrl: z.string(),
     applicationId: z.string(),
-    publicKey: z.string(),
     botToken: z.string(),
-    interactionPort: z.number(),
     listenEnabled: z.boolean(),
     allowedUserIds: z.array(z.string()),
     pendingUsers: z.array(pendingUserSchema),
@@ -200,12 +198,6 @@ export const configSchema = z
     visionLLM: llmEndpointSchema.nullable(),
     secondLLM: secondLLMSchema.nullable(),
     security: securitySchema,
-    context: z
-      .object({
-        compressionThreshold: z.number(),
-        maxHistoryMessages: z.number(),
-      })
-      .partial(),
     discord: discordSchema,
     slack: slackSchema,
     notifications: z.object({ minDurationSec: z.number() }).partial(),

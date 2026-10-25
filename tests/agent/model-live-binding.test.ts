@@ -18,7 +18,7 @@ const security: SecurityConfig = {
 
 describe("AgentLoop live model binding", () => {
   it("model 単体切替でも実行中 binding を更新し、未反映の誤警告を作らない", () => {
-    const loop = new AgentLoop(provider, "qwen-old-7b", new ToolRegistry(), new PermissionManager(security), 8192, 0.8);
+    const loop = new AgentLoop(provider, "qwen-old-7b", new ToolRegistry(), new PermissionManager(security), 8192);
     loop.setLiveBinding({ providerType: "ollama", model: "qwen-old-7b", baseUrl: "http://localhost:11434" });
 
     loop.setModel("qwen-new-7b");
@@ -35,7 +35,6 @@ describe("AgentLoop live model binding", () => {
       new ToolRegistry(),
       new PermissionManager(security),
       262_144,
-      0.8,
     );
     expect(loop.capability.tier).toBe("T2");
     expect(loop.capability.contextWindow).toBe(262_144);

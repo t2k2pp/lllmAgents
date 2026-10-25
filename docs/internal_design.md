@@ -229,7 +229,7 @@ stateDiagram-v2
 ### 2.4 Agent Core のその他の主要コンポーネント
 
 - **ContextManager（自動コンテキスト圧縮機能）**
-  セッション中のトークン使用量を監視し、`compressionThreshold`（デフォルト80%）を超えた際に動作します。古いメッセージ群をLLM自身に「簡潔に要約」させ、システムプロンプトの直後に『要約された過去の文脈』として挿入することで、無限に続く会話でもコンテキスト上限をオーバーしない仕組みを提供します。
+  セッション中のトークン使用量を監視し、能力ティアごとの圧縮閾値 (`capability.compressionThreshold`、 T1=70% / T2=60% / T3=50%。 `modelCapabilities.<モデル名>.compressionThreshold` で上書き可) を超えた際に動作します。古いメッセージ群をLLM自身に「簡潔に要約」させ、システムプロンプトの直後に『要約された過去の文脈』として挿入することで、無限に続く会話でもコンテキスト上限をオーバーしない仕組みを提供します。
 
 - **SessionManager（セッション永続化）**
   LLMのプロバイダ情報や会話履歴（Tool executionの結果含む）を JSON 形式で `~/.localllm/sessions/` 配下に自動保存・復元し、ターミナルを再起動しても前回の続きから作業を再開できるライフサイクルを管理します。
@@ -492,7 +492,7 @@ hookManager.loadHooks(process.cwd());
 
 const agent = new AgentLoop(
   provider, model, toolRegistry, permissions,
-  contextWindow, compressionThreshold,
+  contextWindow,
   hookManager
 );
 
@@ -619,7 +619,7 @@ sandbox許可へ追加し、不存在・無効skillはLLMを呼ぶ前にfail-lou
 |:---|:---|:---|
 | `explore.md` | explore | file_read, glob, grep, web_fetch, web_search |
 | `plan.md` | plan | file_read, glob, grep, web_fetch, web_search |
-| `general-purpose.md` | general-purpose | file_read, file_write, file_edit, glob, grep, bash, web_fetch, web_search, todo_write, ask_user |
+| `general-purpose.md` | general-purpose | file_read, file_write, file_edit, glob, grep, bash, web_fetch, web_search, todo_append, todo_mark, todo_delete, ask_user |
 | `bash.md` | bash | bash, file_read, glob, grep |
 | `code-reviewer.md` | code-reviewer | file_read, glob, grep, bash |
 

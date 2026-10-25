@@ -32,7 +32,6 @@ export type AssistantMessageCallback = (content: string, toolCalls?: ToolCall[])
  *   - dynamic: 毎ターン変わる部分 (現在日時 / goal / todo)。 getMessages() には入れない。
  *     履歴より前に置くと前方一致が毎回そこで途切れ、 履歴全部が再計算になるため。
  *     呼び出し側が attachDynamicContext() で末尾の未送信メッセージに添付する。
- * 文字列を返す旧シグネチャも後方互換で受理し、 その場合は全量を stable 扱いにする。
  *
  * docs/strategic-todo-design.md §2.2 / §3.1 参照。
  */
@@ -40,7 +39,7 @@ export interface ComposedSystemPrompt {
   stable: string;
   dynamic: string;
 }
-export type SystemPromptComposer = (basePrompt: string) => string | ComposedSystemPrompt;
+export type SystemPromptComposer = (basePrompt: string) => ComposedSystemPrompt;
 
 /** 状態通知の現在日時 (ローカル時刻、 秒まで)。 */
 function formatLocalDatetime(now: Date): string {
@@ -118,9 +117,7 @@ export class MessageHistory {
   /** composer を呼んで { stable, dynamic } を得る。 composer が無ければ base 全量が stable。 */
   private compose(): ComposedSystemPrompt {
     if (!this.composer) return { stable: this.systemPrompt, dynamic: "" };
-    const composed = this.composer(this.systemPrompt);
-    // 旧シグネチャ後方互換: 全量を stable 扱い
-    return typeof composed === "string" ? { stable: composed, dynamic: "" } : composed;
+    return this.composer(this.systemPrompt);
   }
 
   getMessages(): Message[] {

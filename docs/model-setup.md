@@ -55,7 +55,7 @@ llamacpp で複数モデルを別ポートで起動する運用 (8080 以外を�
 | `/model provider <type> [<URL>]` | プロバイダー切替 (URL 同時指定可、既存) |
 | `/model list` | モデル一覧から対話選択 (既存) |
 | `/model <name>` | モデル名直接指定 (既存) |
-| `/model url <URL>` | **非推奨**。 互換のため残すが「`/model host` + `/model port`、または `/model setup` を推奨」と案内 |
+| `/model url <URL>` | 2026-10-25 に削除 (`/model host` + `/model port` に一本化。 docs/todo-legacy-ways-cleanup.md) |
 
 ## setup-wizard.ts のリファクタ
 
@@ -99,7 +99,7 @@ visionLLM 設定はそのまま残す。
 
 ## 実装スコープ外
 
-- セカンドLLM (`/second`) 側の表記揺れ統一は本タスクの対象外 (同様の問題はあるが、
-  別タスクで対応)。 セカンドLLMには既に `/second setup` がある。
+- セカンドLLM 側の表記揺れ統一は本タスクの対象外だった。 2026-10-25 に `/model second host` / `/model second port`
+  を追加し、 `/model second url` を削除して main と揃えた。
 - vision LLM の REPL 再設定 — 利用頻度が低く wizard を直接走らせれば良いので
   本タスクではスコープ外。

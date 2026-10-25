@@ -125,9 +125,6 @@ class SearchCoverageError extends Error {
   override name = "SearchCoverageError";
 }
 
-// 後方互換: 既存の名前付きエクスポート (DuckDuckGoデフォルト)
-export const webSearchTool = createWebSearchTool();
-
 // ── SearXNG ──────────────────────────────────────────────
 
 async function searchSearXNG(baseUrl: string, query: string, maxResults: number): Promise<ToolResult> {

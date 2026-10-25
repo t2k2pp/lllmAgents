@@ -78,7 +78,7 @@ async function runWith(firstResponse: ChatChunk[]): Promise<string[]> {
   registry.register(makeProbeTool("salvage_probe", executed, ref));
   const permissions = new PermissionManager(makeSecurityConfig(["salvage_probe"]));
   const provider = makeProvider([firstResponse, [{ type: "done", finishReason: "stop" }]]);
-  const loop = new AgentLoop(provider, "test-model-7b", registry, permissions, 128_000, 0.8);
+  const loop = new AgentLoop(provider, "test-model-7b", registry, permissions, 128_000);
   ref.loop = loop;
   await loop.run("テスト依頼");
   return executed;
@@ -148,7 +148,7 @@ describe("AgentLoop: salvage したツール呼び出しの実行到達 (§6.5 �
       ],
       [{ type: "done", finishReason: "stop" }],
     ]);
-    const loop = new AgentLoop(provider, "test-model-7b", registry, permissions, 128_000, 0.8);
+    const loop = new AgentLoop(provider, "test-model-7b", registry, permissions, 128_000);
     ref.loop = loop;
     await loop.run("テスト依頼");
     // 下書きは実行しない / string 型の引数は数字の字面でも文字列のまま
@@ -185,7 +185,7 @@ describe("AgentLoop: salvage したツール呼び出しの実行到達 (§6.5 �
       { type: "done", finishReason: "stop" },
     ];
     const provider = makeProvider([empty, tool, empty, tool, empty, tool, empty, tool]);
-    const loop = new AgentLoop(provider, "test-model-7b", registry, permissions, 128_000, 0.8);
+    const loop = new AgentLoop(provider, "test-model-7b", registry, permissions, 128_000);
     ref.loop = loop;
     await loop.run("テスト依頼");
     expect(executed).toHaveLength(4);
