@@ -118,7 +118,7 @@ export const BUILTIN_HELP_ENTRIES: ReadonlyArray<{ usage: string; summary: strin
     usage: '/goal-loop [N] --check "<cmd>" <タスク>',
     summary: "決定的検証ゲート型ループ: cmd が exit 0 になるまで反復 (既定8回)",
   },
-  { usage: "/loop [間隔] <プロンプト>", summary: "指定間隔でプロンプトを繰り返し実行" },
+  { usage: "/loop <間隔> <プロンプト>", summary: "指定間隔でプロンプトを繰り返し実行" },
   { usage: "/loop status", summary: "アクティブなループ一覧 + 停止 picker" },
   { usage: "/loop stop [id|all]", summary: "ループを停止" },
 ];

@@ -210,56 +210,44 @@ export function parseInterval(str: string): { ms: number; label: string } | null
   return { ms, label: str.toLowerCase() };
 }
 
+/** /loop の正しい書き方 (使い方エラー時に表示する) */
+export const LOOP_USAGE_LINES = [
+  "使い方: /loop <間隔> <プロンプト>",
+  "  例: /loop 5m /pr-review",
+  "  例: /loop 30m デプロイ状況を確認",
+  "  間隔: 10s, 5m, 2h, 1d (数値 + s/m/h/d)",
+  "/loop status       - 一覧 + 停止 picker",
+  "/loop stop [id|all] - ループを停止",
+];
+
+export type LoopArgsParse =
+  | { ok: true; intervalMs: number; intervalStr: string; prompt: string }
+  | { ok: false; message: string };
+
 /**
- * 入力文字列から間隔とプロンプトを抽出する。
+ * /loop の引数から間隔とプロンプトを取り出す。
  *
- * 対応フォーマット:
- *   /loop 5m <prompt>
- *   /loop <prompt> every 20m
- *   /loop <prompt>             (デフォルト 10m)
+ * 書き方は `/loop <間隔> <プロンプト>` の 1 つだけ (docs/todo-legacy-ways-cleanup.md T2)。
+ * 以前は間隔を省略すると既定 10m で登録していたため、 `/loop list` のような
+ * 打ち間違いが「list を 10 分ごとに送るループ」 として黙って登録されていた。
+ * 先頭が間隔として読めない入力・プロンプトが無い入力は使い方エラーにする。
  *
  * @param argsStr - "/loop" 以降の文字列
  */
-export function parseLoopArgs(argsStr: string): {
-  intervalMs: number;
-  intervalStr: string;
-  prompt: string;
-} {
-  const DEFAULT_INTERVAL_MS = 10 * 60 * 1_000; // 10分
-  const DEFAULT_INTERVAL_STR = "10m";
-
-  const trimmed = argsStr.trim();
-
-  // "every 20m" パターン (末尾)
-  const everyMatch = trimmed.match(/^([\s\S]+?)\s+every\s+(\S+)$/i);
-  if (everyMatch) {
-    const parsed = parseInterval(everyMatch[2]);
-    if (parsed) {
-      return {
-        intervalMs: parsed.ms,
-        intervalStr: parsed.label,
-        prompt: everyMatch[1].trim(),
-      };
-    }
+export function parseLoopArgs(argsStr: string): LoopArgsParse {
+  const parts = argsStr
+    .trim()
+    .split(/\s+/)
+    .filter((p) => p.length > 0);
+  if (parts.length === 0) {
+    return { ok: false, message: "間隔とプロンプトを指定してください。" };
   }
-
-  // 先頭が間隔指定の場合: "5m <prompt>"
-  const parts = trimmed.split(/\s+/);
-  if (parts.length >= 2) {
-    const parsed = parseInterval(parts[0]);
-    if (parsed) {
-      return {
-        intervalMs: parsed.ms,
-        intervalStr: parsed.label,
-        prompt: parts.slice(1).join(" "),
-      };
-    }
+  const parsed = parseInterval(parts[0]);
+  if (!parsed) {
+    return { ok: false, message: `先頭の「${parts[0]}」 は間隔として読めません。` };
   }
-
-  // 間隔指定なし → デフォルト
-  return {
-    intervalMs: DEFAULT_INTERVAL_MS,
-    intervalStr: DEFAULT_INTERVAL_STR,
-    prompt: trimmed,
-  };
+  if (parts.length < 2) {
+    return { ok: false, message: "プロンプトを指定してください。" };
+  }
+  return { ok: true, intervalMs: parsed.ms, intervalStr: parsed.label, prompt: parts.slice(1).join(" ") };
 }

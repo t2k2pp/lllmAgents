@@ -184,7 +184,7 @@ private viewOffset = 0;           // 0 = 最下部に追従。 >0 で遡り中
 
 確定した`write()`だけをsession別の`terminalTranscript`へ最大10,000行保存する。
 spinner frame、進捗上書き、編集中composerはlive表示なので保存しない。`/resume`、
-`--resume`、`--continue`、明示的なRoom移動ではscrollbackを保存snapshotへ置換する。
+`--resume`、明示的なRoom移動ではscrollbackを保存snapshotへ置換する。
 一方、Discord/Slack runのために内部でRoomを借りるだけの切替ではCLI画面を変更しない。
 旧sessionは空画面へ黙って落とさず、conversationのuser/assistant/tool履歴から可読表示を再構成する。
 

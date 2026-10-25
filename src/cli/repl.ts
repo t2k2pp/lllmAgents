@@ -100,11 +100,12 @@ import {
 } from "../agent/model-drift.js";
 import type { LLMRegistryEntry } from "../config/types.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
-import { LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
+import { LOOP_USAGE_LINES, LoopManager, parseLoopArgs } from "../loop/loop-manager.js";
 import { secondLLMAgentTool, setSecondLLMManager } from "../tools/definitions/second-llm.js";
 import { federatedDelegateTool, setFederatedSecondLLMManager } from "../tools/definitions/federated-delegate.js";
 import { buildLLMProfiles } from "../agent/llm-profiles.js";
 import { createProvider } from "../providers/provider-factory.js";
+import { checkModelNameArgs, checkModelNameAvailable } from "./model-name-check.js";
 import { getSubAgentManager } from "../tools/definitions/task.js";
 import { DEFAULT_PORTS } from "../config/types.js";
 import type { ProviderType } from "../config/types.js";
@@ -1920,6 +1921,13 @@ export class REPL {
    *
    * args は subcommand 部分 (`/model second context 128k` なら ["context", "128k"])。
    */
+  /** モデル名の直接指定を受け付けなかった理由を表示する (先頭行を赤、 残りを補足として) */
+  private printModelNameCheckFailure(lines: string[]): void {
+    const [head, ...rest] = lines;
+    console.log(chalk.red(`  ${head}`));
+    for (const line of rest) console.log(chalk.dim(`  ${line}`));
+  }
+
   private async handleSecondLLMCommand(args: string[]): Promise<void> {
     const subCmd = args[0];
     // セカンドLLM未設定 かつ setup 以外のサブコマンドの場合
@@ -2011,7 +2019,15 @@ export class REPL {
         console.log(chalk.yellow("  Second LLM を無効化しました (設定に保存)。"));
       }
     } else if (subCmd === "model" || subCmd === "list") {
-      const newModel = subCmd === "model" ? args.slice(1).join(" ").trim() : "";
+      // 直接指定は main の /model <名前> と同じ規則 (1 語のみ・利用可能な名前のみ)。
+      const nameOpts = { usage: "/model second model <モデル名>", pickerCommand: "/model second list" };
+      const nameArgs = subCmd === "model" ? args.slice(1) : [];
+      const argCheck = nameArgs.length > 1 ? checkModelNameArgs(nameArgs, nameOpts) : null;
+      if (argCheck && !argCheck.ok) {
+        this.printModelNameCheckFailure(argCheck.lines);
+        return;
+      }
+      const newModel = nameArgs[0]?.trim() ?? "";
       if (!this.config.secondLLM) {
         console.log(chalk.red("  Second LLM の設定が存在しません。/model second setup で初期設定してください。"));
       } else if (!newModel) {
@@ -2019,12 +2035,12 @@ export class REPL {
         const provider = this.secondLLMManager?.getProvider();
         if (!provider) {
           console.log(chalk.dim(`  現在のモデル: ${this.config.secondLLM.endpoint.model ?? "(未設定)"}`));
-          console.log(chalk.dim(`  プロバイダーに接続できません。直接指定: /model second model <モデル名>`));
+          console.log(chalk.red(`  セカンドLLMのプロバイダーに接続できません。 接続先を確認して再試行してください。`));
         } else {
           try {
             const models = await provider.listModels();
             if (models.length === 0) {
-              console.log(chalk.dim("  利用可能なモデルはありません。直接指定: /model second model <モデル名>"));
+              console.log(chalk.yellow("  利用可能なモデルはありません。 サーバーを確認して再試行してください。"));
             } else {
               const currentModel = this.config.secondLLM.endpoint.model;
               const chosen = await select({
@@ -2051,11 +2067,25 @@ export class REPL {
           } catch (e) {
             if (!(e instanceof Error && e.message.includes("User force closed"))) {
               console.log(chalk.red(`  モデル一覧の取得に失敗: ${e instanceof Error ? e.message : String(e)}`));
-              console.log(chalk.dim(`  直接指定: /model second model <モデル名>`));
+              console.log(chalk.dim(`  サーバーを確認して再試行してください。`));
             }
           }
         }
       } else {
+        const provider = this.secondLLMManager?.getProvider();
+        const available = provider
+          ? await checkModelNameAvailable(newModel, () => provider.listModels(), nameOpts)
+          : {
+              ok: false as const,
+              lines: [
+                `セカンドLLMのプロバイダーに接続できないため、 ${newModel} への切り替えは行いませんでした。`,
+                `接続先 (/model second host / port) を確認して再試行してください。`,
+              ],
+            };
+        if (!available.ok) {
+          this.printModelNameCheckFailure(available.lines);
+          return;
+        }
         const oldModel = this.config.secondLLM.endpoint.model;
         this.config.secondLLM.endpoint.model = newModel;
         saveConfig(this.config);
@@ -4518,7 +4548,7 @@ export class REPL {
           console.log(chalk.dim(`  セッション保存: ${chalk.cyan(sid)}  (${msgCount} messages)`));
           console.log(chalk.dim(`  続きから再開する場合:`));
           console.log(chalk.dim(`    /resume ${sid}              ← REPL 起動後`));
-          console.log(chalk.dim(`    起動時: --resume ${sid}     ← または --continue`));
+          console.log(chalk.dim(`    起動時: --resume ${sid}     ← または --resume latest`));
         }
         process.removeAllListeners("SIGINT");
         console.log(chalk.dim("\n  Goodbye!\n"));
@@ -5992,10 +6022,23 @@ export class REPL {
             console.log(chalk.dim("    /model setup azure-claude     Azure Claude — OpenAI互換ルート"));
           }
         } else {
+          // 直接指定は 1 語のみ・利用可能な名前のみ受け付ける (docs/todo-legacy-ways-cleanup.md T2)。
+          const nameOpts = { usage: "/model <モデル名>", pickerCommand: "/model list" };
+          const argCheck = checkModelNameArgs(args, nameOpts);
+          if (!argCheck.ok) {
+            this.printModelNameCheckFailure(argCheck.lines);
+            break;
+          }
           const newModel = args[0];
           const oldModel = this.agent.getModel();
           if (newModel === oldModel) {
             console.log(chalk.dim(`  既に ${newModel} を使用中です。`));
+            break;
+          }
+          const provider = this.agent.getProvider();
+          const available = await checkModelNameAvailable(newModel, () => provider.listModels(), nameOpts);
+          if (!available.ok) {
+            this.printModelNameCheckFailure(available.lines);
           } else {
             this.agent.setModel(newModel);
             this.config.mainLLM.model = newModel;
@@ -7487,23 +7530,16 @@ export class REPL {
           break;
         }
 
-        // /loop [interval] <prompt>
-        const argsStr = args.join(" ");
-        if (!argsStr) {
-          console.log(chalk.yellow("  使い方: /loop [間隔] <プロンプト>"));
-          console.log(chalk.dim("  例: /loop 5m /pr-review"));
-          console.log(chalk.dim("  例: /loop 30m デプロイ状況を確認"));
-          console.log(chalk.dim("  間隔: 10s, 5m, 2h, 1d (省略時: 10m)"));
-          console.log(chalk.dim("  /loop status  - 一覧 + 停止 picker"));
+        // /loop <interval> <prompt> (間隔は省略不可。 読めない入力は登録せず使い方を出す)
+        const parsedLoop = parseLoopArgs(args.join(" "));
+        if (!parsedLoop.ok) {
+          if (args.length > 0) console.log(chalk.yellow(`  ${parsedLoop.message}`));
+          const [usageHead, ...usageRest] = LOOP_USAGE_LINES;
+          console.log(chalk.yellow(`  ${usageHead}`));
+          for (const line of usageRest) console.log(chalk.dim(`  ${line}`));
           break;
         }
-
-        const { intervalMs, intervalStr, prompt: loopPrompt } = parseLoopArgs(argsStr);
-
-        if (!loopPrompt) {
-          console.log(chalk.yellow("  プロンプトを指定してください。"));
-          break;
-        }
+        const { intervalMs, intervalStr, prompt: loopPrompt } = parsedLoop;
 
         let loopId: string;
         try {

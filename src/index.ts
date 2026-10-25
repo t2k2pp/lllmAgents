@@ -83,7 +83,7 @@ import { PROVIDER_LABELS } from "./config/types.js";
 import { buildLLMProfiles } from "./agent/llm-profiles.js";
 import { DiscordInteractionServer } from "./discord/interaction-server.js";
 import { CredentialVault } from "./security/credential-vault.js";
-import { getLatestSession } from "./agent/session-manager.js";
+import { getLatestSession, loadSession } from "./agent/session-manager.js";
 import { RoomManager } from "./agent/room-manager.js";
 import { RoomRunQueue } from "./agent/room-run-queue.js";
 import { HookManager } from "./hooks/hook-manager.js";
@@ -98,6 +98,7 @@ import { applyLogRetention } from "./utils/log-rotation.js";
 import { checkForUpdate, formatUpdateInspection, inspectUpdate } from "./utils/update-check.js";
 import { inferContextLength } from "./providers/utils/context-length.js";
 import { resolveStartupMode } from "./cli/startup-mode.js";
+import { parseResumeFlag, resolveResumeFlag } from "./cli/resume-flag.js";
 import { runUnityCommand } from "./unity/unity-integration.js";
 
 const HELP_TEXT = `LocalLLM Agent
@@ -112,6 +113,8 @@ Options:
   --version           Show the version and exit
   --check-update      Check GitHub release/version/assets and exit (--json supported)
   --setup             Run the setup wizard
+  --resume <id>       Resume the saved session <id> (same as /resume <id> in the REPL)
+  --resume latest     Resume the most recent saved session (same as /resume latest)
   --safe-mode         Start without customizations
   --no-mcp            Start without MCP servers
   --alt-screen        Enable the full-screen TUI (inline native scrollback is the default)
@@ -185,6 +188,15 @@ async function main(): Promise<void> {
       process.exitCode = 1;
       return;
     }
+  }
+
+  // --resume は重い初期化 (画面・設定・MCP) より先に解決し、 誤指定なら何も始めずに終了する。
+  // 黙って新規セッションで始めると「再開したつもりが別の会話」 になるため (決定 C2)。
+  const resumeResolution = resolveResumeFlag(parseResumeFlag(args), { loadSession, getLatestSession });
+  if (resumeResolution.kind === "error") {
+    console.error(resumeResolution.message);
+    process.exitCode = 1;
+    return;
   }
 
   // 未捕捉例外での即死時にセッション保存・端末復元・クラッシュログを行う
@@ -738,24 +750,11 @@ async function main(): Promise<void> {
   setSubAgentManager(subAgentManager);
   setSkillSubAgentManager(subAgentManager);
 
-  // Check for --resume flag
-  const resumeIdx = args.indexOf("--resume");
-  if (resumeIdx !== -1) {
-    const sessionId = args[resumeIdx + 1];
-    if (sessionId) {
-      const { loadSession } = await import("./agent/session-manager.js");
-      const session = loadSession(sessionId);
-      if (session) {
-        agent.restoreSession(session);
-        console.log(`  Resumed session: ${sessionId}`);
-      }
-    }
-  } else if (args.includes("--continue")) {
-    const latest = getLatestSession();
-    if (latest) {
-      agent.restoreSession(latest);
-      console.log(`  Resumed latest session: ${latest.meta.id}`);
-    }
+  // --resume (起動直後に解決済み) のセッションを復元する
+  if (resumeResolution.kind === "session") {
+    const session = resumeResolution.session;
+    agent.restoreSession(session);
+    console.log(`  Resumed session: ${session.meta.id} (${session.meta.messageCount} messages)`);
   }
 
   // Room モデル (docs/room-model-design.md): 固定 3 Room の管理と受信順グローバル FIFO キュー。

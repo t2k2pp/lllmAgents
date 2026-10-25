@@ -88,12 +88,12 @@ export class RoomManager {
   // ─── startup ───
 
   /**
-   * REPL 起動時に呼ぶ。 index.ts の --resume/--continue 処理の後に実行し、 agent が現在
+   * REPL 起動時に呼ぶ。 index.ts の --resume 処理の後に実行し、 agent が現在
    * 持っているセッション(新規 or resume 済み)を REPL の Room にタグして登録する。
    * REPL は autoResume=false 既定のため、 ここで自動 resume はしない(起動時新規は index.ts が担う)。
    */
   initReplSession(): void {
-    // 既に room タグ済みのセッション (--resume/--continue で復元) はそのタグを尊重し、
+    // 既に room タグ済みのセッション (--resume で復元) はそのタグを尊重し、
     // 未タグ (新規 or 旧セッション) のみ REPL の Room にタグする。
     const existing = this.agent.getCurrentSessionRoom();
     const room = existing ?? this.bindingFor("repl");

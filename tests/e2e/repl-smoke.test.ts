@@ -388,8 +388,49 @@ describe("E2E smoke — 非TTYパイプモード起動", () => {
         expect(resumed.stdout, diag(resumed)).toContain("SMOKE1-REPLY-XYZZY");
         expect(resumed.stdout, diag(resumed)).toContain("保存stdoutで欠けていた会話本文 2 件");
         expect(resumed.stdout, diag(resumed)).toContain(`Resumed session: ${sessionId}`);
+
+        // --resume latest は REPL の /resume latest と同じく最新セッションを復元する
+        const latest = await runApp(["/quit"], ["--no-mcp", "--resume", "latest"], resumeHome);
+        expect(latest.code, diag(latest)).toBe(0);
+        expect(latest.stdout, diag(latest)).toContain(`Resumed session: ${sessionId}`);
+
+        // 見つからない ID・引数なしは黙って新規セッションで始めず、 エラー終了する
+        const missing = await runApp(["/quit"], ["--no-mcp", "--resume", "no-such-session"], resumeHome);
+        expect(missing.code, diag(missing)).toBe(1);
+        expect(missing.stderr, diag(missing)).toContain("セッション no-such-session が見つかりません");
+        const noArg = await runApp(["/quit"], ["--no-mcp", "--resume"], resumeHome);
+        expect(noArg.code, diag(noArg)).toBe(1);
+        expect(noArg.stderr, diag(noArg)).toContain("--resume latest");
       } finally {
         fs.rmSync(resumeHome, { recursive: true, force: true });
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "シナリオ8: /model は利用可能でない名前・余分な引数で切り替えず、 /loop は間隔の無い入力を登録しない",
+    async () => {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), "localllm-validate-e2e-"));
+      const configDir = path.join(home, ".localllm");
+      try {
+        fs.mkdirSync(configDir, { recursive: true });
+        fs.copyFileSync(path.join(tmpHome, ".localllm", "config.json"), path.join(configDir, "config.json"));
+        const r = await runApp(
+          ["/model url http://192.168.1.10:8000", "/model no-such-model", "/loop list", "/loop status", "/quit"],
+          ["--no-mcp"],
+          home,
+        );
+        expect(r.timedOut, diag(r)).toBe(false);
+        expect(r.code, diag(r)).toBe(0);
+        expect(r.stdout, diag(r)).toContain("余分な引数があります: url http://192.168.1.10:8000");
+        expect(r.stdout, diag(r)).toContain("モデル no-such-model は利用可能なモデルにありません");
+        expect(r.stdout, diag(r)).toContain("先頭の「list」 は間隔として読めません");
+        expect(r.stdout, diag(r)).toContain("アクティブなループはありません");
+        const saved = JSON.parse(fs.readFileSync(path.join(configDir, "config.json"), "utf8"));
+        expect(saved.mainLLM.model).toBe("mock-model");
+      } finally {
+        fs.rmSync(home, { recursive: true, force: true });
       }
     },
     TEST_TIMEOUT_MS,

@@ -65,7 +65,7 @@ config.json のシークレット分離移行、 llm-profiles.json → registry 
 
 ## 実装タスク (順に 1 つずつ、 各タスクで CI 手順を通して push)
 - [x] T1: A の削除 (コマンド別名・何もしない残骸・`/help` を補完と同じ一覧に・`todo_write`・ツール名別名表の統合・コード上だけの互換) + C5 (2026-10-25、 下記「T1 実施内容」)
-- [ ] T2: C2 起動フラグ
+- [x] T2: C2 起動フラグ + T1 で見えた入力検査 (`/model <名前>`・`/loop`) (2026-10-25、 下記「T2 実施内容」)
 - [ ] T3: C3 設定コマンドを対話画面に一本化
 - [ ] T4: C1 権限を rules に一本化
 
@@ -100,3 +100,19 @@ config.json のシークレット分離移行、 llm-profiles.json → registry 
 - 本表に無いが同種の別名として気づいたもの (未対応): `/quit` と `/exit`、 `/model second status|info` と引数なし `/model second`、
   `/model second model <名前>` と `/model second list`、 `/cost model|provider` (単数形) と `/cost models|providers`
 
+
+## T2 実施内容 (2026-10-25)
+
+### 起動フラグ (C2)
+- 書き方は REPL と同じ `--resume <id>` / `--resume latest` の 2 つだけ。 `--continue` は削除 (互換 alias なし)。 `--help` に載せた
+- 解釈は `src/cli/resume-flag.ts` (parseResumeFlag / resolveResumeFlag)。 画面・設定・MCP の初期化より先に解決し、 次の場合は何も始めずに終了コード 1 で終わる (黙って新規セッションで始めない)
+  - 引数なし `--resume` (REPL の `/resume` は picker を開くが、 起動時は REPL 開始前で picker を出せないため使い方エラー)・次が別フラグ・`--resume` の重複
+  - 見つからない ID、 `--resume latest` で保存セッションが無い
+- `/quit` の再開案内とクラッシュ時の案内を `--resume latest` に直した。 README・external_design ほか設計書の `--continue` 表記を直した (cycle-* の履歴文書は触らない。 claude-code-driver スキル内の `--continue` は Claude Code CLI 自身のフラグなので対象外)
+
+### 入力検査 (T1 で露見した分。 削除したコマンド名の特別扱いはしていない)
+- `/model <名前>`: 1 語のみ・プロバイダーのモデル一覧 (`/model list` と同じ取得元) にある名前のみ切り替える (`src/cli/model-name-check.ts`)。
+  余分な引数 (`/model url http://...` 等) は使い方エラー、 一覧に無い名前は候補を示して拒否。 一覧が取れない (例外、 またはローカル系サーバー停止時の空一覧) ときも切り替えず、 再試行か `/model list` を案内する
+- `/model second model <名前>` も同じ規則にした。 一覧取得に失敗したときの「直接指定: /model second model <名前>」 案内は、 直接指定も一覧を要するようになったため再試行の案内に直した
+- `/loop`: 書き方を `/loop <間隔> <プロンプト>` の 1 つにした。 以前は間隔の省略時に既定 10m で登録しており `/loop list` が「list を 10 分ごとに送るループ」 になっていたため、
+  先頭が間隔として読めない入力・プロンプトの無い入力 (`/loop 5m`) は登録せず使い方を出す。 ヘルプ・補完に無かった末尾 `every <間隔>` の別形式も削除した

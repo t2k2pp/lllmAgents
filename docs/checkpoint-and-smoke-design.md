@@ -270,7 +270,7 @@ ToDo 49 件と実メッセージから、挙動は典型的な **リグレッシ
 | **M-D** | スモークの console error が favicon/CORS/`net::ERR` 等のネットワークノイズで誤 FAIL | ネットワーク系ノイズを除外（未捕捉例外は厳格維持） | favicon404＋無効画像のページが pass・consoleErrors 0 |
 | **L-A** | work-tree 外作業時に「ON なのに履歴空」に気づきにくい | `/checkpoint status` に対象フォルダパスを表示 | — |
 
-**1 巡目修正の妥当性（2 巡目で確認された点）**：`git checkout <hash> -- .` の pathspec `.` は **work-tree 基準**で解決され CWD≠work-tree でも正しい／`session.meta.id` 採番で `--resume`/`--continue` 双方が再接続／`/model` 切替は AgentLoop を再生成せず名前空間維持／prune は resume 確定後に実行。**退行なし。**
+**1 巡目修正の妥当性（2 巡目で確認された点）**：`git checkout <hash> -- .` の pathspec `.` は **work-tree 基準**で解決され CWD≠work-tree でも正しい／`session.meta.id` 採番で `--resume <id>`/`--resume latest` 双方が再接続／`/model` 切替は AgentLoop を再生成せず名前空間維持／prune は resume 確定後に実行。**退行なし。**
 
 **M-C（情報）**：2D canvas でも CDN 画像描画で `getImageData` が SecurityError → blank 判定が null（判定不能）に落ちることがある。blank は情報のみのため実害なし。
 

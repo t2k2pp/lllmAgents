@@ -180,7 +180,7 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/swap` | メインLLM ⇔ セカンドLLM を入れ替え (`-y` で確認なし) |
 | `/models` | 登録済みモデルの一覧から main/second への設定・編集・複製・削除・追加。 詳細: docs/model-registry.md |
 | `/todo` | タスクリスト表示 |
-| `/resume [id]` | セッションの会話・確定済み標準出力を復元（引数なしで選択、旧sessionは会話から表示を再構成）。`/resume latest` で最新、`/resume list [N]` で一覧 |
+| `/resume [id]` | セッションの会話・確定済み標準出力を復元（引数なしで選択、旧sessionは会話から表示を再構成）。`/resume latest` で最新、`/resume list [N]` で一覧。起動時に復元するなら `--resume <id>` / `--resume latest` |
 | `/fork [id\|latest]` | 現在または保存済み会話を新しいセッションへ分岐（元セッションは不変） |
 | `/rename <name>` | 現在のセッションへ名前を付け、`/resume list` と再開pickerへ保存 |
 | `/memory` | 永続メモリ表示 |
@@ -199,7 +199,7 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/stream` | ストリーミング表示の現状表示と切替（引数なし） |
 | `/search` | Web検索 |
 | `/permission` | 権限設定の管理 |
-| `/loop` | 反復実行モード (`/loop [間隔] <プロンプト>` / `/loop status` で一覧と停止 / `/loop stop [id\|all]`) |
+| `/loop` | 反復実行モード (`/loop <間隔> <プロンプト>` / `/loop status` で一覧と停止 / `/loop stop [id\|all]`) |
 | `/goal-seek <goal>` | Goal Seek mode 開始（acceptance criteria を立て合格まで自律実行）。複雑なタスクは通常入力でも自動提案される（`goalSeek.autoPropose: false` で無効化） |
 | `/exit-goal-seek` | Goal Seek mode を抜ける |
 | `/integrations` | 外部サービス連携の設定メニュー (Discord / Slack / 会話ログ / Web検索)。Discord の `/ask` 受信は Gateway 方式で公開URL・トンネル不要 (docs/discord-gateway-design.md) |

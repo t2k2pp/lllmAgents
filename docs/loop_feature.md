@@ -15,11 +15,11 @@ Claude Code の `/loop` と `CronCreate/List/Delete` に相当する、ユーザ
 ## コマンド仕様
 
 ```
-/loop [interval] <prompt>   新しいループを開始する
+/loop <interval> <prompt>   新しいループを開始する (間隔は省略不可)
 /loop status                アクティブなループ一覧 + 停止 picker (checkbox 複数選択)
 ```
 
-### 旧コマンドとの互換 (dispatcher 経由でのみ動作、 補完候補からは外れる)
+### picker を使わない停止 (非TTY・スクリプト用)
 
 ```
 /loop stop <id>             指定 ID のループを停止 (スクリプト用)
@@ -38,7 +38,7 @@ Claude Code の `/loop` と `CronCreate/List/Delete` に相当する、ユーザ
 | `2h`   | 2時間        |
 | `1d`   | 1日          |
 
-- 省略時: デフォルト `10m`
+- 省略不可。 先頭が間隔として読めない入力 (例: `/loop list`)・プロンプトの無い入力 (例: `/loop 5m`) は登録せず使い方を表示する。 以前は省略時に既定 `10m` で登録しており、 打ち間違いが黙ってループになっていた。 末尾に `every 20m` を付ける別の書き方も削除し、 `/loop <間隔> <プロンプト>` の 1 つにした (docs/todo-legacy-ways-cleanup.md T2)
 - 単位の大文字・小文字は問わない
 - 小数点あり（例: `1.5h`）も可
 
@@ -132,5 +132,5 @@ Node.js は単一スレッドのため、エージェント実行中（`await ag
 - `/loop` はスキルシステムを経由しない（REPL の switch 文で直接処理）
 - ループは REPL セッション内のみ有効（セッション終了時に全タイマーをクリア）
 - モデル向けscheduleも同じくsession内だけで、プロセス再起動後へ永続化しない
-- 実行中のループをまとめてキャンセルする場合は `/loop status` で全選択 → Enter、 または旧形式の `/loop stop all` (alias) を使う
+- 実行中のループをまとめてキャンセルする場合は `/loop status` で全選択 → Enter、 または `/loop stop all` を使う
 - CLAUDE.md の「絶対パス使用」ルールは本機能には非該当（パス操作なし）

@@ -28,7 +28,7 @@ REPL / Discord / Slack はそれぞれ別の会話コンテキストを持つ（
 - `ConversationState = { history, todos, goal, mode }`（`agent-loop.ts:83`）。会話・ToDo・Goal は**すべてコンテキスト単位**で、`exportConversation()`/`importConversation()` が module singleton（`todo-write.ts` の `let todos` 等）を載せ替える（`agent-loop.ts:2552`,`2567`）。→ 分離は会話だけでなく ToDo/Goal も一貫している。
 - `ConversationStore`（`channel-sessions.ts`）: `key → ConversationState` の in-memory LRU（最大20・**再起動で消える**）。Discord=`discord:<channelId>` / Slack=`slack:<channel>:<thread>`。
 - 永続化: `SessionData = { meta, messages, todos?, goal? }` を `saveSession/loadSession/listSessions`（`session-manager.ts`）。`agent.saveCurrentSession()` は **REPL の `agent.session` のみ**保存。
-- 起動時 resume: REPL は `--resume <id>` / `--continue`。デフォルトは新規セッション。
+- 起動時 resume: REPL は `--resume <id>` / `--resume latest`。デフォルトは新規セッション。
 
 ## 4. Room モデル仕様（確定）
 1. **固定 3 Room: A / B / C**（作成・削除・増減は不要）。
@@ -68,7 +68,7 @@ interface RoomConfig {
 - `SessionData ⇆ ConversationState` の変換ヘルパ（messages⇄MessageHistory, todos, goal, mode）。mode は SessionData に新フィールド追加 or messages とは別管理（要検討、§10-3）。
 
 ## 7. 各サーフェスの挙動
-- **REPL 起動**: binding.repl(=A) を見る。A.autoResume=false なら**新規セッション**（現行どおり）。`--resume/--continue` は当該 Room に対する手動 resume として解釈。
+- **REPL 起動**: binding.repl(=A) を見る。A.autoResume=false なら**新規セッション**（現行どおり）。`--resume` は当該 Room に対する手動 resume として解釈。
 - **Discord 受信開始**: binding.discord(=B)。B.autoResume=true なら B.currentSessionId をロードして継続。なければ新規。
 - **Slack 同様**（C）。
 - **メッセージ処理**: 現行の載せ替え（export 退避 → import → run → export 保存 → import 復帰）を、**ConversationStore ではなく RoomManager 経由**に置換。処理後は `saveRoomState` でディスク保存。

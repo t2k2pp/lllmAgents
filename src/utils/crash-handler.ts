@@ -115,7 +115,7 @@ function handleFatal(kind: string, err: unknown): void {
     console.error(`\n予期しないエラーで終了します (${kind})。`);
     console.error(stack);
     if (sessionSaved) {
-      console.error(`会話は保存済みです。再起動後に --continue で再開できます。`);
+      console.error(`会話は保存済みです。再起動後に --resume latest で再開できます。`);
     }
     if (logPath) {
       console.error(`詳細ログ: ${logPath}`);
