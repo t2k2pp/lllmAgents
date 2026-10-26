@@ -189,9 +189,8 @@ function expectPrewarmIsPrefixOf(prewarm: ChatWithToolsParams, next: ChatWithToo
   for (let i = 0; i < prewarm.messages.length; i++) {
     expect(next.messages[i], `messages[${i}] (${prewarm.messages[i].role}) が一致しない`).toEqual(prewarm.messages[i]);
   }
-  // 予熱には新しい状態通知を付けない (末尾は assistant のまま)。 次の本体呼び出しは、 末尾に足した発言に状態通知を付ける
-  // (それより前の状態通知は、 前の本体呼び出しで送ったもの)
-  expect(prewarm.messages.at(-1)?.role).toBe("assistant");
+  // 予熱には新しい状態通知を付けない (末尾は assistant でもツール結果でもそのまま)。 次の本体呼び出しは、 末尾に足した発言に
+  // 状態通知を付ける (それより前の状態通知は、 前の本体呼び出しで送ったもの)
   expect(String(prewarm.messages.at(-1)?.content)).not.toContain("<harness-context>");
   expect(next.messages.at(-1)?.role).toBe("user");
   expect(String(next.messages.at(-1)?.content)).toContain("<harness-context>");
@@ -287,6 +286,34 @@ describe("予熱を送る 3 経路で、 予熱の並びが次の本体呼び出
     expectSameSettingsExceptMaxTokens(prewarms[0].params, next.params);
     expect(records).toHaveLength(0);
   });
+
+  it("末尾がツール結果の履歴 (response_complete で終わった依頼など) でも送り、 次の本体呼び出しの先頭と一致する", async () => {
+    const log: Sent[] = [];
+    const provider = scriptedProvider([textChunks("再開後の答えです。", 5_000)], log, []);
+    const loop = makeLoop(provider);
+    const session = createSession("test-model-7b");
+    session.messages = [
+      { role: "user", content: "前の質問です" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{ id: "c1", type: "function", function: { name: "probe", arguments: "{}" } }],
+      },
+      { role: "tool", tool_call_id: "c1", content: "調べた結果" },
+    ] as Message[];
+    loop.restoreSession(session);
+
+    const outcome = await loop.prewarmAfterResume();
+    expect(outcome.status).toBe("done");
+    const prewarms = log.filter((s) => s.kind === "prewarm");
+    expect(prewarms).toHaveLength(1);
+    expect(prewarms[0].params.messages.at(-1)?.role).toBe("tool");
+
+    await loop.run("続きの質問です？");
+    const next = log.find((s) => s.kind === "main");
+    if (next === undefined) throw new Error("再開後の本体呼び出しがありません");
+    expectPrewarmIsPrefixOf(prewarms[0].params, next.params);
+  });
 });
 
 describe("予熱を送らないとき", () => {
@@ -305,13 +332,13 @@ describe("予熱を送らないとき", () => {
     expect(records.at(-1)?.prewarm).toBeNull();
   });
 
-  it("課金される・種類の分からない provider と、 末尾が assistant でない履歴には送らず、 理由を記録する", async () => {
+  it("課金される・種類の分からない provider と、 空の履歴には送らず、 理由を記録する", async () => {
     expect(prewarmSkipReason("anthropic", [{ role: "assistant", content: "a" }])?.reason).toBe("not-local-server");
     expect(prewarmSkipReason("azure-openai", [{ role: "assistant", content: "a" }])?.reason).toBe("not-local-server");
     expect(prewarmSkipReason("claude-cli", [{ role: "assistant", content: "a" }])?.reason).toBe("not-local-server");
     expect(prewarmSkipReason("openai-compat", [{ role: "assistant", content: "a" }])?.reason).toBe("not-local-server");
     expect(prewarmSkipReason("llamacpp", [])?.reason).toBe("empty-history");
-    expect(prewarmSkipReason("vllm", [{ role: "user", content: "q" }])?.reason).toBe("tail-not-assistant");
+    expect(prewarmSkipReason("vllm", [{ role: "user", content: "q" }])).toBeNull();
     for (const type of ["llamacpp", "vllm", "lmstudio", "ollama"]) {
       expect(prewarmSkipReason(type, [{ role: "assistant", content: "a" }])).toBeNull();
     }

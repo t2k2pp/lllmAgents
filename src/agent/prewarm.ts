@@ -8,7 +8,9 @@
  * 並びは本体呼び出しと同じ組み立て (AgentLoop.buildMainCallRequest) から作り、 出力上限だけを 1 に差し替える。
  * 状態通知 (attachDynamicContext) は付けない: 次の本体呼び出しは、 この並びの末尾に利用者の発言を足し、
  * その発言に状態通知を付けるだけなので、 予熱の並びがそのまま先頭になる (prompt-prefix-stability.md §3.2)。
- * そのため末尾が assistant でない並び (次の本体呼び出しで末尾に状態通知が付く) は送らない。
+ * 予熱を送る契機 (依頼の終わり・/compact・再開) の後は、 どれも次の本体呼び出しの前に利用者の発言が足されるので、
+ * 履歴の末尾が assistant でもツール結果 (response_complete で終わった依頼など) でも、 状態通知の添付先は新しい発言になる。
+ * 一時停止した作業の再開 (/run resume) は発言を足さずに本体を呼ぶので予熱しない (呼び出し側が呼ばない)。
  *
  * 予熱は性能のための最適化で、 失敗しても正しさは変わらない。 ただし黙らない (失敗は記録と画面の 1 行に出す)。
  *
@@ -27,10 +29,9 @@ export type PrewarmTrigger = "request-end" | "manual" | "resume";
 /**
  * 予熱を送らない理由。
  * - not-local-server: 課金されるクラウドの provider、 または種類の分からない provider (§9.3)
- * - tail-not-assistant: 履歴の末尾が assistant でない (次の本体呼び出しで末尾に状態通知が付き、 並びが一致しない)
  * - empty-history: 履歴が空 (読み込ませる会話が無い)
  */
-export type PrewarmSkipReason = "not-local-server" | "tail-not-assistant" | "empty-history";
+export type PrewarmSkipReason = "not-local-server" | "empty-history";
 
 /** reduction_event の prewarm 欄 (§10.1)。 整理イベントの後に予熱しない契機 (規則 1 など) では欄そのものが null */
 export type PrewarmOutcome =
@@ -65,15 +66,8 @@ export function prewarmSkipReason(
       detail: `provider ${providerType} は自分のサーバで動かすもの (llamacpp / vllm / lmstudio / ollama) ではないため予熱しません (課金される・キャッシュの扱いが provider 任せ)`,
     };
   }
-  const tail = raw.at(-1);
-  if (tail === undefined) {
+  if (raw.length === 0) {
     return { reason: "empty-history", detail: "履歴が空なので予熱しません" };
-  }
-  if (tail.role !== "assistant") {
-    return {
-      reason: "tail-not-assistant",
-      detail: `履歴の末尾が ${tail.role} なので予熱しません (次の本体呼び出しで末尾に状態通知が付き、 並びが一致しないため)`,
-    };
   }
   return null;
 }

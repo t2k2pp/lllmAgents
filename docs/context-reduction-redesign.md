@@ -719,11 +719,14 @@ Goal 昇格の提案 (`maybePromoteToGoal`。 REPL / Slack / Discord が `run()`
   OpenAI 系・Gemini の自動キャッシュは数分で消える (利用者が次を打つまでに消えうる)、 `claude-cli` / `claude-agent-sdk` は子プロセスが
   自分で並びを組むので同じ並びにならない (使用量の枠も減る)。 クラウドはサーバ側の読み込みも速いので、 待ち時間の得も小さい。
 - 種類の分からない provider は、 課金かどうか分からないので送らない側に倒す。
-- 履歴の末尾が assistant でないとき (一時停止した作業の再開で末尾がツール結果・利用者の発言のときなど) も送らない。
-  次の本体呼び出しはその末尾のメッセージに状態通知を付けるので、 予熱の並びが次の先頭にならない。 履歴が空のときも送らない。
+- 履歴が空のときは送らない。 履歴の末尾の役割 (assistant / ツール結果 / 利用者の発言) では区別しない: 予熱を送る契機 (依頼の終わり・
+  `/compact`・再開) の後は、 どれも次の本体呼び出しの前に利用者の発言が足され、 状態通知はその新しい発言に付くので、 予熱の並びは
+  そのまま次の先頭になる。 一時停止した作業の再開 (`/run resume`) は発言を足さずに本体を呼ぶので、 そもそも予熱しない。
+  (2026-10-26 実機確認で改めた: 当初は「末尾が assistant でなければ送らない」 としていたが、 依頼はふつう `response_complete` の
+  ツール結果で終わるので、 依頼の終わりの整理と `/compact` の後の予熱がほぼ毎回送られていなかった)
 
 送らないときは黙らない: 理由を `prewarm_skipped` の記録 (`{"type":"prewarm_skipped","trigger":"resume","reason":"not-local-server","detail":"…"}`。
-reason は `not-local-server` / `tail-not-assistant` / `empty-history`) と動作ログ (info) に出し、 整理イベントの後なら `reduction_event` の
+reason は `not-local-server` / `empty-history`) と動作ログ (info) に出し、 整理イベントの後なら `reduction_event` の
 `prewarm` 欄にも `{status:"skipped", reason, detail}` を入れる。 画面には出さない (クラウドの利用者に毎回出ると煩わしく、 害も無いため)。
 
 ### 9.4 実装 (タスク 9、 2026-10-25)
@@ -733,7 +736,7 @@ reason は `not-local-server` / `tail-not-assistant` / `empty-history`) と動�
   (`getFilteredToolDefs`)・サンプリング・思考の設定が同じ、 messages = `getMessages()`) の `maxTokens` だけを 1 に差し替え、
   `sideCall("prewarm")` で送って応答を読み捨てる。 provider ごとの出力上限の欄 (§4.3 の表。 OpenAI 互換は `max_tokens`) にそのまま 1 が載る。
   llama.cpp でも `/v1/chat/completions` を使い、 `/completion` の `n_predict` は使わない (試験で確認)。
-- **状態通知は付けない**: 予熱の前に `attachDynamicContext()` を呼ばない (送信済みの印も付けない)。 次の本体呼び出しは、 末尾 (assistant) の後ろに
+- **状態通知は付けない**: 予熱の前に `attachDynamicContext()` を呼ばない (送信済みの印も付けない)。 次の本体呼び出しは、 末尾 (assistant かツール結果) の後ろに
   利用者の発言を足し、 その発言に状態通知を付けるだけなので (`prompt-prefix-stability.md` §3.2。 末尾が assistant なら添付先は新しい発言)、
   予熱の並びがそのまま次の先頭になる。 それより前の状態通知は前の本体呼び出しで送ったもので、 そのまま残る。
 - **いつ**: `AgentLoop.runReductionEvent` が、 発火が `boundary:request-end` か `manual` で **成功した** ときだけ送る。 規則 1 (`forced`) と
@@ -961,7 +964,7 @@ AgentLoop は整理イベントのたびに `loadConfig()` から読む (変更�
 | A8 | git commit の区切り | 弱い区切りとして整理に使わず、 検出ごと削除した (タスク 8)。 強い区切りにするなら検出を作り直す | §4.4 |
 | A9 | ToDo が残ったまま終わった依頼の次の発言 | 「前の依頼が正常に終わった」 に数え、 「新しい依頼」 の判定をしない (タスク 8) | §4.4 |
 | A10 | 段階 3 の要約に失敗したとき | 設定 `context.summaryFailure` で選ぶ (既定 `continue`。 §14.2 の 9。 タスク 8) | §6.1 / §11.3 |
-| A11 | 予熱を送らない条件 | 自分のサーバで動く provider (llamacpp / vllm / lmstudio / ollama) だけに送る。 末尾が assistant でない・空の履歴では送らない (タスク 9) | §9.3 |
+| A11 | 予熱を送らない条件 | 自分のサーバで動く provider (llamacpp / vllm / lmstudio / ollama) だけに送る。 空の履歴では送らない (タスク 9。 末尾の役割では区別しない: 2026-10-26 実機確認で改めた) | §9.3 |
 | A12 | 手動の `/compact` の要約の範囲 | 段階 0〜2 で足りていても、 要約してよい最大の範囲を要約する。 範囲が無ければ要約を呼ばない (タスク 10) | §7.1 |
 | A13 | 削除する旧キーの最終一覧 | §11.1 に加え `context.compressionThreshold` / `context.maxHistoryMessages` も消す (タスク 11) | §11.4 |
 
