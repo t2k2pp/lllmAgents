@@ -273,7 +273,8 @@ stateDiagram-v2
 | `reduction-event.ts` | 整理イベント `runReductionEvent`: 前処理・段階 0〜2 → 必要なら段階 3 → 対の検証 → `MessageHistory.replaceMessages(写し, "reduction:<id>")` を 1 回。 失敗なら写しを捨てる。 `reduction_event` の記録、 `/context` の見込み (`previewReduction`) |
 | `prewarm.ts` | 先読み: 本体と同じ組み立て (`buildMainCallRequest`) の出力上限だけ 1 にして送り、 応答を捨てる (`PrewarmRunner`。 本体・脇の呼び出しは終わりを待つ) |
 | `side-call.ts` | 本体の会話ループ以外の LLM 呼び出しの入口 `sideCall(目的, …)`。 `side_call` を記録し、 先読み中は待つ |
-| `cache-miss.ts` | `diagnoseCacheMiss`: 本体呼び出しの `tokensCached` が「前回の入力 − 4,096」 を下回ったら、 間の整理・書き換え理由・脇の呼び出しを原因として `cache_miss` に記録 |
+| `cache-miss.ts` | `diagnoseCacheMiss`: 本体呼び出しの `tokensCached` が「比べる相手 (前回の本体呼び出しか、 その後に送り終えた先読み) の入力 − 4,096」 を下回ったら、 間の整理・書き換え理由・脇の呼び出しを原因に、 相手との並びのずれ (`divergence`) を添えて `cache_miss` に記録 |
+| `prompt-fingerprint.ts` | 送った並びの指紋 (設定・道具の定義・messages の 1 件ずつの短いハッシュ)。 本体呼び出しの `request`、 先読み・要約の `side_call` に残し、 ずれ始めの位置を求める |
 
 AgentLoop との組み込み:
 - 本体呼び出しの再試行ループの先頭で、 先読みの終わりを待ち (`PrewarmRunner.wait`)、 記録しておいた区切り (ToDo の全部完了・Goal の達成) を判定し、

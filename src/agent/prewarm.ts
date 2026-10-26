@@ -172,7 +172,8 @@ async function send(provider: LLMProvider, request: MainCallRequest, signal: Abo
   if (signal.aborted) return { status: "aborted", durationMs: 0 };
   let error: string | undefined;
   try {
-    for await (const chunk of sideCall("prewarm", provider, request)) {
+    // 指紋は、 次の本体呼び出しの外れの判定で並びのずれを求めるのに使う (cache-miss.ts)
+    for await (const chunk of sideCall("prewarm", provider, request, { fingerprint: true })) {
       if (chunk.type === "error") error = chunk.error ?? "Unknown LLM error";
     }
   } catch (e) {

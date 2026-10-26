@@ -916,6 +916,29 @@ reason は `not-local-server` / `empty-history`) と動作ログ (info) に出�
   `{"type":"cache_miss","turn":12,"previousPromptTokens":150000,"promptTokens":151200,"tokensCached":0,"causes":["reduction:r-3","prefix_break:reduction:r-3","side_call:intent"],"expected":true}`。
   `causes` は `reduction:<id>` / `prefix_break:<書き換え理由>` / `side_call:<目的>` の並び (同じものは 1 つ)、 何も無ければ `["unknown"]`。
 
+先読みと比べる・並びの指紋 (2026-10-26 実機確認・タスク 13 で足した):
+- **比べる相手**: 前回の本体呼び出しの後に先読みを送り終えていれば (`side_call` の目的 prewarm が失敗・中断なく終わった)、 その先読みと比べる。
+  再開の直後 (前回の本体呼び出しが無い) も同じ。 先読みの入力の全体 (`tokensIn`) を P にする。 それまでは先読みが効いても
+  「前回の本体呼び出しの P − 4,096」 を下回るので外れと記録され、 再開の直後は前回が無いので何も記録されなかった。
+  相手が先読みに替わったら、 それより前に起きたこと (整理イベント・脇の呼び出し・書き換え理由) は先読みが読み込んだ並びに入っているので
+  原因から外す (`CacheMissCauseCollector.restartFrom`。 書き換え理由は MessageHistory にたまっている件数を次の取り出しで読み飛ばす)。
+  よって依頼の終わりの整理の後でも、 先読みの後の外れは `expected: false` (想定外) になる。 要約 (summarize) は相手にしない
+  (要約の後は履歴を差し替えるので次の外れは想定どおりで、 Anthropic 系の `tokensIn` はキャッシュ分を含まず P に使えない)。
+- **並びの指紋** (`src/agent/prompt-fingerprint.ts`): 本体呼び出しの `request`、 先読みと要約の `side_call` に `fingerprint` を足す。
+  `{"settings":"1a2b3c4d","tools":"5e6f7a8b","messages":["…","…",…]}`。 settings は model とサンプリング・思考などの設定
+  (messages・道具の定義・出力上限・signal を除く)、 tools は道具の定義 (無ければ `-`)、 messages は送る形の 1 件ずつ。 どれも SHA-256 の先頭 8 文字。
+  - 並びそのものを記録しない理由: 先読みと要約は会話の全体を送るので、 1 回ごとにログが会話の大きさ (数十万文字) だけ増える。
+    指紋なら 1 件 11 バイトほど (300 件で約 3 KB)。 本体呼び出しの `request` は messages を差分で残しているが、 先読みと同じ形で並べて比べられるよう
+    指紋も付ける (増えるのは 1 回あたり数 KB 以下)。
+  - 1 件ずつに分ける理由: ずれ始めの位置を後から求めるため (全体を 1 つのハッシュにすると、 ずれたことしか分からない)。
+    隣り合う送信を比べるだけなので 8 文字 (32 ビット) で足りる。
+- **ずれの位置**: `cache_miss` に `against` (比べた相手 `main` / `prewarm`) と `divergence` を足す:
+  `{"against":"prewarm","settingsChanged":false,"toolsChanged":true,"firstDifferentMessage":null,"previousMessageCount":72,"messageCount":73}`。
+  `firstDifferentMessage` は相手と最初に違う messages の位置 (0 は system)、 相手の messages がそのまま今回の先頭なら null。
+  読み方: 道具・設定・messages のどれかがずれていれば、 その送信の組み立ての違い (§9.4 の再開の不具合はここで `toolsChanged: true` になる)。
+  どれもずれていないのに外れたなら、 サーバ側 (スロットの違い・追い出し。 server-aware-runtime-design.md §5.5.1) を疑う。
+- ログの形の例: `{"type":"cache_miss","against":"prewarm","previousPromptTokens":37488,"promptTokens":37945,"tokensCached":9157,"causes":["unknown"],"expected":false,"divergence":{…}}`。
+
 ### 10.3 脇の呼び出しの目的タグ (`side_call`)
 
 脇の呼び出しはすべて 1 つの入口 (目的タグを必須にした関数) を通し、 目的・`tokensIn`・`tokensCached`・所要時間を記録する。

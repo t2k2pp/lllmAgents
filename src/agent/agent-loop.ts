@@ -77,10 +77,12 @@ import { CheckpointManager } from "../checkpoint/checkpoint-manager.js";
 import * as logger from "../utils/logger.js";
 import { getOpsLogger } from "../utils/ops-logger.js";
 import { LLMLogger } from "./llm-logger.js";
+import { fingerprintPrompt } from "./prompt-fingerprint.js";
 import {
   CacheMissCauseCollector,
   type CacheMissCauses,
   diagnoseCacheMiss,
+  type PromptSend,
   mergeCacheMissCauses,
 } from "./cache-miss.js";
 import { setSideCallGate, setSideCallSink } from "./side-call.js";
@@ -312,10 +314,10 @@ export class AgentLoop {
   /** 直前ターンのプロンプトトークン数（待機スピナーでの文脈サイズ表示用） */
   private lastPromptTokens = 0;
   /**
-   * 前回の本体呼び出しの入力トークン数 (キャッシュ分を含む全体)。 cache_miss の判定に使う
-   * (docs/context-reduction-redesign.md §10.2)。 サーバが usage を返さなかったら undefined。
+   * cache_miss の判定で比べる相手 (docs/context-reduction-redesign.md §10.2): 前回の本体呼び出しか、 その後に送り終えた先読み。
+   * 入力トークン数 (キャッシュ分を含む全体。 サーバが usage を返さなかったら undefined) と並びの指紋を持つ。
    */
-  private previousMainPromptTokens: number | undefined;
+  private lastPromptSend: PromptSend | undefined;
   /** 本体呼び出しの間に起きた整理イベント・脇の呼び出しをためる箱 (cache_miss の原因欄) */
   private readonly cacheMissCauses = new CacheMissCauseCollector();
   /**
@@ -561,6 +563,12 @@ export class AgentLoop {
       recordSideCall: (record) => {
         this.llmLogger.logSideCall(record);
         this.cacheMissCauses.noteSideCall(record.purpose);
+        // 送り終えた先読みは、 次の本体呼び出しの外れの判定で比べる相手になる (先読みが効いたかをそこで見る)。
+        // それより前に起きたこと (整理・脇の呼び出し・書き換え) は先読みが読み込んだ並びに入っているので、 原因から外す
+        if (record.purpose === "prewarm" && record.error === undefined && record.fingerprint) {
+          this.lastPromptSend = { kind: "prewarm", promptTokens: record.tokensIn, fingerprint: record.fingerprint };
+          this.cacheMissCauses.restartFrom(this.history, this.history.pendingRewriteReasonCount());
+        }
       },
     });
     // 先読み中は脇の呼び出しを送らない (スロットが 1 つのサーバでは先読みした中身を追い出す。 §9.2)
@@ -1093,23 +1101,6 @@ export class AgentLoop {
             // 状態通知 (現在日時 / Goal / ToDo) を末尾の未送信メッセージに添付する。
             // 送信済みのメッセージは書き換えないので、 リトライで再送しても前方一致は崩れない。
             this.history.attachDynamicContext();
-            // LLM I/O ログ: リクエスト記録
-            this.llmLogger.nextTurn();
-            const prefixInfo = this.llmLogger.logRequest(
-              this.history.getMessages(),
-              this.model,
-              toolDefs.length > 0 ? toolDefs : undefined,
-            );
-            // 送信済みの部分が変わった = プロンプトキャッシュが外れた。 忘却・圧縮など理由の分かる
-            // 書き換えでなければ退行の疑いなので警告する (docs/prompt-prefix-stability.md §7)。
-            const rewriteReasons = this.history.takeRewriteReasons();
-            missCauses = mergeCacheMissCauses(missCauses, this.cacheMissCauses.take(rewriteReasons));
-            if (this.llmLogger.logPrefixBreak(prefixInfo, rewriteReasons)) {
-              logger.warn(
-                `[prefix] 理由の無い書き換えで送信済みの履歴が変わりました (messages[${prefixInfo.messageOffset}] 以降、` +
-                  `前回 ${prefixInfo.previousTotal} 件)。プロンプトキャッシュが外れています。`,
-              );
-            }
             // 出力上限 O (ティアの outputTokenLimit) を必ず渡す (docs/context-reduction-redesign.md §4.2 / §4.3)。
             // 役割は (1) 同じ文を繰り返し続ける生成の暴走の歯止め、 (2) 予約 R の計算 (次の呼び出しが必ず入る)。
             // contextWindow そのものは渡さない (input + max_tokens > context で 400 を返すサーバがある。
@@ -1119,6 +1110,26 @@ export class AgentLoop {
             // Esc 中断が HTTP 層まで届く (ストリーム待機中でも即座に reject される)。
             this.llmAbortController = new AbortController();
             const request = this.buildMainCallRequest(toolDefs, this.llmAbortController.signal);
+            // 並びの指紋 (cache_miss のずれの位置と、 先読み・要約の記録との突き合わせに使う。 §10.2)
+            const fingerprint = fingerprintPrompt(request.params);
+            // LLM I/O ログ: リクエスト記録
+            this.llmLogger.nextTurn();
+            const prefixInfo = this.llmLogger.logRequest(
+              this.history.getMessages(),
+              this.model,
+              toolDefs.length > 0 ? toolDefs : undefined,
+              fingerprint,
+            );
+            // 送信済みの部分が変わった = プロンプトキャッシュが外れた。 忘却・圧縮など理由の分かる
+            // 書き換えでなければ退行の疑いなので警告する (docs/prompt-prefix-stability.md §7)。
+            const rewriteReasons = this.history.takeRewriteReasons();
+            missCauses = mergeCacheMissCauses(missCauses, this.cacheMissCauses.take(rewriteReasons, this.history));
+            if (this.llmLogger.logPrefixBreak(prefixInfo, rewriteReasons)) {
+              logger.warn(
+                `[prefix] 理由の無い書き換えで送信済みの履歴が変わりました (messages[${prefixInfo.messageOffset}] 以降、` +
+                  `前回 ${prefixInfo.previousTotal} 件)。プロンプトキャッシュが外れています。`,
+              );
+            }
             // 次の P の土台 (送った時点の履歴の位置と書き換えの回数)。 応答の usage と組にして lastMainCall に残す
             const sentCount = this.history.getMessageCount();
             const sentRevision = this.history.getRevision();
@@ -1382,16 +1393,17 @@ export class AgentLoop {
                       );
                       recordedInput = promptTokens;
                     }
-                    // キャッシュが外れたかを、 前回の本体呼び出しの入力と比べて判定する (§10.2)。
+                    // キャッシュが外れたかを、 前回の本体呼び出し (その後に先読みを送り終えていれば先読み) の入力と比べて判定する (§10.2)。
                     // Anthropic 系の promptTokens はキャッシュ分を含まないので、 全体 (recordedInput) で比べる。
                     const miss = diagnoseCacheMiss({
-                      previousPromptTokens: this.previousMainPromptTokens,
+                      previous: this.lastPromptSend,
                       promptTokens: recordedInput,
                       tokensCached: chunk.usage.cachedTokens,
+                      fingerprint,
                       causes: missCauses,
                     });
                     if (miss) this.llmLogger.logCacheMiss(miss);
-                    this.previousMainPromptTokens = recordedInput;
+                    this.lastPromptSend = { kind: "main", promptTokens: recordedInput, fingerprint };
                     // 依頼 1 件の増分 G の材料 (最初と最後の本体呼び出しの実数)
                     this.requestGrowth.noteMainCall(recordedInput, outputTokens);
                     this.lastMainCall = {
@@ -1418,7 +1430,7 @@ export class AgentLoop {
                     this.runStats.costUsd += cost;
                   } else {
                     // 入力の数が分からない呼び出しを挟んだら、 その前の数とは比べない
-                    this.previousMainPromptTokens = undefined;
+                    this.lastPromptSend = { kind: "main", fingerprint };
                     this.lastMainCall = null;
                   }
                   stopWaitingSpinner();

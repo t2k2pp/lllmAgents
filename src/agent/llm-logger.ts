@@ -13,6 +13,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import type { CacheMissDiagnosis } from "./cache-miss.js";
 import type { PrewarmSkipReason, PrewarmTrigger } from "./prewarm.js";
+import type { PromptFingerprint } from "./prompt-fingerprint.js";
 import type { ReductionEventRecord } from "./reduction-event.js";
 import type { SideCallRecord } from "./side-call.js";
 
@@ -43,6 +44,11 @@ export interface LLMRequestLog extends LogContext {
   /** このリクエスト時点の履歴総件数。 */
   messageTotal?: number;
   tools?: unknown[];
+  /**
+   * 送った並びの指紋 (設定・道具の定義・messages の 1 件ずつの短いハッシュ)。 先読み・要約の side_call の指紋と並べて、
+   * どこから並びがずれたかを後から見分ける (docs/context-reduction-redesign.md §10.2)
+   */
+  fingerprint?: PromptFingerprint;
 }
 
 export interface LLMResponseLog extends LogContext {
@@ -265,7 +271,12 @@ export class LLMLogger {
   }
 
   /** LLM リクエストをログに記録 */
-  logRequest(messages: unknown[], model: string, tools?: unknown[]): RequestPrefixInfo {
+  logRequest(
+    messages: unknown[],
+    model: string,
+    tools?: unknown[],
+    fingerprint?: PromptFingerprint,
+  ): RequestPrefixInfo {
     // 件数ではなく内容で比べる: 件数だけだと既存メッセージの書き換えが記録に残らず、
     // キャッシュが外れた原因も、 ログからの再現も分からなくなる。
     const messageJsons = messages.map((m) => JSON.stringify(m));
@@ -294,6 +305,7 @@ export class LLMLogger {
       messageOffset,
       messageTotal: messages.length,
       tools: changedTools,
+      ...(fingerprint ? { fingerprint } : {}),
     });
     return { messageOffset, previousTotal, toolsChanged: previousTotal > 0 && changedTools !== undefined };
   }

@@ -393,11 +393,18 @@ export async function requestSummary(input: SummaryCallInput): Promise<SummaryCa
     const messages = [...request.params.messages, instruction];
     const gen =
       request.method === "chatWithTools"
-        ? sideCall("summarize", input.provider, {
-            method: "chatWithTools",
-            params: { ...request.params, messages, maxTokens },
-          })
-        : sideCall("summarize", input.provider, { method: "chat", params: { ...request.params, messages, maxTokens } });
+        ? sideCall(
+            "summarize",
+            input.provider,
+            { method: "chatWithTools", params: { ...request.params, messages, maxTokens } },
+            { fingerprint: true },
+          )
+        : sideCall(
+            "summarize",
+            input.provider,
+            { method: "chat", params: { ...request.params, messages, maxTokens } },
+            { fingerprint: true },
+          );
     const res = await collectResponse(gen);
 
     if (res.toolCalls.length > 0) {

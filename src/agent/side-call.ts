@@ -19,6 +19,7 @@ import type {
   TokenUsage,
   VisionChatParams,
 } from "../providers/base-provider.js";
+import { fingerprintPrompt, type PromptFingerprint } from "./prompt-fingerprint.js";
 
 /**
  * 脇の呼び出しの目的。 必須。 追加したら設計書 §10.3 にも書く。
@@ -61,6 +62,16 @@ export interface SideCallRecord {
   finishReason?: string;
   /** 失敗・中断のとき、 その内容 */
   error?: string;
+  /**
+   * 送った並びの指紋 (本体と同じ並びを先頭に持つ先読み・要約だけ。 docs/context-reduction-redesign.md §10.2)。
+   * 本体呼び出しの記録 (request) の指紋と並べて、 どこから並びがずれたかを後から見分ける
+   */
+  fingerprint?: PromptFingerprint;
+}
+
+export interface SideCallOptions {
+  /** 送った並びの指紋を記録に残す (本体と同じ並びを先頭に持つ先読み・要約で使う) */
+  fingerprint?: boolean;
 }
 
 export interface SideCallSink {
@@ -102,8 +113,10 @@ export async function* sideCall(
   purpose: SideCallPurpose,
   provider: LLMProvider,
   request: SideCallRequest,
+  options: SideCallOptions = {},
 ): AsyncGenerator<ChatChunk> {
   await gate?.beforeSideCall(purpose);
+  const fingerprint = options.fingerprint ? fingerprintPrompt(request.params) : undefined;
   const startedAt = Date.now();
   let usage: TokenUsage | undefined;
   let finishReason: string | undefined;
@@ -136,6 +149,7 @@ export async function* sideCall(
       durationMs: Date.now() - startedAt,
       finishReason,
       error,
+      ...(fingerprint ? { fingerprint } : {}),
     });
   }
 }

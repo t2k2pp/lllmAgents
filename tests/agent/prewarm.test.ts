@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentLoop } from "../../src/agent/agent-loop.js";
 import { LLMLogger } from "../../src/agent/llm-logger.js";
 import { buildPrewarmRequest, prewarmSkipReason } from "../../src/agent/prewarm.js";
+import type { CacheMissDiagnosis } from "../../src/agent/cache-miss.js";
 import type { ReductionEventRecord } from "../../src/agent/reduction-event.js";
 import { createSession, type SessionData } from "../../src/agent/session-manager.js";
 import { sideCall } from "../../src/agent/side-call.js";
@@ -55,6 +56,8 @@ interface ScriptOptions {
   /** 先読みを失敗させる */
   failPrewarm?: boolean;
   providerType?: string;
+  /** 先読みの応答の入力トークン数 (既定 1,000) */
+  prewarmPromptTokens?: number;
 }
 
 /**
@@ -83,7 +86,11 @@ function scriptedProvider(replies: ChatChunk[][], log: Sent[], events: string[],
         return;
       }
       yield { type: "text", text: "x" };
-      yield { type: "done", finishReason: "length", usage: { promptTokens: 1000, completionTokens: 1 } };
+      yield {
+        type: "done",
+        finishReason: "length",
+        usage: { promptTokens: options.prewarmPromptTokens ?? 1000, completionTokens: 1 },
+      };
       return;
     }
     const last = String(params.messages.at(-1)?.content ?? "");
@@ -386,6 +393,138 @@ describe("先読みを送る 3 経路で、 先読みの並びが次の本体呼
     const next = log.find((s) => s.kind === "main");
     if (next === undefined) throw new Error("再開後の本体呼び出しがありません");
     expectPrewarmIsPrefixOf(prewarms[0].params, next.params);
+  });
+});
+
+describe("先読みの後の本体呼び出しの外れの記録 (cache_miss。 §10.2)", () => {
+  /** 先読みには入力 prewarmTokens を、 本体呼び出しには入力 mainTokens・再利用 cached を返す provider */
+  function cachedProvider(log: Sent[], prewarmTokens: number, mainTokens: number, cached: number): LLMProvider {
+    const base = scriptedProvider([], log, []);
+    const chatWithTools = async function* (params: ChatWithToolsParams): AsyncGenerator<ChatChunk> {
+      if (params.maxTokens === 1) {
+        log.push({ kind: "prewarm", params: JSON.parse(JSON.stringify(params)) });
+        yield { type: "text", text: "x" };
+        yield { type: "done", finishReason: "length", usage: { promptTokens: prewarmTokens, completionTokens: 1 } };
+        return;
+      }
+      if (params.tools === undefined) {
+        // 意図・完了の分類 (脇の呼び出し) は台本の provider に任せる
+        yield* base.chatWithTools(params);
+        return;
+      }
+      log.push({ kind: "main", params: JSON.parse(JSON.stringify(params)) });
+      yield { type: "text", text: "答えです。" };
+      yield {
+        type: "done",
+        finishReason: "stop",
+        usage: { promptTokens: mainTokens, completionTokens: 10, cachedTokens: cached },
+      };
+    };
+    return { ...base, chat: chatWithTools, chatWithTools } as unknown as LLMProvider;
+  }
+
+  function resumed(provider: LLMProvider): AgentLoop {
+    const loop = makeLoop(provider);
+    const session = createSession("test-model-7b");
+    session.messages = [
+      { role: "user", content: "前の質問です" },
+      { role: "assistant", content: "前の答えです" },
+    ] as Message[];
+    loop.restoreSession(session);
+    return loop;
+  }
+
+  function captureCacheMisses(): CacheMissDiagnosis[] {
+    const misses: CacheMissDiagnosis[] = [];
+    vi.spyOn(LLMLogger.prototype, "logCacheMiss").mockImplementation((d) => {
+      misses.push(structuredClone(d));
+    });
+    return misses;
+  }
+
+  it("再開の先読みが効けば (先読みの入力 − 数トークンを再利用) 外れにしない", async () => {
+    const misses = captureCacheMisses();
+    const loop = resumed(cachedProvider([], 30_000, 30_400, 29_996));
+    await loop.prewarmAfterResume();
+    await loop.run("続きの質問です？");
+    expect(misses).toHaveLength(0);
+  });
+
+  it("再開の先読みの後に外れたら、 先読みと比べ、 並びがずれていないことを記録する (スロットの違い・追い出しを疑う材料)", async () => {
+    const misses = captureCacheMisses();
+    const loop = resumed(cachedProvider([], 30_000, 30_400, 9_157));
+    await loop.prewarmAfterResume();
+    await loop.run("続きの質問です？");
+    expect(misses).toHaveLength(1);
+    expect(misses[0]).toMatchObject({
+      against: "prewarm",
+      previousPromptTokens: 30_000,
+      tokensCached: 9_157,
+      causes: ["unknown"],
+      expected: false,
+      divergence: {
+        against: "prewarm",
+        settingsChanged: false,
+        toolsChanged: false,
+        firstDifferentMessage: null,
+        previousMessageCount: 3,
+        messageCount: 4,
+      },
+    });
+  });
+
+  it("先読みの後に道具を足すと、 外れの記録に道具のずれが出る (2026-10-26 実機の再開の不具合)", async () => {
+    const misses = captureCacheMisses();
+    const log: Sent[] = [];
+    const loop = resumed(cachedProvider(log, 30_000, 30_400, 9_157));
+    await loop.prewarmAfterResume();
+    loop.getToolRegistry().register({
+      name: "late_tool",
+      definition: {
+        type: "function",
+        function: { name: "late_tool", description: "late", parameters: { type: "object", properties: {} } },
+      },
+      execute: async () => ({ success: true, output: "x" }),
+    });
+    await loop.run("続きの質問です？");
+    expect(misses[0]?.divergence).toMatchObject({
+      against: "prewarm",
+      toolsChanged: true,
+      firstDifferentMessage: null,
+    });
+    const prewarm = log.find((s) => s.kind === "prewarm");
+    const main = log.find((s) => s.kind === "main");
+    expect(main?.params.tools).not.toEqual(prewarm?.params.tools);
+  });
+
+  it("依頼の終わりの整理の後に先読みを送り終えたら、 その整理は外れの原因に挙げない (先読みが読み込み済みなので想定外の外れ)", async () => {
+    const misses = captureCacheMisses();
+    const records = captureReductionRecords();
+    const provider = scriptedProvider(
+      [
+        ...longRequest(70_000),
+        [
+          { type: "text", text: "次の答えです。" },
+          {
+            type: "done",
+            finishReason: "stop",
+            usage: { promptTokens: 66_500, completionTokens: 10, cachedTokens: 0 },
+          },
+        ],
+      ],
+      [],
+      [],
+      { prewarmPromptTokens: 66_000 },
+    );
+    const loop = makeLoop(provider);
+    await loop.run("たくさん調べてください？");
+    await loop.waitForPrewarm();
+    expect(records.at(-1)).toMatchObject({ trigger: "boundary:request-end", ok: true });
+    await loop.run("次の質問です？");
+    const miss = misses.at(-1);
+    expect(miss).toMatchObject({ against: "prewarm", previousPromptTokens: 66_000, tokensCached: 0, expected: false });
+    expect(miss?.causes.some((c) => c.startsWith("reduction:") || c.startsWith("prefix_break:"))).toBe(false);
+    expect(miss?.divergence?.firstDifferentMessage).toBeNull();
   });
 });
 

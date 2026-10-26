@@ -388,6 +388,11 @@ export class MessageHistory {
     return reasons;
   }
 
+  /** まだ取り出していない書き換え理由の件数 (取り出さない)。 cache_miss の比べる相手が先読みに替わったときに使う */
+  pendingRewriteReasonCount(): number {
+    return this.rewriteReasons.length;
+  }
+
   clear(): void {
     this.messages = [];
     this.noteRewrite("clear");
