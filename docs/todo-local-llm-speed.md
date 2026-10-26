@@ -4,6 +4,7 @@
 > 前提: [prompt-prefix-stability.md](prompt-prefix-stability.md) (状態通知の追記化、 2026-10-25 実装済) の続き。
 > 関連: [response-latency-improvement.md](response-latency-improvement.md) / [prompt-cache-cost-reduction.md](prompt-cache-cost-reduction.md)
 > 分担: T1 (計測) と T4 (依頼の区切りでの書き換え) は [context-reduction-redesign.md](context-reduction-redesign.md) (§10 / §6.2) で扱う。 本書は T2/T3/T5/T6 を扱う。
+> 設計: T2 / T3 / T6 の llama.cpp の部分は [server-aware-runtime-design.md](server-aware-runtime-design.md) (2026-10-26、 design) で設計した (サーバの枠・スロット数・モデルを `/props` で読む、 `id_slot` での振り分け)。
 
 ## 背景
 - myppt セッション (2026-10-24) で 1 回の LLM 呼び出しが 17〜44 分。 主因 (日時・Goal・ToDo を履歴より前に置いていた) は
@@ -29,6 +30,7 @@
 - [ ] 結果を本書に表で残し、 T2〜T4 の優先順位を確定する
 
 ### T2. 補助 LLM 呼び出しがメインのキャッシュを追い出さないようにする (効果 大の見込み)
+> 設計: [server-aware-runtime-design.md](server-aware-runtime-design.md) §5.5 (スロットが 2 以上なら `id_slot` で別スロット、 1 ならセカンド LLM か道具を出さない。 判定は読み直し時間)。
 現状: 次の処理がメインと同じ provider・同じモデルで、 内容の違う短いプロンプトを送っている。
 `--parallel 1` の llama-server では同じスロットの KV が上書きされ、 次のメイン呼び出しが全部の再計算になる可能性が高い。
 
@@ -49,6 +51,7 @@
 - [ ] 補助呼び出しの前後でメインのキャッシュ率が落ちないことを T1 の計測で確認する
 
 ### T3. 独占利用のローカル環境では、 サーバのキャッシュ構成をアプリが把握して使う
+> 設計: [server-aware-runtime-design.md](server-aware-runtime-design.md) §5.1〜5.3 (起動時と依頼の区切りに `/props` を読み、 サーバの値を正とする)・§6.4 (`--cache-ram` の大きさは API から見えない)。
 考え方: 1 人で独占利用するサーバなら、 スロット数・スロットあたりの文脈長・キャッシュ容量を
 アプリが前提にしてよい。 把握していれば、 補助呼び出しのスロット割り当てや、 圧縮・忘却を始める位置をより適切に決められる。
 
@@ -80,6 +83,7 @@
 - [ ] 思考量の上限 (思考の予算) をサーバ・モデルが受け付けるかも併せて確認する
 
 ### T6. llama-server 側の推奨設定を整理する (アプリは変えない、 文書のみ)
+> 関連: 2 スロットの案は [server-aware-runtime-design.md](server-aware-runtime-design.md) §5.5.1 で見直した (`id_slot` を送らないと、 道具の定義が同じサブエージェントがメインのスロットに入りうる見込み)。
 - [ ] prefill を速くする `-b` / `-ub`、 ハイブリッドモデル向けの `--ctx-checkpoints`、 KV 量子化、 投機的デコードについて、
       公式 README・リリースノートで現行の挙動を確認し、 推奨設定と確認方法を README または docs に記録する
 - [ ] **補助呼び出し・サブエージェントを使うときは 2 スロットで起動する** (2026-10-25 利用者の案):
@@ -95,4 +99,4 @@ T2〜T5 は機能追加・設計変更なので、 着手時に設計書を docs
 
 ## 未確認事項
 - 実機で補助呼び出しがメインのキャッシュを本当に追い出しているか (サーバの `--parallel` と `--cache-ram` の設定次第)
-- llama.cpp の chat エンドポイントでの `id_slot` の扱い、 `--cache-ram` の既定値 (版により異なる)
+- llama.cpp の chat エンドポイントでの `id_slot` の扱い、 `--cache-ram` の既定値 (版により異なる) → 2026-10 の master のソースでは chat の入口でも `id_slot` が効き、 `--cache-ram` の大きさは API に出ない ([server-aware-runtime-design.md](server-aware-runtime-design.md) §6.3 / §6.4)。 利用者の版での確認は同書 §5.5.3

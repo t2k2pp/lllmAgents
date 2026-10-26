@@ -6,7 +6,7 @@
 > - 新しい設計書を追加したら、 この索引の該当する表に 1 行足す (Status 付き)
 > - 設計と実装が違ったら実装を正として設計書を直す (違和感があれば直す前に利用者へ報告する)
 > - 作業の記録・完了した ToDo・後継に置き換えられた設計は [archive/](archive/README.md) へ移す (`git mv`。 参照も書き換える)
-> - Status 凡例: `implemented` = 実装済みの正 / `in-progress` = 実装の途中 / `proposal` = 未実装の構想・計画 / `reference` = 手順書・参照資料
+> - Status 凡例: `implemented` = 実装済みの正 / `in-progress` = 実装の途中 / `design` = 設計済み・未実装 (実装の手順まで決めたもの) / `proposal` = 未実装の構想・計画 / `reference` = 手順書・参照資料
 
 ## どの時にどれを見るか
 
@@ -20,7 +20,7 @@
 | システムプロンプト・モデルへの説明文を変える | [prompt-prefix-stability.md](prompt-prefix-stability.md) (前方一致を壊さない) | [system-prompt-redesign.md](system-prompt-redesign.md)、 [prompt-language-policy.md](prompt-language-policy.md)、 [internal_design.md](internal_design.md) §16 |
 | ハーネスの促し・ToDo・Goal の振る舞い | [internal_design.md](internal_design.md) §16 | [strategic-todo-design.md](strategic-todo-design.md)、 [reactive-intervention-coherence-design.md](reactive-intervention-coherence-design.md)、 [request-elaboration-design.md](request-elaboration-design.md)、 [goal-seek-mode-design.md](goal-seek-mode-design.md) |
 | コンテキストの整理・`/compact`・`/handoff`・キャッシュが外れる | [context-reduction-redesign.md](context-reduction-redesign.md) | [internal_design.md](internal_design.md) §2.5、 [handoff-design.md](handoff-design.md)、 [prompt-prefix-stability.md](prompt-prefix-stability.md) |
-| LLM の動作が遅い (ローカル LLM) | [prompt-prefix-stability.md](prompt-prefix-stability.md) | [todo-local-llm-speed.md](todo-local-llm-speed.md)、 [response-latency-improvement.md](response-latency-improvement.md) |
+| LLM の動作が遅い (ローカル LLM) | [prompt-prefix-stability.md](prompt-prefix-stability.md) | [todo-local-llm-speed.md](todo-local-llm-speed.md)、 [server-aware-runtime-design.md](server-aware-runtime-design.md) (サーバの枠・スロットに合わせる)、 [response-latency-improvement.md](response-latency-improvement.md) |
 | プロバイダ・モデル設定 (`/models`) | [model-registry.md](model-registry.md) | [model-orchestration.md](model-orchestration.md)、 [model-apply-immediacy.md](model-apply-immediacy.md)、 各プロバイダの設計書 |
 | セカンド LLM・サブエージェント・評価 | [v030_second_llm_design.md](v030_second_llm_design.md) | [internal_design.md](internal_design.md) §2.2、 [evaluation-loop.md](evaluation-loop.md)、 [main_second_swap_design.md](main_second_swap_design.md) |
 | Discord / Slack | [room-model-design.md](room-model-design.md) | [discord-gateway-design.md](discord-gateway-design.md)、 [slack-integration.md](slack-integration.md)、 [channel-interaction-bridge-design.md](channel-interaction-bridge-design.md) |
@@ -149,6 +149,7 @@ Status の記載が無いものは `implemented`。
 
 | ドキュメント | Status | 内容 |
 |---|---|---|
+| [server-aware-runtime-design.md](server-aware-runtime-design.md) | design | サーバに合わせて動く (llama.cpp の /props で枠・スロット数・モデルを読み、 段階を判定し直す。 脇の呼び出し・サブエージェントを別スロット (id_slot) かセカンド LLM へ振り分ける) |
 | [todo-local-llm-speed.md](todo-local-llm-speed.md) | proposal | ローカル LLM の処理速度改善の計画 (未着手) |
 | [multi-tier-harness-roadmap.md](multi-tier-harness-roadmap.md) | in-progress | マルチティア (T1/T2/T3) ハーネスのロードマップ (一部実装済み) |
 | [autonomy-improvement-proposal.md](autonomy-improvement-proposal.md) | proposal | 自律性向上の提案 (A-1〜A-6・B-1 は実装済み。 A-7〜A-9・B-2・B-3 が未着手) |
