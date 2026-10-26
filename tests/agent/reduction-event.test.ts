@@ -336,7 +336,12 @@ describe("整理イベント: 要約に失敗したとき、 設定 continue (�
   }) => {
     const raw = mixedHistory();
     const history = historyWith(raw);
-    const input = eventInput(history, { behavior, promptSize: { tokens: 100_000, basis: "estimate" } });
+    // 規則 1 で確かめる (規則 2 は段階 0〜2 だけで最低量に届かなければ書き換えない。 下の「規則 2 の見送り」)
+    const input = eventInput(history, {
+      behavior,
+      trigger: "forced",
+      promptSize: { tokens: 100_000, basis: "estimate" },
+    });
     const result = await runReductionEvent(input);
 
     expect(result.ok).toBe(true);
@@ -502,7 +507,9 @@ describe("整理イベント (書き換えない)", () => {
   it("減らせるものが無ければ書き換えない", async () => {
     const raw = [user("こんにちは"), reply("こんにちは")];
     const history = historyWith(raw);
-    const result = await runReductionEvent(eventInput(history, { promptSize: { tokens: 20_000, basis: "usage" } }));
+    const result = await runReductionEvent(
+      eventInput(history, { trigger: "manual", promptSize: { tokens: 20_000, basis: "usage" } }),
+    );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toBe("nothing-to-reduce");
@@ -521,6 +528,158 @@ describe("整理イベント (書き換えない)", () => {
     expect(result.reason).toBe("still-too-large");
     expect(history.getRawMessages()).toEqual(raw);
     expect(history.takeRewriteReasons()).toEqual([]);
+  });
+});
+
+// ─── 規則 2 の見送り (§4.6。 2026-10-26 利用者の決定: clear_at_least と同じ考え方) ───
+
+describe("規則 2: 減る量の見込みが最低量 F に届くときだけ書き換える", () => {
+  /** 古いツール結果が少しだけの履歴 (段階 0〜2 で 約 6.6k。 要約してよい範囲はほぼ無い) */
+  const fewReads = (): Message[] => [
+    user("調べて"),
+    ...read("/a"),
+    ...read("/b"),
+    ...read("/c"),
+    ...read("/d"),
+    reply("調べました"),
+  ];
+  /** モデルの長い発言が少しの履歴 (要約しても F = 40,000 に届かない) */
+  const fewReplies = (): Message[] => {
+    const out: Message[] = [user("U1 を説明して")];
+    for (let i = 0; i < 6; i++) out.push(reply(`説明 ${i} ${BIG}`));
+    out.push(...read("/last"));
+    return out;
+  };
+
+  it("段階 0〜2 で F に届かず、 要約してよい範囲も無ければ、 要約を呼ばず履歴も書き換えずに見送る", async () => {
+    const raw = fewReads();
+    const history = historyWith(raw);
+    const revision = history.getRevision();
+    const sent: ChatWithToolsParams[] = [];
+    const growth = new RequestGrowthTracker();
+    const noteReduction = vi.spyOn(growth, "noteReduction");
+    const cacheMissCauses = new CacheMissCauseCollector();
+    const noteEvent = vi.spyOn(cacheMissCauses, "noteReductionEvent");
+    const result = await runReductionEvent(eventInput(history, { sent, growth, cacheMissCauses }));
+
+    expect(result.ok).toBe(false);
+    expect("skipped" in result).toBe(true);
+    if (!("skipped" in result)) return;
+    expect(result.skip).toMatchObject({
+      id: "r-1",
+      trigger: "boundary:request-end",
+      reason: "below-minimum",
+      promptTokensBefore: 150_000,
+      promptBasis: "usage",
+      targetPromptTokens: 114_560,
+      minimumReductionTokens: 40_000,
+      growthTokens: 80_000,
+      summary: { status: "nothing-to-summarize" },
+    });
+    const e = result.skip.expectedFreedTokens;
+    expect(e.stages).toBeGreaterThan(0);
+    expect(e.summary).toBeNull();
+    expect(e.total).toBe(e.stages);
+    expect(e.total).toBeLessThan(40_000);
+    expect(result.skip.detail).toContain("最低量 40,000 に届かないため、 履歴を書き換えずに見送りました");
+    // 何も触らない: 要約の呼び出し・履歴・書き換え理由・cache_miss の原因・G・渡し直しの預かり
+    expect(sent).toHaveLength(0);
+    expect(history.getRawMessages()).toEqual(raw);
+    expect(history.getRevision()).toBe(revision);
+    expect(history.takeRewriteReasons()).toEqual([]);
+    expect(noteEvent).not.toHaveBeenCalled();
+    expect(noteReduction).not.toHaveBeenCalled();
+    expect(history.getPendingStateHandover()).toBeNull();
+  });
+
+  it("要約の範囲を足しても F に届かなければ、 要約を呼ばずに見送る (呼ぶ前に決める)", async () => {
+    const raw = fewReplies();
+    const history = historyWith(raw);
+    const sent: ChatWithToolsParams[] = [];
+    const result = await runReductionEvent(eventInput(history, { sent }));
+    expect("skipped" in result).toBe(true);
+    if (!("skipped" in result)) return;
+    expect(result.skip.summary).toMatchObject({ status: "insufficient", segments: 1 });
+    expect(result.skip.expectedFreedTokens.summary).toBeGreaterThan(0);
+    expect(result.skip.expectedFreedTokens.total).toBeLessThan(40_000);
+    expect(result.skip.detail).toContain("要約は呼んでいません");
+    expect(sent).toHaveLength(0);
+    expect(history.getRawMessages()).toEqual(raw);
+  });
+
+  it("段階 0〜2 だけでは F に届かず、 要約まで含めれば届く見込みなら、 要約を呼んで書き換える", async () => {
+    const history = historyWith(mixedHistory());
+    const sent: ChatWithToolsParams[] = [];
+    const result = await runReductionEvent(
+      eventInput(history, { sent, promptSize: { tokens: 100_000, basis: "estimate" } }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(sent).toHaveLength(1);
+    expect(result.record.freedTokens.stage0 + result.record.freedTokens.stage1).toBeLessThan(40_000);
+    expect(result.record.freedTokens.total).toBeGreaterThanOrEqual(40_000);
+    expect(history.takeRewriteReasons()).toEqual(["reduction:r-1"]);
+  });
+
+  it("段階 0〜2 だけで F に届けば、 要約を呼ばずに書き換える", async () => {
+    const history = historyWith(toolHeavyHistory());
+    const sent: ChatWithToolsParams[] = [];
+    const result = await runReductionEvent(
+      eventInput(history, { sent, promptSize: { tokens: 100_000, basis: "usage" }, growthTokens: 30_000 }),
+    );
+    expect(result.ok).toBe(true);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("規則 1 (forced) は、 F に届かなくても書き換える (入らない呼び出しは送らないため)", async () => {
+    const raw = fewReads();
+    const history = historyWith(raw);
+    const result = await runReductionEvent(eventInput(history, { trigger: "forced" }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.record.freedTokens.total).toBeGreaterThan(0);
+    expect(result.record.freedTokens.total).toBeLessThan(40_000);
+    expect(history.takeRewriteReasons()).toEqual(["reduction:r-1"]);
+  });
+
+  it("要約に失敗したら、 設定 continue でも段階 0〜2 だけで F に届かなければ書き換えない (失敗として出す)", async () => {
+    const raw = mixedHistory();
+    const history = historyWith(raw);
+    const result = await runReductionEvent(
+      eventInput(history, { behavior: "garbage", promptSize: { tokens: 100_000, basis: "estimate" } }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok || "skipped" in result) throw new Error("失敗の結果のはず");
+    expect(result.reason).toBe("summary-failed");
+    expect(result.detail).toContain("要約を得られませんでした");
+    expect(result.detail).toContain("段階 0〜2 だけでは最低量 40,000 に届かないため、 書き換えませんでした");
+    expect(result.record.continuedWithoutSummary).toBe(false);
+    expect(history.getRawMessages()).toEqual(raw);
+    expect(history.takeRewriteReasons()).toEqual([]);
+    expect(formatReductionEventLine(result)).toContain("履歴は変えていません");
+  });
+
+  it("/context の見込み (previewReduction) も規則 2 を行うか見送るかを同じ決め方で出す", () => {
+    const common = {
+      budget,
+      promptSize: { tokens: 150_000, basis: "usage" as const },
+      growthTokens: 80_000,
+      keepRecentToolUses: 1,
+      caseInsensitivePaths: true,
+    };
+    const few = fewReplies();
+    const skipPreview = previewReduction({ ...common, messages: few, currentRequestStart: few.length });
+    if (!skipPreview.ok) throw new Error(skipPreview.error);
+    expect(skipPreview.boundary.worthIt).toBe(false);
+    const mixed = mixedHistory();
+    const doPreview = previewReduction({
+      ...common,
+      promptSize: { tokens: 100_000, basis: "estimate" },
+      messages: mixed,
+      currentRequestStart: mixed.length,
+    });
+    if (!doPreview.ok) throw new Error(doPreview.error);
+    expect(doPreview.boundary).toMatchObject({ worthIt: true, withSummary: true });
   });
 });
 

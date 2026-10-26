@@ -42,11 +42,14 @@ import {
   type BoundaryKind,
   formatReductionEventLine,
   type LastReductionEvent,
+  type LastReductionSkip,
   previewReduction,
   type ReductionEventResult,
+  type ReductionSkippedResult,
   type ReductionStatus,
   type ReductionTrigger,
   runReductionEvent,
+  triggerLabel,
 } from "./reduction-event.js";
 import type { MainCallRequest } from "./reduction-summary.js";
 import { type PrewarmOutcome, PrewarmRunner, type PrewarmTrigger, prewarmSkipReason } from "./prewarm.js";
@@ -342,7 +345,7 @@ export class AgentLoop {
    * 直近の整理イベント (/compact と /context の表示用。 利用者向けだけで、 モデルには見せない)。
    * 整理した履歴オブジェクトと組にして持ち、 会話の載せ替え・再開の後は出さない。
    */
-  private lastReduction: { history: MessageHistory; event: LastReductionEvent } | null = null;
+  private lastReduction: { history: MessageHistory; event: LastReductionEvent | LastReductionSkip } | null = null;
   /**
    * 規則 2 (§4.4) の、 記録して次の本体呼び出しの直前に判定する強い区切り (ToDo の全部完了・Goal の達成)。
    * 依頼の終わり・新しい依頼の判定をしたら、 それに含まれるので捨てる。
@@ -2435,9 +2438,10 @@ export class AgentLoop {
   /**
    * 規則 2: P + R + G > W なら整理イベント (boundary:<種類>) を行う。 先回りなので、 失敗しても作業は止めない
    * (失敗は整理イベントが画面と記録に出す。 次の本体呼び出しが入らなければ規則 1 が改めて判定する)。
-   * @returns 整理イベントを行ったら、 その結果。 発火しなければ null
+   * 減る量の見込みが最低量 F に届かなければ、 整理イベントが書き換えずに見送る (§4.6。 次の区切りでも同じく判定する)。
+   * @returns 整理イベントを行った (か見送った) なら、 その結果。 発火しなければ null
    */
-  private async judgeBoundary(kind: BoundaryKind): Promise<ReductionEventResult | null> {
+  private async judgeBoundary(kind: BoundaryKind): Promise<ReductionEventResult | ReductionSkippedResult | null> {
     const budget = computeContextBudget(this.contextWindow, this.capability.tier);
     const size = this.measureNextPrompt(this.getFilteredToolDefs());
     const growth = this.requestGrowth.resolve(budget).tokens;
@@ -2715,7 +2719,15 @@ export class AgentLoop {
    *
    * @param size 整理前の P。 省略時はいま測る
    */
-  async runReductionEvent(trigger: ReductionTrigger, size?: PromptSize): Promise<ReductionEventResult> {
+  runReductionEvent(trigger: "forced" | "manual", size?: PromptSize): Promise<ReductionEventResult>;
+  runReductionEvent(
+    trigger: ReductionTrigger,
+    size?: PromptSize,
+  ): Promise<ReductionEventResult | ReductionSkippedResult>;
+  async runReductionEvent(
+    trigger: ReductionTrigger,
+    size?: PromptSize,
+  ): Promise<ReductionEventResult | ReductionSkippedResult> {
     const toolDefs = this.getFilteredToolDefs();
     const promptSize = size ?? this.measureNextPrompt(toolDefs);
     const budget = computeContextBudget(this.contextWindow, this.capability.tier);
@@ -2726,7 +2738,7 @@ export class AgentLoop {
     // 要約の呼び出しも Esc で切れるようにする (本体呼び出しと同じ AbortController)
     this.llmAbortController = new AbortController();
     const signal = this.llmAbortController.signal;
-    let result: ReductionEventResult;
+    let result: ReductionEventResult | ReductionSkippedResult;
     try {
       result = await runReductionEvent({
         id,
@@ -2746,6 +2758,15 @@ export class AgentLoop {
       });
     } finally {
       this.llmAbortController = null;
+    }
+    if ("skipped" in result) {
+      // 規則 2 の見送り (§4.6): 履歴も要約も触っていない。 画面には出さず (区切りのたびに出ると煩わしい)、
+      // 動作ログと記録 (reduction_skipped) に残す。 /context の「直近の整理」 に出す。 先読みもしない (キャッシュは元のまま)
+      spinner.stop();
+      logger.info(`[reduction] ${triggerLabel(trigger)}: ${result.skip.detail} (${id})`);
+      this.llmLogger.logReductionSkipped(result.skip);
+      this.lastReduction = { history: reducedHistory, event: { skip: result.skip, finishedAt: Date.now() } };
+      return result;
     }
     const line = formatReductionEventLine(result);
     if (result.ok && result.record.continuedWithoutSummary) {
@@ -2805,7 +2826,7 @@ export class AgentLoop {
   }
 
   /** 直近の整理イベント (今の会話のもの)。 まだ無い・会話を載せ替えた・再開した後は null */
-  getLastReductionEvent(): LastReductionEvent | null {
+  getLastReductionEvent(): LastReductionEvent | LastReductionSkip | null {
     const last = this.lastReduction;
     return last !== null && last.history === this.history ? last.event : null;
   }

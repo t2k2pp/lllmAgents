@@ -8,6 +8,7 @@
 import chalk from "chalk";
 import {
   type LastReductionEvent,
+  type LastReductionSkip,
   type ReductionEventRecord,
   type ReductionEventResult,
   type ReductionFailureReason,
@@ -110,9 +111,12 @@ function prewarmLine(ok: boolean, prewarmSent: boolean, outcome: PrewarmOutcome 
  * /compact の結果。 1 行の結果 (整理イベントのスピナーの行) の後に出す内訳。
  * @param last AgentLoop.getLastReductionEvent() (先読みを送ったか)。 この整理のものでなければ先読みは「送っていません」
  */
-export function formatCompactResult(result: ReductionEventResult, last: LastReductionEvent | null): string {
+export function formatCompactResult(
+  result: ReductionEventResult,
+  last: LastReductionEvent | LastReductionSkip | null,
+): string {
   const r = result.record;
-  const prewarmSent = last !== null && last.record === r && last.prewarmSent;
+  const prewarmSent = last !== null && "record" in last && last.record === r && last.prewarmSent;
   const out: string[] = [""];
   out.push(chalk.bold(`  /compact の結果 (${r.id})`));
   if (result.ok) {
@@ -143,8 +147,16 @@ function formatTime(ms: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function lastEventLines(last: LastReductionEvent | null): string[] {
+function lastEventLines(last: LastReductionEvent | LastReductionSkip | null): string[] {
   if (last === null) return ["    直近の整理: この会話ではまだ整理していません"];
+  if ("skip" in last) {
+    // 規則 2 の見送り (§4.6): 画面には出していないので、 ここで見えるようにする
+    const k = last.skip;
+    return [
+      `    直近の整理: ${k.id} (${triggerLabel(k.trigger)}、 ${formatTime(last.finishedAt)}) は見送りました`,
+      chalk.dim(`      ${k.detail}`),
+    ];
+  }
   const r = last.record;
   const head = `    直近の整理: ${r.id} (${triggerLabel(r.trigger)}、 ${formatTime(last.finishedAt)})`;
   if (!r.ok) {
@@ -199,12 +211,28 @@ export function formatReductionStatus(s: ReductionStatus): string {
     out.push(
       `      段階 0〜2 の後: 約 ${n(p.promptTokensAfterStages)} トークン (目標は ${n(p.goal.targetPromptTokens)} 以下、 最低 ${n(p.goal.minimumReductionTokens)} 減らす)`,
     );
-    if (p.needsSummary) {
-      out.push(
-        `      段階 0〜2 だけでは足りません (目標まで ${n(p.shortfall.toTarget)}、 最低量まで ${n(p.shortfall.toMinimum)} 不足)。 自動の整理でも要約します`,
-      );
-    } else {
+    const auto = p.boundary;
+    if (!p.needsSummary) {
       out.push("      段階 0〜2 だけで目標と最低量に届きます (自動の整理なら要約しません)");
+    } else {
+      out.push(
+        `      段階 0〜2 だけでは足りません (目標まで ${n(p.shortfall.toTarget)}、 最低量まで ${n(p.shortfall.toMinimum)} 不足)`,
+      );
+      if (!auto.worthIt) {
+        const summary =
+          auto.expectedFreedTokens.summary === null
+            ? "要約してよい範囲はありません"
+            : `要約で 約 ${n(auto.expectedFreedTokens.summary)}`;
+        out.push(
+          `      依頼の区切りの自動の整理は見送ります (見込み 約 ${n(auto.expectedFreedTokens.total)} が最低量に届きません。 ${summary})。 作業の途中で入らなくなれば整理します`,
+        );
+      } else if (auto.withSummary) {
+        out.push(
+          `      依頼の区切りの自動の整理では要約もします (見込み 約 ${n(auto.expectedFreedTokens.total)}。 うち要約で 約 ${n(auto.expectedFreedTokens.summary ?? 0)})`,
+        );
+      } else {
+        out.push("      依頼の区切りの自動の整理は段階 0〜2 だけで行います (要約してよい範囲がありません)");
+      }
     }
     if (p.summary.status === "would-summarize") {
       out.push(

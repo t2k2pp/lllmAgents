@@ -295,19 +295,25 @@ function minimumWindow(loop: AgentLoop, registry: ToolRegistry): number {
   return checkContextWindowFits({ contextWindow: 0, tier: "T3", fixedTokens: fixed }).requiredTokens;
 }
 
-/** 成功した整理イベントの発火の種類と、 そのときまでに送った件数を控える */
+/**
+ * 成功した整理イベントと、 見込みが最低量に届かず見送った規則 2 (docs/context-reduction-redesign.md §4.6) の発火の種類と、
+ * そのときまでに送った件数を控える
+ */
 function recordReductions(requests: ChatWithToolsParams[]): {
   events: Array<{ trigger: string; at: number }>;
+  skips: Array<{ trigger: string; at: number }>;
   rewritesAt: number[];
   restore: () => void;
 } {
   const events: Array<{ trigger: string; at: number }> = [];
+  const skips: Array<{ trigger: string; at: number }> = [];
   const rewritesAt: number[] = [];
   const realRun = AgentLoop.prototype.runReductionEvent;
   const run = vi.spyOn(AgentLoop.prototype, "runReductionEvent");
   run.mockImplementation(async function (this: AgentLoop, trigger, size) {
     const result = await realRun.call(this, trigger, size);
     if (result.ok) events.push({ trigger, at: requests.length });
+    if ("skipped" in result) skips.push({ trigger, at: requests.length });
     return result;
   });
   const realReplace = MessageHistory.prototype.replaceMessages;
@@ -318,6 +324,7 @@ function recordReductions(requests: ChatWithToolsParams[]): {
   });
   return {
     events,
+    skips,
     rewritesAt,
     restore: () => {
       run.mockRestore();
@@ -330,7 +337,9 @@ describe("前方一致の不変条件: 整理イベント (規則 1・規則 2) 
   afterEach(() => clearTodos());
 
   // 要約あり: 最後の応答の本文を長くする (段階 1 では消えないモデルの発言が溜まり、 段階 3 の要約の範囲ができる)。
-  // 1 件目の依頼はツールを多く呼び、 依頼の途中で規則 1 を起こす。 依頼の終わりでは規則 2 (依頼の区切り) が起きうる
+  // 1 件目の依頼はツールを多く呼び、 依頼の途中で規則 1 を起こす。 依頼の終わりでは規則 2 (依頼の区切り) が判定される。
+  // この W (起動時検査の最小) では減る量の見込みが最低量 F (32,768) に届かないので、 規則 2 は書き換えずに見送る (§4.6)。
+  // 規則 2 が書き換える場合は次の試験
   it.each([
     { label: "要約なし", finalPadding: "", summaryCalls: 0 },
     { label: "要約あり", finalPadding: "y".repeat(12_000), summaryCalls: 1 },
@@ -377,7 +386,10 @@ describe("前方一致の不変条件: 整理イベント (規則 1・規則 2) 
 
     const triggers = recorded.events.map((e) => e.trigger);
     expect(triggers).toContain("forced");
-    expect(triggers).toContain("boundary:request-end");
+    // 規則 2 は判定されたが、 見込みが F に届かないので見送った (見送りは書き換えないので、 下の外れの検査に現れない)
+    expect(triggers).not.toContain("boundary:request-end");
+    expect(recorded.skips.map((e) => e.trigger)).toContain("boundary:request-end");
+    for (const skip of recorded.skips) expect(recorded.rewritesAt).not.toContain(skip.at);
     // 書き換えは成功した整理イベントごとにちょうど 1 回
     expect(recorded.rewritesAt).toEqual(recorded.events.map((e) => e.at));
     const summaryRequests = requests.filter((r) =>
@@ -395,6 +407,35 @@ describe("前方一致の不変条件: 整理イベント (規則 1・規則 2) 
     // 台本どおり 4 件とも正常に終わっている (本体呼び出しは台本の数ちょうど)
     expect(outcomes).toEqual(["completed", "completed", "completed", "completed"]);
     expect(requests.length - summaryRequests.length).toBe(replies.length);
+  });
+
+  it("規則 2 で見込みが最低量に届けば、 依頼の区切りで 1 回だけ書き換え、 外れるのはその直後の送信だけ", async () => {
+    const registry = makeBigRegistry();
+    const requests: ChatWithToolsParams[] = [];
+    // W = 120,000 / T3: R = 17,408、 G = (W − R) ÷ 2 = 51,296 で頭打ち、 F = 32,768。 規則 2 は P > 51,296、 規則 1 は P > 102,592。
+    // 1 件目は big_probe を 30 回呼び (結果 1 件 約 2,000)、 依頼の終わりで規則 2 が起きる。 段階 1 で直近 3 回より古い結果が消えて F に届く
+    const replies = [...requestScript("q1", 30), ...requestScript("q2", 3), ...requestScript("q3", 3)];
+    const loop = makeLoop(reductionAwareProvider(replies, requests), registry);
+    loop.setContextWindow(120_000);
+    const outcomes: string[] = [];
+    loop.events.on("task_complete", (e) => outcomes.push(e.outcome));
+    const recorded = recordReductions(requests);
+    const boundariesAt: number[] = [];
+    try {
+      for (const q of ["1 件目", "2 件目", "3 件目"]) {
+        await loop.run(`${q}を調べてください？`);
+        boundariesAt.push(requests.length);
+      }
+    } finally {
+      recorded.restore();
+    }
+    expect(recorded.events).toEqual([{ trigger: "boundary:request-end", at: boundariesAt[0] }]);
+    expect(recorded.skips).toEqual([]);
+    expect(recorded.rewritesAt).toEqual([boundariesAt[0]]);
+    // 外れるのは整理の直後の送信 (2 件目の最初の送信) だけ
+    expect(prefixBreaks(requests)).toEqual([boundariesAt[0]]);
+    expect(outcomes).toEqual(["completed", "completed", "completed"]);
+    expect(requests.length).toBe(replies.length);
   });
 
   it("枠に余裕があれば (P + R + G ≤ W)、 揮発メッセージ・思考が残る依頼の境目をまたいでも 1 度も外れない", async () => {

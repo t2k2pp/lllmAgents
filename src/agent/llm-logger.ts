@@ -14,7 +14,7 @@ import * as os from "node:os";
 import type { CacheMissDiagnosis } from "./cache-miss.js";
 import type { PrewarmSkipReason, PrewarmTrigger } from "./prewarm.js";
 import type { PromptFingerprint } from "./prompt-fingerprint.js";
-import type { ReductionEventRecord } from "./reduction-event.js";
+import type { ReductionEventRecord, ReductionSkipRecord } from "./reduction-event.js";
 import type { SideCallRecord } from "./side-call.js";
 
 /**
@@ -143,6 +143,17 @@ export interface LLMReductionEventLog extends LogContext, ReductionEventRecord {
 }
 
 /**
+ * 規則 2 (強い区切りでの先回りの整理) を見送った記録。 減る量の見込みが最低量 F に届かないので、 要約を呼ばず履歴も書き換えなかった。
+ * docs/context-reduction-redesign.md §4.6。
+ */
+export interface LLMReductionSkippedLog extends LogContext, ReductionSkipRecord {
+  ts: string;
+  turn: number;
+  agentId: string;
+  type: "reduction_skipped";
+}
+
+/**
  * 先読みを送らなかった記録 (理由つき)。 送った先読みは side_call (目的 prewarm) に残る。
  * docs/context-reduction-redesign.md §9.3。
  */
@@ -171,6 +182,7 @@ export type LLMLogEntry =
   | LLMSideCallLog
   | LLMCacheMissLog
   | LLMReductionEventLog
+  | LLMReductionSkippedLog
   | LLMPrewarmSkippedLog;
 
 export interface LLMLoggerOptions {
@@ -369,6 +381,17 @@ export class LLMLogger {
       turn: this.turn,
       agentId: this.agentId,
       type: "reduction_event",
+      ...record,
+    });
+  }
+
+  /** 規則 2 の見送りを記録する (turn は直前の本体呼び出しの番号)。 */
+  logReductionSkipped(record: ReductionSkipRecord): void {
+    this.write({
+      ts: new Date().toISOString(),
+      turn: this.turn,
+      agentId: this.agentId,
+      type: "reduction_skipped",
       ...record,
     });
   }

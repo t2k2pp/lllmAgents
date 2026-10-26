@@ -182,6 +182,11 @@ function preview(overrides: Partial<Extract<ReductionPreview, { ok: true }>> = {
     needsSummary: false,
     shortfall: { toTarget: 0, toMinimum: 0 },
     summary: { status: "would-summarize", segments: 2, estimatedFreedTokens: 12_000 },
+    boundary: {
+      worthIt: true,
+      withSummary: false,
+      expectedFreedTokens: { stages: 50_600, summary: null, total: 50_600 },
+    },
     ...overrides,
   };
 }
@@ -261,6 +266,36 @@ describe("/context の整理の状態", () => {
     ).toContain("減らせるものがありませんでした。 履歴は変えていません");
   });
 
+  it("直近の整理が規則 2 の見送りなら、 見送ったことと見込みを出す (画面の 1 行は出さないので、 ここで見える)", () => {
+    const out = plain(
+      formatReductionStatus(
+        status({
+          lastEvent: {
+            skip: {
+              id: "r-2-abc",
+              trigger: "boundary:request-end",
+              reason: "below-minimum",
+              detail:
+                "減る量の見込みが最低量 32,768 に届かないため、 履歴を書き換えずに見送りました (見込み 約 8,800 …)",
+              promptTokensBefore: 70_000,
+              promptBasis: "usage",
+              targetPromptTokens: 31_744,
+              minimumReductionTokens: 32_768,
+              growthTokens: 31_744,
+              expectedFreedTokens: { stages: 8_800, summary: null, total: 8_800 },
+              summary: { status: "nothing-to-summarize" },
+              durationMs: 3,
+            },
+            finishedAt: Date.now(),
+          },
+        }),
+      ),
+    );
+    expect(out).toContain("直近の整理: r-2-abc (依頼の区切り、");
+    expect(out).toContain("は見送りました");
+    expect(out).toContain("最低量 32,768 に届かないため、 履歴を書き換えずに見送りました");
+  });
+
   it("今 /compact した場合の見込み: 段階ごとの量と、 段階 3 は要るかどうかと不足量だけ", () => {
     const out = plain(formatReductionStatus(status()));
     expect(out).toContain("今 /compact した場合の見込み (要約は呼ばずに数えた値)");
@@ -278,13 +313,38 @@ describe("/context の整理の状態", () => {
             needsSummary: true,
             shortfall: { toTarget: 5_000, toMinimum: 20_000 },
             summary: { status: "nothing-to-summarize", detail: "見込み 0 トークン" },
+            boundary: {
+              worthIt: false,
+              withSummary: false,
+              expectedFreedTokens: { stages: 20_000, summary: null, total: 20_000 },
+            },
           }),
         }),
       ),
     );
     expect(short).toContain("目標まで 5,000、 最低量まで 20,000 不足");
+    expect(short).toContain(
+      "依頼の区切りの自動の整理は見送ります (見込み 約 20,000 が最低量に届きません。 要約してよい範囲はありません)",
+    );
     expect(short).toContain("段階 3 (要約): 要約してよい範囲がありません (見込み 0 トークン)");
     expect(short).toContain("整理を取りやめる (stop)");
+
+    const withSummary = plain(
+      formatReductionStatus(
+        status({
+          preview: preview({
+            needsSummary: true,
+            shortfall: { toTarget: 30_000, toMinimum: 24_000 },
+            boundary: {
+              worthIt: true,
+              withSummary: true,
+              expectedFreedTokens: { stages: 8_768, summary: 35_000, total: 43_768 },
+            },
+          }),
+        }),
+      ),
+    );
+    expect(withSummary).toContain("依頼の区切りの自動の整理では要約もします (見込み 約 43,768。 うち要約で 約 35,000)");
 
     const broken = plain(formatReductionStatus(status({ preview: { ok: false, error: "対が壊れています" } })));
     expect(broken).toContain("見込みを出せませんでした: 対が壊れています");

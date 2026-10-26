@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentLoop } from "../../src/agent/agent-loop.js";
+import { LLMLogger } from "../../src/agent/llm-logger.js";
+import type { ReductionEventRecord, ReductionSkipRecord } from "../../src/agent/reduction-event.js";
 import { saveSession, createSession, type SessionData } from "../../src/agent/session-manager.js";
 import type { SecurityConfig } from "../../src/config/types.js";
 import type { ChatChunk, ChatWithToolsParams, LLMProvider, Message } from "../../src/providers/base-provider.js";
@@ -298,6 +300,104 @@ describe("規則 2: 強い区切りでだけ P + R + G > W なら整理する", 
     const sent = requests[0].messages.map((m) => String(m.content));
     expect(sent.filter((c) => c.startsWith("[忘却済み]")).length).toBeGreaterThan(0);
     expect(sent.at(-1)).toContain("次の依頼です");
+  });
+});
+
+describe("規則 2 は減る量の見込みが最低量 F に届くときだけ書き換える (§4.6。 clear_at_least と同じ考え方)", () => {
+  function captureLogs(): { events: ReductionEventRecord[]; skips: ReductionSkipRecord[] } {
+    const events: ReductionEventRecord[] = [];
+    const skips: ReductionSkipRecord[] = [];
+    vi.spyOn(LLMLogger.prototype, "logReductionEvent").mockImplementation((r) => {
+      events.push(structuredClone(r));
+    });
+    vi.spyOn(LLMLogger.prototype, "logReductionSkipped").mockImplementation((r) => {
+      skips.push(structuredClone(r));
+    });
+    return { events, skips };
+  }
+
+  it("見込みが F に届かなければ、 要約を呼ばず履歴も書き換えずに見送り、 記録と /context の直近の整理に残す。 次の区切りでも同じく判定する", async () => {
+    const requests: ChatWithToolsParams[] = [];
+    let summaryCalls = 0;
+    const base = scriptedProvider(
+      [
+        callChunks("p1", "probe", { tag: 1 }, 60_000),
+        textChunks("1 件目を調べました。", 70_000),
+        callChunks("p2", "probe", { tag: 2 }, 72_000),
+        textChunks("2 件目を調べました。", 74_000),
+      ],
+      requests,
+    );
+    const chatWithTools = base.chatWithTools.bind(base);
+    const provider = {
+      ...base,
+      chatWithTools: (params: ChatWithToolsParams) => {
+        if (String(params.messages.at(-1)?.content ?? "").includes("<context-summary-request>")) summaryCalls++;
+        return chatWithTools(params);
+      },
+    } as LLMProvider;
+    const loop = makeLoop(provider, makeRegistry());
+    const triggers = recordTriggers();
+    const logs = captureLogs();
+
+    await loop.run("1 件目を調べてください？");
+    const history = loop.getHistory();
+    const revision = history.getRevision();
+    const rawAfterFirst = structuredClone(history.getRawMessages());
+    expect(triggers).toEqual(["boundary:request-end"]);
+    expect(logs.events).toEqual([]);
+    expect(logs.skips).toHaveLength(1);
+    const skip = logs.skips[0];
+    expect(skip).toMatchObject({
+      trigger: "boundary:request-end",
+      reason: "below-minimum",
+      promptTokensBefore: expect.any(Number),
+      minimumReductionTokens: 32_768,
+    });
+    expect(skip.expectedFreedTokens.total).toBeLessThan(skip.minimumReductionTokens);
+    expect(skip.detail).toContain("見送りました");
+    expect(summaryCalls).toBe(0);
+    // /context の直近の整理には見送りが出る
+    const last = loop.getReductionStatus().lastEvent;
+    expect(last !== null && "skip" in last ? last.skip.id : null).toBe(skip.id);
+
+    // 次の依頼: 新しい依頼では判定しない (前の依頼は正常に終わった)。 依頼の終わりで改めて判定し、 また見送る
+    await loop.run("2 件目を調べてください？");
+    expect(triggers).toEqual(["boundary:request-end", "boundary:request-end"]);
+    expect(logs.skips).toHaveLength(2);
+    expect(logs.events).toEqual([]);
+    // 履歴は書き換わっていない (1 件目の後の履歴がそのまま先頭に残る)
+    expect(history.getRevision()).toBe(revision);
+    expect(history.getRawMessages().slice(0, rawAfterFirst.length)).toEqual(rawAfterFirst);
+    expect(summaryCalls).toBe(0);
+  });
+
+  it("規則 1 (入らない) は、 減る量が F に届かなくても整理する", async () => {
+    const requests: ChatWithToolsParams[] = [];
+    const provider = scriptedProvider(
+      [
+        callChunks("p1", "probe", { tag: 1 }, 10_000),
+        callChunks("p2", "probe", { tag: 2 }, 12_000),
+        callChunks("p3", "probe", { tag: 3 }, 14_000),
+        callChunks("p4", "probe", { tag: 4 }, 16_000),
+        callChunks("p5", "probe", { tag: 5 }, 18_000),
+        // 規則 1 は P > W − R = 110,592 で起きる
+        callChunks("p6", "probe", { tag: 6 }, 110_000),
+        textChunks("調べました。", 20_000),
+      ],
+      requests,
+    );
+    const loop = makeLoop(provider, makeRegistry());
+    const triggers = recordTriggers();
+    const logs = captureLogs();
+
+    await loop.run("たくさん調べてください？");
+    expect(triggers[0]).toBe("forced");
+    const forced = logs.events.find((e) => e.trigger === "forced");
+    expect(forced?.ok).toBe(true);
+    expect(forced?.freedTokens.total).toBeGreaterThan(0);
+    expect(forced?.freedTokens.total).toBeLessThan(forced?.minimumReductionTokens ?? 0);
+    expect(logs.skips.filter((k) => k.trigger === ("forced" as string))).toEqual([]);
   });
 });
 

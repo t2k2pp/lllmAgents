@@ -267,6 +267,8 @@ P (`measureNextPrompt`) と G (`RequestGrowthTracker.resolve`) で `exceedsBound
 - **弱い区切り**: ToDo 1 つの完了・話題の切り替わり・git commit・plan mode を抜けた・複雑な依頼・多段の ToDo の作成の検出
   (旧 `queueBreak` の B2/B4/B5/B6/P1/P2/P3) は整理に使わなくなったので、 検出ごと削除した。
 - 規則 2 は先回りなので、 整理に失敗しても作業は止めない (失敗は整理イベントが画面と記録に出す。 入らなければ次の規則 1 が判定する)。
+- **規則 2 は減る量の見込みが最低量 F に届くときだけ書き換える** (2026-10-26 利用者の決定。 §4.6 の「規則 2 の見送り」)。 届かなければ見送り、
+  次の区切りでも同じく判定する (届かないままなら、 入らなくなったときの規則 1 に任せる形になる)。 見送ったときは先読みも送らない (履歴を変えていない)。
 - 試験: `tests/agent/reduction-boundary.test.ts` (依頼の終わり・ToDo の全部完了・Goal の達成・新しい依頼 (再開後)・弱い区切り・
   Goal が動いている間・P + R + G ≤ W のときに整理しないこと)、 `tests/agent/prompt-prefix-invariant.test.ts` (規則 1 と規則 2 が起きる
   4 件の依頼で、 キャッシュが外れる送信が整理イベントの直後だけであること、 余裕のある枠では依頼の境目で 1 度も外れないこと)。
@@ -299,6 +301,38 @@ P (`measureNextPrompt`) と G (`RequestGrowthTracker.resolve`) で `exceedsBound
 - **目標**: 整理後の P が `W − R − G` 以下 (= 少なくともひと仕事ぶんの余白を空ける)。 段階は目標に達したところで止める。
 - **最低量**: 1 回の整理で少なくとも `F = max(32,768, G ÷ 2)` を減らす。 目標に達していても F に届くまでは段階を進める。
   (Anthropic の `clear_at_least` と同じ考え方。 キャッシュを失う以上、 割に合う量を空ける)
+
+**規則 2 の見送り** (2026-10-26 利用者の決定。 実機確認 タスク 13): 実機 (W = 131,072、 T2) で、 依頼の終わりの整理が目標にも F にも届かない量
+(約 8,800〜15,600。 段階 3 は「要約しても減る見込みがない」 で一度も動かなかった) のまま、 依頼が終わるたびに履歴を書き換えていた。
+先読みで待ちは隠れるが、 書き換え 1 回ごとにサーバの読み込みを全部やり直すので割に合わない。 そこで Anthropic API の context editing の
+`clear_at_least` (「If the API can't clear at least the specified amount, the strategy will not be applied. This helps determine if context clearing
+is worth breaking your prompt cache.」 https://platform.claude.com/docs/en/build-with-claude/context-editing) と同じ扱いにした。
+
+- **対象**: 規則 2 (`boundary:*`) だけ。 規則 1 (`forced`) はこれまでどおり必ず行う (入らない呼び出しは送らない。 F に届かなくても、 入るようになれば進める)。
+  手動の `/compact` もこれまでどおり (段階 0〜3 を最後まで)。
+- **決め方** (`assessReductionWorth`。 `reduction-event.ts`。 要約は呼ぶ前に決める。 見込みを得るために要約を呼ぶことはしない):
+  1. 写しに前処理と段階 0〜2 を当てた見込み (`freedTokens.total`) が F 以上なら行う。 目標に届かなければ、 これまでどおり目標に届く最小の範囲を要約する。
+  2. F に届かなければ、 段階 3 の範囲 (規則 1・2 の決め方 = 目標と最低量に届く最小の範囲。 届かなければ要約してよい最大の範囲) の見込み
+     (`estimatedFreedTokens`) を足し、 F 以上なら要約まで行う。
+  3. それでも F に届かない (要約してよい範囲が無いときも含む) なら **見送る**: 要約を呼ばず、 履歴を書き換えない。
+- **要約に失敗したとき**: 2. で要約まで行うと決めた後に要約が失敗した (型が揃わない・エラー) なら、 設定 `context.summaryFailure` が `continue` でも、
+  段階 0〜2 だけでは F に届かないので書き換えない (`summary-failed` / `summary-error` の失敗として画面と記録に出す。 文に「書き換えませんでした」 を添える)。
+  1. の場合 (段階 0〜2 だけで F に届く) の要約の失敗は従来どおり (continue なら段階 0〜2 だけで書き換える)。
+  要約が成功して実際の減った量が見込みより少なく F を下回っても、 そのまま書き換える (要約の呼び出しは済んでいて、 減る分は減る)。
+- **記録**: 見送りは失敗ではないので `reduction_event` (ok: false) にはせず、 専用の記録 `reduction_skipped` をセッションログに書く
+  (`prewarm_skipped` と同じ扱い)。 欄: `id` (整理イベントと同じ形。 通し番号を進める) / `trigger` / `reason` (`below-minimum`) / `detail` (説明の文) /
+  `promptTokensBefore` / `promptBasis` / `targetPromptTokens` / `minimumReductionTokens` / `growthTokens` /
+  `expectedFreedTokens` {stages, summary (要約の範囲の見込み。 無ければ null), total} / `summary` {status: `nothing-to-summarize` | `insufficient` (+ segments)} / `durationMs`。
+  例: `{"type":"reduction_skipped","id":"r-3-…","trigger":"boundary:request-end","reason":"below-minimum","promptTokensBefore":70412,"minimumReductionTokens":32768,"expectedFreedTokens":{"stages":8812,"summary":null,"total":8812},"summary":{"status":"nothing-to-summarize"},…}`
+- **表示**: 画面には出さない (依頼のたびに出ると煩わしく、 害も無い)。 動作ログ (info) に `[reduction] 依頼の区切り: 減る量の見込みが最低量 … に届かないため、
+  履歴を書き換えずに見送りました (見込み 約 … = 段階 0〜2 で 約 …、 …)` を出す。 `/context` の「直近の整理」 に見送りも出し (`<id> (依頼の区切り、 時刻) は見送りました` と説明)、
+  「今 /compact した場合の見込み」 に、 依頼の区切りの自動の整理なら行うか (要約もするか)・見送るかを出す (`previewReduction` の `boundary`。 同じ `assessReductionWorth`)。
+- **結果の形**: `runReductionEvent` は規則 2 のときだけ `{ ok: false, skipped: true, skip }` (`ReductionSkippedResult`) を返しうる (規則 1・手動の型は従来どおり)。
+- 試験: `tests/agent/reduction-event.test.ts` (見込みが F 未満なら要約を呼ばず履歴・書き換え理由・cache_miss の原因・G を変えない、 要約の範囲を足しても届かなければ要約を呼ばない、
+  要約まで含めて届けば要約する、 段階 0〜2 で届けば要約しない、 規則 1 は F 未満でも書き換える、 要約の失敗で F に届かなければ continue でも書き換えない、 `/context` の見込み)、
+  `tests/agent/reduction-boundary.test.ts` (AgentLoop で見送りが記録と `/context` に出て、 次の依頼の終わりでも改めて判定する。 規則 1 は F 未満でも整理する)、
+  `tests/agent/prompt-prefix-invariant.test.ts` (起動時検査の最小の W では規則 2 が見送られ、 見送りの位置で外れない。 W = 120,000 では規則 2 が 1 回だけ書き換え、
+  外れるのはその直後の送信だけ。 「キャッシュが外れる送信は整理イベントの直後だけ」 の検査は緩めていない)、 `tests/cli/compact-context-commands.test.ts` (表示)。
 
 ### 4.7 具体的な数字 (T1、 G = 80,000、 R = 71,680)
 
@@ -897,6 +931,7 @@ reason は `not-local-server` / `empty-history`) と動作ログ (info) に出�
 到達した段階、 段階ごとの減った量 (前処理・0・1・2・3)、 返した借り (揮発 N 件・思考 N 件)、 整理後の P (推定)、
 段階 3 の要約呼び出しの `tokensIn` / `tokensCached` / `tokensOut` / 所要時間、 先読みの有無と所要時間。
 実装の欄の名前と形は §6.4 (タスク 7)。
+規則 2 を見送ったとき (減る量の見込みが最低量 F に届かない) は `reduction_event` ではなく `reduction_skipped` を 1 件書く (欄は §4.6)。
 
 ### 10.2 キャッシュが外れた原因の特定 (`cache_miss`)
 
@@ -1089,6 +1124,7 @@ AgentLoop は整理イベントのたびに `loadConfig()` から読む (変更�
 | 7 | 利用者の発言 | どの段階でも原文のまま残し、 要約しない (§5.1, §5.6) |
 | 8 | 補助呼び出し・サブエージェントによるキャッシュの追い出し | 本書では計測まで。 振り分けは todo-local-llm-speed.md T2/T3 (§3 非目標) |
 | 9 | 段階 3 の要約に失敗したとき | 設定 `context.summaryFailure` で選ぶ。 既定 `continue` (失敗を画面と記録に出して段階 0〜2 だけで差し替え。 規則 1 で入らなければ止める)、 `stop` は履歴を変えずに失敗 (§6.1 / §11.3) |
+| 10 | 規則 2 で減らせる量が少ないとき (2026-10-26 決定) | 段階 0〜2 (と要るなら段階 3 の範囲) の見込みが最低量 F に届かなければ、 要約を呼ばず書き換えずに見送る (`clear_at_least` と同じ考え方。 記録 `reduction_skipped`。 規則 1・`/compact` は従来どおり) (§4.6) |
 
 ### 14.3 残る未決事項
 
@@ -1112,6 +1148,7 @@ AgentLoop は整理イベントのたびに `loadConfig()` から読む (変更�
 | A12 | 手動の `/compact` の要約の範囲 | 段階 0〜2 で足りていても、 要約してよい最大の範囲を要約する。 範囲が無ければ要約を呼ばない (タスク 10) | §7.1 |
 | A13 | 削除する旧キーの最終一覧 | §11.1 に加え `context.compressionThreshold` / `context.maxHistoryMessages` も消す (タスク 11) | §11.4 |
 | A14 | 1 つの応答の中の一部の呼び出しだけを外すとき・ツールの対の守り方 (2026-10-26 実機の不具合 B) | 呼び出しと結果は一緒に外す。 残りは元の順。 全部外れたら本文か思考があれば本文だけの assistant、 無ければ assistant ごと消す。 保護は呼び出しごと。 AgentLoop は応答の結果の途中にハーネスの促しを挟まず (結果を全部入れた後に足す)、 結果の無い呼び出しには必ず `Error: ` の結果を付ける。 段階 0〜2 は壊れた入力を直さず、 「整理前の履歴が既に壊れている」 と「変換で壊した」 を分けて報告する | §5.9 |
+| A15 | 規則 2 の見送りの記録の形と、 要約に失敗したときの扱い (2026-10-26) | 見送りは専用の記録 `reduction_skipped` (`reduction_event` の ok: false にしない)。 画面には出さず動作ログと `/context` の「直近の整理」。 要約まで含めて F に届く見込みで要約を呼んだ後に要約が失敗したら、 continue でも段階 0〜2 だけでは F に届かないので書き換えない (失敗として出す) | §4.6 |
 
 #### B. 実機の計測で確かめるもの (タスク 2・13)
 
@@ -1124,7 +1161,7 @@ AgentLoop は整理イベントのたびに `loadConfig()` から読む (変更�
 | B5 | 規則 1 の発火時の要約の出力枠: 出力上限は `min(O, W − P − 指示 − M)` で、 規則 1 の発火時は S − 指示 (T1・T2 で約 5k、 T3 で約 2k) しか残らない。 思考オン (既定) で思考だけで使い切らないか (`length` の失敗)。 足りなければ S を見直す | `reduction_event.summary` (status / failureReason / tokensOut / maxTokens) | §5.8 |
 | B6 | ~~ツール結果の合計が T を少し超える分 (最低量 256 × 件数 + 書き込み系の結果) が余白 M に収まるか~~ → 2026-10-26 の改訂で合計は T 以下に守るようにしたので不要 (実機で 397 件の応答が T を約 9.3 万超えたのが改訂の理由)。 代わりに確かめること: 本文を省いた注記を受けたモデルが、 後の応答で必要な結果を取り直すか・変更を伴う呼び出しを繰り返さないか、 応答の後に足す促しの分が M に収まるか | 注記の後の応答、 response の `tokensIn` と推定の差 | §4.3 |
 | B7 | `file_edit` だけでは前の `file_read` を古いとみなさない規則で、 古い読み込みが残りすぎないか。 逆に読み直しの繰り返しが出ないか | `reduction_event` の forgottenCalls、 整理の後の `file_read` の回数 | §5.3 |
-| B8 | G の既定値 80,000・直近 3 件の最大・頭打ち、 最低量 F = max(32,768, G ÷ 2) が実際の作業に合うか (整理の間隔・1 回で減る量) | `reduction_event` の growthTokens / freedTokens、 依頼ごとの増分 | §4.5 / §4.6 |
+| B8 | G の既定値 80,000・直近 3 件の最大・頭打ち、 最低量 F = max(32,768, G ÷ 2) が実際の作業に合うか (整理の間隔・1 回で減る量)。 規則 2 の見送り (§4.6) がどのくらい続き、 結局規則 1 (作業の途中の整理) に回る頻度がどれだけか | `reduction_event` の growthTokens / freedTokens、 `reduction_skipped` の expectedFreedTokens、 依頼ごとの増分 | §4.5 / §4.6 |
 | B9 | 要約の大きさの見込み (区間ごと 256・全体 3,072 トークン) が実際に合うか | `reduction_event.summary.tokensOut` と freedTokens.stage3 | §5.8 |
 | B10 | 要約の真似: モデルが返答に `<summary-of-earlier-turns>` の囲みや 8 見出しの形を書かないか | 整理の後の応答 | §5.8 |
 | B11 | 揮発メッセージと古い思考が次の依頼にも見えたまま残ることの実害 (前の催促に引きずられる) が出ないか | 依頼の境目の応答 | §6.2 / §14.2 の 3 |

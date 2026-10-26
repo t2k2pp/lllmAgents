@@ -10,6 +10,10 @@
  *      (書き換え理由は "reduction:<イベント ID>" の 1 件)
  *   5. cache_miss の原因に整理イベントを記録し (次の外れが expected になる)、 依頼の増分 G に減らした量を足し戻す
  *
+ * 規則 2 (boundary:*) は、 段階 0〜2 の見込み (要るなら段階 3 の範囲の見込みも足す) が最低量 F に届くときだけ行う (§4.6。
+ * Anthropic の clear_at_least と同じ考え方)。 届かなければ要約を呼ばず、 履歴も書き換えずに見送り、 見送りの記録 (reduction_skipped) を返す。
+ * 規則 1 (forced) と手動の /compact は見送らない。
+ *
  * 途中で失敗したら写しを捨てるだけで、 履歴は元のまま。 失敗は結果 (ok: false) として返し、 呼び出し側が利用者に見せる。
  * ただし段階 3 の要約の失敗は設定 context.summaryFailure に従う (2026-10-25 利用者の決定。 §6.1):
  *   - continue (既定): 失敗を記録と 1 行に必ず出したうえで、 段階 0〜2 の写しだけで差し替える
@@ -138,6 +142,89 @@ export type ReductionEventResult =
   | { ok: true; record: ReductionEventRecord }
   | { ok: false; reason: ReductionFailureReason; detail: string; record: ReductionEventRecord };
 
+/**
+ * 規則 2 の見送りの記録 (§4.6。 セッションログの reduction_skipped)。 見込みの減る量が最低量 F に届かないので、
+ * 要約を呼ばず、 履歴も書き換えなかった。 失敗ではない (書き換えが割に合わないだけ。 入らなくなれば規則 1 が整理する)
+ */
+export interface ReductionSkipRecord {
+  /** 整理イベントと同じ形の ID (見送りも通し番号を進める。 /context の「直近の整理」 に出る) */
+  id: string;
+  trigger: BoundaryTrigger;
+  /** below-minimum = 見込みが最低量 F に届かない */
+  reason: "below-minimum";
+  /** 利用者向けの説明 (動作ログと /context に出す) */
+  detail: string;
+  promptTokensBefore: number;
+  promptBasis: PromptSize["basis"];
+  targetPromptTokens: number;
+  minimumReductionTokens: number;
+  growthTokens: number;
+  /**
+   * 見込みの減る量 (送る形の推定)。 stages = 前処理と段階 0〜2、 summary = 段階 3 の範囲の見込み
+   * (要約が要らない・要約してよい範囲が無ければ null)、 total = 合計
+   */
+  expectedFreedTokens: { stages: number; summary: number | null; total: number };
+  /** 段階 3 の見込み: nothing-to-summarize = 要約してよい範囲が無い、 insufficient = 範囲を要約しても F に届かない */
+  summary: { status: "nothing-to-summarize" } | { status: "insufficient"; segments: number };
+  durationMs: number;
+}
+
+/** 規則 2 を見送ったときの結果 (履歴は元のまま。 要約も呼んでいない) */
+export interface ReductionSkippedResult {
+  ok: false;
+  skipped: true;
+  skip: ReductionSkipRecord;
+}
+
+/** 規則 2 の発火の種類 */
+export type BoundaryTrigger = `boundary:${BoundaryKind}`;
+
+/** 規則 2 (強い区切りでの先回り) の発火か */
+export function isBoundaryTrigger(trigger: ReductionTrigger): trigger is BoundaryTrigger {
+  return trigger.startsWith("boundary:");
+}
+
+/** 減る量の見込みが最低量 F に届くか (§4.6)。 規則 2 の「行うか見送るか」 と /context の見込みが同じものを使う */
+export interface ReductionWorth {
+  /** 見込みが F に届く (行う) */
+  worthIt: boolean;
+  /** 行うとき、 段階 3 の要約を呼ぶか (段階 0〜2 の後も目標か F に届かず、 要約してよい範囲がある) */
+  withSummary: boolean;
+  expectedFreedTokens: ReductionSkipRecord["expectedFreedTokens"];
+}
+
+/**
+ * 段階 0〜2 の結果と段階 3 の範囲 (規則 1・2 の決め方。 selectStage3Range) から、 減る量の見込みが F に届くかを決める。
+ * 要約は呼ばない (呼ぶ前に決める)。 段階 0〜2 だけで F に届けば行う (目標に届かなければ、 これまでどおり要約もする)。
+ * 届かなければ、 要約の範囲の見込みを足して F に届くときだけ要約まで行う。 それでも届かなければ見送る。
+ */
+export function assessReductionWorth(
+  stages: ReductionStagesResult,
+  range: SummaryRangeResult | null,
+  goal: ReductionGoal,
+): ReductionWorth {
+  const fromStages = stages.freedTokens.total;
+  const fromSummary = range?.ok === true ? range.range.estimatedFreedTokens : null;
+  const total = fromStages + (fromSummary ?? 0);
+  return {
+    worthIt: total >= goal.minimumReductionTokens,
+    withSummary: fromSummary !== null,
+    expectedFreedTokens: { stages: fromStages, summary: fromSummary, total },
+  };
+}
+
+/** 見送りの説明 (動作ログ・/context) */
+function skipDetail(worth: ReductionWorth, goal: ReductionGoal): string {
+  const n = (v: number) => v.toLocaleString("en-US");
+  const e = worth.expectedFreedTokens;
+  const summary =
+    e.summary === null ? "要約してよい範囲はありません" : `要約で 約 ${n(e.summary)} (要約は呼んでいません)`;
+  return (
+    `減る量の見込みが最低量 ${n(goal.minimumReductionTokens)} に届かないため、 履歴を書き換えずに見送りました ` +
+    `(見込み 約 ${n(e.total)} = 段階 0〜2 で 約 ${n(e.stages)}、 ${summary})`
+  );
+}
+
 export interface ReductionEventInput {
   /** イベント ID (書き換え理由 "reduction:<id>"・cache_miss の原因・記録に出る) */
   id: string;
@@ -182,8 +269,17 @@ export function buildReductionTombstoneText(id: string, lines: readonly string[]
   ].join("\n");
 }
 
-/** 整理イベントを 1 回行う (§6.1)。 成功したときだけ履歴を 1 回差し替える */
-export async function runReductionEvent(input: ReductionEventInput): Promise<ReductionEventResult> {
+/**
+ * 整理イベントを 1 回行う (§6.1)。 成功したときだけ履歴を 1 回差し替える。
+ * 規則 2 (boundary:*) は見込みが最低量 F に届かなければ見送る (ReductionSkippedResult。 §4.6)。 規則 1・手動は見送らない
+ */
+export function runReductionEvent(
+  input: ReductionEventInput & { trigger: "forced" | "manual" },
+): Promise<ReductionEventResult>;
+export function runReductionEvent(input: ReductionEventInput): Promise<ReductionEventResult | ReductionSkippedResult>;
+export async function runReductionEvent(
+  input: ReductionEventInput,
+): Promise<ReductionEventResult | ReductionSkippedResult> {
   const startedAt = Date.now();
   const { history, budget, promptSize } = input;
   const goal = computeReductionGoal(budget, input.growthTokens);
@@ -247,6 +343,34 @@ export async function runReductionEvent(input: ReductionEventInput): Promise<Red
 
   // 2〜3. 足りなければ (手動の /compact なら必ず) 段階 3 (書き換え前の並び + 指示で要約を得て、 写しに当てはめる)
   const rangeResult = selectStage3Range(input.trigger, stages, raw.length, input.keepRecentToolUses);
+  const boundary = isBoundaryTrigger(input.trigger);
+  if (isBoundaryTrigger(input.trigger)) {
+    // 規則 2: 要約を呼ぶ前に、 見込みが最低量 F に届くかを決める。 届かなければ書き換えずに見送る (§4.6)
+    const worth = assessReductionWorth(stages, rangeResult, goal);
+    if (!worth.worthIt) {
+      return {
+        ok: false,
+        skipped: true,
+        skip: {
+          id: input.id,
+          trigger: input.trigger,
+          reason: "below-minimum",
+          detail: skipDetail(worth, goal),
+          promptTokensBefore: promptSize.tokens,
+          promptBasis: promptSize.basis,
+          targetPromptTokens: goal.targetPromptTokens,
+          minimumReductionTokens: goal.minimumReductionTokens,
+          growthTokens: input.growthTokens,
+          expectedFreedTokens: worth.expectedFreedTokens,
+          summary:
+            rangeResult?.ok === true
+              ? { status: "insufficient", segments: rangeResult.range.segments.length }
+              : { status: "nothing-to-summarize" },
+          durationMs: Date.now() - startedAt,
+        },
+      };
+    }
+  }
   if (rangeResult !== null) {
     if (!rangeResult.ok) {
       // 要約しても減らない (要約してよい範囲が小さい)。 段階 0〜2 の分だけで進める。
@@ -293,6 +417,14 @@ export async function runReductionEvent(input: ReductionEventInput): Promise<Red
         }
       }
       if (summaryFailureNote !== null) {
+        if (boundary && stages.freedTokens.total < goal.minimumReductionTokens) {
+          // 規則 2 は要約まで含めて F に届く見込みで行った。 要約が無ければ段階 0〜2 だけでは F に届かないので、
+          // 設定 continue でも書き換えない (割に合わない書き換えをしない。 要約の失敗はそのまま失敗として出す)
+          return fail(
+            record.summary.status === "error" ? "summary-error" : "summary-failed",
+            `${summaryFailureNote}。 段階 0〜2 だけでは最低量 ${goal.minimumReductionTokens.toLocaleString("en-US")} に届かないため、 書き換えませんでした`,
+          );
+        }
         // 設定 continue: 要約は使わず、 段階 0〜2 の写しのまま進める (失敗は記録と 1 行に出す)
         record.continuedWithoutSummary = true;
       } else if (summaryResult?.ok) {
@@ -388,6 +520,12 @@ export interface LastReductionEvent {
   prewarmSent: boolean;
 }
 
+/** 直近の規則 2 の見送り (/context の「直近の整理」 に出す) */
+export interface LastReductionSkip {
+  skip: ReductionSkipRecord;
+  finishedAt: number;
+}
+
 /** /context に出す整理の状態 (利用者向けだけ。 モデルには見せない。 §8) */
 export interface ReductionStatus {
   budget: ContextBudget;
@@ -404,7 +542,8 @@ export interface ReductionStatus {
   boundaryLimitTokens: number;
   summaryFailurePolicy: SummaryFailurePolicy;
   preview: ReductionPreview;
-  lastEvent: LastReductionEvent | null;
+  /** 直近の整理イベントか規則 2 の見送り */
+  lastEvent: LastReductionEvent | LastReductionSkip | null;
 }
 
 export interface ReductionPreviewInput {
@@ -441,6 +580,11 @@ export type ReductionPreview =
       summary:
         | { status: "would-summarize"; segments: number; estimatedFreedTokens: number }
         | { status: "nothing-to-summarize"; detail: string };
+      /**
+       * 規則 2 (区切りの自動の整理) なら行うか見送るか (§4.6)。 段階 3 は規則 1・2 の範囲 (目標と最低量に届く最小) で数える。
+       * 規則 1 (作業の途中で入らない) は見込みにかかわらず行う
+       */
+      boundary: ReductionWorth;
     }
   | { ok: false; error: string };
 
@@ -464,6 +608,12 @@ export function previewReduction(input: ReductionPreviewInput): ReductionPreview
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
   const range = selectStage3Range("manual", stages, input.messages.length, input.keepRecentToolUses);
+  const boundaryRange = selectStage3Range(
+    "boundary:request-end",
+    stages,
+    input.messages.length,
+    input.keepRecentToolUses,
+  );
   const summary: Extract<ReductionPreview, { ok: true }>["summary"] =
     range?.ok === true
       ? {
@@ -483,6 +633,7 @@ export function previewReduction(input: ReductionPreviewInput): ReductionPreview
     needsSummary: stages.needsSummary,
     shortfall: stages.shortfall,
     summary,
+    boundary: assessReductionWorth(stages, boundaryRange, goal),
   };
 }
 

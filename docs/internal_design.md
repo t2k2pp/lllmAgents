@@ -270,7 +270,7 @@ stateDiagram-v2
 | `tool-result-limit.ts` | `ToolResultBatch`: 1 回の応答のツール結果を、 1 件の上限 (トークン数) と合計 T で頭と尻尾を残して切る |
 | `reduction-stages.ts` | `applyReductionStages`: 写しに前処理 (終わった依頼の揮発メッセージ・思考) と段階 0〜2 を最後まで当てる純粋な関数。 保護するツール、 忘却の記録 (`insertTombstone`) |
 | `reduction-summary.ts` | 段階 3: 範囲の決定 (`selectSummaryRange`)、 今の並び + 指示 1 件での要約の呼び出し (`requestSummary`。 思考の設定は本体と同じ)、 8 見出しの型の検査、 写しへの当てはめ、 状態の渡し直し |
-| `reduction-event.ts` | 整理イベント `runReductionEvent`: 前処理・段階 0〜2 → 必要なら段階 3 → 対の検証 → `MessageHistory.replaceMessages(写し, "reduction:<id>")` を 1 回。 失敗なら写しを捨てる。 `reduction_event` の記録、 `/context` の見込み (`previewReduction`) |
+| `reduction-event.ts` | 整理イベント `runReductionEvent`: 前処理・段階 0〜2 → (規則 2 は減る量の見込みが最低量 F に届かなければ、 要約を呼ばず書き換えずに見送る。 `assessReductionWorth`・`reduction_skipped`) → 必要なら段階 3 → 対の検証 → `MessageHistory.replaceMessages(写し, "reduction:<id>")` を 1 回。 失敗なら写しを捨てる。 `reduction_event` の記録、 `/context` の見込み (`previewReduction`) |
 | `prewarm.ts` | 先読み: 本体と同じ組み立て (`buildMainCallRequest`) の出力上限だけ 1 にして送り、 応答を捨てる (`PrewarmRunner`。 本体・脇の呼び出しは終わりを待つ) |
 | `side-call.ts` | 本体の会話ループ以外の LLM 呼び出しの入口 `sideCall(目的, …)`。 `side_call` を記録し、 先読み中は待つ |
 | `cache-miss.ts` | `diagnoseCacheMiss`: 本体呼び出しの `tokensCached` が「比べる相手 (前回の本体呼び出しか、 その後に送り終えた先読み) の入力 − 4,096」 を下回ったら、 間の整理・書き換え理由・脇の呼び出しを原因に、 相手との並びのずれ (`divergence`) を添えて `cache_miss` に記録 |

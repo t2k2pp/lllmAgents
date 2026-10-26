@@ -154,17 +154,20 @@ function textChunks(text: string, promptTokens?: number): ChatChunk[] {
   ];
 }
 
-/** 古いツール結果を段階 1 で消せるよう、 K (T3 = 3) より多く probe を呼ぶ 1 件の依頼 */
-function longRequest(finalPromptTokens: number): ChatChunk[][] {
+/**
+ * 古いツール結果を段階 1 で消せるよう、 K (T3 = 3) より多く probe を呼ぶ 1 件の依頼。
+ * 規則 2 (依頼の終わり) で整理させるときは、 段階 0〜2 の見込みが最低量 F (= 32,768) に届くよう probe を増やす
+ * (結果 1 件は T3 の上限 2,048 トークンまで。 届かなければ規則 2 は見送る。 §4.6)
+ */
+function longRequest(finalPromptTokens: number, probes = 5): ChatChunk[][] {
   return [
-    callChunks("p1", 10_000),
-    callChunks("p2", 12_000),
-    callChunks("p3", 14_000),
-    callChunks("p4", 16_000),
-    callChunks("p5", 18_000),
+    ...Array.from({ length: probes }, (_, i) => callChunks(`p${i + 1}`, 10_000 + i * 2_000)),
     textChunks("調べ終わりました。", finalPromptTokens),
   ];
 }
+
+/** 規則 2 で整理される (段階 0〜2 の見込みが F に届く) 依頼 */
+const BOUNDARY_PROBES = 22;
 
 function makeRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
@@ -226,7 +229,11 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
 describe("先読みを送る 3 経路で、 先読みの並びが次の本体呼び出しの先頭と一致する", () => {
   it("依頼の終わり (規則 2) の整理の後", async () => {
     const log: Sent[] = [];
-    const provider = scriptedProvider([...longRequest(70_000), textChunks("次の答えです。", 20_000)], log, []);
+    const provider = scriptedProvider(
+      [...longRequest(70_000, BOUNDARY_PROBES), textChunks("次の答えです。", 20_000)],
+      log,
+      [],
+    );
     const loop = makeLoop(provider);
     const records = captureReductionRecords();
 
@@ -502,7 +509,7 @@ describe("先読みの後の本体呼び出しの外れの記録 (cache_miss。 
     const records = captureReductionRecords();
     const provider = scriptedProvider(
       [
-        ...longRequest(70_000),
+        ...longRequest(70_000, BOUNDARY_PROBES),
         [
           { type: "text", text: "次の答えです。" },
           {
@@ -668,7 +675,9 @@ describe("先読み中の待ち合わせ", () => {
   it("先読みの失敗は作業を止めず、 記録と画面の 1 行に出す", async () => {
     const log: Sent[] = [];
     const loop = makeLoop(
-      scriptedProvider([...longRequest(70_000), textChunks("次の答えです。", 20_000)], log, [], { failPrewarm: true }),
+      scriptedProvider([...longRequest(70_000, BOUNDARY_PROBES), textChunks("次の答えです。", 20_000)], log, [], {
+        failPrewarm: true,
+      }),
     );
     const records = captureReductionRecords();
     const notices: Array<{ level: string; message: string }> = [];
