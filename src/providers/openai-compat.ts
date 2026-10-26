@@ -304,10 +304,16 @@ export class OpenAICompatProvider implements LLMProvider {
                 }
                 partialToolCalls.clear();
               }
-              yield { type: "done", finishReason: choice.finish_reason, usage: lastUsage };
+              // done はここでは出さない。 llama.cpp などは finish_reason の後の別のかたまりで usage を返すので、
+              // ここで出すと usage の無い done と有る done の 2 回になる (受け側は usage の無い done で前回の入力数を
+              // 捨ててしまい、 cache_miss を判定できなくなっていた)。 done は [DONE] か、 ストリームの終わりで 1 回だけ出す。
             }
           }
         }
+      }
+      // [DONE] を送らずに閉じるサーバ向け: 終わりの理由を受け取っていれば、 ここで 1 回だけ done を出す
+      if (lastFinishReason !== undefined) {
+        yield { type: "done", finishReason: lastFinishReason, usage: lastUsage };
       }
     } catch (e) {
       // アイドルタイムアウトやAbortによるストリーム切断をわかりやすいエラーに変換

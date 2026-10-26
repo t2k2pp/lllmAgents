@@ -74,4 +74,49 @@ describe("OpenAICompatProvider: finishReason 保持テスト", () => {
     expect(response.content).toBe("完了");
     expect(response.finishReason).toBe("stop");
   });
+
+  async function collectChunks(sseLines: string[]) {
+    vi.spyOn(httpClient, "httpPostStream").mockImplementation(async () => {
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const line of sseLines) {
+            controller.enqueue(new TextEncoder().encode(line));
+          }
+          controller.close();
+        },
+      });
+    });
+    const provider = new OpenAICompatProvider("openai-compat", "https://example.test");
+    const chunks = [];
+    for await (const chunk of provider.chat({
+      model: "test-model",
+      messages: [{ role: "user", content: "test" }],
+      stream: true,
+    })) {
+      chunks.push(chunk);
+    }
+    return chunks;
+  }
+
+  it("finish_reason の後に usage が別のかたまりで来ても、 done は usage 付きで 1 回だけ出す (llama.cpp の返し方)", async () => {
+    const chunks = await collectChunks([
+      'data: {"choices":[{"index":0,"delta":{"content":"答え"},"finish_reason":null}]}\n\n',
+      'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+      'data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":96}}}\n\n',
+      "data: [DONE]\n\n",
+    ]);
+    const dones = chunks.filter((c) => c.type === "done");
+    expect(dones).toHaveLength(1);
+    expect(dones[0].finishReason).toBe("stop");
+    expect(dones[0].usage).toEqual({ promptTokens: 100, completionTokens: 5, cachedTokens: 96 });
+  });
+
+  it("[DONE] を送らずに閉じても、 終わりの理由を受け取っていれば done を 1 回出す", async () => {
+    const chunks = await collectChunks([
+      'data: {"choices":[{"index":0,"delta":{"content":"答え"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":1}}\n\n',
+    ]);
+    const dones = chunks.filter((c) => c.type === "done");
+    expect(dones).toHaveLength(1);
+    expect(dones[0].usage?.promptTokens).toBe(10);
+  });
 });
