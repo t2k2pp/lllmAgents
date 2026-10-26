@@ -403,6 +403,113 @@ describe("ツールの対の検証", () => {
   });
 });
 
+describe("1 つの応答の中の一部の呼び出しだけを外す・差し替える (§5.4)", () => {
+  it("保護と非保護が混ざる応答: 非保護の本文ありは対ごと外し、 他は結果だけ差し替え、 保護は触らない。 順と対は保つ", () => {
+    const bulky = call("bash", { command: `f=data/e.txt ${"x".repeat(400)}` });
+    const read = call("file_read", { file_path: "/p/a.txt" });
+    const todos = [1, 2, 3].map((i) => call("todo_append", { items: [{ content: `項目 ${i}` }] }));
+    const msgs: Message[] = [
+      user("依頼"),
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [bulky, todos[0], read, todos[1], todos[2]],
+      },
+      { role: "tool", content: `Error: Exit code: 127\n${BIG}`, tool_call_id: bulky.id },
+      { role: "tool", content: "1 項目を追加しました。", tool_call_id: todos[0].id },
+      { role: "tool", content: BIG, tool_call_id: read.id },
+      { role: "tool", content: "1 項目を追加しました。", tool_call_id: todos[1].id },
+      { role: "tool", content: "1 項目を追加しました。", tool_call_id: todos[2].id },
+      ...tail(),
+    ];
+    const r = run(msgs);
+    expect(findToolPairingError(r.messages)).toBeNull();
+    const head = r.messages[1];
+    expect(head.tool_calls?.map((c) => c.id)).toEqual([todos[0].id, read.id, todos[1].id, todos[2].id]);
+    expect(r.messages.slice(2, 6).map((m) => m.tool_call_id)).toEqual([todos[0].id, read.id, todos[1].id, todos[2].id]);
+    expect(ruleOf(r, bulky.id)).toBe("1-pair");
+    expect(ruleOf(r, read.id)).toBe("1-result");
+    for (const t of todos) expect(resultOf(r.messages, t.id)).toBe("1 項目を追加しました。");
+    expect(r.messages).toHaveLength(msgs.length - 1);
+  });
+
+  it("全部の呼び出しを外したら、 本文か思考があれば本文 (と思考) だけの assistant として残し、 無ければ assistant ごと消す", () => {
+    const a = call("bash", { command: "y".repeat(400) });
+    const b = call("bash", { command: "z".repeat(400) });
+    const c = call("bash", { command: "w".repeat(400) });
+    const msgs: Message[] = [
+      user("前の依頼"),
+      ...batch([a, "ok"], [b, "ok"]),
+      user("今の依頼"),
+      { role: "assistant", content: "", thinking: "考え", tool_calls: [c] },
+      { role: "tool", content: "ok", tool_call_id: c.id },
+      ...tail(),
+    ];
+    const r = run(msgs, { currentRequestStart: 4 });
+    expect(findToolPairingError(r.messages)).toBeNull();
+    // 前の依頼の応答 (本文も思考も無い) は消える。 今の依頼の応答は思考だけの assistant になる
+    expect(r.messages[1]).toBe(msgs[4]);
+    expect(r.messages[2]).toEqual({ role: "assistant", content: "", thinking: "考え" });
+    expect(r.forgotten.map((f) => f.toolCallId)).toEqual([a.id, b.id, c.id]);
+  });
+});
+
+describe("実機 2026-10-26 の再現: 397 件の呼び出しの応答の結果の途中に、 ハーネスの促しが挟まった履歴", () => {
+  /**
+   * 保存セッション mvp5t7u6-8yb2 の形を小さくしたもの: bash 2 件 (1 件は本文あり) + todo_append (保護) の応答で、
+   * 計画/Todo 過多の促し (揮発の user) が 6 件目の todo_append の結果の後に入っていた。
+   */
+  function interleaved(): { messages: Message[]; requestStart: number } {
+    const bash1 = call("bash", { command: `f=data/d.txt; ${"Hmm ".repeat(80)}` });
+    const bash2 = call("bash", { command: "f=data/e.txt? ..." });
+    const todos = Array.from({ length: 10 }, (_, i) => call("todo_append", { items: [{ content: `Read ${i}` }] }));
+    const calls = [bash1, bash2, ...todos];
+    const results: Message[] = calls.map((c, i) => ({
+      role: "tool",
+      content: i < 2 ? "Error: Exit code: 127" : "2 項目を追加しました。",
+      tool_call_id: c.id,
+    }));
+    const nudge: Message = { role: "user", content: "[ハーネス] 計画/Todo の更新が過多です", ephemeral: true };
+    const messages: Message[] = [
+      user("data/a.txt を読んで"),
+      ...batch([call("file_read", { file_path: "data/a.txt" }), BIG]),
+      { role: "assistant", content: "65 個です。" },
+      user("data/b.txt を読んで"),
+      { role: "assistant", content: "", tool_calls: calls },
+      ...results.slice(0, 8),
+      nudge,
+      ...results.slice(8),
+    ];
+    return { messages, requestStart: 4 };
+  }
+
+  it("依頼の途中で整理すると対が壊れたまま: 「整理前の履歴」 が壊れていると報告する (変換で壊したとは言わない)", () => {
+    const { messages, requestStart } = interleaved();
+    expect(findToolPairingError(messages)).toMatch(/tool_result が欠落しています \(assistant index=5/);
+    expect(() => run(messages, { currentRequestStart: requestStart })).toThrow(
+      /整理前の履歴のツールの対が既に壊れていて、 段階 0〜2 の後も壊れたままです: tool_result が欠落しています/,
+    );
+  });
+
+  it("依頼の終わりの整理では、 前処理が終わった依頼の促しを除くので対が揃い、 正しい写しを返す (実機の r-2 と同じ)", () => {
+    const { messages } = interleaved();
+    const r = run(messages, { currentRequestStart: messages.length, keepRecentToolUses: 5 });
+    expect(findToolPairingError(r.messages)).toBeNull();
+    expect(r.repaid.ephemeral).toBe(1);
+  });
+
+  it("促しが結果の後ろにあれば (AgentLoop の修正後の形)、 段階 0〜2 を当てても対は保たれる", () => {
+    const { messages, requestStart } = interleaved();
+    const nudgeAt = messages.findIndex((m) => m.ephemeral);
+    const fixed = [...messages.slice(0, nudgeAt), ...messages.slice(nudgeAt + 1), messages[nudgeAt]];
+    expect(findToolPairingError(fixed)).toBeNull();
+    for (const start of [requestStart, fixed.length]) {
+      const r = run(fixed, { currentRequestStart: start, keepRecentToolUses: 5 });
+      expect(findToolPairingError(r.messages)).toBeNull();
+    }
+  });
+});
+
 describe("純粋さと減った量", () => {
   it("入力の配列もメッセージも書き換えない", () => {
     const msgs = mixedHistory();

@@ -2118,15 +2118,24 @@ export class AgentLoop {
                 `\n  ツール呼び出しの代わりにJSONが返されました。${fakeWrites.length}件のfile_writeを直接実行します...`,
               ),
             );
-            this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
-            const syntheticCalls: ToolCall[] = fakeWrites.map((fw) => ({
-              id: `synthetic_fw_${Date.now()}`,
+            // 代わりに実行する file_write を、 この応答の呼び出しとして assistant に載せる。 結果 (tool) は必ず
+            // 呼び出しを持つ assistant の直後に続ける (呼び出しの無い結果は対の検証で壊れた履歴になり、 整理できなくなる)。
+            // id は応答の中で重ならないよう通し番号を付ける
+            const stamp = Date.now();
+            const syntheticCalls: ToolCall[] = fakeWrites.map((fw, i) => ({
+              id: `synthetic_fw_${stamp}_${i}`,
               type: "function",
               function: { name: "file_write", arguments: JSON.stringify(fw) },
             }));
+            this.history.addAssistantMessage(textContent, syntheticCalls, { thinking: thinkingContent });
             const shouldAbort = await this.withToolBatch(syntheticCalls, async (batch) => {
-              for (const call of syntheticCalls) {
-                if (await this.executeSingleTool(call, batch)) return true;
+              for (let i = 0; i < syntheticCalls.length; i++) {
+                if (await this.executeSingleTool(syntheticCalls[i], batch)) {
+                  for (const pending of syntheticCalls.slice(i + 1)) {
+                    this.addLimitedToolResult(batch, pending, "Error: 前のツールで停止したため未実行です。");
+                  }
+                  return true;
+                }
               }
               return false;
             });
@@ -2983,8 +2992,8 @@ export class AgentLoop {
       ),
     );
     this.notice("warn", `stuck-loop 検出: ${toolCall.function.name} の同一エラー再発`);
-    // stuck-loop 介入は in-turn の方向修正なので揮発 (次の整理イベントで除く)
-    this.history.addUserMessage(intervention, { ephemeral: true });
+    // stuck-loop 介入は in-turn の方向修正なので揮発 (次の整理イベントで除く)。 応答の結果を全部入れた後に足す
+    this.addInTurnNote(intervention);
   }
 
   /** Phase D-2: T1/T2 向け標準介入 (自由形式の advice) */
@@ -3120,11 +3129,11 @@ export class AgentLoop {
     console.log(
       chalk.yellow(`\n  ⚠ bash 累積実行時間が ${totalSec}s に達しました。 重い build/run の連発を見直してください`),
     );
-    this.history.addUserMessage(
+    // 応答の結果を全部入れた後に足す (結果の途中に挟まない)
+    this.addInTurnNote(
       `[ハーネス] このユーザー発話以降、 bash の累積実行時間が ${totalSec}s を超えました。\n` +
         `  重い検証 (build / 起動 / 全件再実行) を毎 edit ごとに走らせていませんか?\n` +
         `  対策: (a) 複数 edit をまとめてから 1 回 build (b) syntax check (\`node --check\` / \`tsc --noEmit\` 等) で軽く確認 (c) ホットリロードを活用 (d) 同一コマンドの単純再実行は禁止。`,
-      { ephemeral: true },
     );
     this.bashCumulativeWarned = true;
   }
@@ -3153,11 +3162,11 @@ export class AgentLoop {
       );
     }
     console.log(chalk.yellow(`\n  ⚠ 計画/Todo 過多検知: ${reasons.join(" / ")}`));
-    this.history.addUserMessage(
+    // 応答の結果を全部入れた後に足す (結果の途中に挟むと対が切れる。 2026-10-26 実機で 397 件の応答の 6 件目の後に挟まった)
+    this.addInTurnNote(
       `[ハーネス] このユーザー発話以降、 計画/Todo の更新が過多です:\n` +
         reasons.map((r) => `  - ${r}`).join("\n") +
         `\n  対策: 既存の todo を見直し、 必要なら 1 回だけ更新する。 計画モード再突入は禁止 — 既存計画を流用して実装を進めてください。`,
-      { ephemeral: true },
     );
     this.planTodoWarned = true;
   }
@@ -3165,6 +3174,9 @@ export class AgentLoop {
   /**
    * 1 回の応答のツール呼び出しの結果を入れる間の範囲。 その応答の結果は必ずこの中で addLimitedToolResult を通して入れる。
    * - 合計の上限 T を数える入れ物 (ToolResultBatch) を、 その応答の呼び出し (入れる順) で作る (docs/context-reduction-redesign.md §4.3)。
+   * - 結果を入れている間にハーネスが足す促し (stuck-loop・bash 累積・計画/Todo 過多) は、 その応答の結果を全部入れた後に足す
+   *   (addInTurnNote)。 結果の途中に挟むと、 呼び出しと結果の対が切れた履歴になる (2026-10-26 実機。 整理が対の検証で失敗し続けた)。
+   * - 終わったとき (中断・例外を含む) に結果の無い呼び出しが残っていれば、 実行していない旨の結果を入れて対を保つ。
    * - 合計の上限で切った・省いたときは、 応答ごとに 1 行で利用者に知らせる。
    */
   private async withToolBatch(toolCalls: readonly ToolCall[], run: (batch: ToolResultBatch) => Promise<boolean>) {
@@ -3173,11 +3185,37 @@ export class AgentLoop {
       { perResultTokens: budget.toolResultLimitTokens, totalTokens: budget.toolResultTotalTokens },
       toolCalls.map((c) => c.function.name),
     );
+    const scope = { filled: new Set<string>(), notes: [] as string[] };
+    const outer = this.toolBatchScope;
+    this.toolBatchScope = scope;
     try {
       return await run(batch);
     } finally {
+      for (const call of toolCalls) {
+        if (!scope.filled.has(call.id)) {
+          this.addLimitedToolResult(
+            batch,
+            call,
+            "Error: このツール呼び出しの結果を受け取れませんでした (中断または内部エラー)。",
+          );
+        }
+      }
+      this.toolBatchScope = outer;
       this.reportToolResultBatch(batch);
+      for (const note of scope.notes) this.history.addUserMessage(note, { ephemeral: true });
     }
+  }
+
+  /** 応答の結果を入れている範囲 (withToolBatch)。 範囲の外では null */
+  private toolBatchScope: { filled: Set<string>; notes: string[] } | null = null;
+
+  /**
+   * ハーネスの in-turn の促し (揮発の user) を足す。 ツール結果を入れている範囲の中なら、 その応答の結果を全部入れた後に足す
+   * (結果の途中に挟まない)。 範囲の外ならすぐ足す。
+   */
+  private addInTurnNote(text: string): void {
+    if (this.toolBatchScope) this.toolBatchScope.notes.push(text);
+    else this.history.addUserMessage(text, { ephemeral: true });
   }
 
   /** 合計の上限で切った・省いた結果があれば、 応答ごとに 1 行で知らせる。 注記だけでも上限を超えたら赤字と harness_notice */
@@ -3205,6 +3243,7 @@ export class AgentLoop {
   private addLimitedToolResult(batch: ToolResultBatch, toolCall: ToolCall, content: string): void {
     const fit = batch.fit(toolCall.function.name, content);
     this.history.addToolResult(toolCall.id, fit.content);
+    this.toolBatchScope?.filled.add(toolCall.id);
   }
 
   /** Execute a single tool call, returning whether to abort the rest of the run loop */
@@ -3405,7 +3444,7 @@ export class AgentLoop {
     const settled = await Promise.allSettled(promises);
     let shouldAbort = false;
 
-    for (const entry of settled) {
+    for (const [index, entry] of settled.entries()) {
       if (entry.status === "fulfilled") {
         const { toolCall, result, durationMs } = entry.value;
         this.llmLogger.logToolResult({
@@ -3452,7 +3491,10 @@ export class AgentLoop {
           shouldAbort = true;
         }
       } else {
+        // 呼び出しには必ず結果を 1 つ付ける (対を保つ)。 失敗の中身は結果と動作ログに残す
         logger.error("Parallel tool execution error:", entry.reason);
+        const reason = entry.reason instanceof Error ? entry.reason.message : String(entry.reason);
+        this.addLimitedToolResult(batch, toolCalls[index], `Error: ツールの実行中に例外が発生しました: ${reason}`);
       }
     }
 

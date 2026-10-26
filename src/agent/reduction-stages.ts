@@ -398,8 +398,16 @@ export function applyReductionStages(input: ReductionStagesInput): ReductionStag
   const messages = s2.map((e) => e.message);
   const pairingError = findToolPairingError(messages);
   if (pairingError) {
-    // 段階は対を分けない作りなので、 ここに来たら作りの誤り。 壊れた写しは返さない
-    throw new Error(`[reduction-stages] 変換後の写しのツールの対が壊れています: ${pairingError}`);
+    // 壊れた写しは返さない (直したり黙って通したりしない)。 段階は対を分けない作りなので、 入力の時点で既に
+    // 壊れていたのか、 変換で壊したのか (作りの誤り) を分けて書く。 2026-10-26 実機: 1 回の応答の結果の途中に
+    // ハーネスの促し (揮発の user) が挟まった入力を「変換後」 と報告していた。 なお、 前処理がその促しを
+    // 終わった依頼の揮発メッセージとして除いた結果、 対が揃ったときは、 正しい写しなのでそのまま返す
+    const inputError = findToolPairingError(input.messages);
+    throw new Error(
+      inputError
+        ? `[reduction-stages] 整理前の履歴のツールの対が既に壊れていて、 段階 0〜2 の後も壊れたままです: ${pairingError}`
+        : `[reduction-stages] 変換後の写しのツールの対が壊れています: ${pairingError}`,
+    );
   }
 
   const freedTokens = {
