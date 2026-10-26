@@ -42,7 +42,7 @@
 | [git-hooks.md](git-hooks.md) | Git フック (commit-msg / pre-commit) — コミット前に CI と同じ型・lint 検査 |
 | [release-workflow.md](release-workflow.md) | リリース自動ビルド (最新パッチ版 Node 24 の exe を Windows runner でビルドして Release へ) |
 | [prompt-prefix-stability.md](prompt-prefix-stability.md) | プロンプトの前方一致を壊さない約束 (CLAUDE.md のルール。 送った並びは書き換えず、 変わる情報は末尾に足す) |
-| [context-reduction-redesign.md](context-reduction-redesign.md) | コンテキストの整理 (予約で時期を決め、 決まった段階で 1 回だけ書き換え・予熱・計測)。 実機での確認 §14.3 B が残る |
+| [context-reduction-redesign.md](context-reduction-redesign.md) | コンテキストの整理 (予約で時期を決め、 決まった段階で 1 回だけ書き換え・先読み・計測)。 実機での確認 §14.3 B が残る |
 
 ## 機能別の設計書
 

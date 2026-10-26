@@ -11,7 +11,7 @@
 - **サブエージェント**: タスク委譲による並列・バックグラウンド処理（explore / plan / general-purpose / bash）
 - **プランモード**: 読み取り専用の計画フェーズで設計を固めてから実装
 - **スキルシステム**: TDD、コミット、PRレビュー等のワークフローを `/commit` のように直接呼び出し
-- **コンテキストの整理**: 割合の閾値ではなく「次の呼び出しが必ず枠に入る」ための予約で整理の時期を決める。整理は古いツール結果などを決まった規則で消し、それでも足りないときだけ要約する（利用者の発言は原文のまま残す）。履歴の書き換えは 1 回の整理につき 1 回だけで、依頼の終わりの整理・`/compact`・再開の後は会話をサーバに読み込ませておく（予熱）。手動の整理は `/compact`（詳細: docs/context-reduction-redesign.md）
+- **コンテキストの整理**: 割合の閾値ではなく「次の呼び出しが必ず枠に入る」ための予約で整理の時期を決める。整理は古いツール結果などを決まった規則で消し、それでも足りないときだけ要約する（利用者の発言は原文のまま残す）。履歴の書き換えは 1 回の整理につき 1 回だけで、依頼の終わりの整理・`/compact`・再開の後は会話をサーバに読み込ませておく（先読み）。手動の整理は `/compact`（詳細: docs/context-reduction-redesign.md）
 - **セッション管理**: 会話と確定済み端末出力の保存・復元・継続・元を保持した分岐
 - **永続メモリ**: セッションを跨いで知識を蓄積
 - **画像認識**: Vision非対応LLM向けにサブLLM委譲をサポート
@@ -171,7 +171,7 @@ permission、sandboxは維持されるため、通常起動を壊すカスタマ
 | `/tui mouse <on\|off\|status>` | 全画面TUIのmouse captureを実行中に切替。`off`はnative選択・コピー、`on`はホイール内部履歴を優先 |
 | `/run [status\|pause\|resume\|inspect\|discard]` | foreground runの状態表示・一時停止 (再開地点を保存)・再開・再開地点の診断/破棄。PC再起動を跨ぐ。background taskとsecond LLMは対象外 |
 | `/context` | コンテキストの内訳（トークン数・進捗バー）と整理の状態（次に送る量 P とそれが実数か推定か、予約 R の内訳、整理する点 (規則 1・2)、ひと仕事の増分 G と直近 3 件、直近の整理、今 `/compact` した場合の段階ごとの見込み）。`/context <system|memory|skills|tools|messages>` で各カテゴリの中身をダンプ。詳細: docs/context-reduction-redesign.md §7 |
-| `/compact` | コンテキストを今すぐ整理する（手動の整理はこれ 1 つ。段階 0〜3 を最後まで進め、前後の量・段階ごとの減った量・要約の有無・予熱の有無を表示）。詳細: docs/context-reduction-redesign.md §7 |
+| `/compact` | コンテキストを今すぐ整理する（手動の整理はこれ 1 つ。段階 0〜3 を最後まで進め、前後の量・段階ごとの減った量・要約の有無・先読みの有無を表示）。詳細: docs/context-reduction-redesign.md §7 |
 | `/handoff` | 引き継ぎメモを残してコンテキストをリセット（手動のリセット。区切りでの自動リセットは無い）。`/handoff dry` でメモを表示するだけ（リセットしない）。メモの生成に失敗した場合は履歴を変更しない。詳細: docs/handoff-design.md |
 | `/model` | 現在のモデル情報 / `/model list` / `/model <name>` / `/model host <ホスト>` / `/model port <番号>` / `/model provider <type>` / `/model context <値>`。 新規追加は `/models` → Add new、 temperature 等・特性説明の編集は `/models` → Edit |
 | `/model second` | セカンドLLM管理 (`enable` / `disable` / `list` / `model <名前>` / `context` / `host` / `port` / `provider`) |
@@ -390,7 +390,7 @@ src/
 │   ├── message-history.ts  # 会話履歴管理
 │   ├── context-budget.ts   # 整理の予算（予約 R・規則 1/2・ひと仕事の増分 G・起動時の枠の検査）
 │   ├── reduction-event.ts  # 整理イベント（段階 0〜3 を写しに当て、履歴を 1 回だけ差し替える）
-│   ├── prewarm.ts          # 予熱（整理・再開の後に会話をサーバへ読み込ませる）
+│   ├── prewarm.ts          # 先読み（整理・再開の後に会話をサーバへ読み込ませる）
 │   ├── token-counter.ts    # トークン数推定
 │   ├── session-manager.ts  # セッション保存・復元
 │   ├── memory.ts           # 永続メモリ

@@ -1,5 +1,5 @@
 /**
- * 予熱 (docs/context-reduction-redesign.md §9。 整理の作り直し タスク 9)。
+ * 先読み (docs/context-reduction-redesign.md §9。 整理の作り直し タスク 9)。
  *
  * 履歴を書き換えた後 (依頼の終わりの整理・/compact) と、 セッションを再開した後は、 サーバの KV キャッシュに
  * 今の並びが無い。 次の本体呼び出しで全部を読み直すと十数分かかるので、 利用者の手が空いている間に
@@ -7,33 +7,33 @@
  *
  * 並びは本体呼び出しと同じ組み立て (AgentLoop.buildMainCallRequest) から作り、 出力上限だけを 1 に差し替える。
  * 状態通知 (attachDynamicContext) は付けない: 次の本体呼び出しは、 この並びの末尾に利用者の発言を足し、
- * その発言に状態通知を付けるだけなので、 予熱の並びがそのまま先頭になる (prompt-prefix-stability.md §3.2)。
- * 予熱を送る契機 (依頼の終わり・/compact・再開) の後は、 どれも次の本体呼び出しの前に利用者の発言が足されるので、
+ * その発言に状態通知を付けるだけなので、 先読みの並びがそのまま先頭になる (prompt-prefix-stability.md §3.2)。
+ * 先読みを送る契機 (依頼の終わり・/compact・再開) の後は、 どれも次の本体呼び出しの前に利用者の発言が足されるので、
  * 履歴の末尾が assistant でもツール結果 (response_complete で終わった依頼など) でも、 状態通知の添付先は新しい発言になる。
- * 一時停止した作業の再開 (/run resume) は発言を足さずに本体を呼ぶので予熱しない (呼び出し側が呼ばない)。
+ * 一時停止した作業の再開 (/run resume) は発言を足さずに本体を呼ぶので先読みしない (呼び出し側が呼ばない)。
  *
- * 予熱は性能のための最適化で、 失敗しても正しさは変わらない。 ただし黙らない (失敗は記録と画面の 1 行に出す)。
+ * 先読みは性能のための最適化で、 失敗しても正しさは変わらない。 ただし黙らない (失敗は記録と画面の 1 行に出す)。
  *
- * 予熱中の待ち合わせ: 予熱は裏で走らせる (利用者の入力を妨げない)。 本体呼び出しは送る前に wait() で終わりを待ち、
- * 脇の呼び出しは sideCall() の入口 (SideCallGate) で待つ。 スロットが 1 つのサーバでは、 予熱中に別の並びを送ると
- * 予熱した中身を追い出し、 切断するとそれまでの読み込みが無駄になるため。 Esc の中断 (abort()) は予熱も切る。
+ * 先読み中の待ち合わせ: 先読みは裏で走らせる (利用者の入力を妨げない)。 本体呼び出しは送る前に wait() で終わりを待ち、
+ * 脇の呼び出しは sideCall() の入口 (SideCallGate) で待つ。 スロットが 1 つのサーバでは、 先読み中に別の並びを送ると
+ * 先読みした中身を追い出し、 切断するとそれまでの読み込みが無駄になるため。 Esc の中断 (abort()) は先読みも切る。
  */
 import type { ProviderType, SecondLLMProviderType } from "../config/types.js";
 import type { LLMProvider, Message } from "../providers/base-provider.js";
 import type { MainCallRequest } from "./reduction-summary.js";
 import { type SideCallGate, type SideCallPurpose, sideCall } from "./side-call.js";
 
-/** 予熱を送る契機 (§9.1)。 request-end = 依頼の終わり (規則 2) の整理の後、 manual = /compact の後、 resume = セッションの再開 */
+/** 先読みを送る契機 (§9.1)。 request-end = 依頼の終わり (規則 2) の整理の後、 manual = /compact の後、 resume = セッションの再開 */
 export type PrewarmTrigger = "request-end" | "manual" | "resume";
 
 /**
- * 予熱を送らない理由。
+ * 先読みを送らない理由。
  * - not-local-server: 課金されるクラウドの provider、 または種類の分からない provider (§9.3)
  * - empty-history: 履歴が空 (読み込ませる会話が無い)
  */
 export type PrewarmSkipReason = "not-local-server" | "empty-history";
 
-/** reduction_event の prewarm 欄 (§10.1)。 整理イベントの後に予熱しない契機 (規則 1 など) では欄そのものが null */
+/** reduction_event の prewarm 欄 (§10.1)。 整理イベントの後に先読みしない契機 (規則 1 など) では欄そのものが null */
 export type PrewarmOutcome =
   | { status: "skipped"; reason: PrewarmSkipReason; detail: string }
   | { status: "done"; durationMs: number }
@@ -41,8 +41,8 @@ export type PrewarmOutcome =
   | { status: "aborted"; durationMs: number };
 
 /**
- * 予熱を送ってよい provider (§9.3)。 自分のサーバで動かすもの (KV キャッシュがそのサーバにあり、 送っても課金されない) だけ。
- * クラウドは入力トークンに課金されるうえ (予熱の分だけ全部の入力をもう 1 回払う)、 キャッシュの扱いが provider 任せ
+ * 先読みを送ってよい provider (§9.3)。 自分のサーバで動かすもの (KV キャッシュがそのサーバにあり、 送っても課金されない) だけ。
+ * クラウドは入力トークンに課金されるうえ (先読みの分だけ全部の入力をもう 1 回払う)、 キャッシュの扱いが provider 任せ
  * (明示の cache_control・数分で消える自動キャッシュ・子プロセスが自分で並びを組む claude-cli など) で、 待ち時間を減らせる保証も無い。
  */
 const LOCAL_SERVER_TYPES: ReadonlySet<SecondLLMProviderType> = new Set<ProviderType>([
@@ -53,7 +53,7 @@ const LOCAL_SERVER_TYPES: ReadonlySet<SecondLLMProviderType> = new Set<ProviderT
 ]);
 
 /**
- * 予熱を送らない理由を返す (送ってよければ null)。
+ * 先読みを送らない理由を返す (送ってよければ null)。
  * @param raw 履歴 (getRawMessages())
  */
 export function prewarmSkipReason(
@@ -63,16 +63,16 @@ export function prewarmSkipReason(
   if (!LOCAL_SERVER_TYPES.has(providerType as SecondLLMProviderType)) {
     return {
       reason: "not-local-server",
-      detail: `provider ${providerType} は自分のサーバで動かすもの (llamacpp / vllm / lmstudio / ollama) ではないため予熱しません (課金される・キャッシュの扱いが provider 任せ)`,
+      detail: `provider ${providerType} は自分のサーバで動かすもの (llamacpp / vllm / lmstudio / ollama) ではないため先読みしません (課金される・キャッシュの扱いが provider 任せ)`,
     };
   }
   if (raw.length === 0) {
-    return { reason: "empty-history", detail: "履歴が空なので予熱しません" };
+    return { reason: "empty-history", detail: "履歴が空なので先読みしません" };
   }
   return null;
 }
 
-/** 本体呼び出しの送り方から、 予熱の送り方を作る (並び・ツール定義・設定はそのまま、 出力上限だけ 1) */
+/** 本体呼び出しの送り方から、 先読みの送り方を作る (並び・ツール定義・設定はそのまま、 出力上限だけ 1) */
 export function buildPrewarmRequest(main: MainCallRequest): MainCallRequest {
   return main.method === "chatWithTools"
     ? { method: "chatWithTools", params: { ...main.params, maxTokens: 1 } }
@@ -86,12 +86,12 @@ interface RunningPrewarm {
 }
 
 export interface PrewarmRunnerHooks {
-  /** 予熱の終わりを待ち始めたとき (利用者に見える 1 行を出す) */
+  /** 先読みの終わりを待ち始めたとき (利用者に見える 1 行を出す) */
   onWait(who: string): void;
 }
 
 /**
- * 予熱を 1 つだけ裏で走らせ、 本体呼び出し・脇の呼び出しを終わりまで待たせる。
+ * 先読みを 1 つだけ裏で走らせ、 本体呼び出し・脇の呼び出しを終わりまで待たせる。
  * AgentLoop が 1 つ持ち、 sideCall の入口の待ち合わせ (setSideCallGate) にも登録する。
  */
 export class PrewarmRunner implements SideCallGate {
@@ -104,16 +104,16 @@ export class PrewarmRunner implements SideCallGate {
   }
 
   /**
-   * 予熱を裏で送る (すぐ返す)。 走っている予熱があれば切ってから送る (並びが古くなっているため)。
+   * 先読みを裏で送る (すぐ返す)。 走っている先読みがあれば切ってから送る (並びが古くなっているため)。
    * @param build 送り方を作る関数 (中断用の signal を受け取り、 本体呼び出しと同じ組み立てで作る)
-   * @returns 予熱の終わり (成功・失敗・中断のどれでも resolve する。 reject しない)
+   * @returns 先読みの終わり (成功・失敗・中断のどれでも resolve する。 reject しない)
    */
   start(
     trigger: PrewarmTrigger,
     provider: LLMProvider,
     build: (signal: AbortSignal) => MainCallRequest,
   ): Promise<PrewarmOutcome> {
-    // 並びは今の時点で作る。 前の予熱は切り、 その終わりを待ってから送る (同じスロットに 2 つ送らない)
+    // 並びは今の時点で作る。 前の先読みは切り、 その終わりを待ってから送る (同じスロットに 2 つ送らない)
     const previous = this.current;
     previous?.controller.abort();
     const controller = new AbortController();
@@ -129,12 +129,12 @@ export class PrewarmRunner implements SideCallGate {
     return done;
   }
 
-  /** 走っている予熱を切る (Esc の中断)。 終わりは待たない */
+  /** 走っている先読みを切る (Esc の中断)。 終わりは待たない */
   abort(): void {
     this.current?.controller.abort();
   }
 
-  /** 走っている予熱を切って、 終わりまで待つ (載せ替え・終了の前) */
+  /** 走っている先読みを切って、 終わりまで待つ (載せ替え・終了の前) */
   async stop(): Promise<void> {
     const running = this.current;
     if (running === null) return;
@@ -143,7 +143,7 @@ export class PrewarmRunner implements SideCallGate {
   }
 
   /**
-   * 予熱が走っていれば、 終わるまで待つ (待ち始めに 1 行を出す)。 切断はしない。
+   * 先読みが走っていれば、 終わるまで待つ (待ち始めに 1 行を出す)。 切断はしない。
    * @param who 待っているもの (表示用。 例: 本体の呼び出し)
    */
   async wait(who: string): Promise<void> {
@@ -158,17 +158,17 @@ export class PrewarmRunner implements SideCallGate {
     await this.current?.done;
   }
 
-  /** sideCall の入口の待ち合わせ。 予熱そのものは待たない */
+  /** sideCall の入口の待ち合わせ。 先読みそのものは待たない */
   async beforeSideCall(purpose: SideCallPurpose): Promise<void> {
     if (purpose === "prewarm") return;
     await this.wait(`脇の呼び出し (${purpose})`);
   }
 }
 
-/** 予熱を送り、 応答を読み捨てる。 失敗・中断も結果として返す (投げない) */
+/** 先読みを送り、 応答を読み捨てる。 失敗・中断も結果として返す (投げない) */
 async function send(provider: LLMProvider, request: MainCallRequest, signal: AbortSignal): Promise<PrewarmOutcome> {
   const startedAt = Date.now();
-  // 前の予熱の終わりを待つ間に切られた
+  // 前の先読みの終わりを待つ間に切られた
   if (signal.aborted) return { status: "aborted", durationMs: 0 };
   let error: string | undefined;
   try {

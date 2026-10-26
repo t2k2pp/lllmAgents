@@ -167,7 +167,7 @@ describe("出力上限がリクエストに載る (HTTP の provider)", () => {
   });
 });
 
-describe("予熱の出力上限 1 がリクエストに載る (予熱を送る自分のサーバの provider。 §9.2)", () => {
+describe("先読みの出力上限 1 がリクエストに載る (先読みを送る自分のサーバの provider。 §9.2)", () => {
   let body: Record<string, unknown> | undefined;
   let url: string | undefined;
 

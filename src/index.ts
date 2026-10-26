@@ -920,7 +920,7 @@ async function main(): Promise<void> {
 
   // Cleanup
   await hookManager.runSessionHooks("stop");
-  // 走っている予熱を切って、 その記録 (reduction_event の予熱の欄など) を書き終えてから終わる
+  // 走っている先読みを切って、 その記録 (reduction_event の先読みの欄など) を書き終えてから終わる
   await agent.stopPrewarm();
   agent.saveCurrentSession();
   await mcpManager.disconnectAll();

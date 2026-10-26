@@ -1,6 +1,6 @@
 /**
  * コンテキスト整理の利用者向けの表示 (docs/context-reduction-redesign.md §7)。
- *   - formatCompactResult: /compact の結果 (前後の P、 段階ごとの減った量、 要約したか、 失敗の理由、 予熱の有無)
+ *   - formatCompactResult: /compact の結果 (前後の P、 段階ごとの減った量、 要約したか、 失敗の理由、 先読みの有無)
  *   - formatReductionStatus: /context に足す整理の状態 (P、 R の内訳、 規則 1・2 の発火点、 G、 直近の整理、 今 /compact した場合の見込み)
  *
  * どちらも画面 (と Slack / Discord の返信) に出すだけで、 履歴には入れない。 モデルに残量を伝えない (§8)。
@@ -84,21 +84,21 @@ function summaryLine(r: ReductionEventRecord): string {
 }
 
 function prewarmLine(ok: boolean, prewarmSent: boolean, outcome: PrewarmOutcome | null): string {
-  if (!ok) return "予熱: 送っていません (履歴を変えていないので、 サーバの読み込みはそのまま使えます)";
+  if (!ok) return "先読み: 送っていません (履歴を変えていないので、 サーバの読み込みはそのまま使えます)";
   if (outcome === null) {
     return prewarmSent
-      ? "予熱: 送りました (次の呼び出しに備えて、 サーバに会話を読み込ませています。 結果は使いません)"
-      : "予熱: 送っていません";
+      ? "先読み: 送りました (次の呼び出しに備えて、 サーバに会話を読み込ませています。 結果は使いません)"
+      : "先読み: 送っていません";
   }
   switch (outcome.status) {
     case "skipped":
-      return `予熱: 送っていません (${outcome.detail})`;
+      return `先読み: 送っていません (${outcome.detail})`;
     case "done":
-      return `予熱: 済みました (${(outcome.durationMs / 1000).toFixed(1)} 秒)`;
+      return `先読み: 済みました (${(outcome.durationMs / 1000).toFixed(1)} 秒)`;
     case "failed":
-      return `予熱: 失敗しました (作業には影響しません): ${outcome.error}`;
+      return `先読み: 失敗しました (作業には影響しません): ${outcome.error}`;
     case "aborted":
-      return "予熱: 途中で止めました";
+      return "先読み: 途中で止めました";
     default: {
       const exhaustive: never = outcome;
       return String(exhaustive);
@@ -108,7 +108,7 @@ function prewarmLine(ok: boolean, prewarmSent: boolean, outcome: PrewarmOutcome 
 
 /**
  * /compact の結果。 1 行の結果 (整理イベントのスピナーの行) の後に出す内訳。
- * @param last AgentLoop.getLastReductionEvent() (予熱を送ったか)。 この整理のものでなければ予熱は「送っていません」
+ * @param last AgentLoop.getLastReductionEvent() (先読みを送ったか)。 この整理のものでなければ先読みは「送っていません」
  */
 export function formatCompactResult(result: ReductionEventResult, last: LastReductionEvent | null): string {
   const r = result.record;

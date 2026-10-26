@@ -6050,7 +6050,7 @@ export class REPL {
         const forked = forkSession(source);
         saveSession(forked);
         this.agent.restoreSession(forked);
-        // 分岐元の会話がサーバに無いことがある (別のセッションから分岐したとき) ので、 再開と同じく予熱する
+        // 分岐元の会話がサーバに無いことがある (別のセッションから分岐したとき) ので、 再開と同じく先読みする
         void this.agent.prewarmAfterResume();
         console.log(
           chalk.dim(

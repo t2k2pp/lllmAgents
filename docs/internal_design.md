@@ -140,7 +140,7 @@ sequenceDiagram
     Loop->>Loop: Historyに追加
 
     loop 回数の上限なし (loopCheckInterval 回ごとにループ点検)
-        Loop->>Loop: 予熱の終わりを待つ・ToDo/Goal の区切り (規則 2)
+        Loop->>Loop: 先読みの終わりを待つ・ToDo/Goal の区切り (規則 2)
         Loop->>Loop: P を測る (直前の usage + その後の推定)
         alt P + R > W (規則 1)
             Loop->>Context: runReductionEvent("forced")
@@ -167,7 +167,7 @@ sequenceDiagram
         end
     end
 
-    Loop->>Loop: 依頼の終わりの区切り (規則 2)。 整理したら予熱を裏で送る
+    Loop->>Loop: 依頼の終わりの区切り (規則 2)。 整理したら先読みを裏で送る
 ```
 
 ### 2.2 サブエージェントのライフサイクル (`SubAgentManager`)
@@ -271,22 +271,22 @@ stateDiagram-v2
 | `reduction-stages.ts` | `applyReductionStages`: 写しに前処理 (終わった依頼の揮発メッセージ・思考) と段階 0〜2 を最後まで当てる純粋な関数。 保護するツール、 忘却の記録 (`insertTombstone`) |
 | `reduction-summary.ts` | 段階 3: 範囲の決定 (`selectSummaryRange`)、 今の並び + 指示 1 件での要約の呼び出し (`requestSummary`。 思考の設定は本体と同じ)、 8 見出しの型の検査、 写しへの当てはめ、 状態の渡し直し |
 | `reduction-event.ts` | 整理イベント `runReductionEvent`: 前処理・段階 0〜2 → 必要なら段階 3 → 対の検証 → `MessageHistory.replaceMessages(写し, "reduction:<id>")` を 1 回。 失敗なら写しを捨てる。 `reduction_event` の記録、 `/context` の見込み (`previewReduction`) |
-| `prewarm.ts` | 予熱: 本体と同じ組み立て (`buildMainCallRequest`) の出力上限だけ 1 にして送り、 応答を捨てる (`PrewarmRunner`。 本体・脇の呼び出しは終わりを待つ) |
-| `side-call.ts` | 本体の会話ループ以外の LLM 呼び出しの入口 `sideCall(目的, …)`。 `side_call` を記録し、 予熱中は待つ |
+| `prewarm.ts` | 先読み: 本体と同じ組み立て (`buildMainCallRequest`) の出力上限だけ 1 にして送り、 応答を捨てる (`PrewarmRunner`。 本体・脇の呼び出しは終わりを待つ) |
+| `side-call.ts` | 本体の会話ループ以外の LLM 呼び出しの入口 `sideCall(目的, …)`。 `side_call` を記録し、 先読み中は待つ |
 | `cache-miss.ts` | `diagnoseCacheMiss`: 本体呼び出しの `tokensCached` が「前回の入力 − 4,096」 を下回ったら、 間の整理・書き換え理由・脇の呼び出しを原因として `cache_miss` に記録 |
 
 AgentLoop との組み込み:
-- 本体呼び出しの再試行ループの先頭で、 予熱の終わりを待ち (`PrewarmRunner.wait`)、 記録しておいた区切り (ToDo の全部完了・Goal の達成) を判定し、
+- 本体呼び出しの再試行ループの先頭で、 先読みの終わりを待ち (`PrewarmRunner.wait`)、 記録しておいた区切り (ToDo の全部完了・Goal の達成) を判定し、
   規則 1 (`enforceForcedLimit`) を状態通知の添付の前に判定する。 規則 1 の整理に失敗したら本体を呼ばずに止める (終わり方 `context_reduction_failed`)。
-- 本体呼び出しには `maxTokens = O` を渡す。 本体・要約・予熱の送り方は `buildMainCallRequest` の 1 つで組み立てる (前方一致を崩さないため)。
+- 本体呼び出しには `maxTokens = O` を渡す。 本体・要約・先読みの送り方は `buildMainCallRequest` の 1 つで組み立てる (前方一致を崩さないため)。
 - `run()` の始めに入力の検査 (`checkUserInput`) と新しい依頼の区切り、 終わりに依頼の終わりの区切り (`finishRequest`) を判定する。
-  依頼の終わりの整理と `/compact` (`runReductionEvent("manual")`) が成功したら予熱を送る。 再開 (`--resume` / `/resume` / `/fork`) の後は `prewarmAfterResume()`。
+  依頼の終わりの整理と `/compact` (`runReductionEvent("manual")`) が成功したら先読みを送る。 再開 (`--resume` / `/resume` / `/fork`) の後は `prewarmAfterResume()`。
 - 応答のたびの履歴の書き換え (揮発メッセージ・思考の除去) はしない。 揮発の印は `Message.ephemeral` に持ち、 送る前に外す (セッションに保存される)。
   除くのは次の整理イベントの前処理 (`docs/ephemeral-context-design.md` の 2026-10-25 改訂)。
 - 段階 3 の要約に失敗したときは設定 `context.summaryFailure` (`continue` / `stop`) に従う。
 - 脇の呼び出しの思考: 意図の分類・完了判定 (`intent-classifier.ts`)、 進み具合の判定 (`progress-judge.ts`)、 Goal 昇格 (`goal-promotion.ts`)、 入力圧縮 (`compress-text.ts`) は
   `disableThinking: true` で呼ぶ (送るのは llamacpp / vllm のときだけで、 `chat_template_kwargs.enable_thinking=false`。 商用 API には送らない)。
-  段階 3 の要約・予熱は本体と同じ並びを使うので思考の設定も本体と同じ (オフにすると前方一致が崩れる)。 引き継ぎメモ (`docs/handoff-design.md`) も思考を残す。
+  段階 3 の要約・先読みは本体と同じ並びを使うので思考の設定も本体と同じ (オフにすると前方一致が崩れる)。 引き継ぎメモ (`docs/handoff-design.md`) も思考を残す。
   経緯は `docs/archive/context-reduction-reasoning-model-fix.md`。
 - 状態は `getReductionStatus()` / `getLastReductionEvent()` で `/context` / `/compact` の表示 (`src/cli/reduction-view.ts`) に渡す。 モデルには残量を伝えない。
 - 旧設定キーは `src/config/context-keys-removal.ts` が起動時に 1 回だけ削除する (バックアップ・告知の仕組みは `one-time-migration.ts` で権限の移行と共通)。

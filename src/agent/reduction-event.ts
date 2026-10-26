@@ -127,7 +127,7 @@ export interface ReductionEventRecord {
   /** 要約に失敗し、 設定 continue に従って段階 0〜2 の分だけで進めた (成功・失敗のどちらの結果にも付く) */
   continuedWithoutSummary: boolean;
   /**
-   * 予熱 (§9)。 予熱する契機 (依頼の終わり・/compact) で整理に成功したときだけ、 AgentLoop が予熱の終わりに埋めてから記録する
+   * 先読み (§9)。 先読みする契機 (依頼の終わり・/compact) で整理に成功したときだけ、 AgentLoop が先読みの終わりに埋めてから記録する
    * (送らなかったときは理由)。 それ以外 (規則 1・ほかの区切り・失敗) は null
    */
   prewarm: PrewarmOutcome | null;
@@ -380,11 +380,11 @@ function selectStage3Range(
 
 /** 直近の整理イベント (AgentLoop が持つ。 /compact と /context の表示に使う) */
 export interface LastReductionEvent {
-  /** 記録 (予熱を送ったときは、 予熱が終わると record.prewarm が埋まる) */
+  /** 記録 (先読みを送ったときは、 先読みが終わると record.prewarm が埋まる) */
   record: ReductionEventRecord;
   /** 終わった時刻 (Date.now()) */
   finishedAt: number;
-  /** 予熱を送ったか (送らなかった理由は record.prewarm の skipped) */
+  /** 先読みを送ったか (送らなかった理由は record.prewarm の skipped) */
   prewarmSent: boolean;
 }
 

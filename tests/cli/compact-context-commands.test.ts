@@ -64,7 +64,7 @@ const sentPrewarm = (r: ReductionEventRecord): LastReductionEvent => ({
 // ─── /compact の表示 ───
 
 describe("/compact の結果の表示", () => {
-  it("成功 (要約なし): 前後の P、 段階ごとの減った量、 要約しなかったこと、 予熱を送ったこと", () => {
+  it("成功 (要約なし): 前後の P、 段階ごとの減った量、 要約しなかったこと、 先読みを送ったこと", () => {
     const r = record();
     const out = plain(formatCompactResult(ok(r), sentPrewarm(r)));
     expect(out).toContain("/compact の結果 (r-1-abc)");
@@ -77,7 +77,7 @@ describe("/compact の結果の表示", () => {
     expect(out).toMatch(/段階 2 \(古い思考\).*約 400/);
     expect(out).toMatch(/段階 3 \(要約\).*約 0/);
     expect(out).toContain("要約: しませんでした (要約してよい範囲がありません");
-    expect(out).toContain("予熱: 送りました");
+    expect(out).toContain("先読み: 送りました");
   });
 
   it("成功 (要約あり): 要約した区間の数と段階 3 の量", () => {
@@ -108,7 +108,7 @@ describe("/compact の結果の表示", () => {
     expect(out).toContain("整理後: 約 98,000");
   });
 
-  it("要約に失敗し、 設定 stop に従って取りやめたとき: 履歴は変えず、 予熱も送らない", () => {
+  it("要約に失敗し、 設定 stop に従って取りやめたとき: 履歴は変えず、 先読みも送らない", () => {
     const r = record({
       ok: false,
       failureReason: "summary-failed",
@@ -130,7 +130,7 @@ describe("/compact の結果の表示", () => {
     expect(out).toContain("結果: 要約を得られませんでした。 履歴は変えていません");
     expect(out).toContain("設定 context.summaryFailure が stop なので、 整理を取りやめました");
     expect(out).toContain("ツールを呼びました");
-    expect(out).toContain("予熱: 送っていません (履歴を変えていないので");
+    expect(out).toContain("先読み: 送っていません (履歴を変えていないので");
     expect(out).not.toContain("整理後");
   });
 
@@ -153,17 +153,17 @@ describe("/compact の結果の表示", () => {
     expect(out).toContain("段階 0〜2 で 0 トークン");
   });
 
-  it("予熱を送らなかったときは理由を出す", () => {
+  it("先読みを送らなかったときは理由を出す", () => {
     const r = record({
       prewarm: {
         status: "skipped",
         reason: "not-local-server",
-        detail: "provider anthropic は自分のサーバで動かすものではないため予熱しません",
+        detail: "provider anthropic は自分のサーバで動かすものではないため先読みしません",
       },
     });
     const out = plain(formatCompactResult(ok(r), { record: r, finishedAt: Date.now(), prewarmSent: false }));
     expect(out).toContain(
-      "予熱: 送っていません (provider anthropic は自分のサーバで動かすものではないため予熱しません)",
+      "先読み: 送っていません (provider anthropic は自分のサーバで動かすものではないため先読みしません)",
     );
   });
 });
@@ -350,7 +350,7 @@ describe("/compact のハンドラ", () => {
       ?.handler({ agent } as unknown as ReplCommandContext, []);
     expect(runReductionEvent).toHaveBeenCalledWith("manual");
     expect(out.text()).toContain("/compact の結果 (r-1-abc)");
-    expect(out.text()).toContain("予熱: 送りました");
+    expect(out.text()).toContain("先読み: 送りました");
   });
 
   it("引数は受け付けない (/compact dry は無い。 見込みは /context)", async () => {

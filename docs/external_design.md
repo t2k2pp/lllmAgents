@@ -254,9 +254,9 @@ temperature / top_p / top_k / rep_penalty / description の編集 (旧 `/model t
 **画面に出るもの**:
 - 整理のたびに 1 行: 「コンテキストを整理しました (<きっかけ>): 約 N トークン減、 … 推定 A → B トークン (<整理の id>)」。 失敗は赤字で
   「履歴は変えていません」 と理由。 要約に失敗して段階 0〜2 の分だけで進んだときは黄色の行と失敗の中身 (設定 `context.summaryFailure`)。
-- 依頼の終わりの整理・`/compact`・セッションの再開 (`--resume` / `/resume` / `/fork`) の後は、 会話をサーバに読み込ませておく (予熱。 自分のサーバで動く
-  llamacpp / vllm / lmstudio / ollama のときだけ)。 予熱の途中で送信すると、 予熱の終わりを待ってから送ることと Esc で中断できることを 1 行で知らせ、 終わりを待ってから送る。
-  予熱の失敗は黄色の 1 行で、 作業は止めない。
+- 依頼の終わりの整理・`/compact`・セッションの再開 (`--resume` / `/resume` / `/fork`) の後は、 会話をサーバに読み込ませておく (先読み。 自分のサーバで動く
+  llamacpp / vllm / lmstudio / ollama のときだけ)。 先読みの途中で送信すると、 先読みの終わりを待ってから送ることと Esc で中断できることを 1 行で知らせ、 終わりを待ってから送る。
+  先読みの失敗は黄色の 1 行で、 作業は止めない。
 - `/context` で、 次に送る量 (実数か推定か)・予約 R の内訳・規則 1・2 の発火点までの距離・G・直近の整理・今 `/compact` した場合の見込みが見られる。
   これらはモデルには伝えない (残量を見せると急いで終わらせる等の振る舞いを招くため)。
 
@@ -266,7 +266,7 @@ temperature / top_p / top_k / rep_penalty / description の編集 (旧 `/model t
 - ツール結果は 1 件ごとにトークン数の上限で切り、 1 回の応答の合計も上限で切る (切ったときは結果の中に注記)。
 
 **記録** (セッションログ `~/.localllm/logs/sessions/<sid>_main.jsonl`): 整理ごとの `reduction_event`、 キャッシュが外れたときの `cache_miss` (原因つき)、
-脇の呼び出し (意図の分類・要約・サブエージェント・予熱など) ごとの `side_call`。
+脇の呼び出し (意図の分類・要約・サブエージェント・先読みなど) ごとの `side_call`。
 
 旧設定 (`context.reduction` / `context.forgetting` / `context.strategy` / `context.compressionThreshold` / `context.maxHistoryMessages`、
 `modelCapabilities.<モデル名>.compressionThreshold` / `keepRecentMessages`) は起動時に 1 回だけ削除し (元の config.json はバックアップに残す)、 削除したキーを告知する。

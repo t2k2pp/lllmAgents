@@ -13,12 +13,12 @@ import { ToolRegistry } from "../../src/tools/tool-registry.js";
 import { clearGoal } from "../../src/agent/goal-slot.js";
 
 /**
- * 予熱 (docs/context-reduction-redesign.md §9。 整理の作り直し タスク 9)。
+ * 先読み (docs/context-reduction-redesign.md §9。 整理の作り直し タスク 9)。
  *
- * 台本 provider (種類は llamacpp = 予熱を送る自分のサーバ) で AgentLoop を回し、
- * - 予熱の並びが次の本体呼び出しの先頭と一致すること (依頼の終わりの整理・/compact・再開の 3 経路)
+ * 台本 provider (種類は llamacpp = 先読みを送る自分のサーバ) で AgentLoop を回し、
+ * - 先読みの並びが次の本体呼び出しの先頭と一致すること (依頼の終わりの整理・/compact・再開の 3 経路)
  * - 規則 1 (作業の途中) の整理では送らないこと
- * - 予熱中の送信は終わりを待つこと、 Esc で切れること、 予熱中に脇の呼び出しが出ないこと
+ * - 先読み中の送信は終わりを待つこと、 Esc で切れること、 先読み中に脇の呼び出しが出ないこと
  * - 出力上限 1 で送ること
  * を確かめる。
  *
@@ -48,15 +48,15 @@ interface Sent {
 }
 
 interface ScriptOptions {
-  /** 予熱の応答を返す前に待つもの (待ち合わせの試験用)。 signal が中断されたら error で終える */
+  /** 先読みの応答を返す前に待つもの (待ち合わせの試験用)。 signal が中断されたら error で終える */
   holdPrewarm?: () => Promise<void>;
-  /** 予熱を失敗させる */
+  /** 先読みを失敗させる */
   failPrewarm?: boolean;
   providerType?: string;
 }
 
 /**
- * 本体呼び出しには台本を順に返す。 出力上限 1 の呼び出しは予熱として控え、 台本を消費しない。
+ * 本体呼び出しには台本を順に返す。 出力上限 1 の呼び出しは先読みとして控え、 台本を消費しない。
  * 脇の呼び出し (意図・完了の分類・要約) には決まった答えを返す。 log には送った順に控える (送った瞬間の深い写し)
  */
 function scriptedProvider(replies: ChatChunk[][], log: Sent[], events: string[], options: ScriptOptions = {}) {
@@ -181,7 +181,7 @@ function makeLoop(provider: LLMProvider): AgentLoop {
   );
 }
 
-/** 予熱の並びが、 次の本体呼び出しの先頭とそのまま一致すること (ツール定義も同じ) */
+/** 先読みの並びが、 次の本体呼び出しの先頭とそのまま一致すること (ツール定義も同じ) */
 function expectPrewarmIsPrefixOf(prewarm: ChatWithToolsParams, next: ChatWithToolsParams): void {
   expect(next.tools).toEqual(prewarm.tools);
   expect(next.model).toBe(prewarm.model);
@@ -189,7 +189,7 @@ function expectPrewarmIsPrefixOf(prewarm: ChatWithToolsParams, next: ChatWithToo
   for (let i = 0; i < prewarm.messages.length; i++) {
     expect(next.messages[i], `messages[${i}] (${prewarm.messages[i].role}) が一致しない`).toEqual(prewarm.messages[i]);
   }
-  // 予熱には新しい状態通知を付けない (末尾は assistant でもツール結果でもそのまま)。 次の本体呼び出しは、 末尾に足した発言に
+  // 先読みには新しい状態通知を付けない (末尾は assistant でもツール結果でもそのまま)。 次の本体呼び出しは、 末尾に足した発言に
   // 状態通知を付ける (それより前の状態通知は、 前の本体呼び出しで送ったもの)
   expect(String(prewarm.messages.at(-1)?.content)).not.toContain("<harness-context>");
   expect(next.messages.at(-1)?.role).toBe("user");
@@ -214,7 +214,7 @@ function captureReductionRecords(): ReductionEventRecord[] {
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
 
-describe("予熱を送る 3 経路で、 予熱の並びが次の本体呼び出しの先頭と一致する", () => {
+describe("先読みを送る 3 経路で、 先読みの並びが次の本体呼び出しの先頭と一致する", () => {
   it("依頼の終わり (規則 2) の整理の後", async () => {
     const log: Sent[] = [];
     const provider = scriptedProvider([...longRequest(70_000), textChunks("次の答えです。", 20_000)], log, []);
@@ -316,7 +316,7 @@ describe("予熱を送る 3 経路で、 予熱の並びが次の本体呼び出
   });
 });
 
-describe("予熱を送らないとき", () => {
+describe("先読みを送らないとき", () => {
   it("規則 1 (作業の途中) とほかの区切りの整理では送らない (prewarm 欄は null)", async () => {
     const log: Sent[] = [];
     const provider = scriptedProvider(longRequest(20_000), log, []);
@@ -367,7 +367,7 @@ describe("予熱を送らないとき", () => {
   });
 });
 
-describe("予熱中の待ち合わせ", () => {
+describe("先読み中の待ち合わせ", () => {
   function resumedLoop(provider: LLMProvider): AgentLoop {
     const loop = makeLoop(provider);
     const session = createSession("test-model-7b");
@@ -379,7 +379,7 @@ describe("予熱中の待ち合わせ", () => {
     return loop;
   }
 
-  it("予熱中に送信した依頼は、 予熱の終わりを待ってから本体を呼ぶ (切断しない)。 待っている間は 1 行出す", async () => {
+  it("先読み中に送信した依頼は、 先読みの終わりを待ってから本体を呼ぶ (切断しない)。 待っている間は 1 行出す", async () => {
     const log: Sent[] = [];
     const events: string[] = [];
     let release!: () => void;
@@ -396,7 +396,7 @@ describe("予熱中の待ち合わせ", () => {
     const running = loop.run("質問です？");
     await tick();
     expect(events).toEqual(["prewarm:start"]);
-    expect(notices.some((m) => m.includes("予熱") && m.includes("本体の呼び出し"))).toBe(true);
+    expect(notices.some((m) => m.includes("先読み") && m.includes("本体の呼び出し"))).toBe(true);
 
     release();
     await running;
@@ -404,7 +404,7 @@ describe("予熱中の待ち合わせ", () => {
     expect(events.slice(0, 3)).toEqual(["prewarm:start", "prewarm:end", "main"]);
   });
 
-  it("Esc (abort) は予熱も切り、 待っていた依頼は本体を呼ばずに中断で終わる", async () => {
+  it("Esc (abort) は先読みも切り、 待っていた依頼は本体を呼ばずに中断で終わる", async () => {
     const log: Sent[] = [];
     const events: string[] = [];
     const loop = resumedLoop(
@@ -426,7 +426,7 @@ describe("予熱中の待ち合わせ", () => {
     expect(outcomes).toEqual(["aborted"]);
   });
 
-  it("予熱中は脇の呼び出しを送らず、 終わってから送る", async () => {
+  it("先読み中は脇の呼び出しを送らず、 終わってから送る", async () => {
     const log: Sent[] = [];
     const events: string[] = [];
     let release!: () => void;
@@ -453,7 +453,7 @@ describe("予熱中の待ち合わせ", () => {
     expect(events).toEqual(["prewarm:start", "prewarm:end", "side"]);
   });
 
-  it("予熱の失敗は作業を止めず、 記録と画面の 1 行に出す", async () => {
+  it("先読みの失敗は作業を止めず、 記録と画面の 1 行に出す", async () => {
     const log: Sent[] = [];
     const loop = makeLoop(
       scriptedProvider([...longRequest(70_000), textChunks("次の答えです。", 20_000)], log, [], { failPrewarm: true }),
@@ -466,7 +466,7 @@ describe("予熱中の待ち合わせ", () => {
     await loop.waitForPrewarm();
     await tick();
     expect(records.at(-1)?.prewarm).toMatchObject({ status: "failed", error: "サーバが落ちています" });
-    expect(notices.some((n) => n.level === "warn" && n.message.includes("予熱に失敗しました"))).toBe(true);
+    expect(notices.some((n) => n.level === "warn" && n.message.includes("先読みに失敗しました"))).toBe(true);
 
     const outcomes: string[] = [];
     loop.events.on("task_complete", (e) => outcomes.push(e.outcome));

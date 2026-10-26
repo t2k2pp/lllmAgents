@@ -137,7 +137,7 @@ export interface LLMReductionEventLog extends LogContext, ReductionEventRecord {
 }
 
 /**
- * 予熱を送らなかった記録 (理由つき)。 送った予熱は side_call (目的 prewarm) に残る。
+ * 先読みを送らなかった記録 (理由つき)。 送った先読みは side_call (目的 prewarm) に残る。
  * docs/context-reduction-redesign.md §9.3。
  */
 export interface LLMPrewarmSkippedLog extends LogContext {
@@ -326,7 +326,7 @@ export class LLMLogger {
   }
 
   /**
-   * 予熱を送らなかったことと、 その理由を記録する (docs/context-reduction-redesign.md §9.3)。 送った予熱は side_call
+   * 先読みを送らなかったことと、 その理由を記録する (docs/context-reduction-redesign.md §9.3)。 送った先読みは side_call
    * (目的 prewarm) に残る。
    */
   logPrewarmSkipped(entry: { trigger: PrewarmTrigger; reason: PrewarmSkipReason; detail: string }): void {

@@ -569,7 +569,7 @@ bash 2 件を合わせて 8 件目の結果の後) に、 AgentLoop が「計画
 4. 写しに要約を当てはめ、 忘却の記録を 1 件にまとめて入れる (既存 insertTombstone の追記統合)
 5. ツールの対を検証して、 MessageHistory.replaceMessages() で 1 回だけ差し替える
    (書き換え理由は "reduction:<イベント ID>" の 1 件)
-6. 記録 (§10) → 依頼の境目なら予熱 (§9)
+6. 記録 (§10) → 依頼の境目なら先読み (§9)
 ```
 
 途中で失敗したら写しを捨てるだけで、 履歴は元のまま。 失敗はそのまま利用者に報告する。
@@ -735,7 +735,7 @@ Goal 昇格の提案 (`maybePromoteToGoal`。 REPL / Slack / Discord が `run()`
 
 | コマンド | 新しい動き |
 |---|---|
-| `/compact` | **手動の整理はこの 1 つだけ** (2026-10-25 利用者と決定)。 整理イベントを今すぐ行い、 段階 0〜3 を最後まで進める。 終わったら予熱する。 タスク 8 で `runReductionEvent("manual")` に付け替え済み。 予熱はタスク 9 で済み (§9.4)。 表示はタスク 10 で済み (§7.1) |
+| `/compact` | **手動の整理はこの 1 つだけ** (2026-10-25 利用者と決定)。 整理イベントを今すぐ行い、 段階 0〜3 を最後まで進める。 終わったら先読みする。 タスク 8 で `runReductionEvent("manual")` に付け替え済み。 先読みはタスク 9 で済み (§9.4)。 表示はタスク 10 で済み (§7.1) |
 | `/context` | 内訳表示に加えて、 P (実数か推定か)、 R の内訳、 規則 1・2 の発火点、 G と直近 3 件、 直近の整理イベント、 今 `/compact` した場合の段階ごとの減る量の見込みを表示。 タスク 10 で済み (§7.1) |
 | `/forget` | **削除** (LLM に選ばせる忘却が無くなるため。 決まった段階は `/compact` に含まれる)。 タスク 8 で削除済み |
 | `/forget mode` / `/forget status` / `/forget dry` | 削除 |
@@ -755,7 +755,7 @@ Goal 昇格の提案 (`maybePromoteToGoal`。 REPL / Slack / Discord が `run()`
   要約の失敗の扱いは規則 1・2 と同じく設定 `context.summaryFailure` に従う。
 - **/compact の表示**: 整理イベントの 1 行 (スピナーの結果。 他の発火と同じ) の後に、 前後の P (実数か推定か)、 減った量の合計と段階ごと
   (前処理・0・1・2・3)、 要約 (した区間の数 / しなかった理由 / 失敗の中身と、 設定 continue なら「段階 0〜2 の分だけで整理」、 stop なら「取りやめた」)、
-  予熱 (送った / 送らなかった理由 / 失敗で履歴を変えていないので送らない) を出す。 予熱を送ったことの 1 行 (`startPrewarm`) は /compact では出さず、 この表示に含める。
+  先読み (送った / 送らなかった理由 / 失敗で履歴を変えていないので送らない) を出す。 先読みを送ったことの 1 行 (`startPrewarm`) は /compact では出さず、 この表示に含める。
   引数は受け付けない (`/compact dry` は作らない。 見込みは `/context`)。
 - **/context の表示**: 既存の内訳の後に「コンテキストの整理」 の欄。 P (実数か推定か)、 R = O + T + M + S の内訳、 規則 1 (W − R) と規則 2 (W − R − G) の
   発火点といまの P との距離、 G (既定値か直近 3 件の最大か・頭打ち) と直近の依頼の増分、 直近の整理イベント、 今 `/compact` した場合の見込み、 要約の失敗の扱いの設定。
@@ -763,14 +763,14 @@ Goal 昇格の提案 (`maybePromoteToGoal`。 REPL / Slack / Discord が `run()`
   区間の数と見込みの減る量を出すだけ (要約は呼ばない)。 段階 0〜2 だけで目標・最低量に届くか (届かなければ不足量) も出す。
   整理イベントと見込みは段階 3 の範囲の決め方 (`selectStage3Range`) を共有する。
 - **直近の整理イベント**: `AgentLoop.getLastReductionEvent()`。 整理した履歴オブジェクトと組で持ち、 会話の載せ替え (`importConversation`) の後は出さない。
-  再開 (`restoreSession`) では捨てる。 予熱を送ったかを持ち、 予熱の結果は記録 (`record.prewarm`) が埋まり次第出る。 状態は `AgentLoop.getReductionStatus()`。
+  再開 (`restoreSession`) では捨てる。 先読みを送ったかを持ち、 先読みの結果は記録 (`record.prewarm`) が埋まり次第出る。 状態は `AgentLoop.getReductionStatus()`。
 - **チャネル** (Slack / Discord) の `/context` も同じ欄を返す (`channel-commands.ts`。 意味は全サーフェス共通)。
 - **履歴に入らないこと**: どちらの表示も `console.log` / `process.stdout.write` とチャネルの返信だけで、 履歴 (`MessageHistory`) に足す経路は無い
   (コマンドの出力をモデルに渡す経路は REPL・チャネルとも無いことを確かめた)。 モデルに残量を伝えない (§8)。
 - **削除の確認** (grep): `/forget` と `/context strategy` は src・tests の補完・ヘルプ・レジストリに無い (`tests/cli/compact-context-commands.test.ts` で固定)。
   README のコマンド表と `external_design.md` のコマンド表の `/forget`・`/context strategy` の記述も直した。 `config-reference.md` の
   `context.reduction` / `context.strategy` の行 (`/forget mode` / `/context strategy` に触れている) はタスク 11 で消した。
-- 試験: `tests/cli/compact-context-commands.test.ts` (/compact の表示: 成功・要約あり・要約失敗 continue / stop・減るもの無し・予熱を送らない理由。
+- 試験: `tests/cli/compact-context-commands.test.ts` (/compact の表示: 成功・要約あり・要約失敗 continue / stop・減るもの無し・先読みを送らない理由。
   /context の各欄: 実数 / 推定、 R の内訳、 発火点、 G、 直近の整理、 見込み。 登録と削除。 ハンドラ。 チャネル)、
   `tests/agent/reduction-event.test.ts` (手動は足りていても最大の範囲を要約する・範囲が無ければ呼ばない、 `previewReduction` の量が整理イベントと一致し履歴を変えない)。
 
@@ -786,7 +786,9 @@ Goal 昇格の提案 (`maybePromoteToGoal`。 REPL / Slack / Discord が `run()`
 
 ---
 
-## 9. 予熱
+## 9. 先読み
+
+> 名前 (2026-10-26): 旧称「予熱」 を「先読み」 に改めた (利用者向けの表示・文書・コメント)。 コードの識別子 (`prewarm`・`PrewarmRunner`・side_call の目的タグ `prewarm`・記録の型 `prewarm_skipped`・`reduction_event.prewarm` 欄など) は、 記録の形を変えないため英語のまま残す。 `docs/archive/` の中は当時の記録なので「予熱」 のまま。
 
 ### 9.1 いつ送るか
 
@@ -806,28 +808,28 @@ Goal 昇格の提案 (`maybePromoteToGoal`。 REPL / Slack / Discord が `run()`
 - 出力した 1 トークンの分だけ次の呼び出しとずれる。 混成モデルではプロンプト末尾近くの保存点に戻れれば再利用できる。
   実測 (2026-10-25、 前方一致の修正後の 11 回) では、 再利用数が毎回ちょうど「前回の入力 − 4」 だった。
   末尾の生成開始部分 (`<|im_start|>assistant\n<think>\n`) の手前の保存点に戻れているということで、
-  予熱の並びの末尾に次の依頼を足す形でも同じく効く見込みが高い。 最終確認は次の本体呼び出しの `tokensCached` で行う。
-- 予熱中に利用者が送信したら、 本体呼び出しは予熱の終了を待ってから送る (切断するとそれまでの読み込みが無駄になる恐れ)。
-  Esc での中断は予熱も切る。
-- スロットが 1 つなので、 予熱中に脇の呼び出しを送らない (送ると予熱した中身を追い出す)。
+  先読みの並びの末尾に次の依頼を足す形でも同じく効く見込みが高い。 最終確認は次の本体呼び出しの `tokensCached` で行う。
+- 先読み中に利用者が送信したら、 本体呼び出しは先読みの終了を待ってから送る (切断するとそれまでの読み込みが無駄になる恐れ)。
+  Esc での中断は先読みも切る。
+- スロットが 1 つなので、 先読み中に脇の呼び出しを送らない (送ると先読みした中身を追い出す)。
 
 ### 9.3 送らない条件 (タスク 9 で決定、 2026-10-25)
 
-予熱は **自分のサーバで動かす provider (`llamacpp` / `vllm` / `lmstudio` / `ollama`) にだけ** 送る。 それ以外 (クラウドの
+先読みは **自分のサーバで動かす provider (`llamacpp` / `vllm` / `lmstudio` / `ollama`) にだけ** 送る。 それ以外 (クラウドの
 `anthropic` / `azure-*` / `gemini` / `vertex-ai` / `claude-cli` / `claude-agent-sdk`、 種類の分からないもの) には送らない。 根拠:
-- 自分のサーバでは、 予熱の費用は利用者の手が空いている間の計算時間だけで、 お金はかからない。 KV キャッシュもそのサーバにある。
+- 自分のサーバでは、 先読みの費用は利用者の手が空いている間の計算時間だけで、 お金はかからない。 KV キャッシュもそのサーバにある。
   usage や `cached_tokens` を返さないサーバ (ollama の一部など) でも送る (結果は捨てるので usage は要らない。 効いたかは次の本体呼び出しの
   `tokensCached` と所要時間で見る)。
-- クラウドは入力トークンに課金される。 予熱すると全部の入力をもう 1 回払うことになり、 得られるのは待ち時間の短縮だけ。
+- クラウドは入力トークンに課金される。 先読みすると全部の入力をもう 1 回払うことになり、 得られるのは待ち時間の短縮だけ。
   しかもキャッシュの扱いが provider 任せで、 効く保証が無い: Anthropic 系は明示の `cache_control` の書き込み (割増し) が要り、
   OpenAI 系・Gemini の自動キャッシュは数分で消える (利用者が次を打つまでに消えうる)、 `claude-cli` / `claude-agent-sdk` は子プロセスが
   自分で並びを組むので同じ並びにならない (使用量の枠も減る)。 クラウドはサーバ側の読み込みも速いので、 待ち時間の得も小さい。
 - 種類の分からない provider は、 課金かどうか分からないので送らない側に倒す。
-- 履歴が空のときは送らない。 履歴の末尾の役割 (assistant / ツール結果 / 利用者の発言) では区別しない: 予熱を送る契機 (依頼の終わり・
-  `/compact`・再開) の後は、 どれも次の本体呼び出しの前に利用者の発言が足され、 状態通知はその新しい発言に付くので、 予熱の並びは
-  そのまま次の先頭になる。 一時停止した作業の再開 (`/run resume`) は発言を足さずに本体を呼ぶので、 そもそも予熱しない。
+- 履歴が空のときは送らない。 履歴の末尾の役割 (assistant / ツール結果 / 利用者の発言) では区別しない: 先読みを送る契機 (依頼の終わり・
+  `/compact`・再開) の後は、 どれも次の本体呼び出しの前に利用者の発言が足され、 状態通知はその新しい発言に付くので、 先読みの並びは
+  そのまま次の先頭になる。 一時停止した作業の再開 (`/run resume`) は発言を足さずに本体を呼ぶので、 そもそも先読みしない。
   (2026-10-26 実機確認で改めた: 当初は「末尾が assistant でなければ送らない」 としていたが、 依頼はふつう `response_complete` の
-  ツール結果で終わるので、 依頼の終わりの整理と `/compact` の後の予熱がほぼ毎回送られていなかった)
+  ツール結果で終わるので、 依頼の終わりの整理と `/compact` の後の先読みがほぼ毎回送られていなかった)
 
 送らないときは黙らない: 理由を `prewarm_skipped` の記録 (`{"type":"prewarm_skipped","trigger":"resume","reason":"not-local-server","detail":"…"}`。
 reason は `not-local-server` / `empty-history`) と動作ログ (info) に出し、 整理イベントの後なら `reduction_event` の
@@ -840,33 +842,33 @@ reason は `not-local-server` / `empty-history`) と動作ログ (info) に出�
   (`getFilteredToolDefs`)・サンプリング・思考の設定が同じ、 messages = `getMessages()`) の `maxTokens` だけを 1 に差し替え、
   `sideCall("prewarm")` で送って応答を読み捨てる。 provider ごとの出力上限の欄 (§4.3 の表。 OpenAI 互換は `max_tokens`) にそのまま 1 が載る。
   llama.cpp でも `/v1/chat/completions` を使い、 `/completion` の `n_predict` は使わない (試験で確認)。
-- **状態通知は付けない**: 予熱の前に `attachDynamicContext()` を呼ばない (送信済みの印も付けない)。 次の本体呼び出しは、 末尾 (assistant かツール結果) の後ろに
+- **状態通知は付けない**: 先読みの前に `attachDynamicContext()` を呼ばない (送信済みの印も付けない)。 次の本体呼び出しは、 末尾 (assistant かツール結果) の後ろに
   利用者の発言を足し、 その発言に状態通知を付けるだけなので (`prompt-prefix-stability.md` §3.2。 末尾が assistant なら添付先は新しい発言)、
-  予熱の並びがそのまま次の先頭になる。 それより前の状態通知は前の本体呼び出しで送ったもので、 そのまま残る。
+  先読みの並びがそのまま次の先頭になる。 それより前の状態通知は前の本体呼び出しで送ったもので、 そのまま残る。
 - **いつ**: `AgentLoop.runReductionEvent` が、 発火が `boundary:request-end` か `manual` で **成功した** ときだけ送る。 規則 1 (`forced`) と
   ほかの区切り (ToDo の全部完了・Goal の達成・新しい依頼) はすぐ本体を呼ぶので送らない。 失敗・`nothing-to-reduce` は履歴が変わっていない
   (キャッシュは元のまま) ので送らない。 再開は `AgentLoop.prewarmAfterResume()` を、 起動時の `--resume` (`index.ts`)・`/resume latest`・
   `/resume <id>`・`/fork` (分岐元が別のセッションならサーバに無い) の後に呼ぶ。 一時停止した作業の再開 (`/run resume`、 起動時の再開確認) と
   チャネルの会話の載せ替え (Room) はすぐ本体を呼ぶので呼ばない。
-- **裏で走らせる**: `PrewarmRunner` (AgentLoop に 1 つ) が予熱を 1 つだけ走らせ、 すぐ返す (依頼の終わりでは `isProcessing` を戻してから
-  利用者が打てる。 `/compact` もすぐ入力に戻る)。 新しい予熱を送るときは前の予熱を切り、 その終わりを待ってから送る。
-  `restoreSession` / `importConversation` は走っている予熱を切る (並びが古くなるため)。 終了時 (`index.ts` の後片付け) は `stopPrewarm()` で
+- **裏で走らせる**: `PrewarmRunner` (AgentLoop に 1 つ) が先読みを 1 つだけ走らせ、 すぐ返す (依頼の終わりでは `isProcessing` を戻してから
+  利用者が打てる。 `/compact` もすぐ入力に戻る)。 新しい先読みを送るときは前の先読みを切り、 その終わりを待ってから送る。
+  `restoreSession` / `importConversation` は走っている先読みを切る (並びが古くなるため)。 終了時 (`index.ts` の後片付け) は `stopPrewarm()` で
   切って終わりを待ち、 記録を書き終えてから終わる。
 - **待ち合わせ**: 本体呼び出しは再試行ループの先頭 (規則 2・規則 1 の判定の前) で `PrewarmRunner.wait("本体の呼び出し")` を待つ。 脇の呼び出しは
   `sideCall()` の入口で待つ (`setSideCallGate`。 AgentLoop が生成時に登録。 意図の分類・Goal 昇格・要約・サブエージェントなど全部。
   目的 `prewarm` は待たない)。 provider を問わず待つ (同じサーバに別の provider オブジェクトで送るものがあるため。 本体呼び出しが待った後なので
-  依頼の中では実際には待たない)。 待ち始めに dim の 1 行と `harness_notice` (info)「予熱 (サーバへの会話の読み込み) が終わるのを待ってから
+  依頼の中では実際には待たない)。 待ち始めに dim の 1 行と `harness_notice` (info)「先読み (サーバへの会話の読み込み) が終わるのを待ってから
   <本体の呼び出し / 脇の呼び出し (目的)> を送ります。 Esc で中断できます」 を出す。 切断はしない。 side_call の所要時間は待ち終えてから数える。
-- **中断**: `AgentLoop.abort()` (Esc) は予熱も切る。 待っていた本体呼び出しは送らず、 従来の中断 (`user_abort`) で止まる。 待ち受け中 (依頼の外) の
-  Esc は REPL が拾わないので、 予熱は最後まで走る (利用者は待たされていない)。
-- **失敗**: 予熱の失敗 (provider のエラー) は作業を止めない。 黄色の 1 行・`harness_notice` (warn)「予熱に失敗しました (作業には影響しません。 …)」・
+- **中断**: `AgentLoop.abort()` (Esc) は先読みも切る。 待っていた本体呼び出しは送らず、 従来の中断 (`user_abort`) で止まる。 待ち受け中 (依頼の外) の
+  Esc は REPL が拾わないので、 先読みは最後まで走る (利用者は待たされていない)。
+- **失敗**: 先読みの失敗 (provider のエラー) は作業を止めない。 黄色の 1 行・`harness_notice` (warn)「先読みに失敗しました (作業には影響しません。 …)」・
   動作ログの警告と、 `side_call` の `error`、 整理イベントの後なら `reduction_event.prewarm` の `{status:"failed", error}` に出す。
 - **記録**: `reduction_event.prewarm` は `{status:"done"|"failed"|"aborted", durationMs, error?}` か `{status:"skipped", reason, detail}`、
-  予熱しない発火では null。 送ったときは予熱が終わってから `reduction_event` を書く (欄を埋めるため。 画面の 1 行は整理が終わった時点で出す)。
-  再開の予熱は整理イベントではないので `side_call` (目的 prewarm) と、 送らなかったときの `prewarm_skipped` だけ。
-- 試験: `tests/agent/prewarm.test.ts` (台本 provider (種類 llamacpp) で、 依頼の終わりの整理・`/compact`・再開の 3 経路で予熱の並びが次の本体
-  呼び出しの先頭と一致し、 違いが出力上限だけであること。 規則 1 では送らないこと。 送らない条件。 予熱中の送信が終わりを待つこと・待ちの 1 行。
-  Esc で切れること。 予熱中に脇の呼び出しが出ないこと。 失敗が作業を止めず記録と 1 行に出ること)、
+  先読みしない発火では null。 送ったときは先読みが終わってから `reduction_event` を書く (欄を埋めるため。 画面の 1 行は整理が終わった時点で出す)。
+  再開の先読みは整理イベントではないので `side_call` (目的 prewarm) と、 送らなかったときの `prewarm_skipped` だけ。
+- 試験: `tests/agent/prewarm.test.ts` (台本 provider (種類 llamacpp) で、 依頼の終わりの整理・`/compact`・再開の 3 経路で先読みの並びが次の本体
+  呼び出しの先頭と一致し、 違いが出力上限だけであること。 規則 1 では送らないこと。 送らない条件。 先読み中の送信が終わりを待つこと・待ちの 1 行。
+  Esc で切れること。 先読み中に脇の呼び出しが出ないこと。 失敗が作業を止めず記録と 1 行に出ること)、
   `tests/providers/max-tokens-all-providers.test.ts` (vllm / llamacpp / lmstudio / ollama で `/chat/completions` に `max_tokens: 1`、 `n_predict` なし)。
 
 ---
@@ -878,7 +880,7 @@ reason は `not-local-server` / `empty-history`) と動作ログ (info) に出�
 セッションログ (`~/.localllm/logs/sessions/<sid>_main.jsonl`) に 1 件:
 `id`、 発火 (`forced` / `boundary:<種類>` / `manual`)、 整理前の P (実数か推定か)、 目標、 最低量、
 到達した段階、 段階ごとの減った量 (前処理・0・1・2・3)、 返した借り (揮発 N 件・思考 N 件)、 整理後の P (推定)、
-段階 3 の要約呼び出しの `tokensIn` / `tokensCached` / `tokensOut` / 所要時間、 予熱の有無と所要時間。
+段階 3 の要約呼び出しの `tokensIn` / `tokensCached` / `tokensOut` / 所要時間、 先読みの有無と所要時間。
 実装の欄の名前と形は §6.4 (タスク 7)。
 
 ### 10.2 キャッシュが外れた原因の特定 (`cache_miss`)
@@ -917,7 +919,7 @@ reason は `not-local-server` / `empty-history`) と動作ログ (info) に出�
   `second-llm` (セカンド LLM の相談・委任・評価 `second-llm-manager.ts`)、 `vision` (画像解析 `vision.ts`)。
   呼び出し元と目的: `intent-classifier.ts` (intent / completion)、 `progress-judge.ts` (progress)、 `goal-promotion.ts` (goal-promotion)、
   `handoff.ts` (handoff)、 `reduction-summary.ts` (summarize。 旧 `hierarchical-compressor.ts` はタスク 8 で削除済み)、 `sub-agent.ts` (subagent)。
-  `prewarm` は予熱 (`prewarm.ts`。 §9.4)。 脇の呼び出しは送る前に予熱の終わりを待つ (`setSideCallGate`)。
+  `prewarm` は先読み (`prewarm.ts`。 §9.4)。 脇の呼び出しは送る前に先読みの終わりを待つ (`setSideCallGate`)。
 
 本節の計測は [todo-local-llm-speed.md](todo-local-llm-speed.md) の T1 を兼ねる。 同書の T4 (依頼の区切りでの書き換え) は本書 §6.2 で扱う。
 
@@ -1014,11 +1016,11 @@ AgentLoop は整理イベントのたびに `loadConfig()` から読む (変更�
 | 6 | 段階 3: キャッシュ済みの並び + 指示での要約、 要約の型、 状態の渡し直し | 要約の呼び出しが前回の本体呼び出しをそのまま先頭に含む | 台本 provider で前方一致を検証。 型の 8 見出し。 利用者の発言が原文のまま残ること。 ツール呼び出しが返ったときの再送 | `710b4fa` |
 | 7 | 1 回の書き換え: イベントの流れ、 借りの延期、 `Message.ephemeral` の保存 | 応答の終わりで履歴が書き換わらない | **前方一致テストの拡張**: 台本 provider で AgentLoop を複数の依頼にわたって回し、 小さい W で規則 1 を起こす。 「直前の送信を先頭に含まない送信」 がイベントごとにちょうど 1 回で、 揮発メッセージ・思考がある依頼の境目では 0 回 | `352df62` |
 | 8 | AgentLoop への組み込み: 規則 1 を本体呼び出しの直前に、 規則 2 を依頼の終わり・ToDo 全完了・Goal 達成に。 `ContextStrategy` の自動経路、 `ForgettingEngine` の LLM 経路、 `reduce()` の 3 方式、 `HierarchicalCompressor` を削除 | 旧経路が残っていない (grep で確認) | 既存の `context-strategy.test.ts` / `forgetting.test.ts` / `context-manager-failure-policy.test.ts` を新仕様に置き換え (**済み**: `reduction-boundary.test.ts` ほか。 §4.4 / §6.5) | `050a2eb` |
-| 9 | 予熱 | 依頼の境目の整理・`/compact`・再開の後に 1 回送る。 予熱中の送信は終了を待つ | 台本 provider で予熱の並びが次の本体呼び出しの先頭と一致 (**済み**: `prewarm.test.ts`。 §9.3 / §9.4) | `e34e8c4` |
+| 9 | 先読み | 依頼の境目の整理・`/compact`・再開の後に 1 回送る。 先読み中の送信は終了を待つ | 台本 provider で先読みの並びが次の本体呼び出しの先頭と一致 (**済み**: `prewarm.test.ts`。 §9.3 / §9.4) | `e34e8c4` |
 | 10 | コマンド: `/compact` / `/context` の表示 (見込みを含む)、 `/forget` 一式と `/context strategy` の削除 | 補完・help から消える (レジストリ方式) | コマンドの単体テスト | `66f78ca` |
 | 11 | 設定: キー削除と 1 回だけの扱い、 告知、 バックアップ | 2 回目の起動で何もしない | 移行の単体テスト (`permission-migration` のテストに倣う) | `ae6d743` |
 | 12 | 文書: README、 `config-reference.md`、 `external_design.md` / `internal_design.md`、 §12 の注記、 索引の Status | 設計書と実装が一致 | — | 済み (タスク 12 のコミット。 `git log --grep "タスク 12"`) |
-| 13 | 実機確認: 予熱後の `tokensCached`、 20 万超の読み込み速度、 整理イベントの記録 | 結果を本書に追記 | 手動 (TTY) | 未 (実機。 利用者の作業が終わってから) |
+| 13 | 実機確認: 先読み後の `tokensCached`、 20 万超の読み込み速度、 整理イベントの記録 | 結果を本書に追記 | 手動 (TTY) | 未 (実機。 利用者の作業が終わってから) |
 
 ---
 
@@ -1033,7 +1035,7 @@ AgentLoop は整理イベントのたびに `loadConfig()` から読む (変更�
 | 揮発メッセージ・古い思考が次の依頼にも見える | 整理イベントで必ず除く。 実害 (前の催促に引きずられる) が出たら §14.2 の 3 を再検討 |
 | 段階 0 の規則の誤判定で必要な結果を消す | 条件を慎重側に倒し、 呼び出しは残す (読み直せば取れる)。 消したものは忘却の記録に必ず書く |
 | 要約の呼び出しでモデルがツールを呼ぶ | 1 回だけ再送し、 だめなら失敗を報告。 規則 1 の発火中なら本体を呼ばずに止める |
-| 予熱の 1 トークン分のずれでキャッシュが使えない | 実測から効く見込みが高い (§9.2)。 実機で確かめ、 使えなければ予熱を外す (別のやり方を足さない) |
+| 先読みの 1 トークン分のずれでキャッシュが使えない | 実測から効く見込みが高い (§9.2)。 実機で確かめ、 使えなければ先読みを外す (別のやり方を足さない) |
 | 推定 (文字数ベース) が実際より小さい | 実数を優先して使う。 余白 M を置く。 `cache_miss` と同じく推定と実数の差を記録する |
 
 ### 14.2 決定事項 (2026-10-25 利用者と確認)
@@ -1068,7 +1070,7 @@ AgentLoop は整理イベントのたびに `loadConfig()` から読む (変更�
 | A8 | git commit の区切り | 弱い区切りとして整理に使わず、 検出ごと削除した (タスク 8)。 強い区切りにするなら検出を作り直す | §4.4 |
 | A9 | ToDo が残ったまま終わった依頼の次の発言 | 「前の依頼が正常に終わった」 に数え、 「新しい依頼」 の判定をしない (タスク 8) | §4.4 |
 | A10 | 段階 3 の要約に失敗したとき | 設定 `context.summaryFailure` で選ぶ (既定 `continue`。 §14.2 の 9。 タスク 8) | §6.1 / §11.3 |
-| A11 | 予熱を送らない条件 | 自分のサーバで動く provider (llamacpp / vllm / lmstudio / ollama) だけに送る。 空の履歴では送らない (タスク 9。 末尾の役割では区別しない: 2026-10-26 実機確認で改めた) | §9.3 |
+| A11 | 先読みを送らない条件 | 自分のサーバで動く provider (llamacpp / vllm / lmstudio / ollama) だけに送る。 空の履歴では送らない (タスク 9。 末尾の役割では区別しない: 2026-10-26 実機確認で改めた) | §9.3 |
 | A12 | 手動の `/compact` の要約の範囲 | 段階 0〜2 で足りていても、 要約してよい最大の範囲を要約する。 範囲が無ければ要約を呼ばない (タスク 10) | §7.1 |
 | A13 | 削除する旧キーの最終一覧 | §11.1 に加え `context.compressionThreshold` / `context.maxHistoryMessages` も消す (タスク 11) | §11.4 |
 | A14 | 1 つの応答の中の一部の呼び出しだけを外すとき・ツールの対の守り方 (2026-10-26 実機の不具合 B) | 呼び出しと結果は一緒に外す。 残りは元の順。 全部外れたら本文か思考があれば本文だけの assistant、 無ければ assistant ごと消す。 保護は呼び出しごと。 AgentLoop は応答の結果の途中にハーネスの促しを挟まず (結果を全部入れた後に足す)、 結果の無い呼び出しには必ず `Error: ` の結果を付ける。 段階 0〜2 は壊れた入力を直さず、 「整理前の履歴が既に壊れている」 と「変換で壊した」 を分けて報告する | §5.9 |
@@ -1077,7 +1079,7 @@ AgentLoop は整理イベントのたびに `loadConfig()` から読む (変更�
 
 | # | 確かめること | 見る記録 | 本書 |
 |---|---|---|---|
-| B1 | 予熱が効くか: 予熱の後の次の本体呼び出しの `tokensCached` が「予熱の入力 − 数トークン」 になるか (1 トークン分のずれで外れないか)。 効かなければ予熱を外す (別のやり方を足さない) | `<sid>_main.jsonl` の response・`side_call` (prewarm)・`cache_miss` | §9.2 / §14.1 |
+| B1 | 先読みが効くか: 先読みの後の次の本体呼び出しの `tokensCached` が「先読みの入力 − 数トークン」 になるか (1 トークン分のずれで外れないか)。 効かなければ先読みを外す (別のやり方を足さない) | `<sid>_main.jsonl` の response・`side_call` (prewarm)・`cache_miss` | §9.2 / §14.1 |
 | B2 | 20 万トークンを超える履歴の読み込みの速さ (1 トークンあたり遅くなるか) | 整理の後・キャッシュが外れた後の本体呼び出しの所要時間と `tokensIn` | §1.2 |
 | B3 | 整理イベントの記録の中身: どの段階でどれだけ減るか、 段階 3 まで進む頻度、 整理の後に実際に残る量と読み直しの時間 | `reduction_event` | §4.7 / §10.1 |
 | B4 | 脇の呼び出し (意図の分類・Goal 昇格・進み具合の判定・サブエージェントなど) が本体の KV キャッシュを追い出しているか (タスク 2) | `side_call` の直後の本体呼び出しの `tokensCached`・`cache_miss` の causes | §1.4 / §10.3 |

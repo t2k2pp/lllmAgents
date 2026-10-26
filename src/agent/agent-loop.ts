@@ -272,12 +272,12 @@ export class AgentLoop {
    */
   private llmAbortController: AbortController | null = null;
   /**
-   * 予熱 (docs/context-reduction-redesign.md §9)。 裏で 1 つだけ走らせ、 本体呼び出し・脇の呼び出しを終わりまで待たせる。
-   * abort() (Esc) は予熱も切る。
+   * 先読み (docs/context-reduction-redesign.md §9)。 裏で 1 つだけ走らせ、 本体呼び出し・脇の呼び出しを終わりまで待たせる。
+   * abort() (Esc) は先読みも切る。
    */
   private readonly prewarm = new PrewarmRunner({
     onWait: (who) => {
-      const line = `予熱 (サーバへの会話の読み込み) が終わるのを待ってから${who}を送ります。 Esc で中断できます`;
+      const line = `先読み (サーバへの会話の読み込み) が終わるのを待ってから${who}を送ります。 Esc で中断できます`;
       console.log(chalk.dim(`  ⏳ ${line}`));
       this.notice("info", line);
     },
@@ -563,7 +563,7 @@ export class AgentLoop {
         this.cacheMissCauses.noteSideCall(record.purpose);
       },
     });
-    // 予熱中は脇の呼び出しを送らない (スロットが 1 つのサーバでは予熱した中身を追い出す。 §9.2)
+    // 先読み中は脇の呼び出しを送らない (スロットが 1 つのサーバでは先読みした中身を追い出す。 §9.2)
     setSideCallGate(this.prewarm);
     this.intentClassifier = new IntentClassifier(this.provider, model);
     this.evaluator = new Evaluator(secondLLMManager, this.provider, model);
@@ -642,7 +642,7 @@ export class AgentLoop {
     // HTTP 接続を切断してサーバ側の生成も止める。 これが無いと llama.cpp が
     // 中断済み生成を完走するまで後続リクエストが待たされ「固まった」 ように見える。
     this.llmAbortController?.abort();
-    // 予熱も切る (docs/context-reduction-redesign.md §9.2)
+    // 先読みも切る (docs/context-reduction-redesign.md §9.2)
     this.prewarm.abort();
   }
 
@@ -1073,7 +1073,7 @@ export class AgentLoop {
         while (!success) {
           // context整理中やconnection retry待ちにpause要求が届いた場合も、次のmain APIを出す前に保存する。
           if (!(await pauseAtBoundaryIfRequested(iteration))) return;
-          // 予熱中なら終わるまで待つ (切断しない。 切るとそれまでの読み込みが無駄になる。 §9.2)。 Esc は予熱も切り、 下の中断の確認で止まる
+          // 先読み中なら終わるまで待つ (切断しない。 切るとそれまでの読み込みが無駄になる。 §9.2)。 Esc は先読みも切り、 下の中断の確認で止まる
           await this.prewarm.wait("本体の呼び出し");
           // 規則 2 の記録済みの強い区切り (ToDo の全部完了・Goal の達成) と規則 1 (docs/context-reduction-redesign.md §4.4)。
           // 規則 1: 本体呼び出しの直前に P + R > W なら、 先に整理イベントを行う。 失敗したら入らない呼び出しは送らずに止める。
@@ -1081,7 +1081,7 @@ export class AgentLoop {
           // 先頭に含める必要があるため)。
           await this.judgePendingBoundary();
           if (this._aborted) {
-            // 予熱の待ちか、 規則 2 の整理 (要約の呼び出し) の途中で Esc が押された。 本体は呼ばずに止める
+            // 先読みの待ちか、 規則 2 の整理 (要約の呼び出し) の途中で Esc が押された。 本体は呼ばずに止める
             console.log(chalk.yellow("\n  (処理を中断しました)"));
             this.appendAbortMarker("");
             this.recordSpanEnd("user_abort");
@@ -2754,8 +2754,8 @@ export class AgentLoop {
       logger.error(`[reduction] ${line}`);
       this.notice("error", line);
     }
-    // 依頼の終わり (規則 2) と /compact の整理の後は予熱する (§9.1)。 規則 1 (作業の途中) とほかの区切りは
-    // すぐ本体を呼ぶので送らない。 記録 (reduction_event) は予熱の欄を埋めてから書く (送ったら終わったとき)
+    // 依頼の終わり (規則 2) と /compact の整理の後は先読みする (§9.1)。 規則 1 (作業の途中) とほかの区切りは
+    // すぐ本体を呼ぶので送らない。 記録 (reduction_event) は先読みの欄を埋めてから書く (送ったら終わったとき)
     const prewarmTrigger: PrewarmTrigger | null = !result.ok
       ? null
       : trigger === "boundary:request-end"
@@ -2832,7 +2832,7 @@ export class AgentLoop {
     };
   }
 
-  // ─── 予熱 (docs/context-reduction-redesign.md §9) ───
+  // ─── 先読み (docs/context-reduction-redesign.md §9) ───
 
   /**
    * 次の本体呼び出しと同じ並び (本体と同じ組み立て buildMainCallRequest。 状態通知は付けない) を、 出力上限 1 で裏で送る。
@@ -2855,10 +2855,10 @@ export class AgentLoop {
         this.reportPrewarmOutcome(outcome);
         return outcome;
       });
-    // /compact は結果の表示 (src/cli/commands/compact.ts) に予熱の有無を含めるので、 ここでは出さない
+    // /compact は結果の表示 (src/cli/commands/compact.ts) に先読みの有無を含めるので、 ここでは出さない
     if (trigger !== "manual") {
       console.log(
-        chalk.dim("  予熱を送りました (次の呼び出しに備えて、 サーバに会話を読み込ませています。 結果は使いません)"),
+        chalk.dim("  先読みを送りました (次の呼び出しに備えて、 サーバに会話を読み込ませています。 結果は使いません)"),
       );
     }
     return { status: "started", done };
@@ -2866,7 +2866,7 @@ export class AgentLoop {
 
   private reportPrewarmOutcome(outcome: PrewarmOutcome): void {
     if (outcome.status === "failed") {
-      const line = `予熱に失敗しました (作業には影響しません。 次の呼び出しで会話の読み直しが起きることがあります): ${outcome.error}`;
+      const line = `先読みに失敗しました (作業には影響しません。 次の呼び出しで会話の読み直しが起きることがあります): ${outcome.error}`;
       console.log(
         chalk.yellow(`
   ⚠ ${line}`),
@@ -2874,29 +2874,29 @@ export class AgentLoop {
       logger.warn(`[prewarm] ${line}`);
       this.notice("warn", line);
     } else if (outcome.status === "aborted") {
-      logger.info("[prewarm] 予熱を中断しました");
+      logger.info("[prewarm] 先読みを中断しました");
     } else if (outcome.status === "done") {
-      logger.info(`[prewarm] 予熱が終わりました (${outcome.durationMs} ms)`);
+      logger.info(`[prewarm] 先読みが終わりました (${outcome.durationMs} ms)`);
     }
   }
 
   /**
-   * セッションを再開した後の予熱 (§9.1。 再開直後はサーバに今の会話が無い)。 整理イベントではないので、
+   * セッションを再開した後の先読み (§9.1。 再開直後はサーバに今の会話が無い)。 整理イベントではないので、
    * 記録は side_call (目的 prewarm) だけ (送らなかったときは理由の記録)。 /resume・起動時の --resume・/fork の後に呼ぶ。
    * 一時停止した作業の再開 (/run resume) はすぐ本体を呼ぶので呼ばない。
-   * @returns 予熱の終わり (送らなかったときはすぐ。 reject しない)
+   * @returns 先読みの終わり (送らなかったときはすぐ。 reject しない)
    */
   prewarmAfterResume(): Promise<PrewarmOutcome> {
     const prewarm = this.startPrewarm("resume");
     return prewarm.status === "skipped" ? Promise.resolve(prewarm.outcome) : prewarm.done;
   }
 
-  /** 走っている予熱の終わりを待つ (表示なし。 終了処理・テスト用) */
+  /** 走っている先読みの終わりを待つ (表示なし。 終了処理・テスト用) */
   async waitForPrewarm(): Promise<void> {
     await this.prewarm.settled();
   }
 
-  /** 走っている予熱を切って終わりを待つ (終了の前。 予熱の記録を書き終えるため) */
+  /** 走っている先読みを切って終わりを待つ (終了の前。 先読みの記録を書き終えるため) */
   async stopPrewarm(): Promise<void> {
     await this.prewarm.stop();
   }
@@ -3734,7 +3734,7 @@ export class AgentLoop {
   }
 
   restoreSession(sessionData: SessionData, options: { restoreTerminalTranscript?: boolean } = {}): void {
-    // 走っている予熱の並びは古くなるので切る (再開の予熱は呼び出し側が prewarmAfterResume で改めて送る)
+    // 走っている先読みの並びは古くなるので切る (再開の先読みは呼び出し側が prewarmAfterResume で改めて送る)
     this.prewarm.abort();
     this.session = sessionData;
     if (this.terminalTranscriptBridge && options.restoreTerminalTranscript !== false) {
@@ -3863,7 +3863,7 @@ export class AgentLoop {
    * のためここで同期する。
    */
   importConversation(state: ConversationState | null): void {
-    // 走っている予熱の並びは古くなるので切る
+    // 走っている先読みの並びは古くなるので切る
     this.prewarm.abort();
     if (state) {
       this.history = state.history;
