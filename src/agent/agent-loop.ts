@@ -3778,11 +3778,14 @@ export class AgentLoop {
     this.history = new MessageHistory(systemPrompt);
     // 戦略 ToDo Phase 1: 新しい MessageHistory にも composer を注入
     this.history.setSystemPromptComposer((base) => this.composeQuasiSystemPrompt(base));
-    // 揮発の印と思考は「借り」 として次の整理イベントで返すので、 保存・再開で失わない (docs/context-reduction-redesign.md §6.2)
+    // 揮発の印と思考は「借り」 として次の整理イベントで返すので、 保存・再開で失わない (docs/context-reduction-redesign.md §6.2)。
+    // 状態通知 (contextNote) も戻す: 落とすと送ったときと並びが変わり、 再開の先読みがサーバに残っている前の会話の
+    // キャッシュを使えず、 全部を読み直すことになる (docs/context-reduction-redesign.md §9.4)
     for (const msg of sessionData.messages) {
       if (msg.role === "user") {
         this.history.addUserMessage(typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content), {
           ephemeral: msg.ephemeral === true,
+          contextNote: msg.contextNote,
         });
       } else if (msg.role === "assistant") {
         this.history.addAssistantMessage(
@@ -3794,6 +3797,7 @@ export class AgentLoop {
         this.history.addToolResult(
           msg.tool_call_id ?? "",
           typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
+          { contextNote: msg.contextNote },
         );
       } else if (msg.role === "system") {
         // 忘却トゥームストーン / 圧縮要約。 system prompt は session に保存されないので、

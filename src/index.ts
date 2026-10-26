@@ -757,8 +757,7 @@ async function main(): Promise<void> {
     const session = resumeResolution.session;
     agent.restoreSession(session);
     console.log(`  Resumed session: ${session.meta.id} (${session.meta.messageCount} messages)`);
-    // 再開直後はサーバに今の会話が無いので、 利用者が打つ間に読み込ませる (docs/context-reduction-redesign.md §9)
-    void agent.prewarmAfterResume();
+    // 再開の先読みは、 道具の登録が全部終わってから (REPL を始める直前に) 送る (下の repl.start() の手前を参照)
   }
 
   // Room モデル (docs/room-model-design.md): 固定 3 Room の管理と受信順グローバル FIFO キュー。
@@ -916,6 +915,11 @@ async function main(): Promise<void> {
   for (const tool of createScheduleTools(loopManager, (prompt, id) => repl.runScheduledPrompt(prompt, id))) {
     toolRegistry.register(tool);
   }
+  // --resume で再開した会話を、 利用者が打つ間にサーバに読み込ませる (docs/context-reduction-redesign.md §9.4)。
+  // 道具の定義は並びの先頭 (system の直後) に入るので、 道具の登録 (上の schedule_* が最後) が全部終わってから送る。
+  // 先に送ると次の本体呼び出しと道具の並びがずれ、 先読みが効かない (2026-10-26 実機: 先読み 37,488 の後の本体呼び出しで
+  // 再利用が 9,157 だけになった)。 --background / --slack は会話の出どころで道具の絞り方が変わり、 起動時の会話も載せ替えうるので送らない
+  if (resumeResolution.kind === "session") void agent.prewarmAfterResume();
   await repl.start();
 
   // Cleanup

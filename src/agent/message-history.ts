@@ -262,9 +262,13 @@ export class MessageHistory {
     return this.messages.length;
   }
 
-  addUserMessage(content: string | ContentPart[], opts?: { ephemeral?: boolean }): void {
+  /**
+   * @param opts.contextNote セッションの再開で、 保存されていた状態通知を戻すときだけ渡す (送ったときと同じ並びに戻すため)
+   */
+  addUserMessage(content: string | ContentPart[], opts?: { ephemeral?: boolean; contextNote?: string }): void {
     const msg: Message = { role: "user", content };
     if (opts?.ephemeral) msg.ephemeral = true;
+    if (opts?.contextNote) msg.contextNote = opts.contextNote;
     this.messages.push(msg);
   }
 
@@ -310,12 +314,13 @@ export class MessageHistory {
     this.messages.push({ role: "system", content });
   }
 
-  addToolResult(toolCallId: string, content: string): void {
-    this.messages.push({
-      role: "tool",
-      content,
-      tool_call_id: toolCallId,
-    });
+  /**
+   * @param opts.contextNote セッションの再開で、 保存されていた状態通知を戻すときだけ渡す (送ったときと同じ並びに戻すため)
+   */
+  addToolResult(toolCallId: string, content: string, opts?: { contextNote?: string }): void {
+    const msg: Message = { role: "tool", content, tool_call_id: toolCallId };
+    if (opts?.contextNote) msg.contextNote = opts.contextNote;
+    this.messages.push(msg);
   }
 
   /**

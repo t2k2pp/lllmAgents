@@ -1,9 +1,11 @@
+import fs from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentLoop } from "../../src/agent/agent-loop.js";
 import { LLMLogger } from "../../src/agent/llm-logger.js";
 import { buildPrewarmRequest, prewarmSkipReason } from "../../src/agent/prewarm.js";
 import type { ReductionEventRecord } from "../../src/agent/reduction-event.js";
-import { createSession } from "../../src/agent/session-manager.js";
+import { createSession, type SessionData } from "../../src/agent/session-manager.js";
 import { sideCall } from "../../src/agent/side-call.js";
 import type { SecurityConfig } from "../../src/config/types.js";
 import type { ChatChunk, ChatWithToolsParams, LLMProvider, Message } from "../../src/providers/base-provider.js";
@@ -285,6 +287,77 @@ describe("先読みを送る 3 経路で、 先読みの並びが次の本体呼
     expectPrewarmIsPrefixOf(prewarms[0].params, next.params);
     expectSameSettingsExceptMaxTokens(prewarms[0].params, next.params);
     expect(records).toHaveLength(0);
+  });
+
+  it("実際の保存セッションの形 (思考・状態通知・揮発・忘却の記録・ToDo・Goal を持つ) の再開でも一致し、 保存した並びをそのまま戻す", async () => {
+    const log: Sent[] = [];
+    const provider = scriptedProvider([textChunks("再開後の答えです。", 5_000)], log, []);
+    const loop = makeLoop(provider);
+    const session = createSession("test-model-7b");
+    // 2026-10-26 実機で保存された mvp8gvnw-frz6.json と同じ種類の欄を持つ並び
+    session.messages = [
+      { role: "user", content: "a を読んでください", contextNote: "# Current datetime\n2026/10/26 21:29:01" },
+      { role: "system", content: "[忘却の記録] 整理 r-1: 古いツール結果などを履歴から削除しました。" },
+      {
+        role: "assistant",
+        content: "",
+        thinking: "a を読む",
+        tool_calls: [{ id: "c1", type: "function", function: { name: "probe", arguments: "{}" } }],
+      },
+      { role: "tool", tool_call_id: "c1", content: "[忘却済み] probe の結果は履歴から削除しました。" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{ id: "c2", type: "function", function: { name: "probe", arguments: '{"tag":"todo"}' } }],
+      },
+      {
+        role: "tool",
+        tool_call_id: "c2",
+        content: "id=t1 を completed に変更しました。",
+        contextNote: "# Current datetime\n2026/10/26 21:30:00",
+      },
+      { role: "assistant", content: "読み終えました。 答えは 65 です。", thinking: "数えた" },
+      { role: "user", content: "見直してください", ephemeral: true },
+      { role: "assistant", content: "見直しました。" },
+    ] as Message[];
+    session.todos = [{ id: "t1", content: "a を読む", status: "completed", round: 1 }] as SessionData["todos"];
+    session.goal = {
+      definition: {
+        statement: "ID の数を数える",
+        acceptance_criteria: ["数が合っている"],
+        created_at: 0,
+        register_at_creation: "plain",
+      },
+      history: [],
+    };
+    const saved = structuredClone(session.messages);
+    loop.restoreSession(session);
+    // 保存した並び (状態通知・思考・揮発の印を含む) をそのまま戻す。 落とすと前に送った並びと変わる
+    expect(loop.getHistory().getRawMessages()).toEqual(saved);
+
+    const outcome = await loop.prewarmAfterResume();
+    expect(outcome.status).toBe("done");
+    const prewarms = log.filter((s) => s.kind === "prewarm");
+    expect(prewarms).toHaveLength(1);
+    expect(String(prewarms[0].params.messages[1]?.content)).toContain("2026/10/26 21:29:01");
+
+    await loop.run("続きの質問です？");
+    const next = log.find((s) => s.kind === "main");
+    if (next === undefined) throw new Error("再開後の本体呼び出しがありません");
+    expectPrewarmIsPrefixOf(prewarms[0].params, next.params);
+    expectSameSettingsExceptMaxTokens(prewarms[0].params, next.params);
+  });
+
+  it("起動時の --resume は、 道具の登録が全部終わってから先読みする (後から道具を足すと並びがずれる)", () => {
+    // 2026-10-26 実機: index.ts が schedule_* の登録より前に先読みを送り、 次の本体呼び出しと道具の並びがずれて
+    // 先読み (37,488) の後の再利用が 9,157 (system と道具の途中の保存点) だけになった。 起動の流れは試験で回せないので、
+    // index.ts の中の順序を確かめる
+    const source = fs.readFileSync(path.join(__dirname, "../../src/index.ts"), "utf8");
+    const prewarmAt = source.indexOf("agent.prewarmAfterResume()");
+    expect(prewarmAt).toBeGreaterThan(0);
+    expect(source.indexOf("agent.prewarmAfterResume()", prewarmAt + 1)).toBe(-1);
+    expect(source.lastIndexOf("toolRegistry.register(")).toBeLessThan(prewarmAt);
+    expect(source.indexOf("await repl.start()")).toBeGreaterThan(prewarmAt);
   });
 
   it("末尾がツール結果の履歴 (response_complete で終わった依頼など) でも送り、 次の本体呼び出しの先頭と一致する", async () => {
