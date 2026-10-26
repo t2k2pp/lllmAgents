@@ -660,6 +660,29 @@ classDiagram
 
 - **フロントマターの解析 (`parseFrontmatter`)**: 独自の簡易 YAML パーサーで文字列値（クォート有無どちらも対応）とフロースタイル配列 `[a, b, c]` をサポート。
 
+### 種類ごとの道具 (`tools:`)
+
+`task` ツールで起動したサブエージェントに渡す道具は、 定義の `tools:` とメインの登録済みの道具の重なりから、 委任の決まり
+(`excludedToolsFor`: `task` / plan mode の道具 / 管理の道具を子では除く) を引いたもの (`filterRegistryForAncestors`)。
+道具の定義はサブエージェント自身のプロンプトの先頭に入るので、 `SubAgent` の生成時に 1 度だけ決め、 1 回の起動の中では変えない。
+
+| 種類 | 意図 | 道具 |
+|---|---|---|
+| `explore` / `plan` | 読み取り専用の調査・計画 | file_read, glob, grep, web_fetch, web_search |
+| `code-reviewer` | レビュー専任 (書き込まない) | file_read, glob, grep, bash |
+| `bash` | コマンド実行 | bash, file_read, glob, grep |
+| `general-purpose` | 全般 (書き込みあり) | file_read, file_write, file_edit, glob, grep, bash, web_fetch, web_search, todo_append, todo_mark, todo_delete, ask_user |
+
+- 読み取りの道具 (file_read / glob / grep) は全部の種類にある。 書き込み (file_write / file_edit) は general-purpose だけ (既存の意図どおり)。
+- 権限 (`PermissionManager`。 `security.rules` の deny・読める場所) はメインと同じものをサブエージェントの道具の実行にも当てる。
+- 起動のたびに、 実際に渡した道具の一覧を動作ログ (info) に `[subagent] <id> (<種類>) の道具: …` と残す。 定義に書いてあるのに
+  登録されていない道具 (例: 設定で無効の道具) は黙って落とさず、 `[subagent] <種類> の定義にある道具が登録されていません: …` を警告として残す。
+- 2026-10-26 の確認: 実機で「`task` のサブエージェントが file_read を持たず bash で代わりにしていた」 との報告を受けて調べたが、
+  src (と deploy/agents) の定義・登録・絞り込みでは全部の種類に file_read / glob / grep が渡っていた
+  (`tests/agent/sub-agent-tools.test.ts` が組み込みの定義そのものを読んで確かめる)。 一覧が欠ける経路として残るのは、 利用者・作業フォルダの
+  上書き定義 (`~/.localllm/agents/`・`.localllm/agents/`) と、 `context: fork` のスキルの `tools:` (スキルの書いた一覧に絞る)。
+  次に起きたときは上の動作ログで、 渡した一覧に file_read が無かったのか、 有ったのにモデルが使わなかったのかを見分ける。
+
 `SubAgent` 構築時は、agent定義の`skills`と`task`呼出の`skills`を有効な`SkillRegistry`で解決し、
 重複除去した全文を元のsystem prompt末尾へ注入します。`${SKILL_DIR}`を解決してskill directoryを
 sandbox許可へ追加し、不存在・無効skillはLLMを呼ぶ前にfail-loudとします。

@@ -11,6 +11,7 @@ import * as logger from "../utils/logger.js";
 import { isStructurallyIncomplete } from "../utils/incomplete-response.js";
 import {
   ROOT_ANCESTORS,
+  excludedToolsFor,
   extendAncestors,
   filterRegistryForAncestors,
   type AncestorTypes,
@@ -332,6 +333,16 @@ export class SubAgent {
     // D1: ancestors に基づき task / second_llm_* を構造的に除外。
     //     allowedTools 指定があればそれと AND で交差させる (= ホワイトリスト ∩ 非除外)
     this.filteredRegistry = filterRegistryForAncestors(toolRegistry, this.selfAncestors, this.config.allowedTools);
+    // 道具の一覧はサブエージェント自身のプロンプトの先頭に入るので、 1 回の起動の中では変えない (ここで 1 度だけ決める)。
+    // 実際に渡す一覧を動作ログに残す (モデルが道具を使わなかったのか、 一覧に無かったのかを後から見分けるため)。
+    // 定義に書いてあるのに登録されていない道具は黙って落とさず、 警告として残す
+    const toolNames = this.filteredRegistry.getToolNames();
+    logger.info(`[subagent] ${this.agentId} (${String(type)}) の道具: ${toolNames.join(", ") || "(なし)"}`);
+    const excluded = excludedToolsFor(this.selfAncestors);
+    const missing = (this.config.allowedTools ?? []).filter((n) => !toolNames.includes(n) && !excluded.has(n));
+    if (missing.length > 0) {
+      logger.warn(`[subagent] ${String(type)} の定義にある道具が登録されていません: ${missing.join(", ")}`);
+    }
     this.history = new MessageHistory(this.config.systemPrompt);
     // ToolExecutor にも自分の ancestors を渡し、 task / second_llm_* ツールが呼ばれた時に
     // さらに 1 段拡張した ancestors を子に伝播できるようにする
