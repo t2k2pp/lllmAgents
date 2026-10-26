@@ -38,8 +38,12 @@ function setup(execute: () => Promise<ToolResult>, name = "vision_analyze", back
   }));
   (loop as unknown as { runApiGate: { beginRun(source: "cli"): void } }).runApiGate.beginRun("cli");
   loop.getHistory().addAssistantMessage("", calls);
-  const run = () =>
-    (loop as unknown as { executeToolsParallel(calls: ToolCall[]): Promise<boolean> }).executeToolsParallel(calls);
+  // 応答の結果は withToolBatch の中で入れる (合計の上限 T を数える入れ物はその応答の呼び出しで作る)
+  const inner = loop as unknown as {
+    withToolBatch(calls: ToolCall[], run: (batch: unknown) => Promise<boolean>): Promise<boolean>;
+    executeToolsParallel(calls: ToolCall[], batch: unknown): Promise<boolean>;
+  };
+  const run = () => inner.withToolBatch(calls, (batch) => inner.executeToolsParallel(calls, batch));
   return { loop, run };
 }
 

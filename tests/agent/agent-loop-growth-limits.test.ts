@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentLoop } from "../../src/agent/agent-loop.js";
 import { TIER_CONTEXT_BUDGETS } from "../../src/agent/capability-tier.js";
-import { estimateTokens } from "../../src/agent/token-counter.js";
+import { estimateTokens, MESSAGE_OVERHEAD_TOKENS } from "../../src/agent/token-counter.js";
 import { MIN_TOOL_RESULT_TOKENS } from "../../src/agent/tool-result-limit.js";
 import type { ChatChunk, ChatWithToolsParams, LLMProvider, Message } from "../../src/providers/base-provider.js";
 import type { SecurityConfig } from "../../src/config/types.js";
@@ -124,7 +124,7 @@ describe("本体呼び出しの出力上限 O", () => {
 describe("同じ応答のツール結果の合計の上限 T", () => {
   afterEach(() => clearTodos());
 
-  it("1 回の応答で 5 件呼ぶと、 1 件の上限で切った後、 合計を使い切った分は最低量まで切る (入れる順で数える)", async () => {
+  it("1 回の応答で 5 件呼ぶと、 1 件の上限で切り、 合計の残りで切り、 入らない分は本文を省く (合計は T 以下。 入れる順で数える)", async () => {
     const requests: ChatWithToolsParams[] = [];
     const calls: ChatChunk[] = [];
     for (let i = 0; i < 5; i++) {
@@ -137,21 +137,40 @@ describe("同じ応答のツール結果の合計の上限 T", () => {
     const provider = scriptedProvider([calls, textReply("終わりました。")], requests);
     // 1 件 約 11,000 トークン (1 件の上限 2,048 を超える)
     const loop = makeLoop(provider, makeRegistry(40_000));
-    await loop.run("調べてもらえますか？");
+    const lines: string[] = [];
+    const log = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    });
+    try {
+      await loop.run("調べてもらえますか？");
+    } finally {
+      log.mockRestore();
+    }
 
     const results = toolResults(requests[1].messages);
     expect(results).toHaveLength(5);
     const sizes = results.map(estimateTokens);
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 3; i++) {
       expect(sizes[i]).toBeLessThanOrEqual(T3.toolResultLimitTokens);
       expect(results[i]).toContain(`BEGIN t${i}`);
       expect(results[i]).toContain(`the limit for one tool result is ${T3.toolResultLimitTokens} tokens`);
     }
-    // 5 件目: 合計 8,192 を使い切ったので最低量。 切った理由が結果の中に見える
-    expect(sizes[4]).toBeLessThanOrEqual(MIN_TOOL_RESULT_TOKENS);
-    expect(results[4]).toContain(`reached their combined limit of ${T3.toolResultTotalTokens} tokens`);
-    expect(results[4]).toContain("BEGIN t4");
-    expect(results[4]).toContain("END");
+    // 4 件目: 合計の残り (5 件目の注記の分を残した量) まで切る。 頭と尻尾は残る
+    expect(sizes[3]).toBeGreaterThanOrEqual(MIN_TOOL_RESULT_TOKENS);
+    expect(results[3]).toContain(`reached their combined limit of ${T3.toolResultTotalTokens} tokens`);
+    expect(results[3]).toContain("BEGIN t3");
+    expect(results[3]).toContain("END");
+    // 5 件目: 残りが最低量に届かないので本文を省き、 何が起きたかと次にどうすればよいかの注記だけ
+    expect(results[4]).toContain("[Result omitted by the harness:");
+    expect(results[4]).toContain('the "big_probe" call was handled and its result reported success');
+    expect(results[4]).not.toContain("BEGIN t4");
+    // 合計 (本文 + 1 件の枠) は T 以下
+    const total = sizes.reduce((sum, n) => sum + n + MESSAGE_OVERHEAD_TOKENS, 0);
+    expect(total).toBeLessThanOrEqual(T3.toolResultTotalTokens);
+    // 利用者にも応答ごとに 1 行で見える
+    const notices = lines.filter((l) => l.includes("同じ応答のツール結果の合計が上限"));
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain("1 件を短く切り、 1 件は本文を省きました (big_probe×1。");
   });
 });
 

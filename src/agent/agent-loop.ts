@@ -51,6 +51,7 @@ import {
 import type { MainCallRequest } from "./reduction-summary.js";
 import { type PrewarmOutcome, PrewarmRunner, type PrewarmTrigger, prewarmSkipReason } from "./prewarm.js";
 import { ToolResultBatch } from "./tool-result-limit.js";
+import { summarizeToolNames } from "./reduction-stages.js";
 import { estimateMessageTokens, estimateTokens, estimateToolDefinitionTokens } from "./token-counter.js";
 import { normalizeToolCalls } from "./tool-call-normalizer.js";
 import { classifyTaskComplexity, recommendTier, explainRecommendation } from "./task-complexity.js";
@@ -1727,14 +1728,18 @@ export class AgentLoop {
                 chalk.yellow(`\n  同じツール呼び出しが${MAX_REPEAT_TOOL}回連続しています。別のアプローチを試みます...`),
               );
               this.history.addAssistantMessage(textContent, toolCalls, { thinking: thinkingContent });
-              // 直前のツール結果を偽造せずに、問題を指摘するメッセージを追加
-              for (const tc of toolCalls) {
-                this.history.addToolResult(
-                  tc.id,
-                  "Error: このツール呼び出しは同じ引数で繰り返し実行されており、同じ結果が返っています。" +
-                    "別のアプローチを取ってください。ファイルが存在しない場合は作成し、ツール名を間違えている場合は正しいツールを使ってください。",
-                );
-              }
+              // 直前のツール結果を偽造せずに、問題を指摘するメッセージを追加 (この応答の結果なので合計 T に数える)
+              await this.withToolBatch(toolCalls, async (batch) => {
+                for (const tc of toolCalls) {
+                  this.addLimitedToolResult(
+                    batch,
+                    tc,
+                    "Error: このツール呼び出しは同じ引数で繰り返し実行されており、同じ結果が返っています。" +
+                      "別のアプローチを取ってください。ファイルが存在しない場合は作成し、ツール名を間違えている場合は正しいツールを使ってください。",
+                  );
+                }
+                return false;
+              });
               repeatToolCount = 0;
               lastToolSignature = "";
               continue;
@@ -1746,12 +1751,11 @@ export class AgentLoop {
 
           this.history.addAssistantMessage(textContent, toolCalls, { thinking: thinkingContent });
 
-          let shouldAbort = false;
-          if (toolCalls.length === 1) {
-            shouldAbort = await this.executeSingleTool(toolCalls[0], this.newToolResultBatch());
-          } else {
-            shouldAbort = await this.executeToolsParallel(toolCalls);
-          }
+          const shouldAbort = await this.withToolBatch(toolCalls, (batch) =>
+            toolCalls.length === 1
+              ? this.executeSingleTool(toolCalls[0], batch)
+              : this.executeToolsParallel(toolCalls, batch),
+          );
 
           if (shouldAbort) {
             this.recordSpanEnd("tool_abort");
@@ -2115,19 +2119,20 @@ export class AgentLoop {
               ),
             );
             this.history.addAssistantMessage(textContent, undefined, { thinking: thinkingContent });
-            let shouldAbort = false;
-            const batch = this.newToolResultBatch();
-            for (const fw of fakeWrites) {
-              const syntheticCall: ToolCall = {
-                id: `synthetic_fw_${Date.now()}`,
-                type: "function",
-                function: { name: "file_write", arguments: JSON.stringify(fw) },
-              };
-              shouldAbort = await this.executeSingleTool(syntheticCall, batch);
-              if (shouldAbort) {
-                this.recordSpanEnd("synthetic_write_abort");
-                return;
+            const syntheticCalls: ToolCall[] = fakeWrites.map((fw) => ({
+              id: `synthetic_fw_${Date.now()}`,
+              type: "function",
+              function: { name: "file_write", arguments: JSON.stringify(fw) },
+            }));
+            const shouldAbort = await this.withToolBatch(syntheticCalls, async (batch) => {
+              for (const call of syntheticCalls) {
+                if (await this.executeSingleTool(call, batch)) return true;
               }
+              return false;
+            });
+            if (shouldAbort) {
+              this.recordSpanEnd("synthetic_write_abort");
+              return;
             }
             // 書き込み完了後、モデルに続きを促す (in-turn の合図)
             this.history.addUserMessage("ファイルの作成が完了しました。", { ephemeral: true });
@@ -3158,30 +3163,47 @@ export class AgentLoop {
   }
 
   /**
-   * 1 回の応答のツール結果の上限 (1 件の上限と合計 T) を数える入れ物。 応答ごとに 1 つ作り、
-   * その応答の結果を履歴に入れるときに必ず通す (docs/context-reduction-redesign.md §4.3)。
+   * 1 回の応答のツール呼び出しの結果を入れる間の範囲。 その応答の結果は必ずこの中で addLimitedToolResult を通して入れる。
+   * - 合計の上限 T を数える入れ物 (ToolResultBatch) を、 その応答の呼び出し (入れる順) で作る (docs/context-reduction-redesign.md §4.3)。
+   * - 合計の上限で切った・省いたときは、 応答ごとに 1 行で利用者に知らせる。
    */
-  private newToolResultBatch(): ToolResultBatch {
+  private async withToolBatch(toolCalls: readonly ToolCall[], run: (batch: ToolResultBatch) => Promise<boolean>) {
     const budget = TIER_CONTEXT_BUDGETS[this.capability.tier];
-    return new ToolResultBatch({
-      perResultTokens: budget.toolResultLimitTokens,
-      totalTokens: budget.toolResultTotalTokens,
-    });
+    const batch = new ToolResultBatch(
+      { perResultTokens: budget.toolResultLimitTokens, totalTokens: budget.toolResultTotalTokens },
+      toolCalls.map((c) => c.function.name),
+    );
+    try {
+      return await run(batch);
+    } finally {
+      this.reportToolResultBatch(batch);
+    }
   }
 
-  /**
-   * ツール結果を上限に合わせて履歴に入れる。 切ったときは結果の中に注記が入る。
-   * 合計の上限で切ったときは、 利用者にも 1 行で知らせる (1 件の上限での切り詰めは従来どおり注記だけ)。
-   */
+  /** 合計の上限で切った・省いた結果があれば、 応答ごとに 1 行で知らせる。 注記だけでも上限を超えたら赤字と harness_notice */
+  private reportToolResultBatch(batch: ToolResultBatch): void {
+    const s = batch.summary();
+    if (s.overflow) {
+      const message =
+        `同じ応答のツール呼び出しが ${s.callCount} 件と多すぎ、 本文を省いた注記だけでも結果の合計が上限 ${s.totalTokens.toLocaleString("en-US")} トークンを超えました ` +
+        `(約 ${s.usedTokens.toLocaleString("en-US")} トークン)。 次の呼び出しの前に整理が走ることがあります。`;
+      console.log(chalk.red(`  ✖ ${message}`));
+      this.notice("error", message);
+    }
+    if (s.truncatedByTotal === 0 && s.omitted.length === 0) return;
+    const cut = s.truncatedByTotal > 0 ? `${s.truncatedByTotal} 件を短く切` : "";
+    const omitted =
+      s.omitted.length > 0
+        ? `${s.omitted.length} 件は本文を省きました (${summarizeToolNames(s.omitted)}。 呼び出しは済んでおり、 成否は結果に残しています)`
+        : "";
+    const what = cut && omitted ? `${cut}り、 ${omitted}` : cut ? `${cut}りました` : omitted;
+    const line = `  (同じ応答のツール結果の合計が上限 ${s.totalTokens.toLocaleString("en-US")} トークンに達したため、 ${what})`;
+    console.log(s.omitted.length > 0 ? chalk.yellow(line) : chalk.dim(line));
+  }
+
+  /** ツール結果を上限に合わせて履歴に入れる (withToolBatch の中で呼ぶ)。 切った・省いたときは結果の中に注記が入る */
   private addLimitedToolResult(batch: ToolResultBatch, toolCall: ToolCall, content: string): void {
     const fit = batch.fit(toolCall.function.name, content);
-    if (fit.truncation?.reason === "response-total") {
-      console.log(
-        chalk.dim(
-          `  (同じ応答のツール結果の合計が上限に近いため、 ${toolCall.function.name} の結果を約 ${fit.truncation.originalTokens} → ${fit.truncation.keptTokens} トークンに切りました)`,
-        ),
-      );
-    }
     this.history.addToolResult(toolCall.id, fit.content);
   }
 
@@ -3298,16 +3320,15 @@ export class AgentLoop {
   }
 
   /** Execute multiple tool calls with concurrency limit, returning whether to abort the run loop */
-  private async executeToolsParallel(toolCalls: ToolCall[]): Promise<boolean> {
+  private async executeToolsParallel(toolCalls: ToolCall[], batch: ToolResultBatch): Promise<boolean> {
     if (!(await this.runApiGate.waitUntilRunning()) || this._aborted) return true;
     const limit = this.maxParallelTools;
     // 結果を履歴に入れる順 (= toolCalls の順) で合計を数えるので、 並列でも切り方は決定的
-    const batch = this.newToolResultBatch();
     if (limit === 1) {
       for (let i = 0; i < toolCalls.length; i++) {
         if (await this.executeSingleTool(toolCalls[i], batch)) {
           for (const pending of toolCalls.slice(i + 1)) {
-            this.history.addToolResult(pending.id, "Error: 前のツールで停止したため未実行です。");
+            this.addLimitedToolResult(batch, pending, "Error: 前のツールで停止したため未実行です。");
           }
           return true;
         }

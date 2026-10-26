@@ -22,11 +22,14 @@ export function estimateTokens(text: string): number {
   return Math.ceil(count * 1.1);
 }
 
+/** 1 件のメッセージの枠 (役割など) の推定トークン数。 estimateMessageTokens が 1 件ごとに足す */
+export const MESSAGE_OVERHEAD_TOKENS = 4;
+
 export function estimateMessageTokens(messages: Message[]): number {
   let total = 0;
   for (const msg of messages) {
     // Role overhead
-    total += 4;
+    total += MESSAGE_OVERHEAD_TOKENS;
     const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
     total += estimateTokens(content);
     if (msg.tool_calls) {
