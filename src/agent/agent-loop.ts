@@ -9,6 +9,7 @@ import { globalCostCalculator } from "../cost/cost-calculator.js";
 // プロンプト表示中はライブ領域を排他所有する (docs/tui-alternate-screen.md §4.3)
 import { select } from "../cli/prompt-gate.js";
 import { screen } from "../cli/screen-manager.js";
+import { prewarmIndicator } from "../cli/prewarm-indicator.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
@@ -52,7 +53,14 @@ import {
   triggerLabel,
 } from "./reduction-event.js";
 import type { MainCallRequest } from "./reduction-summary.js";
-import { type PrewarmOutcome, PrewarmRunner, type PrewarmTrigger, prewarmSkipReason } from "./prewarm.js";
+import {
+  PREWARM_ABORT_REASONS,
+  type PrewarmOutcome,
+  PrewarmRunner,
+  type PrewarmRunningStatus,
+  type PrewarmTrigger,
+  prewarmSkipReason,
+} from "./prewarm.js";
 import { ToolResultBatch } from "./tool-result-limit.js";
 import { summarizeToolNames } from "./reduction-stages.js";
 import { estimateMessageTokens, estimateTokens, estimateToolDefinitionTokens } from "./token-counter.js";
@@ -73,7 +81,12 @@ import {
 } from "./session-manager.js";
 import type { RoomId } from "./room-types.js";
 import { PlanManager } from "./plan-mode.js";
-import { DEFAULT_SUMMARY_FAILURE_POLICY, type LLMEndpoint, type SamplingParams } from "../config/types.js";
+import {
+  DEFAULT_PREWARM_AUTO,
+  DEFAULT_SUMMARY_FAILURE_POLICY,
+  type LLMEndpoint,
+  type SamplingParams,
+} from "../config/types.js";
 import { makeLiveBinding, type LiveModelBinding } from "./model-drift.js";
 import { loadConfig } from "../config/config-manager.js";
 import { CheckpointManager } from "../checkpoint/checkpoint-manager.js";
@@ -136,6 +149,9 @@ import {
   getCurrentTodos,
   beginTodoRound,
 } from "../tools/definitions/todo-write.js";
+
+/** 指紋を作るためだけに組み立てる送り方に渡す signal (送らないので切ることもない。 指紋は signal を含まない) */
+const NEVER_ABORTED = new AbortController().signal;
 
 /**
  * チャネル会話スワップ用の会話状態 (A-5: docs/archive/channel-session-queue-design.md §2)。
@@ -278,15 +294,35 @@ export class AgentLoop {
   private llmAbortController: AbortController | null = null;
   /**
    * 先読み (docs/context-reduction-redesign.md §9)。 裏で 1 つだけ走らせ、 本体呼び出し・脇の呼び出しを終わりまで待たせる。
-   * abort() (Esc) は先読みも切る。
+   * abort() (Esc) は先読みも切る。 次の呼び出しの並びが先読みの並びで始まらなくなったら待たずに切る (§9.5)。
+   * 走っている間は表示 (prewarmIndicator) を出し続け、 終わったら結果の 1 行を出す (§9.6)。
    */
   private readonly prewarm = new PrewarmRunner({
-    onWait: (who) => {
-      const line = `先読み (サーバへの会話の読み込み) が終わるのを待ってから${who}を送ります。 Esc で中断できます`;
-      console.log(chalk.dim(`  ⏳ ${line}`));
+    onStart: (status) => {
+      logger.info(`[prewarm] 先読み (${status.trigger}) を送りました (約 ${status.promptTokens} トークン)`);
+      prewarmIndicator.begin(status);
+    },
+    onWait: (who, status) => {
+      const line = `先読み (サーバへの会話の読み込み) が終わるのを待ってから${who}を送ります。 Esc で取り消せます`;
+      logger.info(`[prewarm] ${line}`);
       this.notice("info", line);
+      prewarmIndicator.waiting(status);
+    },
+    onStale: (trigger, reason) => {
+      // 切った理由は動作ログと記録 (side_call の abortKind・abortReason) に残す。 利用者への 1 行は終わりに出す
+      logger.info(`[prewarm] 先読み (${trigger}) を止めました: ${reason}`);
+    },
+    onEnd: (_status, outcome) => {
+      prewarmIndicator.end(outcome);
+      this.reportPrewarmOutcome(outcome);
     },
   });
+  /** 先読みの前の準備 (判定と整理。 §9.4)。 終わるまで次の依頼を始めない */
+  private prewarmPreparation: Promise<void> | null = null;
+  /** 先読みの前の判定 (boundary:before-prewarm) で整理したときに送る先読みの契機 */
+  private boundaryPrewarmTrigger: "resume" | "manual-command" = "manual-command";
+  /** 直近の整理イベントの後に送った先読みの終わり (再開の準備が受け取る)。 送らなかった整理では null */
+  private reductionPrewarm: Promise<PrewarmOutcome> | null = null;
   /**
    * Phase 5 第10ラウンド: 「対話必須」 ロック。 統合された 1 つの状態で扱う。
    *
@@ -494,6 +530,8 @@ export class AgentLoop {
       );
       this.notice("info", "foreground runを一時停止 (再開地点を保存済み)");
     });
+    // 送り先が替わる。 前の送り先に送った先読みは次の本体呼び出しに効かないので切る (§9.5)
+    this.prewarm.cut("接続先 (provider) を替えたため");
     this.rawProvider = provider;
     this.provider = gateLLMProvider(provider, this.runApiGate);
     this.streamingDisplay = streamingDisplay;
@@ -527,6 +565,11 @@ export class AgentLoop {
     // Goal / ToDo は system ではなく、 変化時に末尾へ添付する状態通知になる (docs/prompt-prefix-stability.md)。
     this.history = new MessageHistory(systemPrompt);
     this.history.setSystemPromptComposer((base) => this.composeQuasiSystemPrompt(base));
+    this.watchHistoryRewrites(this.history);
+    // 道具の登録・解除で道具の定義 (並びの先頭) が変わる。 走っている先読みが古くなれば切る (§9.5)
+    this.toolRegistry.addChangeListener((name) =>
+      this.invalidatePrewarm(`道具 ${name} の登録・解除で道具の定義が変わったため`),
+    );
     // 整理しても次の呼び出しが入らない枠なら、 ここで理由と必要量を示して止める (docs/context-reduction-redesign.md §6.3)
     this.assertContextWindowFits(this.capability, contextWindow, model);
     // ToDo の遷移フック。 全部完了 (規則 2 の強い区切り) を記録する。 tool の通り道に検出を 1 本足すだけで新しいループは作らない
@@ -576,6 +619,8 @@ export class AgentLoop {
     });
     // 先読み中は脇の呼び出しを送らない (スロットが 1 つのサーバでは先読みした中身を追い出す。 §9.2)
     setSideCallGate(this.prewarm);
+    // 入力待ちの Esc (入力欄が空のとき) は、 裏で走っている先読みだけを取り消す (§9.6)
+    prewarmIndicator.setCancelHandler(() => this.prewarm.abort());
     this.intentClassifier = new IntentClassifier(this.provider, model);
     this.evaluator = new Evaluator(secondLLMManager, this.provider, model);
     // セカンドLLMにもセッションIDを共有（ログファイル名の統一用）
@@ -856,6 +901,8 @@ export class AgentLoop {
           this.runStats.outcome = "error";
           return;
         }
+        // 先読みの前の準備 (判定と整理。 §9.4) の途中なら終わるまで待つ (整理の差し替えと発言の追加を重ねない)
+        await this.prewarmPrepared();
         // 規則 2 の「新しい依頼が届いた」 (docs/context-reduction-redesign.md §4.4)。 前の依頼の終わりで判定していないとき
         // (中断・エラー・再開のあと) だけ、 新しい発言を履歴に入れる前に判定する (前の依頼は全部終わった依頼として扱う)
         await this.judgeNewRequestBoundary();
@@ -1084,15 +1131,13 @@ export class AgentLoop {
         while (!success) {
           // context整理中やconnection retry待ちにpause要求が届いた場合も、次のmain APIを出す前に保存する。
           if (!(await pauseAtBoundaryIfRequested(iteration))) return;
-          // 先読み中なら終わるまで待つ (切断しない。 切るとそれまでの読み込みが無駄になる。 §9.2)。 Esc は先読みも切り、 下の中断の確認で止まる
-          await this.prewarm.wait("本体の呼び出し");
           // 規則 2 の記録済みの強い区切り (ToDo の全部完了・Goal の達成) と規則 1 (docs/context-reduction-redesign.md §4.4)。
           // 規則 1: 本体呼び出しの直前に P + R > W なら、 先に整理イベントを行う。 失敗したら入らない呼び出しは送らずに止める。
           // 状態通知の添付 (attachDynamicContext) より前に判定する (要約の呼び出しは、 前回の本体呼び出しの並びをそのまま
           // 先頭に含める必要があるため)。
           await this.judgePendingBoundary();
           if (this._aborted) {
-            // 先読みの待ちか、 規則 2 の整理 (要約の呼び出し) の途中で Esc が押された。 本体は呼ばずに止める
+            // 規則 2 の整理 (要約の呼び出し) の途中で Esc が押された。 本体は呼ばずに止める
             console.log(chalk.yellow("\n  (処理を中断しました)"));
             this.appendAbortMarker("");
             this.recordSpanEnd("user_abort");
@@ -1115,6 +1160,18 @@ export class AgentLoop {
             const request = this.buildMainCallRequest(toolDefs, this.llmAbortController.signal);
             // 並びの指紋 (cache_miss のずれの位置と、 先読み・要約の記録との突き合わせに使う。 §10.2)
             const fingerprint = fingerprintPrompt(request.params);
+            // 先読み中なら、 その並びがこの呼び出しの先頭になるときだけ終わるまで待つ (切断しない。 切るとそれまでの読み込みが
+            // 無駄になる。 §9.2)。 先頭にならない (古い) 先読みは待たずに切る (§9.5)。 Esc は先読みも切り、 ここで止まる
+            if (this.prewarm.isRunning()) {
+              await this.prewarm.waitBeforeMainCall("本体の呼び出し", fingerprint);
+              if (this._aborted) {
+                this.llmAbortController = null;
+                console.log(chalk.yellow("\n  (先読みを取り消し、 処理を中断しました)"));
+                this.appendAbortMarker("");
+                this.recordSpanEnd("user_abort");
+                return;
+              }
+            }
             // LLM I/O ログ: リクエスト記録
             this.llmLogger.nextTurn();
             const prefixInfo = this.llmLogger.logRequest(
@@ -2755,6 +2812,9 @@ export class AgentLoop {
         growth: this.requestGrowth,
         summaryFailure: loadConfig().context?.summaryFailure ?? DEFAULT_SUMMARY_FAILURE_POLICY,
         signal,
+        // 書き換えると決めた時点で、 走っている先読みを切る (書き換えた後の並びは先読みの並びで始まらない。 §9.5)。
+        // 規則 2 の見送りでは呼ばれないので、 まだ使える先読みは残る
+        onWillRewrite: () => this.prewarm.cut(PREWARM_ABORT_REASONS.reduction),
       });
     } finally {
       this.llmAbortController = null;
@@ -2787,23 +2847,40 @@ export class AgentLoop {
       logger.error(`[reduction] ${line}`);
       this.notice("error", line);
     }
-    // 依頼の終わり (規則 2) と /compact の整理の後は先読みする (§9.1)。 規則 1 (作業の途中) とほかの区切りは
-    // すぐ本体を呼ぶので送らない。 記録 (reduction_event) は先読みの欄を埋めてから書く (送ったら終わったとき)
-    const prewarmTrigger: PrewarmTrigger | null = !result.ok
-      ? null
-      : trigger === "boundary:request-end"
-        ? "request-end"
-        : trigger === "manual"
-          ? "manual"
-          : null;
+    // 依頼の終わり (規則 2)・/compact・再開 (§9.4) の整理の後は、 整理した後の並びを先読みする (§9.1)。
+    // 規則 1 (作業の途中) とほかの区切りはすぐ本体を呼ぶので送らない。 記録 (reduction_event) は先読みの欄を埋めてから書く
+    // (送ったら終わったとき)
+    // 先読みの前の判定 (再開・/prewarm) は頼まれた先読みなので必ず送る。 ほかは自動の先読みが入っているときだけ (§9.1)
+    const auto = this.isAutoPrewarmEnabled();
+    // Esc で中断されたあとは送らない (利用者が止めた)
+    const prewarmTrigger: PrewarmTrigger | null =
+      !result.ok || this._aborted
+        ? null
+        : trigger === "boundary:before-prewarm"
+          ? this.boundaryPrewarmTrigger
+          : !auto
+            ? null
+            : trigger === "boundary:request-end"
+              ? "request-end"
+              : trigger === "manual"
+                ? "manual"
+                : null;
+    if (result.ok && trigger === "manual" && !auto) this.printPrewarmHint();
+    if (result.ok && trigger === "manual" && !this.isProcessing) {
+      // 依頼の合間の /compact は、 段階 0〜3 を最後まで進めた判定なので、 次の依頼の始まりの判定 (規則 2) を重ねない。
+      // 重ねると、 下で送る先読みの並びをすぐ書き換えて捨てることになる (§9.5)
+      this.requestEndSettled = true;
+    }
     const last: LastReductionEvent = { record: result.record, finishedAt: Date.now(), prewarmSent: false };
     this.lastReduction = { history: reducedHistory, event: last };
+    this.reductionPrewarm = null;
     if (prewarmTrigger === null) {
       this.llmLogger.logReductionEvent(result.record);
       return result;
     }
     const prewarm = this.startPrewarm(prewarmTrigger);
     last.prewarmSent = prewarm.status === "started";
+    this.reductionPrewarm = prewarm.status === "started" ? prewarm.done : Promise.resolve(prewarm.outcome);
     if (prewarm.status === "skipped") {
       result.record.prewarm = prewarm.outcome;
       this.llmLogger.logReductionEvent(result.record);
@@ -2868,9 +2945,45 @@ export class AgentLoop {
   // ─── 先読み (docs/context-reduction-redesign.md §9) ───
 
   /**
+   * 次の呼び出しの並びを変える操作の後に呼ぶ (§9.5 の 2 段目)。 走っている先読みの並びが、 今の並びの先頭でなくなって
+   * いればその場で切る (サーバの計算を待たずに止める)。 並びが変わっていなければ何もしない。
+   * 呼び忘れた経路も、 先読みを待つ前の比べ (1 段目の安全網) が拾う。
+   * @returns 切ったなら true
+   */
+  invalidatePrewarm(reason: string): boolean {
+    return this.prewarm.abortIfStale(reason);
+  }
+
+  /** 履歴の書き換え (整理・/clear・system の更新など) の申告で、 先読みを確かめる (§9.5) */
+  private watchHistoryRewrites(history: MessageHistory): void {
+    history.setRewriteListener((reason) => {
+      // 載せ替えた後の古い履歴の書き換えは、 今の並びに関係しない
+      if (history === this.history) this.invalidatePrewarm(`履歴を書き換えたため (${reason})`);
+    });
+  }
+
+  /** 自動の先読み (設定 context.prewarm.auto。 既定は切。 §9.1) が入っているか */
+  isAutoPrewarmEnabled(): boolean {
+    return loadConfig().context?.prewarm?.auto ?? DEFAULT_PREWARM_AUTO;
+  }
+
+  /** 先読みの様子 (/prewarm status)。 自動の入切・走っている先読み・直近の結果 */
+  getPrewarmStatus(): {
+    auto: boolean;
+    running: PrewarmRunningStatus | null;
+    last: ReturnType<PrewarmRunner["lastOutcome"]>;
+  } {
+    return {
+      auto: this.isAutoPrewarmEnabled(),
+      running: this.prewarm.runningStatus(),
+      last: this.prewarm.lastOutcome(),
+    };
+  }
+
+  /**
    * 次の本体呼び出しと同じ並び (本体と同じ組み立て buildMainCallRequest。 状態通知は付けない) を、 出力上限 1 で裏で送る。
    * 送らない条件 (prewarmSkipReason) に当たれば送らず、 理由をログ (と prewarm の記録) に残す。
-   * 失敗は作業を止めず、 黄色の 1 行と harness_notice (warn) で知らせる。
+   * 送っている間の表示と終わりの 1 行は PrewarmRunner の hooks (prewarmIndicator) が出す。
    */
   private startPrewarm(
     trigger: PrewarmTrigger,
@@ -2882,46 +2995,144 @@ export class AgentLoop {
       return { status: "skipped", outcome: { status: "skipped", ...skip } };
     }
     const toolDefs = this.getFilteredToolDefs();
-    const done = this.prewarm
-      .start(trigger, this.provider, (signal) => this.buildMainCallRequest(toolDefs, signal))
-      .then((outcome) => {
-        this.reportPrewarmOutcome(outcome);
-        return outcome;
-      });
-    // /compact は結果の表示 (src/cli/commands/compact.ts) に先読みの有無を含めるので、 ここでは出さない
-    if (trigger !== "manual") {
-      console.log(
-        chalk.dim("  先読みを送りました (次の呼び出しに備えて、 サーバに会話を読み込ませています。 結果は使いません)"),
-      );
-    }
+    const done = this.prewarm.start({
+      trigger,
+      provider: this.provider,
+      build: (signal) => this.buildMainCallRequest(toolDefs, signal),
+      // 比べる相手は、 今の時点で次の本体呼び出しが送る並び (状態通知を付ける前)
+      currentFingerprint: () =>
+        fingerprintPrompt(this.buildMainCallRequest(this.getFilteredToolDefs(), NEVER_ABORTED).params),
+      promptTokens: this.measureNextPrompt(toolDefs).tokens,
+    });
     return { status: "started", done };
   }
 
   private reportPrewarmOutcome(outcome: PrewarmOutcome): void {
     if (outcome.status === "failed") {
       const line = `先読みに失敗しました (作業には影響しません。 次の呼び出しで会話の読み直しが起きることがあります): ${outcome.error}`;
-      console.log(
-        chalk.yellow(`
-  ⚠ ${line}`),
-      );
+      console.log(chalk.yellow(`\n  ⚠ ${line}`));
       logger.warn(`[prewarm] ${line}`);
       this.notice("warn", line);
     } else if (outcome.status === "aborted") {
-      logger.info("[prewarm] 先読みを中断しました");
+      logger.info(`[prewarm] 先読みを止めました (${outcome.kind ?? "?"}: ${outcome.reason ?? "理由不明"})`);
     } else if (outcome.status === "done") {
       logger.info(`[prewarm] 先読みが終わりました (${outcome.durationMs} ms)`);
     }
   }
 
+  /** 自動の先読みが切のとき、 /compact・再開の後に 1 回だけ出す案内 */
+  private printPrewarmHint(): void {
+    console.log(
+      chalk.dim("  /prewarm で、 この会話を今のうちにサーバへ読み込ませておけます (次の呼び出しが速くなります)"),
+    );
+  }
+
   /**
-   * セッションを再開した後の先読み (§9.1。 再開直後はサーバに今の会話が無い)。 整理イベントではないので、
-   * 記録は side_call (目的 prewarm) だけ (送らなかったときは理由の記録)。 /resume・起動時の --resume・/fork の後に呼ぶ。
-   * 一時停止した作業の再開 (/run resume) はすぐ本体を呼ぶので呼ばない。
-   * @returns 先読みの終わり (送らなかったときはすぐ。 reject しない)
+   * セッションを再開した後 (/resume・起動時の --resume・/fork)。 一時停止した作業の再開 (/run resume) はすぐ本体を呼ぶので呼ばない。
+   * 自動の先読みが入っていれば先読みし (prewarmBeforeNextRequest と同じ手順。 §9.4)、 切なら /prewarm の案内を 1 行出すだけ。
+   * @returns 先読みの終わり (送らなかったときは準備の後すぐ。 reject しない)
    */
   prewarmAfterResume(): Promise<PrewarmOutcome> {
-    const prewarm = this.startPrewarm("resume");
-    return prewarm.status === "skipped" ? Promise.resolve(prewarm.outcome) : prewarm.done;
+    if (!this.isAutoPrewarmEnabled()) {
+      const detail = "自動の先読みは切です (/prewarm で送れます)";
+      logger.info(`[prewarm] ${detail}`);
+      this.llmLogger.logPrewarmSkipped({ trigger: "resume", reason: "auto-off", detail });
+      this.printPrewarmHint();
+      return Promise.resolve({ status: "skipped", reason: "auto-off", detail });
+    }
+    return this.prewarmBeforeNextRequest("resume").prewarm;
+  }
+
+  /**
+   * /prewarm (利用者が今すぐ先読みを頼んだ)。 送れないとき (依頼の処理中・既に先読み中・自分のサーバでない・履歴が空) は
+   * 理由を返す。 送れるなら prewarmBeforeNextRequest と同じ手順で整理してから先読みする。
+   */
+  prewarmNow():
+    | { ok: false; message: string }
+    | { ok: true; prepared: Promise<void>; prewarm: Promise<PrewarmOutcome> } {
+    if (this.isProcessing) {
+      return { ok: false, message: "依頼を処理している間は先読みしません (次の呼び出しがすぐ送られるため)" };
+    }
+    const running = this.prewarm.runningStatus();
+    if (running !== null) {
+      const elapsed = Math.round((Date.now() - running.startedAt) / 1000);
+      return { ok: false, message: `既に先読み中です (${elapsed} 秒経過)。 入力欄が空のときの Esc で取り消せます` };
+    }
+    const skip = prewarmSkipReason(this.provider.providerType, this.history.getRawMessages());
+    if (skip !== null) return { ok: false, message: skip.detail };
+    return { ok: true, ...this.prewarmBeforeNextRequest("manual-command") };
+  }
+
+  /**
+   * 次の依頼の前に先読みする (再開の後の自動の先読みと /prewarm。 §9.4)。
+   *
+   * 先読みは次の本体呼び出しの先頭になる並びだけを送る (§9.5)。 そのため送る前に、 次の依頼の始まりと同じ判定
+   * (規則 2: P + R + G > W。 judgeBoundary と同じ測り方・予算) を 「先読みの前 (boundary:before-prewarm)」 として行い、
+   * 整理するなら先に整理して (reduction_event に記録。 Esc で切れる。 結果は 1 行)、 整理した後の並びを先読みする。
+   * 判定を済ませたので、 次の依頼の始まりでは判定し直さない (requestEndSettled)。 Esc で整理を切ったときは先読みせず、
+   * 次の依頼の始まりで判定し直す。 整理しなかった (発火しない・見送り・失敗) ときは今の並びをそのまま先読みする。
+   * 準備 (判定と整理) が終わるまで次の依頼は始めない (run() が待つ)。
+   * @returns prepared = 準備の終わり (Esc の受け付けはここまで呼び出し側が持つ)、 prewarm = 先読みの終わり
+   */
+  private prewarmBeforeNextRequest(trigger: "resume" | "manual-command"): {
+    prepared: Promise<void>;
+    prewarm: Promise<PrewarmOutcome>;
+  } {
+    const job = this.prepareAndPrewarm(trigger);
+    const prepared = job.then(() => undefined);
+    this.prewarmPreparation = prepared;
+    void prepared.then(() => {
+      if (this.prewarmPreparation === prepared) this.prewarmPreparation = null;
+    });
+    return { prepared, prewarm: job.then((r) => r.prewarm) };
+  }
+
+  /** 先読みの前の準備 (判定と整理) の終わりを待つ。 先読みの終わりは待たない */
+  async prewarmPrepared(): Promise<void> {
+    await this.prewarmPreparation;
+  }
+
+  /** 判定と整理を行い、 先読みを送る。 先読みの終わりは包んで返す (準備の終わりと分けるため) */
+  private async prepareAndPrewarm(trigger: "resume" | "manual-command"): Promise<{ prewarm: Promise<PrewarmOutcome> }> {
+    const outcomeOf = (prewarm: ReturnType<AgentLoop["startPrewarm"]>) => ({
+      prewarm: prewarm.status === "skipped" ? Promise.resolve(prewarm.outcome) : prewarm.done,
+    });
+    if (prewarmSkipReason(this.provider.providerType, this.history.getRawMessages()) !== null) {
+      return outcomeOf(this.startPrewarm(trigger));
+    }
+    this._aborted = false;
+    this.boundaryPrewarmTrigger = trigger;
+    let result: Awaited<ReturnType<AgentLoop["judgeBoundary"]>>;
+    try {
+      result = await this.judgeBoundary("before-prewarm");
+    } catch (e) {
+      // 判定・整理は作りの上では投げない。 投げたら黙らずに知らせ、 今の並びを先読みする
+      const message = `先読みの前のコンテキスト整理の判定に失敗しました: ${e instanceof Error ? e.message : String(e)}`;
+      console.log(chalk.red(`\n  ${message}`));
+      logger.error(`[reduction] ${message}`);
+      this.notice("error", message);
+      result = null;
+    }
+    if (this._aborted) {
+      // Esc で整理を切った。 先読みはせず、 次の依頼の始まりで判定し直す
+      this._aborted = false;
+      console.log(chalk.dim("  整理を取り消したので、 先読みもしません"));
+      return {
+        prewarm: Promise.resolve({
+          status: "aborted",
+          durationMs: 0,
+          kind: "user",
+          reason: PREWARM_ABORT_REASONS.user,
+        }),
+      };
+    }
+    // 次の依頼の始まりと同じ判定を済ませた (同じ判定を重ねると、 送った先読みの並びをすぐ書き換えて捨てうる)
+    this.requestEndSettled = true;
+    if (result !== null && !("skipped" in result) && result.ok && this.reductionPrewarm !== null) {
+      // 整理イベントが整理した後の並びを先読みした (reduction_event の先読みの欄に残る)
+      return { prewarm: this.reductionPrewarm };
+    }
+    return outcomeOf(this.startPrewarm(trigger));
   }
 
   /** 走っている先読みの終わりを待つ (表示なし。 終了処理・テスト用) */
@@ -3768,7 +3979,7 @@ export class AgentLoop {
 
   restoreSession(sessionData: SessionData, options: { restoreTerminalTranscript?: boolean } = {}): void {
     // 走っている先読みの並びは古くなるので切る (再開の先読みは呼び出し側が prewarmAfterResume で改めて送る)
-    this.prewarm.abort();
+    this.prewarm.cut(PREWARM_ABORT_REASONS.swapped);
     this.session = sessionData;
     if (this.terminalTranscriptBridge && options.restoreTerminalTranscript !== false) {
       const restored = this.terminalTranscriptBridge.restore(sessionData.terminalTranscript, sessionData.messages);
@@ -3811,6 +4022,7 @@ export class AgentLoop {
     this.history = new MessageHistory(systemPrompt);
     // 戦略 ToDo Phase 1: 新しい MessageHistory にも composer を注入
     this.history.setSystemPromptComposer((base) => this.composeQuasiSystemPrompt(base));
+    this.watchHistoryRewrites(this.history);
     // 揮発の印と思考は「借り」 として次の整理イベントで返すので、 保存・再開で失わない (docs/context-reduction-redesign.md §6.2)。
     // 状態通知 (contextNote) も戻す: 落とすと送ったときと並びが変わり、 再開の先読みがサーバに残っている前の会話の
     // キャッシュを使えず、 全部を読み直すことになる (docs/context-reduction-redesign.md §9.4)
@@ -3901,9 +4113,10 @@ export class AgentLoop {
    */
   importConversation(state: ConversationState | null): void {
     // 走っている先読みの並びは古くなるので切る
-    this.prewarm.abort();
+    this.prewarm.cut(PREWARM_ABORT_REASONS.swapped);
     if (state) {
       this.history = state.history;
+      this.watchHistoryRewrites(this.history);
       clearTodos();
       if (state.todos.length > 0) setTodosFromGoal(state.todos);
       if (state.goal) {
@@ -3926,6 +4139,7 @@ export class AgentLoop {
       );
       this.history = new MessageHistory(systemPrompt);
       this.history.setSystemPromptComposer((base) => this.composeQuasiSystemPrompt(base));
+      this.watchHistoryRewrites(this.history);
       clearTodos();
       clearGoalSlot();
       this.currentMode = "forward";
@@ -4079,6 +4293,8 @@ export class AgentLoop {
     this.evaluator.setMainProvider(this.provider, model);
     this.capability = capability;
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, model)} (${this.capability.reason})`);
+    // model は送り方の設定に入る。 先読みの並びは古くなる (§9.5)
+    this.invalidatePrewarm("model を替えたため");
   }
 
   /**
@@ -4226,6 +4442,8 @@ export class AgentLoop {
     } else {
       this.samplingParams[name] = value;
     }
+    // サンプリングの設定は送り方の設定に入る (指紋が変わる)。 先読みの並びは古くなる (§9.5)
+    this.invalidatePrewarm(`サンプリングの設定 ${name} を替えたため`);
   }
 
   getStreamingDisplay(): boolean {

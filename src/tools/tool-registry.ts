@@ -52,9 +52,21 @@ export interface ToolHandler {
 
 export class ToolRegistry {
   private tools = new Map<string, ToolHandler>();
+  /** 登録・解除の通知先 (道具の定義は送る並びの先頭に入るので、 AgentLoop が先読みを確かめる。 context-reduction-redesign.md §9.5) */
+  private changeListeners = new Set<(name: string) => void>();
+
+  /** 登録・解除の通知先を足す */
+  addChangeListener(listener: (name: string) => void): void {
+    this.changeListeners.add(listener);
+  }
+
+  private notifyChange(name: string): void {
+    for (const listener of this.changeListeners) listener(name);
+  }
 
   register(handler: ToolHandler): void {
     this.tools.set(handler.name, handler);
+    this.notifyChange(handler.name);
   }
 
   /**
@@ -62,7 +74,9 @@ export class ToolRegistry {
    * 削除できれば true、 そもそも未登録なら false。
    */
   unregister(name: string): boolean {
-    return this.tools.delete(name);
+    const removed = this.tools.delete(name);
+    if (removed) this.notifyChange(name);
+    return removed;
   }
 
   get(name: string): ToolHandler | undefined {

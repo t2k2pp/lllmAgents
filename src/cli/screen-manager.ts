@@ -253,6 +253,11 @@ export interface ScreenManager {
   updateTransientStatus(text: string): void;
   /** 一過性の状態行を消す */
   clearTransientStatus(): void;
+  /**
+   * 裏で続いている処理 (先読み) の状態行を出し続ける (null で消す)。 入力欄・スピナーの上の 1 行に、 消すまで出る
+   * (一過性の状態行と違い古くならない)。 代替画面だけ。 素通しの画面では呼び出し側が始まりと終わりの行を出す
+   */
+  setBackgroundStatus(text: string | null): void;
   /** ライブ領域を取得する。解放関数を返す */
   acquireLive(owner: LiveOwner): () => void;
   /** 今ライブ領域を持っている所有者 (いなければ undefined) */
@@ -420,6 +425,8 @@ export class ScreenManagerImpl implements ScreenManager {
   /** 代替画面で表示するスピナーの最新フレーム (ライブ領域の所有者がいないときだけ描く) */
   private statusLine = "";
   private statusAtMs = 0;
+  /** 裏で続いている処理の状態行 (setBackgroundStatus。 空なら出さない) */
+  private backgroundStatus = "";
   private outputListeners = new Set<(text: string) => void>();
   /** 端末リサイズ購読 (stop で外す) */
   private resizeHandler: (() => void) | null = null;
@@ -629,6 +636,13 @@ export class ScreenManagerImpl implements ScreenManager {
     // 最初の可視tokenは体感TTFTそのものなので、16msのframe集約へ戻さない。
     // 直前のora frameが描画予約済みでも、ここでcancelして最新本文を同期描画する。
     this.renderNow();
+  }
+
+  setBackgroundStatus(text: string | null): void {
+    const next = text ?? "";
+    if (next === this.backgroundStatus) return;
+    this.backgroundStatus = next;
+    if (this.alternate && this.started) this.scheduleRender();
   }
 
   clearTransientStatus(): void {
@@ -1099,7 +1113,12 @@ export class ScreenManagerImpl implements ScreenManager {
         pinnedHeight = 0;
       }
     }
-    return primaryHeight + pinnedHeight;
+    return this.backgroundHeight() + primaryHeight + pinnedHeight;
+  }
+
+  /** 裏の処理の状態行の高さ (排他所有中は出さない) */
+  private backgroundHeight(): number {
+    return this.backgroundStatus && !this.isExclusive() ? 1 : 0;
   }
 
   // ─── 描画 (§3.5) ─────────────────────────────────────
@@ -1176,6 +1195,12 @@ export class ScreenManagerImpl implements ScreenManager {
       }
       out += `\x1b[${reserved > 0 ? viewH + 1 : viewH};1H`;
       this.sink(out);
+      // 裏の処理 (先読み) の状態行は、 ライブ領域の先頭の 1 行に出し、 所有者にはその下から描かせる
+      const backgroundH = reserved > 0 ? this.backgroundHeight() : 0;
+      if (backgroundH > 0) {
+        this.sink(truncateAnsiToWidth(this.backgroundStatus, columns));
+        this.sink(`\x1b[${viewH + 2};1H`);
+      }
 
       let primaryHeight = 0;
       if (owner?.height) {
@@ -1200,7 +1225,7 @@ export class ScreenManagerImpl implements ScreenManager {
       }
       if (pinned?.redraw) {
         // primary status/progressの直下へcomposerの原点を固定する。
-        this.sink(`\x1b[${viewH + primaryHeight + 1};1H`);
+        this.sink(`\x1b[${viewH + backgroundH + primaryHeight + 1};1H`);
         try {
           pinned.redraw();
         } catch {

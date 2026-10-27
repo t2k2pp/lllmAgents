@@ -21,6 +21,7 @@ import { learnCommand } from "./learn.js";
 import { runControlCommand } from "./run-control.js";
 import { contextCommand } from "./context.js";
 import { compactCommand } from "./compact.js";
+import { prewarmCommand } from "./prewarm.js";
 
 const COMMANDS: ReplCommandDef[] = [
   parallelCommand,
@@ -35,6 +36,7 @@ const COMMANDS: ReplCommandDef[] = [
   runControlCommand,
   contextCommand,
   compactCommand,
+  prewarmCommand,
 ];
 
 let lookupCache: Map<string, ReplCommandDef> | null = null;

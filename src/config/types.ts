@@ -179,9 +179,18 @@ export type SummaryFailurePolicy = "continue" | "stop";
 /** context.summaryFailure の既定値 (getDefaultConfig と、 設定が無いときの読み出しの両方がこれを使う) */
 export const DEFAULT_SUMMARY_FAILURE_POLICY: SummaryFailurePolicy = "continue";
 
+/**
+ * context.prewarm.auto の既定値 (docs/context-reduction-redesign.md §9.1)。 切: 先読みは利用者の /prewarm でだけ送る。
+ * 自動 (依頼の終わりの整理・/compact・再開の後) は、 思わぬときに長い読み込みが始まり本体の読み込みと見分けられなかったため
+ * 既定を切にした (2026-10-27 利用者の判断)
+ */
+export const DEFAULT_PREWARM_AUTO = false;
+
 export interface ContextConfig {
   /** 段階 3 の要約に失敗したときの扱い。 未設定なら "continue" */
   summaryFailure?: SummaryFailurePolicy;
+  /** 先読み (§9)。 auto = 依頼の終わりの整理・/compact・再開の後に自動で送るか。 未設定なら DEFAULT_PREWARM_AUTO (切) */
+  prewarm?: { auto?: boolean };
 }
 
 /**

@@ -63,6 +63,14 @@ export interface SideCallRecord {
   /** 失敗・中断のとき、 その内容 */
   error?: string;
   /**
+   * こちらから切ったとき (options.signal が中断された)、 切った理由の種類と中身。 先読みでは
+   * 種類 user (Esc) / stale (並びが古くなった) / replaced / stop (docs/context-reduction-redesign.md §9.5)
+   */
+  abortKind?: string;
+  abortReason?: string;
+  /** 送った契機 (先読みだけ。 request-end / manual / resume / manual-command) */
+  trigger?: string;
+  /**
    * 送った並びの指紋 (本体と同じ並びを先頭に持つ先読み・要約だけ。 docs/context-reduction-redesign.md §10.2)。
    * 本体呼び出しの記録 (request) の指紋と並べて、 どこから並びがずれたかを後から見分ける
    */
@@ -72,6 +80,10 @@ export interface SideCallRecord {
 export interface SideCallOptions {
   /** 送った並びの指紋を記録に残す (本体と同じ並びを先頭に持つ先読み・要約で使う) */
   fingerprint?: boolean;
+  /** 送り方に渡した中断用の signal。 中断されたら、 その理由 (abort(reason)) を記録の abortKind・abortReason に残す */
+  signal?: AbortSignal;
+  /** 送った契機 (記録の trigger に残す。 先読みが使う) */
+  trigger?: string;
 }
 
 export interface SideCallSink {
@@ -149,6 +161,8 @@ export async function* sideCall(
       durationMs: Date.now() - startedAt,
       finishReason,
       error,
+      ...(options.trigger ? { trigger: options.trigger } : {}),
+      ...(options.signal?.aborted ? describeAbort(options.signal.reason) : {}),
       ...(fingerprint ? { fingerprint } : {}),
     });
   }
@@ -163,4 +177,14 @@ function invoke(provider: LLMProvider, request: SideCallRequest): AsyncGenerator
     case "chatWithVision":
       return provider.chatWithVision(request.params);
   }
+}
+
+/** abort(reason) の理由を記録の欄にする。 { kind, detail } (先読みの PrewarmAbortReason など) か文字列を読む */
+function describeAbort(reason: unknown): { abortKind?: string; abortReason: string } {
+  if (typeof reason === "string") return { abortReason: reason };
+  if (reason !== null && typeof reason === "object" && "detail" in reason && typeof reason.detail === "string") {
+    const kind = "kind" in reason && typeof reason.kind === "string" ? reason.kind : undefined;
+    return { ...(kind ? { abortKind: kind } : {}), abortReason: reason.detail };
+  }
+  return { abortReason: "中断" };
 }

@@ -826,11 +826,29 @@ Goal 昇格の提案 (`maybePromoteToGoal`。 REPL / Slack / Discord が `run()`
 
 ### 9.1 いつ送るか
 
-- 依頼の境目 (規則 2 の「依頼の終わり」) で整理したとき
-- `/compact` の後
-- セッションを再開したとき (再開直後はキャッシュが無い)
+原則: **先読みは、 次の本体呼び出しが先頭に持つ並びだけを送る。 捨てる並びの先読みを待つ・サーバに計算させ続ける経路を作らない**
+(§9.5。 2026-10-27 の事故 §9.8)。
+
+- **利用者の `/prewarm`** (§9.7)。 いつでも (依頼の合間に) 送れる。 使いどころ: 起動して再開した後、 席を外す前に送っておく。
+- **自動の先読み** (設定 `context.prewarm.auto`。 **既定は切**。 `/prewarm on` で入れる) が入っているときだけ、 次の後に送る:
+  - 依頼の境目 (規則 2 の「依頼の終わり」) で整理したとき
+  - `/compact` の後
+  - セッションを再開したとき (起動時の `--resume`・`/resume`・`/fork`。 再開直後はキャッシュが無い)
 
 規則 1 (作業の途中) の整理では送らない (すぐ本体を呼ぶので意味がない)。
+
+**既定を切にした理由 (2026-10-27 利用者の判断)**: 自動の先読みは思わぬとき (再開の直後など) に始まり、 数十分続くことがある。 表示も無かったので、
+利用者には本体の読み込みと見分けられなかった (§9.8)。 先読みは性能のための最適化なので、 送るかどうかは利用者が決める。 切のときは、 `/compact` と
+再開の後に 1 回だけ dim の案内「/prewarm で、 この会話を今のうちにサーバへ読み込ませておけます (次の呼び出しが速くなります)」 を出す
+(送らなかったことは `prewarm_skipped` の reason `auto-off` にも残す)。
+
+**送る前の判定 (再開・`/prewarm`)**: 先読みのあと最初に届く依頼は、 その始まりで規則 2 (「新しい依頼が届いた」) の判定を受ける。 そこで整理すると
+先読みの並びは捨てられる。 そこで再開の後と `/prewarm` は、 送る前に **同じ判定** (`judgeBoundary` と同じ測り方・予算。 P + R + G > W なら整理イベント)
+を発火の種類 `boundary:before-prewarm` (表示は「先読みの前」) で行い、 整理するなら先に整理して (`reduction_event` に記録・1 行の結果・Esc で切れる)、
+**整理した後の並びを先読みする**。 判定を済ませたので次の依頼の始まりでは判定し直さない (`requestEndSettled`)。 Esc で整理を切ったら先読みもせず、
+次の依頼の始まりで判定し直す。 整理しなかった (発火しない・見送り・失敗) ときは今の並びを先読みする。 準備 (判定と整理) が終わるまで次の依頼は
+始めない (`run()` が `prewarmPrepared()` を待つ)。 依頼の合間の `/compact` は段階 0〜3 を最後まで進めた判定なので、 成功したら同じく次の依頼の
+始まりの判定を重ねない (重ねると直後に送った先読みの並びを捨てうる)。
 
 ### 9.2 送り方
 
@@ -844,6 +862,7 @@ Goal 昇格の提案 (`maybePromoteToGoal`。 REPL / Slack / Discord が `run()`
   末尾の生成開始部分 (`<|im_start|>assistant\n<think>\n`) の手前の保存点に戻れているということで、
   先読みの並びの末尾に次の依頼を足す形でも同じく効く見込みが高い。 最終確認は次の本体呼び出しの `tokensCached` で行う。
 - 先読み中に利用者が送信したら、 本体呼び出しは先読みの終了を待ってから送る (切断するとそれまでの読み込みが無駄になる恐れ)。
+  ただし **先読みの並びがその本体呼び出しの先頭になるときだけ** 待つ。 ならない (古い) 先読みは待たずに切る (§9.5)。
   Esc での中断は先読みも切る。
 - スロットが 1 つなので、 先読み中に脇の呼び出しを送らない (送ると先読みした中身を追い出す)。
 
@@ -866,7 +885,7 @@ Goal 昇格の提案 (`maybePromoteToGoal`。 REPL / Slack / Discord が `run()`
   ツール結果で終わるので、 依頼の終わりの整理と `/compact` の後の先読みがほぼ毎回送られていなかった)
 
 送らないときは黙らない: 理由を `prewarm_skipped` の記録 (`{"type":"prewarm_skipped","trigger":"resume","reason":"not-local-server","detail":"…"}`。
-reason は `not-local-server` / `empty-history`) と動作ログ (info) に出し、 整理イベントの後なら `reduction_event` の
+reason は `not-local-server` / `empty-history` / `auto-off` (自動の先読みが切。 §9.1)) と動作ログ (info) に出し、 整理イベントの後なら `reduction_event` の
 `prewarm` 欄にも `{status:"skipped", reason, detail}` を入れる。 画面には出さない (クラウドの利用者に毎回出ると煩わしく、 害も無いため)。
 
 ### 9.4 実装 (タスク 9、 2026-10-25)
@@ -879,10 +898,12 @@ reason は `not-local-server` / `empty-history`) と動作ログ (info) に出�
 - **状態通知は付けない**: 先読みの前に `attachDynamicContext()` を呼ばない (送信済みの印も付けない)。 次の本体呼び出しは、 末尾 (assistant かツール結果) の後ろに
   利用者の発言を足し、 その発言に状態通知を付けるだけなので (`prompt-prefix-stability.md` §3.2。 末尾が assistant なら添付先は新しい発言)、
   先読みの並びがそのまま次の先頭になる。 それより前の状態通知は前の本体呼び出しで送ったもので、 そのまま残る。
-- **いつ**: `AgentLoop.runReductionEvent` が、 発火が `boundary:request-end` か `manual` で **成功した** ときだけ送る。 規則 1 (`forced`) と
-  ほかの区切り (ToDo の全部完了・Goal の達成・新しい依頼) はすぐ本体を呼ぶので送らない。 失敗・`nothing-to-reduce` は履歴が変わっていない
-  (キャッシュは元のまま) ので送らない。 再開は `AgentLoop.prewarmAfterResume()` を、 起動時の `--resume` (`index.ts`)・`/resume latest`・
-  `/resume <id>`・`/fork` (分岐元が別のセッションならサーバに無い) の後に呼ぶ。 一時停止した作業の再開 (`/run resume`、 起動時の再開確認) と
+- **いつ**: `AgentLoop.runReductionEvent` が、 発火が `boundary:before-prewarm` (再開・`/prewarm` の前の判定。 §9.1) で **成功した** とき、
+  または自動の先読みが入っていて発火が `boundary:request-end` か `manual` で **成功した** ときだけ送る (Esc で中断された後は送らない)。
+  規則 1 (`forced`) と ほかの区切り (ToDo の全部完了・Goal の達成・新しい依頼) はすぐ本体を呼ぶので送らない。 失敗・`nothing-to-reduce` は履歴が変わっていない
+  (キャッシュは元のまま) ので送らない。 再開は REPL の `prewarmAfterResume()` (中で `AgentLoop.prewarmAfterResume()`。 自動が切なら案内だけ) を、
+  起動時の `--resume` (`index.ts`)・`/resume latest`・`/resume <id>`・`/fork` (分岐元が別のセッションならサーバに無い) の後に呼ぶ。 送る前の判定と整理の間は、
+  通常の依頼と同じく Esc を受け付ける (`awaitRunContinuation`)。 一時停止した作業の再開 (`/run resume`、 起動時の再開確認) と
   チャネルの会話の載せ替え (Room) はすぐ本体を呼ぶので呼ばない。
   起動時の `--resume` は、 道具の登録が全部終わってから (`index.ts` の `repl.start()` の直前に) 送る。 `--background` / `--slack` では送らない
   (会話の出どころで道具の絞り方が変わり、 起動時の会話も Room の載せ替えで入れ替わりうるため、 次の本体呼び出しと同じ並びを作れない)。
@@ -901,24 +922,104 @@ reason は `not-local-server` / `empty-history`) と動作ログ (info) に出�
   server-aware-runtime-design.md §5.5.1。
 - **裏で走らせる**: `PrewarmRunner` (AgentLoop に 1 つ) が先読みを 1 つだけ走らせ、 すぐ返す (依頼の終わりでは `isProcessing` を戻してから
   利用者が打てる。 `/compact` もすぐ入力に戻る)。 新しい先読みを送るときは前の先読みを切り、 その終わりを待ってから送る。
-  `restoreSession` / `importConversation` は走っている先読みを切る (並びが古くなるため)。 終了時 (`index.ts` の後片付け) は `stopPrewarm()` で
+  `restoreSession` / `importConversation` は走っている先読みを切る (並びが古くなるため。 §9.5)。 終了時 (`index.ts` の後片付け) は `stopPrewarm()` で
   切って終わりを待ち、 記録を書き終えてから終わる。
-- **待ち合わせ**: 本体呼び出しは再試行ループの先頭 (規則 2・規則 1 の判定の前) で `PrewarmRunner.wait("本体の呼び出し")` を待つ。 脇の呼び出しは
+- **待ち合わせ**: 本体呼び出しは、 規則 2・規則 1 の判定と状態通知の添付を済ませ、 送り方を組み立てた直後 (送る直前) に
+  `PrewarmRunner.waitBeforeMainCall("本体の呼び出し", その指紋)` を待つ。 先読みの並びが先頭にならなければ待たずに切る (§9.5)。 脇の呼び出しは
   `sideCall()` の入口で待つ (`setSideCallGate`。 AgentLoop が生成時に登録。 意図の分類・Goal 昇格・要約・サブエージェントなど全部。
-  目的 `prewarm` は待たない)。 provider を問わず待つ (同じサーバに別の provider オブジェクトで送るものがあるため。 本体呼び出しが待った後なので
-  依頼の中では実際には待たない)。 待ち始めに dim の 1 行と `harness_notice` (info)「先読み (サーバへの会話の読み込み) が終わるのを待ってから
-  <本体の呼び出し / 脇の呼び出し (目的)> を送ります。 Esc で中断できます」 を出す。 切断はしない。 side_call の所要時間は待ち終えてから数える。
-- **中断**: `AgentLoop.abort()` (Esc) は先読みも切る。 待っていた本体呼び出しは送らず、 従来の中断 (`user_abort`) で止まる。 待ち受け中 (依頼の外) の
-  Esc は REPL が拾わないので、 先読みは最後まで走る (利用者は待たされていない)。
+  目的 `prewarm` は待たない。 ここでも先に並びを比べ、 古ければ切る)。 provider を問わず待つ (同じサーバに別の provider オブジェクトで送るものがあるため)。
+  待ち始めに `harness_notice` (info)「先読み (サーバへの会話の読み込み) が終わるのを待ってから <本体の呼び出し / 脇の呼び出し (目的)> を送ります。
+  Esc で取り消せます」 を出し、 表示 (§9.6) を「待っています」 の言い方に替える。 切断はしない。 side_call の所要時間は待ち終えてから数える。
+- **中断**: `AgentLoop.abort()` (Esc) は先読みも切る。 待っていた本体呼び出しは送らず、「(先読みを取り消し、 処理を中断しました)」 と従来の中断
+  (`user_abort`) で止まる。 待ち受け中 (依頼の外) は、 入力欄が空のときの Esc が先読みだけを取り消す (§9.6)。
 - **失敗**: 先読みの失敗 (provider のエラー) は作業を止めない。 黄色の 1 行・`harness_notice` (warn)「先読みに失敗しました (作業には影響しません。 …)」・
   動作ログの警告と、 `side_call` の `error`、 整理イベントの後なら `reduction_event.prewarm` の `{status:"failed", error}` に出す。
-- **記録**: `reduction_event.prewarm` は `{status:"done"|"failed"|"aborted", durationMs, error?}` か `{status:"skipped", reason, detail}`、
-  先読みしない発火では null。 送ったときは先読みが終わってから `reduction_event` を書く (欄を埋めるため。 画面の 1 行は整理が終わった時点で出す)。
-  再開の先読みは整理イベントではないので `side_call` (目的 prewarm) と、 送らなかったときの `prewarm_skipped` だけ。
+- **記録**: `reduction_event.prewarm` は `{status:"done"|"failed"|"aborted", durationMs, error?, kind?, reason?}` か `{status:"skipped", reason, detail}`、
+  先読みしない発火では null。 aborted の `kind` は切った理由の種類 (`user` = 利用者の Esc / `stale` = 並びが古くなった / `replaced` = 新しい先読みに替えた /
+  `stop` = 終了の前)、 `reason` はその中身。 送ったときは先読みが終わってから `reduction_event` を書く (欄を埋めるため。 画面の 1 行は整理が終わった時点で出す)。
+  先読みの `side_call` (目的 prewarm) には契機 `trigger` (`request-end` / `manual` / `resume` / `manual-command`) と、 切ったときの `abortKind`・`abortReason` が載る。
+  整理しなかった再開の先読みと `/prewarm` は整理イベントではないので `side_call` と、 送らなかったときの `prewarm_skipped` だけ。
 - 試験: `tests/agent/prewarm.test.ts` (台本 provider (種類 llamacpp) で、 依頼の終わりの整理・`/compact`・再開の 3 経路で先読みの並びが次の本体
   呼び出しの先頭と一致し、 違いが出力上限だけであること。 規則 1 では送らないこと。 送らない条件。 先読み中の送信が終わりを待つこと・待ちの 1 行。
   Esc で切れること。 先読み中に脇の呼び出しが出ないこと。 失敗が作業を止めず記録と 1 行に出ること)、
   `tests/providers/max-tokens-all-providers.test.ts` (vllm / llamacpp / lmstudio / ollama で `/chat/completions` に `max_tokens: 1`、 `n_predict` なし)。
+  2026-10-27 の追加 (§9.5〜9.7): 再開・`/prewarm` が整理してから送り先読みの並びが次の本体呼び出しの先頭になること、 次の依頼の始まりで整理し直さないこと、
+  整理を Esc で切ったら送らないこと、 書き換え (申告あり)・`/clear`・道具の登録・サンプリングと model の変更で切ること、 申告の無い書き換えでも本体呼び出しの
+  前に切って待たないこと (安全網)、 忘却だけの整理が本体呼び出しより前に切ること、 規則 2 の見送りでは切らないこと、 入力待ちの Esc が先読みだけを取り消すこと、
+  既定の切では自動で送らないこと、 `/prewarm` の断り・on/off の保存・status の表示、 表示の移り変わり。
+
+### 9.5 古い並びの先読みを切る (2026-10-27)
+
+先読みは「次の本体呼び出しの先頭になる並び」 にだけ意味がある。 並び (設定・道具の定義・messages) を変えるものは何でも先読みを無駄にするので、
+**待たずに、 その場で切る** (llama.cpp は HTTP の接続が閉じると処理を取り消すので、 サーバの計算も止まる)。 個別の経路の直しの一覧にせず、 2 段で守る:
+
+1. **安全網 (どの経路でも拾う)**: `PrewarmRunner` は送った並びの指紋 (§10.2 の `fingerprintPrompt`。 設定・道具の定義・messages の 1 件ずつ) を持つ。
+   何かが先読みを待つ前 (本体呼び出しの `waitBeforeMainCall`、 脇の呼び出しの `beforeSideCall`) に、 今の並びの指紋 (本体呼び出しは送る直前の実物、
+   脇の呼び出しは「今の時点で次の本体呼び出しが送る並び」) と比べ、 設定か道具の定義が違う、 または先読みの messages が今の messages の先頭でなければ、
+   待たずに切る (理由 `mismatch`)。 これから足す経路が知らせ忘れても、 待たされることは無い。
+2. **すぐ切る (サーバの計算を待たずに止める)**: 並びを変える操作が `AgentLoop.invalidatePrewarm(理由)` を呼び、 同じ比べ方で古ければその場で切る。
+   - `MessageHistory` の書き換えの申告 (`replaceMessages`・`updateSystemPrompt`・`clear`) は通知 (`setRewriteListener`) を出し、 AgentLoop が受けて呼ぶ
+   - `ToolRegistry` の `register` / `unregister` は通知 (`addChangeListener`) を出し、 AgentLoop が受けて呼ぶ
+   - `setModel`・`setSamplingParam` は自分で呼ぶ。 `setProvider` (送り先が替わる) と `restoreSession` / `importConversation` (会話の載せ替え) は比べずに切る
+3. **整理イベントは、 書き換えると決めた時点で切る** (`ReductionEventInput.onWillRewrite`。 差し替えの後ではない): 規則 1 (`forced`) と `/compact` (`manual`) は
+   見送らないので始まりで、 規則 2 は見込みが最低量 F に届くと決めた直後 (要約の呼び出しと段階の当てはめ・差し替えより前) に切る。 規則 2 の見送りは
+   履歴を書き換えないので、 まだ使える先読みを残す。 要約の呼び出しは切った後なので先読みを待たない。 整理の後に先読みする契機 (§9.1) なら、
+   整理した後の並びで新しく送る。
+
+経路の棚卸し (2026-10-27。 → どの段で守るか):
+
+| 並びを変える経路 | 守り方 |
+|---|---|
+| 整理イベント (規則 1・規則 2・`/compact`・先読みの前) | 3 (書き換えると決めた時点) + 2 (`replaceMessages` の申告) + 1 |
+| `/clear` (repl)・`/try` の試行ごとのリセット・チャネルの `clear`・`/handoff` | 2 (`history.clear()` の申告) + 1 |
+| `/resume`・`/fork`・起動時の `--resume`・`/run resume` (`restoreSession`) | 2 (載せ替えで切る) + 1 |
+| Room の載せ替え・新しい会話 (`importConversation`) | 2 (載せ替えで切る) + 1 |
+| system の更新 (`updateLLMProfiles`・入力圧縮 `/compress-input`・tier の変更などの `updateSystemPrompt`) | 2 (`updateSystemPrompt` の申告) + 1 |
+| 道具の定義 (`/image` の道具・`/knowledge`・`/mcp` の接続と切断・schedule の道具・サブエージェントの道具など、 `ToolRegistry` の登録と解除) | 2 (`ToolRegistry` の通知) + 1 |
+| plan モードの出入り・チャネルの道具の絞り込み (`getFilteredToolDefs` の結果が変わる) | 1 (通知は無い。 待つ前の比べで拾う) |
+| `/skills` の入切・Goal / ToDo の変化 (準システムプロンプトの合成) | 1 (状態通知は末尾に足すので通常は並びを変えない。 変えた場合は比べで拾う) |
+| model の切り替え (`/model`・`/models`・`setModel`) | 2 (`setModel`) + 1 |
+| 接続先の切り替え (`setProvider`) | 2 (比べずに切る) |
+| サンプリングの設定 (`setSamplingParam`) | 2 + 1 (設定は指紋に入る) |
+| 思考の設定 (`disableThinking`) | 1 (送り方の設定に入る。 本体呼び出しは今は使わない) |
+| 申告の無い書き換え (不具合) | 1 (`prompt-prefix-stability.md` の `prefix_break` の警告も出る) |
+
+切ったときは、 動作ログ (info)・`side_call` の `abortKind: "stale"` と `abortReason`・`PrewarmOutcome` の `kind`/`reason` に残し、 画面には終わりの 1 行
+(整理なら「会話を整理したので、 古い並びの先読みを止めました」、 ほかは「次の呼び出しで送る中身が変わったので、 古い並びの先読みを止めました (理由)」) を出す。
+
+### 9.6 表示と取り消し (2026-10-27)
+
+先読みは裏で数分〜数十分続くので、 走っている間は本体の「LLM処理中...」 と違う言い方の表示を出し続ける (`src/cli/prewarm-indicator.ts`)。
+- 代替画面: 入力欄・スピナーの上の 1 行 (`screen.setBackgroundStatus`) に「⇣ 先読み中 (次の呼び出しに備えて会話をサーバに読ませています) · 約 40.1万 トークン · 3分12秒 · Esc で取り消し」
+  を出し、 経過時間を毎秒更新する。 本体・脇の呼び出しが終わりを待つ間は「⏳ 先読みの終わりを待っています (読み終われば次の呼び出しはキャッシュを使えます) · … · Esc で取り消し」 に替える。
+- 素通しの画面・パイプ: 動く行は出さず、 始まりと終わりの行 (待ち始めたときはその 1 行も) だけを出す。
+- 終わったら表示を消し、 結果の 1 行 (「先読みが終わりました (12秒)。 …」 / 失敗は黄色の 1 行 / 取り消し・切ったときは理由) を出す。
+- 進み具合 (サーバが読み終えたトークン数) は出さず、 送る量の見込み (P) と経過時間だけを出す。 llama.cpp の読み込みの進み具合の通知はサーバの版と設定に依存し、
+  取れないときの別の取り方を重ねない (重ねると、 どの値を出しているかが分からなくなる)。
+- 取り消しは既存の Esc だけ (別の方法を足さない): 入力待ちで入力欄が空のときの Esc が先読みだけを取り消す (入力欄に文字があれば従来どおり文字を消すだけ、
+  メニューが出ていれば閉じるだけ)。 依頼の処理中・先読みを待っている間の Esc は従来どおり処理ごと中断し、 先読みも切る。 記録の種類は `user`。
+- `/prewarm status` は自動の入切・走っている先読み (契機・見込み・経過・待っているもの)・直近の結果を出す。
+- 代替画面の見た目と Esc の手触りは試験では確かめられない (端末での確認が要る)。
+
+### 9.7 `/prewarm` (2026-10-27)
+
+`src/cli/commands/prewarm.ts` (コマンドのレジストリに登録。 補完と /help はレジストリから出る)。
+- `/prewarm`: 今すぐ先読みする (契機 `manual-command`)。 §9.1 の「送る前の判定」 をして、 整理するなら先に整理する。 判定と整理の間は Esc で切れる
+  (`awaitRunContinuation`)。 先読みそのものは裏で続く。 依頼の処理中・既に先読み中・自分のサーバでない provider・履歴が空なら、 理由を示して断る。
+- `/prewarm on` / `/prewarm off`: 自動の先読みを入れる・切る。 設定 `context.prewarm.auto` に保存する (`config.json`。 スキーマで真偽値だけを受け付ける)。
+- `/prewarm status`: §9.6。
+
+### 9.8 事故の記録: 捨てる並びの先読みを 1 時間 40 分待った (2026-10-27)
+
+- 起きたこと: 大きなセッション (約 1,392 件・約 40 万トークン。 サーバは llama.cpp・n_ctx 524,288・スロット 2・Qwen3.8-27B Q8) を `--resume` で再開した。
+  1. 起動時に再開の先読みが、 整理していない履歴 (約 40 万トークン、 出力上限 1) を送った。
+  2. 最初の依頼の始まりで規則 2 (`boundary:new-request`) が整理し、 403,055 → 109,559 トークンに書き換えた (段階 0〜2 だけ、 63 ms)。
+  3. 本体呼び出しは送る前に先読みの終わりを待った。 先読みは書き換えで捨てる並びなのに、 切るものが無く、 1 時間 40 分たってもサーバは読み込みを続けていた
+     (深くなるほど読み込みは遅くなる)。 利用者には表示も無く、 本体の読み込みと見分けられなかった。
+- 原因: 先読みを送る時点で「次の本体呼び出しの先頭がこの並びになるか」 を見ていなかった (次の依頼の始まりの判定を考えていなかった)。 また、 送った後に
+  並びが変わっても先読みを切る仕組みが無く、 待つ側も並びを確かめていなかった。
+- 直し: 再開・`/prewarm` は送る前に次の依頼の始まりと同じ判定をして先に整理する (§9.1)。 古い並びの先読みは 2 段で切る (§9.5)。 表示と Esc の取り消し (§9.6)。
+  自動の先読みは既定で切にし、 `/prewarm` で送る (§9.1・§9.7)。
 
 ---
 

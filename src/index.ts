@@ -919,7 +919,8 @@ async function main(): Promise<void> {
   // 道具の定義は並びの先頭 (system の直後) に入るので、 道具の登録 (上の schedule_* が最後) が全部終わってから送る。
   // 先に送ると次の本体呼び出しと道具の並びがずれ、 先読みが効かない (2026-10-26 実機: 先読み 37,488 の後の本体呼び出しで
   // 再利用が 9,157 だけになった)。 --background / --slack は会話の出どころで道具の絞り方が変わり、 起動時の会話も載せ替えうるので送らない
-  if (resumeResolution.kind === "session") void agent.prewarmAfterResume();
+  // 自動の先読み (context.prewarm.auto) が切なら /prewarm の案内を出すだけ (§9.1)
+  if (resumeResolution.kind === "session") await repl.prewarmAfterResume();
   await repl.start();
 
   // Cleanup

@@ -2449,7 +2449,7 @@ export class REPL {
         chalk.dim(`  最新セッションを復元しました: ${latest.meta.id} (${latest.meta.messageCount} messages)`),
       );
       // 再開直後はサーバに今の会話が無いので、 利用者が打つ間に読み込ませる (docs/context-reduction-redesign.md §9)
-      void this.agent.prewarmAfterResume();
+      await this.prewarmAfterResume();
       return;
     }
 
@@ -2491,7 +2491,7 @@ export class REPL {
     console.log(
       chalk.dim(`  セッション ${chalk.cyan(sessionId)} を復元しました (${session.meta.messageCount} messages)`),
     );
-    void this.agent.prewarmAfterResume();
+    await this.prewarmAfterResume();
   }
 
   /**
@@ -4048,6 +4048,16 @@ export class REPL {
    * `/run resume`が再起動後に開始したrunにも、通常入力と同じEsc・type-ahead・busy管理を付ける。
    * これが無いとresume後のrunだけ再pauseやsteeringができず、操作契約が非対称になる。
    */
+  /**
+   * セッションを再開した後の先読み (/resume・起動時の --resume・/fork。 docs/context-reduction-redesign.md §9.4)。
+   * 自動の先読みが切なら AgentLoop が /prewarm の案内を出すだけ。 入っていれば、 送る前の判定と整理の間は
+   * 通常の依頼と同じく Esc を受け付ける (整理を切れる)。 先読みそのものは裏で続く (入力欄が空のときの Esc で取り消せる)
+   */
+  async prewarmAfterResume(): Promise<void> {
+    void this.agent.prewarmAfterResume();
+    await this.awaitRunContinuation(this.agent.prewarmPrepared());
+  }
+
   private async awaitRunContinuation(continuation: Promise<void>): Promise<void> {
     this.agentBusy = true;
     let interruptedByEsc = false;
@@ -6051,7 +6061,7 @@ export class REPL {
         saveSession(forked);
         this.agent.restoreSession(forked);
         // 分岐元の会話がサーバに無いことがある (別のセッションから分岐したとき) ので、 再開と同じく先読みする
-        void this.agent.prewarmAfterResume();
+        await this.prewarmAfterResume();
         console.log(
           chalk.dim(
             `  セッションを分岐しました: ${chalk.cyan(source.meta.id)} → ${chalk.cyan(forked.meta.id)} (${forked.meta.messageCount} messages)`,

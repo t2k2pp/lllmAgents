@@ -4,6 +4,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { sanitizeParsedConfig } from "../../src/config/config-schema.js";
+import { DEFAULT_PREWARM_AUTO } from "../../src/config/types.js";
 
 describe("sanitizeParsedConfig", () => {
   it("正しい config は無警告でそのまま通る", () => {
@@ -25,6 +26,15 @@ describe("sanitizeParsedConfig", () => {
     expect(r.warnings).toHaveLength(1);
     expect(r.warnings[0]).toContain("context.summaryFailure");
     expect(r.config).toEqual({ context: {} });
+  });
+
+  it("context.prewarm.auto は真偽値だけを受け付け、 それ以外は警告して取り除く (既定は切。 context-reduction-redesign.md §9.1)", () => {
+    expect(sanitizeParsedConfig({ context: { prewarm: { auto: true } } }).warnings).toEqual([]);
+    const r = sanitizeParsedConfig({ context: { prewarm: { auto: "yes" } } });
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]).toContain("context.prewarm");
+    expect((r.config.context as { prewarm?: { auto?: unknown } } | undefined)?.prewarm?.auto).toBeUndefined();
+    expect(DEFAULT_PREWARM_AUTO).toBe(false);
   });
 
   it("未知のトップレベルキーは黙って消さない (将来フィールドの保全)", () => {

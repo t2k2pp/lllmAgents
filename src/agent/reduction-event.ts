@@ -63,9 +63,10 @@ export type ReductionTrigger = "forced" | `boundary:${BoundaryKind}` | "manual";
 /**
  * 規則 2 の強い区切り (§4.4)。 request-end = 依頼の終わり (応答が正常に終わり、 未完了の ToDo が無く、 Goal も動いていない)、
  * todos-complete = ToDo が全部完了した、 goal-achieved = Goal を達成した、
- * new-request = 新しい依頼が届いた (前の依頼の終わりで判定していないときだけ)
+ * new-request = 新しい依頼が届いた (前の依頼の終わりで判定していないときだけ)、
+ * before-prewarm = 先読みの前 (再開の後の自動の先読み・/prewarm。 送る前に、 次の依頼の始まりと同じ判定をする。 §9.4)
  */
-export type BoundaryKind = "request-end" | "todos-complete" | "goal-achieved" | "new-request";
+export type BoundaryKind = "request-end" | "todos-complete" | "goal-achieved" | "new-request" | "before-prewarm";
 
 export type ReductionFailureReason =
   /** 段階 0〜2 の当てはめが例外を投げた (作りの誤り) */
@@ -258,6 +259,12 @@ export interface ReductionEventInput {
   summaryFailure: SummaryFailurePolicy;
   /** 要約の呼び出しを切る signal (Esc)。 中断済みなら要約の失敗を設定にかかわらず失敗にする */
   signal?: AbortSignal;
+  /**
+   * 履歴を書き換えると決めたときに 1 回呼ぶ (§9.5)。 規則 1・手動は始まりに、 規則 2 は見込みが最低量 F に届くと決めた直後
+   * (要約の呼び出しと差し替えより前) に呼ぶ。 規則 2 の見送りでは呼ばない。 AgentLoop はここで走っている先読みを切る
+   * (書き換えた後の並びは先読みの並びで始まらないので、 先読みを待つのも、 サーバに計算させ続けるのも無駄)
+   */
+  onWillRewrite?: () => void;
 }
 
 /** 忘却の記録 1 回分の本文 (§5.3 / §5.4 の行に、 見出しと読み直しの案内を付ける) */
@@ -311,6 +318,9 @@ export async function runReductionEvent(
     record.durationMs = Date.now() - startedAt;
     return { ok: false, reason, detail, record };
   };
+
+  // 規則 1・手動は見送らないので、 始まりで書き換えると決まる (規則 2 は下で見込みを確かめてから)
+  if (!isBoundaryTrigger(input.trigger)) input.onWillRewrite?.();
 
   // 1. 写しに前処理 + 段階 0〜2
   const raw = history.getRawMessages();
@@ -370,6 +380,8 @@ export async function runReductionEvent(
         },
       };
     }
+    // 見込みが F に届くので書き換える。 要約の呼び出しより前に知らせる (先読みを待たせない)
+    input.onWillRewrite?.();
   }
   if (rangeResult !== null) {
     if (!rangeResult.ok) {
@@ -691,6 +703,8 @@ export function triggerLabel(trigger: ReductionTrigger): string {
       return "Goal を達成";
     case "boundary:new-request":
       return "新しい依頼の前";
+    case "boundary:before-prewarm":
+      return "先読みの前";
     default: {
       const exhaustive: never = trigger;
       return String(exhaustive);

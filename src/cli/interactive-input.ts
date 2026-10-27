@@ -26,6 +26,7 @@ import {
 import { screen } from "./screen-manager.js";
 import { layoutInputBuffer } from "./input-layout.js";
 import { MouseKeypressFilter } from "./terminal-input.js";
+import { prewarmIndicator } from "./prewarm-indicator.js";
 
 // ─── 公開型 ─────────────────────────────────────────────
 
@@ -723,6 +724,9 @@ export class InteractiveInput {
             cursorPos = 0;
             this.historyIndex = -1;
             renderInput();
+          } else {
+            // 入力欄が空なら、 裏で走っている先読みだけを取り消す (ほかには何もしない。 context-reduction-redesign.md §9.6)
+            prewarmIndicator.cancelFromEscape();
           }
           return;
         }

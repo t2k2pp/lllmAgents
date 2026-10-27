@@ -172,6 +172,11 @@ export class MessageHistory {
    * (docs/context-reduction-redesign.md §4.1 の P)。
    */
   private revision = 0;
+  /**
+   * 送信済みの部分を書き換えたときに呼ぶ (理由つき)。 AgentLoop が走っている先読みを確かめて、 古ければその場で切る
+   * (docs/context-reduction-redesign.md §9.5)
+   */
+  private onRewrite: ((reason: string) => void) | null = null;
 
   constructor(systemPrompt: string) {
     this.systemPrompt = systemPrompt;
@@ -179,6 +184,11 @@ export class MessageHistory {
 
   setAssistantMessageCallback(cb: AssistantMessageCallback | null): void {
     this.onAssistantMessage = cb;
+  }
+
+  /** 送信済みの部分を書き換えたときの通知先を登録する (AgentLoop が履歴を作る・載せ替えるときに呼ぶ) */
+  setRewriteListener(listener: ((reason: string) => void) | null): void {
+    this.onRewrite = listener;
   }
 
   /**
@@ -366,14 +376,17 @@ export class MessageHistory {
   }
 
   updateSystemPrompt(prompt: string): void {
-    if (prompt !== this.systemPrompt) this.noteRewrite("system-prompt");
+    // 書き換えてから申告する (通知先の先読みの確かめが、 新しい並びと比べられるように)
+    const changed = prompt !== this.systemPrompt;
     this.systemPrompt = prompt;
+    if (changed) this.noteRewrite("system-prompt");
   }
 
   /** 送信済みの部分を書き換えたことを申告する (理由をためて、 書き換えの回数を進める) */
   private noteRewrite(reason: string): void {
     this.rewriteReasons.push(reason);
     this.revision++;
+    this.onRewrite?.(reason);
   }
 
   /** 送信済みの部分を書き換えた回数 (増えていれば、 その間に書き換えがあった) */

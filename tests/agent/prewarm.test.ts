@@ -14,6 +14,9 @@ import { PermissionManager } from "../../src/security/permission-manager.js";
 import { clearTodos } from "../../src/tools/definitions/todo-write.js";
 import { ToolRegistry } from "../../src/tools/tool-registry.js";
 import { clearGoal } from "../../src/agent/goal-slot.js";
+import { formatPrewarmStatusReport, prewarmCommand } from "../../src/cli/commands/prewarm.js";
+import { PrewarmIndicator, prewarmIndicator } from "../../src/cli/prewarm-indicator.js";
+import { getDefaultConfig } from "../../src/config/types.js";
 
 /**
  * 先読み (docs/context-reduction-redesign.md §9。 整理の作り直し タスク 9)。
@@ -33,10 +36,27 @@ vi.mock("../../src/agent/session-manager.js", async (importOriginal) => {
   return { ...actual, saveSession: vi.fn() };
 });
 
+/**
+ * 自動の先読み (context.prewarm.auto) の入切。 既定は切 (§9.1) だが、 自動の経路の試験は入にして回す。
+ * 設定ファイルは書かない (試験のホームは並列に走るほかの試験と共有なので、 読み出しだけを差し替える)
+ */
+const prewarmSetting = { auto: true };
+vi.mock("../../src/config/config-manager.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/config/config-manager.js")>();
+  return {
+    ...actual,
+    loadConfig: () => {
+      const config = actual.loadConfig();
+      return { ...config, context: { ...config.context, prewarm: { auto: prewarmSetting.auto } } };
+    },
+  };
+});
+
 afterEach(() => {
   clearTodos();
   clearGoal();
   vi.restoreAllMocks();
+  prewarmSetting.auto = true;
 });
 
 const W = 128_000;
@@ -367,9 +387,9 @@ describe("先読みを送る 3 経路で、 先読みの並びが次の本体呼
     // 先読み (37,488) の後の再利用が 9,157 (system と道具の途中の保存点) だけになった。 起動の流れは試験で回せないので、
     // index.ts の中の順序を確かめる
     const source = fs.readFileSync(path.join(__dirname, "../../src/index.ts"), "utf8");
-    const prewarmAt = source.indexOf("agent.prewarmAfterResume()");
+    const prewarmAt = source.indexOf("repl.prewarmAfterResume()");
     expect(prewarmAt).toBeGreaterThan(0);
-    expect(source.indexOf("agent.prewarmAfterResume()", prewarmAt + 1)).toBe(-1);
+    expect(source.indexOf("prewarmAfterResume()", prewarmAt + "repl.prewarmAfterResume()".length)).toBe(-1);
     expect(source.lastIndexOf("toolRegistry.register(")).toBeLessThan(prewarmAt);
     expect(source.indexOf("await repl.start()")).toBeGreaterThan(prewarmAt);
   });
@@ -656,6 +676,8 @@ describe("先読み中の待ち合わせ", () => {
     const loop = resumedLoop(provider);
 
     const prewarmDone = loop.prewarmAfterResume();
+    // 再開の先読みは、 送る前の判定 (次の依頼の始まりと同じ) を済ませてから送る
+    await loop.prewarmPrepared();
     const side = (async () => {
       for await (const _ of sideCall("intent", provider, {
         method: "chat",
@@ -693,5 +715,351 @@ describe("先読み中の待ち合わせ", () => {
     loop.events.on("task_complete", (e) => outcomes.push(e.outcome));
     await loop.run("次の質問です？");
     expect(outcomes).toEqual(["completed"]);
+  });
+});
+
+// ─── 古い並びの先読みを待たない・切る (§9.5。 2026-10-27 実機: 再開の先読み 約 40 万トークンを 1 時間 40 分待った) ───
+
+/** 終わった依頼に古いツール結果が 30 件ある大きな会話 (P ≈ 66,000 > 規則 2 の発火点 55,296。 段階 1 だけで F に届く) */
+function bigSession(): SessionData {
+  const session = createSession("test-model-7b");
+  const messages: Message[] = [{ role: "user", content: "たくさん調べてください" }];
+  for (let i = 0; i < 30; i++) {
+    messages.push({
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: `b${i}`, type: "function", function: { name: "probe", arguments: JSON.stringify({ i }) } }],
+    });
+    messages.push({ role: "tool", tool_call_id: `b${i}`, content: `結果${i}:${"あ".repeat(2_000)}` });
+  }
+  messages.push({ role: "assistant", content: "調べ終わりました。" });
+  session.messages = messages;
+  return session;
+}
+
+function smallSession(): SessionData {
+  const session = createSession("test-model-7b");
+  session.messages = [
+    { role: "user", content: "前の質問です" },
+    { role: "assistant", content: "前の答えです" },
+  ] as Message[];
+  return session;
+}
+
+/** 先読みの応答を止めておく provider (release で返す)。 切られたら prewarm:aborted を控える */
+function heldProvider(log: Sent[], events: string[], replies: ChatChunk[][] = [textChunks("答えです。", 5_000)]) {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const provider = scriptedProvider(replies, log, events, { holdPrewarm: () => held });
+  return { provider, release: () => release() };
+}
+
+function captureSideCalls(): Array<Record<string, unknown>> {
+  const records: Array<Record<string, unknown>> = [];
+  vi.spyOn(LLMLogger.prototype, "logSideCall").mockImplementation((r) => {
+    records.push(structuredClone(r) as unknown as Record<string, unknown>);
+  });
+  return records;
+}
+
+describe("再開の先読みは、 次の依頼の始まりと同じ判定で整理してから送る (§9.4)", () => {
+  it("規則 2 の発火点を超える会話の再開は、 先に整理し、 整理した後の並びを先読みする。 次の依頼の始まりでは整理し直さない", async () => {
+    const log: Sent[] = [];
+    const loop = makeLoop(scriptedProvider([textChunks("再開後の答えです。", 8_000)], log, []));
+    const records = captureReductionRecords();
+    loop.restoreSession(bigSession());
+
+    const outcome = await loop.prewarmAfterResume();
+    expect(outcome.status).toBe("done");
+    await tick();
+    // 整理イベントは 1 回 (先読みの前)。 先読みは整理した後の並びで 1 回だけ
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      trigger: "boundary:before-prewarm",
+      ok: true,
+      summary: { status: "not-needed" },
+    });
+    expect(records[0].prewarm).toMatchObject({ status: "done" });
+    const prewarms = log.filter((s) => s.kind === "prewarm");
+    expect(prewarms).toHaveLength(1);
+    const kept = prewarms[0].params.messages.filter((m) => String(m.content).includes("あ".repeat(2_000)));
+    expect(kept.length).toBeLessThan(30);
+
+    await loop.run("続きの質問です？");
+    // 次の依頼の始まり (new-request) では整理し直さない (先読みの並びを捨てない)
+    expect(records).toHaveLength(1);
+    const next = log.find((s) => s.kind === "main");
+    if (next === undefined) throw new Error("再開後の本体呼び出しがありません");
+    expectPrewarmIsPrefixOf(prewarms[0].params, next.params);
+  });
+
+  it("判定の途中 (整理) で Esc が押されたら先読みせず、 次の依頼の始まりで判定し直す", async () => {
+    const log: Sent[] = [];
+    const loop = makeLoop(scriptedProvider([textChunks("答えです。", 8_000)], log, []));
+    loop.restoreSession(bigSession());
+    // 要約の無い整理は一瞬で終わるので、 整理の終わりに Esc が届いた扱いにする
+    const original = loop.runReductionEvent.bind(loop);
+    vi.spyOn(loop, "runReductionEvent").mockImplementation(async (trigger, size) => {
+      loop.abort();
+      return await original(trigger, size);
+    });
+    const outcome = await loop.prewarmAfterResume();
+    expect(outcome).toMatchObject({ status: "aborted", kind: "user" });
+    await tick();
+    expect(log.filter((s) => s.kind === "prewarm")).toHaveLength(0);
+  });
+});
+
+describe("走っている先読みの並びが古くなったら、 待たずにその場で切る (§9.5)", () => {
+  async function resumedHeld(session: SessionData = smallSession()) {
+    const log: Sent[] = [];
+    const events: string[] = [];
+    const held = heldProvider(log, events);
+    const loop = makeLoop(held.provider);
+    loop.restoreSession(session);
+    const prewarm = loop.prewarmAfterResume();
+    await loop.prewarmPrepared();
+    await tick();
+    expect(events).toEqual(["prewarm:start"]);
+    return { loop, log, events, prewarm, release: held.release };
+  }
+
+  it("履歴の書き換え (申告あり) で切り、 本体呼び出しは待たない", async () => {
+    const sideCalls = captureSideCalls();
+    const { loop, log, events, prewarm } = await resumedHeld();
+    const raw = loop.getHistory().getRawMessages();
+    loop.getHistory().replaceMessages([raw[0], { role: "assistant", content: "書き換えた答えです" }], "test-rewrite");
+    expect(await prewarm).toMatchObject({ status: "aborted", kind: "stale" });
+    expect(events).toEqual(["prewarm:start", "prewarm:aborted"]);
+    // 本体は (先読みを待たずに) 送られて終わる
+    await loop.run("質問です？");
+    expect(log.filter((s) => s.kind === "main")).toHaveLength(1);
+    const record = sideCalls.find((r) => r.purpose === "prewarm");
+    expect(record).toMatchObject({ abortKind: "stale", trigger: "resume" });
+    expect(String(record?.abortReason)).toContain("test-rewrite");
+  });
+
+  it("/clear (history.clear) で切る", async () => {
+    const { loop, prewarm } = await resumedHeld();
+    loop.getHistory().clear();
+    expect(await prewarm).toMatchObject({ status: "aborted", kind: "stale" });
+  });
+
+  it("道具の登録で切る", async () => {
+    const { loop, prewarm } = await resumedHeld();
+    loop.getToolRegistry().register({
+      name: "late_tool",
+      definition: {
+        type: "function",
+        function: { name: "late_tool", description: "late", parameters: { type: "object", properties: {} } },
+      },
+      execute: async () => ({ success: true, output: "x" }),
+    });
+    expect(await prewarm).toMatchObject({ status: "aborted", kind: "stale" });
+  });
+
+  it("サンプリングの設定・model の変更で切る", async () => {
+    const a = await resumedHeld();
+    a.loop.setSamplingParam("temperature", 0.1);
+    expect(await a.prewarm).toMatchObject({ status: "aborted", kind: "stale" });
+    const b = await resumedHeld();
+    b.loop.setModel("other-model-7b");
+    expect(await b.prewarm).toMatchObject({ status: "aborted", kind: "stale" });
+  });
+
+  it("安全網: 申告の無い書き換え (知らせない経路) でも、 本体呼び出しの前に並びを比べて切り、 待たない", async () => {
+    const { loop, log, events, prewarm } = await resumedHeld();
+    // 送った並びの中身を、 書き換えの申告をせずに変える
+    loop.getHistory().getRawMessages()[1].content = "黙って変えた答えです";
+    await tick();
+    expect(events).toEqual(["prewarm:start"]);
+    await loop.run("質問です？");
+    expect(await prewarm).toMatchObject({ status: "aborted", kind: "stale" });
+    expect(events.indexOf("prewarm:aborted")).toBeGreaterThan(-1);
+    expect(events.indexOf("prewarm:aborted")).toBeLessThan(events.indexOf("main"));
+    expect(log.filter((s) => s.kind === "main")).toHaveLength(1);
+  });
+
+  it("忘却だけ (段階 0〜2・要約なし) の整理も、 書き換えると決めた時点で切る (本体呼び出しより前)", async () => {
+    const log: Sent[] = [];
+    const events: string[] = [];
+    const held = heldProvider(log, events);
+    const loop = makeLoop(held.provider);
+    const records = captureReductionRecords();
+    loop.restoreSession(bigSession());
+    // 整理する前の (大きい) 並びの先読みを走らせておく (再開の先読みは整理してから送るので、 内側から直接送る)
+    (loop as unknown as { startPrewarm(t: string): unknown }).startPrewarm("resume");
+    await tick();
+    expect(events).toEqual(["prewarm:start"]);
+    await loop.run("次の質問です？");
+    expect(records[0]).toMatchObject({ trigger: "boundary:new-request", ok: true, summary: { status: "not-needed" } });
+    expect(events.indexOf("prewarm:aborted")).toBeGreaterThan(-1);
+    expect(events.indexOf("prewarm:aborted")).toBeLessThan(events.indexOf("main"));
+  });
+
+  it("規則 2 の見送り (書き換えない) では、 まだ使える先読みを切らない", async () => {
+    const { loop, events, prewarm, release } = await resumedHeld();
+    const result = await loop.runReductionEvent("boundary:new-request");
+    expect("skipped" in result && result.skipped).toBe(true);
+    await tick();
+    expect(events).toEqual(["prewarm:start"]);
+    release();
+    expect(await prewarm).toMatchObject({ status: "done" });
+  });
+
+  it("入力待ちの Esc (prewarmIndicator.cancelFromEscape) は先読みだけを取り消し、 記録に利用者の取り消しと残す", async () => {
+    const sideCalls = captureSideCalls();
+    const { prewarm } = await resumedHeld();
+    expect(prewarmIndicator.isActive()).toBe(true);
+    expect(prewarmIndicator.cancelFromEscape()).toBe(true);
+    expect(await prewarm).toMatchObject({ status: "aborted", kind: "user" });
+    expect(prewarmIndicator.isActive()).toBe(false);
+    expect(sideCalls.find((r) => r.purpose === "prewarm")).toMatchObject({ abortKind: "user" });
+  });
+});
+
+describe("自動の先読みは既定で切、 /prewarm で頼む (§9.1)", () => {
+  it("切では、 再開・依頼の終わりの整理・/compact の後に先読みしない", async () => {
+    prewarmSetting.auto = false;
+    const log: Sent[] = [];
+    const loop = makeLoop(
+      scriptedProvider([...longRequest(70_000, BOUNDARY_PROBES), textChunks("次の答えです。", 20_000)], log, []),
+    );
+    const records = captureReductionRecords();
+    loop.restoreSession(smallSession());
+    expect(await loop.prewarmAfterResume()).toMatchObject({ status: "skipped", reason: "auto-off" });
+    await loop.run("たくさん調べてください？");
+    await loop.waitForPrewarm();
+    expect(records.at(-1)).toMatchObject({ trigger: "boundary:request-end", ok: true, prewarm: null });
+    const compact = await loop.runReductionEvent("manual");
+    await loop.waitForPrewarm();
+    expect(compact.record.prewarm).toBeNull();
+    expect(log.filter((s) => s.kind === "prewarm")).toHaveLength(0);
+  });
+
+  it("/prewarm は、 次の依頼の始まりと同じ判定で整理してから先読みし、 契機を manual-command と記録する", async () => {
+    prewarmSetting.auto = false;
+    const sideCalls = captureSideCalls();
+    const log: Sent[] = [];
+    const loop = makeLoop(scriptedProvider([textChunks("答えです。", 8_000)], log, []));
+    const records = captureReductionRecords();
+    loop.restoreSession(bigSession());
+    const started = loop.prewarmNow();
+    if (!started.ok) throw new Error(started.message);
+    await started.prepared;
+    expect(await started.prewarm).toMatchObject({ status: "done" });
+    await tick();
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ trigger: "boundary:before-prewarm", ok: true });
+    expect(sideCalls.find((r) => r.purpose === "prewarm")).toMatchObject({ trigger: "manual-command" });
+    await loop.run("続きの質問です？");
+    expect(records).toHaveLength(1);
+    const prewarm = log.find((s) => s.kind === "prewarm");
+    const next = log.find((s) => s.kind === "main");
+    if (!prewarm || !next) throw new Error("先読みか本体呼び出しがありません");
+    expectPrewarmIsPrefixOf(prewarm.params, next.params);
+  });
+
+  it("/prewarm は、 先読み中・自分のサーバでない・履歴が空なら理由を示して断る", async () => {
+    const { provider } = heldProvider([], []);
+    const loop = makeLoop(provider);
+    expect(loop.prewarmNow()).toMatchObject({ ok: false, message: expect.stringContaining("履歴が空") });
+    loop.restoreSession(smallSession());
+    const first = loop.prewarmNow();
+    expect(first.ok).toBe(true);
+    if (first.ok) await first.prepared;
+    expect(loop.prewarmNow()).toMatchObject({ ok: false, message: expect.stringContaining("既に先読み中") });
+    loop.abort();
+    const cloud = makeLoop(scriptedProvider([], [], [], { providerType: "anthropic" }));
+    cloud.restoreSession(smallSession());
+    expect(cloud.prewarmNow()).toMatchObject({ ok: false, message: expect.stringContaining("anthropic") });
+  });
+
+  it("/prewarm on / off は設定 context.prewarm.auto に保存し、 status は入切・走っている先読み・直近の結果を出す", async () => {
+    const config = getDefaultConfig();
+    const saveConfig = vi.fn();
+    const loop = makeLoop(scriptedProvider([], [], []));
+    const ctx = { agent: loop, config, saveConfig };
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    await prewarmCommand.handler(ctx, ["on"]);
+    expect(config.context?.prewarm?.auto).toBe(true);
+    await prewarmCommand.handler(ctx, ["off"]);
+    expect(config.context?.prewarm?.auto).toBe(false);
+    expect(saveConfig).toHaveBeenCalledTimes(2);
+
+    const now = 1_000_000;
+    const report = formatPrewarmStatusReport(
+      {
+        auto: false,
+        running: { trigger: "manual-command", startedAt: now - 192_000, promptTokens: 401_000, waitingFor: null },
+        last: { trigger: "resume", outcome: { status: "aborted", durationMs: 5, kind: "user" }, finishedAt: now },
+      },
+      now,
+    );
+    expect(report).toContain("自動の先読み: 切");
+    expect(report).toContain("/prewarm、 約 40.1万 トークン、 3分12秒 経過");
+    expect(report).toContain("先読みを取り消しました (Esc)");
+  });
+});
+
+describe("先読みの表示 (prewarmIndicator。 §9.6)", () => {
+  function fakeOutput(live: boolean) {
+    const calls: Array<[string, string | null]> = [];
+    return {
+      calls,
+      output: {
+        live: () => live,
+        setStatus: (text: string | null) => calls.push(["status", text]),
+        log: (line: string) => calls.push(["log", line]),
+      },
+    };
+  }
+  const status = { trigger: "resume" as const, startedAt: 0, promptTokens: 401_000, waitingFor: null };
+
+  it("代替画面: 先読み中 → 待っている → 終わり (状態行を消して 1 行)", () => {
+    const { calls, output } = fakeOutput(true);
+    const indicator = new PrewarmIndicator(output, () => 192_000);
+    indicator.begin(status);
+    expect(calls.at(-1)?.[1]).toContain(
+      "先読み中 (次の呼び出しに備えて会話をサーバに読ませています) · 約 40.1万 トークン · 3分12秒 · Esc で取り消し",
+    );
+    indicator.waiting({ ...status, waitingFor: "本体の呼び出し" });
+    expect(calls.at(-1)?.[1]).toContain("先読みの終わりを待っています");
+    indicator.end({
+      status: "aborted",
+      durationMs: 1,
+      kind: "stale",
+      reason: "会話を整理する (履歴を書き換える) と決めたため",
+    });
+    expect(calls.slice(-2)).toEqual([
+      ["status", null],
+      ["log", "会話を整理したので、 古い並びの先読みを止めました"],
+    ]);
+    expect(indicator.isActive()).toBe(false);
+  });
+
+  it("パイプ・素通しの画面: 動く行は出さず、 始まりと終わりの行だけ", () => {
+    const { calls, output } = fakeOutput(false);
+    const indicator = new PrewarmIndicator(output, () => 12_000);
+    indicator.begin(status);
+    indicator.end({ status: "done", durationMs: 12_300 });
+    const logs = calls.filter((c) => c[0] === "log").map((c) => c[1]);
+    expect(logs[0]).toContain("先読み中");
+    expect(logs[1]).toContain("先読みが終わりました (12秒)");
+    expect(calls.filter((c) => c[0] === "status" && c[1] !== null)).toHaveLength(0);
+  });
+
+  it("Esc の取り消しは、 先読みの表示が出ているときだけ取り消し関数を呼ぶ", () => {
+    const { output } = fakeOutput(true);
+    const indicator = new PrewarmIndicator(output);
+    const cancel = vi.fn(() => true);
+    indicator.setCancelHandler(cancel);
+    expect(indicator.cancelFromEscape()).toBe(false);
+    indicator.begin(status);
+    expect(indicator.cancelFromEscape()).toBe(true);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    indicator.end({ status: "aborted", durationMs: 1, kind: "user" });
   });
 });

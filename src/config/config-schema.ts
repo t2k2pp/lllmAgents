@@ -198,7 +198,12 @@ export const configSchema = z
     slack: slackSchema,
     notifications: z.object({ minDurationSec: z.number() }).partial(),
     goalSeek: z.object({ autoPropose: z.boolean() }).partial(),
-    context: z.object({ summaryFailure: z.enum(["continue", "stop"]) }).partial(),
+    context: z
+      .object({
+        summaryFailure: z.enum(["continue", "stop"]),
+        prewarm: z.object({ auto: z.boolean() }).partial(),
+      })
+      .partial(),
     search: z
       .object({
         provider: z.enum(["duckduckgo", "searxng"]),
