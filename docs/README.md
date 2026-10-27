@@ -168,7 +168,8 @@ Status の記載が無いものは `implemented`。
 
 - config の `mainLLM` / `secondLLM` / `visionLLM` と model-registry のスロットの二重管理: 「今は触らない」 と決定済み (external_design §2.6)
 - `/try` の評価役に Generator の作業ログを渡している件 (経緯を断つか): [evaluation-loop.md](evaluation-loop.md) §3.2.1
-- コンテキストの整理の実機での確認 (T2・T13): [context-reduction-redesign.md](context-reduction-redesign.md) §14.3 B
+- 次のチャットの出発点 (判断待ち 4 件・次の作業): [handover-2026-10-27-context-and-server.md](handover-2026-10-27-context-and-server.md)
+- コンテキストの整理の実機確認の結果と残り: [context-reduction-redesign.md](context-reduction-redesign.md) §15
 
 ## アーカイブ
 
