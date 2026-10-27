@@ -588,6 +588,10 @@ export class InteractiveInput {
 
       const onKeypress = (_ch: string | undefined, key?: readline.Key): void => {
         if (!key) return;
+        // 確認ダイアログ (inquirer) が画面を排他所有している間のキーは相手のもの。
+        // 同じ stdin の keypress はここにも届くので、 受け取ると確認の Enter で書きかけの
+        // 文字が送信され、 Esc で消える。 書きかけはそのまま持ち、 解放後に描き直される。
+        if (screen.isExclusive()) return;
 
         // ── ブラケット貼り付け: 開始マーカー ──
         if (key.sequence === "\x1b[200~") {

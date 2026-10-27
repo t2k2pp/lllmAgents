@@ -691,6 +691,12 @@ export class ScreenManagerImpl implements ScreenManager {
     // 塞ぎたいのは「inquirer が自分で raw にする前の一瞬」 なのでスキップしてはいけない。
     // 失敗時に幽霊ownerを残さないため、raw確認後にだけ登録する。
     this.ensureStdinRaw();
+    // 素通しモードで inquirer 等へ画面を渡すときは、 入力欄の描画を先に消しておく。
+    // 残したままだと確認の表示が入力欄の行へ続けて描かれる。 書きかけの文字は入力欄が
+    // 持ち続けており、 解放時に描き直す (docs/tui-alternate-screen.md §4.3)。
+    if (!this.alternate && !owner.redraw && !wasExclusive) {
+      (this.pinnedOwner() ?? this.softOwner())?.clear?.();
+    }
     this.owners.push(entry);
 
     if (this.alternate) {
@@ -726,6 +732,8 @@ export class ScreenManagerImpl implements ScreenManager {
         this.renderNow();
       } else {
         this.flush();
+        // 排他所有の間に消しておいた入力欄を、 書きかけの文字ごと描き直す
+        if (wasExclusive) (this.pinnedOwner() ?? this.softOwner())?.redraw?.();
       }
     };
   }

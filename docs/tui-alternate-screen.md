@@ -292,6 +292,19 @@ export const select = gate(rawSelect);   // @inquirer/prompts 系も同様にく
 **生の `inquirer` を import している箇所が 1 つも残っていないこと**を
 `grep -rn 'from "inquirer"' src/` で保証する (残っていればそこだけ画面が壊れる)。
 
+#### 処理中入力欄の書きかけを守る (2026-10-28)
+
+LLM の処理中は、 追加入力用の入力欄 (`processing-input`、 ソフト所有・pinned) が開いたままになる。
+そこへ権限確認などの `inquirer` が排他所有で重なると、 **同じ stdin の keypress が入力欄にも届く**。
+確認のために押した Enter で書きかけの文字が追加入力として送られ、 Esc では消去され、
+利用者からは「入力していた文字が消えた」 ように見えていた。
+
+1. 入力欄は `screen.isExclusive()` の間のキーをすべて無視する
+   (`src/cli/interactive-input.ts`)。 書きかけの文字・カーソル位置はそのまま持ち続ける
+2. 素通しモードでは、 排他所有が始まるときに入力欄へ `clear()` を呼んで描画を消し、
+   排他所有が解けたら退避していた出力を流したあとで `redraw()` を呼び、 書きかけごと描き直す
+   (`src/cli/screen-manager.ts` の `acquireLive`)。 代替画面では解放時の全画面再描画で足りる
+
 ### 4.4 なぜ inquirer を置き換えないのか
 
 自前のリストプロンプトを書けば所有権を完全に握れるが、

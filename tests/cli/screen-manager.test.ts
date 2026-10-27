@@ -572,6 +572,26 @@ describe("ScreenManager: ライブ領域の描画 (§3.5 / §4.2)", () => {
     expect(written).toEqual(["バックグラウンド通知\n"]);
     release();
   });
+
+  it("passthrough で確認ダイアログが来たら入力欄を消し、 終わって退避出力を流してから描き直す", () => {
+    const { screen, written } = createHarness();
+    const order: string[] = [];
+    const releaseInput = screen.acquireLive({
+      name: "processing-input",
+      redraw: () => order.push("redraw"),
+      height: () => 1,
+      clear: () => order.push("clear"),
+      pinned: true,
+    });
+    const releasePrompt = screen.acquireLive({ name: "inquirer" });
+    expect(order).toEqual(["clear"]);
+    screen.write("確認中の通知\n");
+    expect(written).toEqual([]);
+    releasePrompt();
+    expect(written).toEqual(["確認中の通知\n"]);
+    expect(order).toEqual(["clear", "redraw"]);
+    releaseInput();
+  });
 });
 
 describe("ScreenManager: 代替画面でのスピナー状態行 (§5 補足)", () => {

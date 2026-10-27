@@ -32,4 +32,33 @@ describe("InteractiveInput lifecycle", () => {
     expect(releases).toEqual(["release"]);
     expect(writes.join("")).toContain("\r\x1b[2K\r");
   });
+
+  it("確認ダイアログが画面を排他所有している間のキーは無視し、 書きかけを確認の Enter で送らない", async () => {
+    Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true });
+    vi.spyOn(screen, "isAlternate").mockReturnValue(false);
+    vi.spyOn(screen, "writeLive").mockImplementation(() => {});
+    vi.spyOn(screen, "acquireLive").mockImplementation(() => () => {});
+    const exclusive = vi.spyOn(screen, "isExclusive").mockReturnValue(false);
+
+    const pending = new InteractiveInput().question("> ", { disableMenu: true });
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    const press = (ch: string | undefined, key: { name?: string; sequence: string }): void => {
+      process.stdin.emit("keypress", ch, key);
+    };
+
+    for (const ch of "途中") press(ch, { sequence: ch });
+    exclusive.mockReturnValue(true);
+    press(undefined, { name: "down", sequence: "\x1b[B" });
+    press(undefined, { name: "escape", sequence: "\x1b" });
+    press("\r", { name: "return", sequence: "\r" });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    exclusive.mockReturnValue(false);
+    press("\r", { name: "return", sequence: "\r" });
+    expect(await pending).toBe("途中");
+  });
 });
