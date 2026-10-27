@@ -181,7 +181,16 @@ scripts/build-deploy.js の処理:
 3. src/skills/builtin/ を deploy/skills/ へコピー（ファイル実体）
 4. deploy/install.bat, install.sh, README.md を最新版で書き出し
 5. deploy/.deploy-meta.json 更新（バージョン、ビルド日時、コミット）
+6. 導入済みの exe と今回の exe の日時を並べて示し、 install スクリプトを流すか尋ねる [y/N]
 ```
+
+6 を足した理由 (2026-10-27): deploy/ を作り直しても、 普段 `localllm` で起動する導入済みの exe
+(`%LOCALAPPDATA%\localllm\` / `~/.local/bin/`) は install スクリプトを流すまで古いまま。 これに気付かず、
+2 日前の版で不具合を追い続けた実例がある。
+- 導入済みが今回の exe と同じ (大きさと更新日時が一致) なら尋ねず、 同じ版だと知らせるだけ
+- 対話できないとき (標準入出力が端末でない。 パイプ・CI) は尋ねず、 導入済みは更新していないことを 1 行で知らせる
+- y でも localllm.exe が起動中なら流さない (Windows では起動中の exe を上書きできず install.bat が失敗する)。 終了してから流すよう案内する
+- 流した install が失敗したら終了コード 1
 
 所要時間: 30〜60 秒（esbuild + SEA blob + postject がボトルネック）。
 

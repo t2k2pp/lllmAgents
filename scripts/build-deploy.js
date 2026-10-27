@@ -11,10 +11,12 @@
 //     - install.bat / install.sh
 //     - README.md (配布版)
 //  3. .deploy-meta.json を書き出し
+//  4. install スクリプトを流して導入済みの exe を更新するか尋ねる (対話できないときは知らせるだけ)
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, cpSync, rmSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { getGitBuildId } from "./git-revision.js";
 
@@ -47,23 +49,8 @@ function log(msg) {
  * --force で警告のみにできる（ユーザーが意図的に上書きしたい場合）。
  */
 function checkExeNotRunning() {
-  if (process.platform !== "win32") return;
-  const r = spawnSync("tasklist", ["/FI", "IMAGENAME eq localllm.exe", "/NH"], {
-    encoding: "utf8",
-    shell: false,
-  });
-  if (r.status !== 0) {
-    log("WARN: tasklist 実行に失敗。プロセスチェックをスキップします");
-    return;
-  }
-  const out = r.stdout ?? "";
-  if (!/localllm\.exe/i.test(out)) return; // 起動なし — OK
-
-  // 起動中: PID 抽出 (tasklist の出力は "name PID Session SessionNo MemUsage" の固定幅っぽい列)
-  const pids = out
-    .split(/\r?\n/)
-    .filter((l) => /localllm\.exe/i.test(l))
-    .map((l) => l.trim().split(/\s+/)[1] ?? "?");
+  const pids = findRunningExePids();
+  if (pids === null || pids.length === 0) return; // 調べられない (警告済み) か、 起動なし — OK
 
   const msg =
     `localllm.exe が起動中です (PID: ${pids.join(", ")})。\n` +
@@ -78,6 +65,27 @@ function checkExeNotRunning() {
     return;
   }
   throw new Error(msg);
+}
+
+/**
+ * 起動中の localllm.exe の PID (Windows のみ。 ほかの OS は exe がロックされないので空)。
+ * tasklist が失敗したら警告して null (調べられなかった)。
+ */
+function findRunningExePids() {
+  if (process.platform !== "win32") return [];
+  const r = spawnSync("tasklist", ["/FI", "IMAGENAME eq localllm.exe", "/NH"], {
+    encoding: "utf8",
+    shell: false,
+  });
+  if (r.status !== 0) {
+    log("WARN: tasklist 実行に失敗。プロセスチェックをスキップします");
+    return null;
+  }
+  // tasklist の出力は "name PID Session SessionNo MemUsage" の固定幅っぽい列
+  return (r.stdout ?? "")
+    .split(/\r?\n/)
+    .filter((l) => /localllm\.exe/i.test(l))
+    .map((l) => l.trim().split(/\s+/)[1] ?? "?");
 }
 
 function runBuildExe() {
@@ -176,9 +184,73 @@ function main() {
   log(`done (${Date.now() - start}ms)`);
 }
 
+/** install スクリプトの導入先の exe (install.bat / install.sh の INSTALL_DIR と同じ場所) */
+function installedExePath() {
+  if (process.platform === "win32") {
+    return process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "localllm", EXE_NAME) : null;
+  }
+  return process.env.HOME ? join(process.env.HOME, ".local", "bin", EXE_NAME) : null;
+}
+
+/** 大きさと更新日時が同じなら同じ版とみなす (install.bat の copy も cpSync も更新日時を保つ) */
+function sameFile(a, b) {
+  const sa = statSync(a);
+  const sb = statSync(b);
+  return sa.size === sb.size && Math.floor(sa.mtimeMs / 1000) === Math.floor(sb.mtimeMs / 1000);
+}
+
+function describeMtime(path) {
+  return path !== null && existsSync(path) ? statSync(path).mtime.toLocaleString("ja-JP") : "未導入";
+}
+
+/**
+ * deploy/ を作っただけでは、 普段起動する導入済みの exe は古いまま (2026-10-27 に古い版で動き続けた実例)。
+ * 最後に install スクリプトを流すか尋ねる。 対話できないとき (パイプ・CI) は尋ねずに知らせるだけ。
+ * @returns 終了コード (流した install が失敗したら 1)
+ */
+async function offerInstall() {
+  const installed = installedExePath();
+  const script = process.platform === "win32" ? join(DEPLOY, "install.bat") : join(DEPLOY, "install.sh");
+  log(`導入済みの ${EXE_NAME}: ${installed ?? "(場所が分かりません)"} (${describeMtime(installed)})`);
+  log(`今回ビルドした ${EXE_NAME}: ${EXE_DST} (${describeMtime(EXE_DST)})`);
+  if (installed !== null && existsSync(installed) && sameFile(installed, EXE_DST)) {
+    log("導入済みの exe は今回ビルドしたものと同じです");
+    return 0;
+  }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    log(`導入済みの exe は更新していません。 反映するには ${script} を実行してください`);
+    return 0;
+  }
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await rl.question(`${script} を実行して、 導入済みの localllm を更新しますか? [y/N] `);
+  rl.close();
+  if (!/^y(es)?$/i.test(answer.trim())) {
+    log(`実行しませんでした。 反映するには ${script} を実行してください`);
+    return 0;
+  }
+  const pids = findRunningExePids();
+  if (pids !== null && pids.length > 0) {
+    log(
+      `localllm.exe が起動中のため実行しません (PID: ${pids.join(", ")})。 ` +
+        `起動中の exe は上書きできません。 終了してから ${script} を実行してください`,
+    );
+    return 0;
+  }
+  const r =
+    process.platform === "win32"
+      ? spawnSync("cmd.exe", ["/d", "/c", script], { cwd: DEPLOY, stdio: "inherit" })
+      : spawnSync("sh", [script], { cwd: DEPLOY, stdio: "inherit" });
+  if (r.status !== 0) {
+    log(`error: ${script} が失敗しました (code ${r.status ?? r.error?.message})`);
+    return 1;
+  }
+  log(`導入済みの ${EXE_NAME} を更新しました (${describeMtime(installed)})`);
+  return 0;
+}
+
 try {
   main();
-  process.exit(0);
+  process.exit(await offerInstall());
 } catch (e) {
   console.error(`[build-deploy] error: ${e.message}`);
   process.exit(1);

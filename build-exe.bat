@@ -19,5 +19,4 @@ if errorlevel 1 (
 )
 echo.
 echo Done. deploy/localllm.exe is up to date.
-echo You can now run: sandbox\run.bat   or   deploy\install.bat
 endlocal
