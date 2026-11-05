@@ -48,7 +48,7 @@ export function detectCotToolMismatch(
   thinking: string | undefined,
   toolNames: readonly string[],
 ): CotToolMismatchResult {
-  if (!thinking || !thinking.trim() || toolNames.length === 0) {
+  if (!thinking?.trim() || toolNames.length === 0) {
     return { mismatch: false };
   }
 

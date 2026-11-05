@@ -6,6 +6,7 @@ import { isWindows, isMacOS } from "../../utils/platform.js";
 import { getActiveProcessSandbox } from "../../security/active-sandbox.js";
 import { getSandboxProxy } from "../../security/sandbox-proxy.js";
 import { isDestructiveCommand } from "../../security/destructive-commands.js";
+import { sanitizeChildEnv } from "../../security/env-sanitizer.js";
 import { loadConfig } from "../../config/config-manager.js";
 import { Utf8ChunkDecoder } from "../../utils/utf8-chunk-decoder.js";
 import type { ToolHandler, ToolResult } from "../tool-registry.js";
@@ -315,8 +316,9 @@ export const bashTool: BashToolHandler = {
       };
 
       const startMs = Date.now();
+      // 親プロセスの機密認証情報（APIキー・クラウドシークレット等）を除去した上で子プロセス環境変数を構築
       // Phase 2b-1: プロキシ経由にする場合は子プロセスへ HTTP(S)_PROXY を注入
-      const childEnv: NodeJS.ProcessEnv = { ...process.env };
+      const childEnv: NodeJS.ProcessEnv = sanitizeChildEnv(process.env);
       if (proxyPort) {
         const proxyUrl = `http://127.0.0.1:${proxyPort}`;
         childEnv.HTTP_PROXY = proxyUrl;
