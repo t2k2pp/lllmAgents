@@ -55,22 +55,17 @@ describe("Sandbox Security", () => {
 
     it("should resolve deepest existing ancestor when multiple child directories do not exist (macOS /var -> /private/var)", () => {
       const mockRealpath = vi.mocked(fs.realpathSync);
-      // File and two parent levels do not exist; 3rd ancestor (/sym/home) exists and resolves to /private/sym/home
-      mockRealpath
-        .mockImplementationOnce(() => {
-          throw new Error("ENOENT");
-        })
-        .mockImplementationOnce(() => {
-          throw new Error("ENOENT");
-        })
-        .mockImplementationOnce(() => {
-          throw new Error("ENOENT");
-        })
-        .mockReturnValueOnce("/private/sym/home" as unknown as Buffer);
+      mockRealpath.mockImplementation((p) => {
+        const s = String(p).replace(/\\/g, "/");
+        if (s.endsWith("/sym/home")) {
+          return "/private/sym/home" as unknown as Buffer;
+        }
+        throw new Error("ENOENT");
+      });
 
       const result = safeResolvePath("/sym/home/.localllm/skills/my-skill/SKILL.md");
       expect(result).toContain("private");
-      expect(result).toContain(path.join(".localllm", "skills", "my-skill", "SKILL.md"));
+      expect(result.replace(/\\/g, "/").toLowerCase()).toContain(".localllm/skills/my-skill/skill.md");
     });
 
     it("should handle non-existent parent gracefully", () => {
