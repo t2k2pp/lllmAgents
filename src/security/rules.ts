@@ -76,6 +76,29 @@ export const DANGEROUS_COMMAND_PATTERNS: SecurityRule[] = [
     action: "warn",
     message: "環境変数に認証情報を設定しています",
   },
+
+  // Cloud Instance Metadata Service (IMDS) access block (AWS/GCP/Azure/Oracle 169.254.169.254,
+  // AWS ECS 169.254.170.2, AWS IPv6 fd00:ec2::254, Alibaba Cloud 100.100.100.200, GCP/Tencent metadata hosts)
+  {
+    pattern:
+      /(?:169\.254\.(?:169\.254|170\.2)|100\.100\.100\.200|fd00:ec2::254|metadata\.google\.internal|\bmetadata\.goog\b|metadata\.tencentyun\.com)/i,
+    action: "block",
+    message: "クラウドインスタンスメタデータサービス(IMDS)へのアクセスは禁止されています",
+  },
+
+  // Unsanctioned cloud object storage exfiltration block (Alibaba Cloud OSS / ossutil)
+  {
+    pattern: /(?:\bossutil\d*\b|[a-z0-9.-]*\boss-[a-z0-9-]+\.aliyuncs\.com\b)/i,
+    action: "block",
+    message: "Alibaba Cloud OSS への直接アクセス・データ送信は禁止されています",
+  },
+
+  // Raw bash /dev/tcp or /dev/udp socket access block
+  {
+    pattern: /\/dev\/(?:tcp|udp)\//i,
+    action: "block",
+    message: "/dev/tcp または /dev/udp を用いた直接ソケット通信は禁止されています",
+  },
 ];
 
 export function checkCommand(command: string): SecurityRule | null {

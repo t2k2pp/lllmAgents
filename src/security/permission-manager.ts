@@ -139,9 +139,77 @@ function hasBroadRecursiveScan(command: string): boolean {
   return false;
 }
 
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1", "0.0.0.0"]);
+
+function isLoopbackUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+    if (parsed.username || parsed.password) return false;
+    return LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 外部通信・データ送信・DNSトンネリング・環境偵察コマンドを検出。
+ * - curl / wget / Invoke-WebRequest / Invoke-RestMethod:
+ *   ループバック (localhost / 127.0.0.1 / [::1]) への単純な GET/HEAD (開発サーバの疎通確認等) は除外し、
+ *   外部ホストへの通信・スキーム省略ホスト指定・POST/PUT/upload 等のデータ送信フラグ付き通信はすべて確認対象とする。
+ * - nc / ncat / netcat / socat / telnet / ftp / sftp / scp 等のソケット・転送ツール
+ * - dig / nslookup / host / Resolve-DnsName 等の DNS クエリコマンド (コマンド境界で判定し英単語 dig/ghost の誤検知を防ぐ)
+ * - /etc/resolv.conf / ipconfig /all / Get-DnsClientServerAddress / which curl 等のネットワーク・転送ツール偵察
+ */
+export function hasSuspiciousNetworkOrRecon(scannedCommand: string): boolean {
+  // 1. certutil による外部取得
+  if (/\bcertutil\b[^|;&\n]*\s-urlcache\b/i.test(scannedCommand)) return true;
+
+  // 2. 生ソケット・リモート転送コマンド (コマンド先頭トークン位置)
+  if (/(?:^|[|;&`\n]|\$\()\s*(?:sudo\s+)?(?:nc|ncat|netcat|socat|telnet|ftp|sftp|scp)\b/.test(scannedCommand)) {
+    return true;
+  }
+
+  // 3. DNS クエリコマンド (コマンド先頭トークン位置)
+  if (/(?:^|[|;&`\n]|\$\()\s*(?:sudo\s+)?(?:dig|nslookup|host|Resolve-DnsName)\s+\S+/i.test(scannedCommand)) {
+    return true;
+  }
+
+  // 4. DNS・ネットワーク設定読取および転送ツール有無の偵察
+  if (/\/etc\/resolv\.conf\b/.test(scannedCommand)) return true;
+  if (/\b(?:Get-DnsClientServerAddress|scutil\s+--dns|resolvectl)\b/i.test(scannedCommand)) return true;
+  if (/\bipconfig\s+\/all\b/i.test(scannedCommand)) return true;
+  if (
+    /(?:^|[|;&`\n]|\$\()\s*(?:which|where|command\s+-v|type)\s+[^|;&\n]*\b(?:curl|wget|nc|ncat|netcat|socat|dig|nslookup|host|ossutil|scp|sftp|ftp|telnet)\b/i.test(
+      scannedCommand,
+    )
+  ) {
+    return true;
+  }
+
+  // 5. curl / wget / PowerShell Web 系コマンドの検査
+  const segments = scannedCommand.split(/[|;&\n]+/);
+  const httpClientRe = /(?:^|\$\(|`)\s*(?:sudo\s+)?(?:curl|wget|Invoke-WebRequest|Invoke-RestMethod|iwr|irm)\b/i;
+  const exfilFlagRe =
+    /\s(?:-(?:d|F|T)\b|--(?:data|data-ascii|data-binary|data-raw|data-urlencode|form|form-string|upload-file|post-data|post-file)\b|(?:-X|--request|-Method)\s*(?:['"]?(?:POST|PUT|PATCH)['"]?)\b|-(?:Body|InFile)\b)/i;
+
+  for (const seg of segments) {
+    if (!httpClientRe.test(seg)) continue;
+    // データ送信・アップロードフラグがあればループバックでも確認
+    if (exfilFlagRe.test(seg)) return true;
+    // セグメント内の URL をすべて抽出し、1つ以上のループバック URL のみで構成されているか検証
+    const urls = seg.match(/https?:\/\/[^\s'"`|;&<>()]+/gi) ?? [];
+    if (urls.length === 0) return true; // スキーム省略 (curl evil.com 等) は確認
+    if (urls.some((u) => !isLoopbackUrl(u))) return true;
+  }
+
+  return false;
+}
+
 /** auto-approve されていても「都度確認」が必要な bash コマンドか判定 */
 export function bashNeedsExplicitAsk(command: string, cwd: string): boolean {
-  return referencesOutsideCwd(command, cwd) || hasBroadRecursiveScan(stripHeredocBodies(command));
+  const scanned = stripHeredocBodies(command);
+  return referencesOutsideCwd(command, cwd) || hasBroadRecursiveScan(scanned) || hasSuspiciousNetworkOrRecon(scanned);
 }
 
 export class PermissionManager {
@@ -312,6 +380,19 @@ export class PermissionManager {
     const sandboxHit = this.checkChannelSandbox(toolName, params);
     if (sandboxHit) return sandboxHit;
 
+    // 危険コマンド: block は allow ルールやセッション許可でも覆せないハードブロック、warn は確認文に併記
+    let warning = "";
+    if (toolName === "bash") {
+      const command = (params.command as string) ?? "";
+      const dangerousRule = checkCommand(command);
+      if (dangerousRule) {
+        if (dangerousRule.action === "block") {
+          return { allowed: false, reason: dangerousRule.message };
+        }
+        warning = `⚠ ${dangerousRule.message}\n`;
+      }
+    }
+
     if (ruleResult === "allow") return { allowed: true };
     // ask ルールに一致したら自動許可 (ツール全体の許可・autorun) を使わず確認へ回す
     const forceAsk = ruleResult === "ask";
@@ -331,19 +412,6 @@ export class PermissionManager {
     const cacheKey = `${source}:${toolName}:${hashParams(params)}`;
     if (this.channelSessionApprovals.has(cacheKey)) {
       return { allowed: true };
-    }
-
-    // 危険コマンド: block は拒否、 warn は確認文に併記
-    let warning = "";
-    if (toolName === "bash") {
-      const command = (params.command as string) ?? "";
-      const dangerousRule = checkCommand(command);
-      if (dangerousRule) {
-        if (dangerousRule.action === "block") {
-          return { allowed: false, reason: dangerousRule.message };
-        }
-        warning = `⚠ ${dangerousRule.message}\n`;
-      }
     }
 
     // 5.3 (R-2 権限側): 非同期面は人が15分以内に確認できず、同期ボタン確認は失効 interaction
@@ -460,6 +528,13 @@ export class PermissionManager {
     if (ruleResult === "deny") {
       return { allowed: false, reason: `ルールにより ${toolName} はブロックされました` };
     }
+
+    // 危険コマンドの block ルールは allow ルール・autorun・auto-approve のいずれでも覆せないハードブロック
+    const dangerousRule = toolName === "bash" ? checkCommand((params.command as string) ?? "") : null;
+    if (dangerousRule?.action === "block") {
+      return { allowed: false, reason: dangerousRule.message };
+    }
+
     if (ruleResult === "allow") {
       return { allowed: true };
     }
@@ -498,11 +573,11 @@ export class PermissionManager {
           return { allowed: false, reason: `パス ${filePath} はサンドボックス外です` };
         }
       }
-      // bash: auto-approve でも CWD 外参照・広域再帰スキャンは確認を挟む
+      // bash: auto-approve でも CWD 外参照・広域再帰スキャン・外部通信/偵察は確認を挟む
       if (toolName === "bash") {
         const command = (params.command as string) ?? "";
         if (bashNeedsExplicitAsk(command, process.cwd())) {
-          console.log(chalk.dim(`  [CWD外参照または広域スキャンのため auto-approve をバイパスして確認]`));
+          console.log(chalk.dim(`  [CWD外参照・広域スキャン・外部通信/偵察のため auto-approve をバイパスして確認]`));
           // fall through to ask flow
         } else {
           return { allowed: true };
@@ -523,16 +598,9 @@ export class PermissionManager {
       return { allowed: true };
     }
 
-    // Check for dangerous commands
-    if (toolName === "bash") {
-      const command = params.command as string;
-      const dangerousRule = checkCommand(command);
-      if (dangerousRule) {
-        if (dangerousRule.action === "block") {
-          return { allowed: false, reason: dangerousRule.message };
-        }
-        console.log(chalk.yellow(`\n  WARNING: ${dangerousRule.message}`));
-      }
+    // Check for dangerous commands (block は上で拒否済み、ここでは確認プロンプト前の warn を表示)
+    if (dangerousRule?.action === "warn") {
+      console.log(chalk.yellow(`\n  WARNING: ${dangerousRule.message}`));
     }
 
     // File operations: sandbox check
