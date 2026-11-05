@@ -17,6 +17,7 @@ import type { LLMProvider, ToolCall, ToolDefinition, ContentPart, Message } from
 import type { ToolRegistry, ToolResult } from "../tools/tool-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager, RequestSource } from "../security/permission-manager.js";
+import { detectCotToolMismatch } from "../security/cot-tool-guard.js";
 import type { HookManager } from "../hooks/hook-manager.js";
 import { MessageHistory, toSentMessage } from "./message-history.js";
 import { generateHandoffNote, runHandoff, type HandoffResult } from "./handoff.js";
@@ -236,7 +237,7 @@ function isGarbageResponse(text: string): boolean {
   // Mistral ネイティブツール呼び出し形式（vLLMがOpenAI形式に変換できなかった場合）
   if (t.startsWith("[TOOL_CALLS]")) return true;
   // その他の明らかなアーティファクト（短い特殊文字のみ）
-  if (t.length < 5 && /^[<>\[\]@#|{}]+$/.test(t)) return true;
+  if (t.length < 5 && /^[<>[\]@#|{}]+$/.test(t)) return true;
   return false;
 }
 
@@ -1571,7 +1572,6 @@ export class AgentLoop {
               receivedTokens = 0;
               visibleTextContent = "";
               thinkingStarted = false;
-              continue;
             } else {
               // "abort" → この発話を中止してREPLに戻る（プロセスは終了しない）
               // _aborted を立てることで /try などの呼び出し元もループを抜けられる
@@ -1823,11 +1823,34 @@ export class AgentLoop {
 
           this.history.addAssistantMessage(textContent, toolCalls, { thinking: thinkingContent });
 
-          const shouldAbort = await this.withToolBatch(toolCalls, (batch) =>
-            toolCalls.length === 1
-              ? this.executeSingleTool(toolCalls[0], batch)
-              : this.executeToolsParallel(toolCalls, batch),
+          // CoT（推論ログ）で「ツール不要」と宣言しながら実ツールを呼び出している場合は
+          // 自動承認 (auto / autorun) を停止し、このターンのツール実行を確認プロンプト（非対話面は拒否）へ強制する
+          const cotCheck = detectCotToolMismatch(
+            thinkingContent,
+            toolCalls.map((tc) => tc.function.name),
           );
+          if (cotCheck.mismatch) {
+            const reason = cotCheck.matchedPhrase ?? "no tools needed";
+            getOpsLogger().warn("security", "CoT thinking declared no tools needed, but tool calls were emitted", {
+              model: this.model,
+              matchedPhrase: reason,
+              toolNames: cotCheck.calledTools,
+            });
+            this.permissions.setCotMismatchForTurn(reason);
+          } else {
+            this.permissions.setCotMismatchForTurn(null);
+          }
+
+          let shouldAbort: boolean;
+          try {
+            shouldAbort = await this.withToolBatch(toolCalls, (batch) =>
+              toolCalls.length === 1
+                ? this.executeSingleTool(toolCalls[0], batch)
+                : this.executeToolsParallel(toolCalls, batch),
+            );
+          } finally {
+            this.permissions.setCotMismatchForTurn(null);
+          }
 
           if (shouldAbort) {
             this.recordSpanEnd("tool_abort");

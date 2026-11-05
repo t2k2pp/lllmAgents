@@ -233,10 +233,21 @@ export class PermissionManager {
   private _containmentAutoAllowNotified = false;
   // W3: 封じ込め下で bash 確認を自動許可した回数（セッションサマリ用）
   private _containmentAutoAllowCount = 0;
+  // CoT（推論ログ）で「ツール不要」と宣言しながらツールを呼び出したターンの強制確認理由
+  private _cotMismatchReason: string | null = null;
 
   /** 封じ込め下で bash 確認を自動許可した回数（W3 サマリ）。 */
   getContainmentAutoAllowCount(): number {
     return this._containmentAutoAllowCount;
+  }
+
+  /** CoT不整合ターンを設定/解除（非nullの間は INHERENTLY_SAFE 以外の自動承認を停止して確認へ回す）。 */
+  setCotMismatchForTurn(reason: string | null): void {
+    this._cotMismatchReason = reason;
+  }
+
+  getCotMismatchForTurn(): string | null {
+    return this._cotMismatchReason;
   }
 
   constructor(
@@ -306,9 +317,11 @@ export class PermissionManager {
   /**
    * CLI でのツール単位の既定レベル (引数を見ない)。 本質的に安全なツール・ツール名だけの allow ルール (CLI に効くもの)・
    * セッション中常に許可したツールは auto、 それ以外は ask。
+   * ただし CoT 不整合検出ターン中は INHERENTLY_SAFE 以外をすべて ask に降格させる。
    */
   getPermissionLevel(toolName: string): PermissionLevel {
     if (INHERENTLY_SAFE_TOOLS.has(toolName)) return "auto";
+    if (this._cotMismatchReason) return "ask";
     if (isToolAllowedByRule(this.rules, toolName, "cli")) return "auto";
     if (this.alwaysAllowTools.has(toolName)) return "auto";
     return "ask";
@@ -393,24 +406,30 @@ export class PermissionManager {
       }
     }
 
-    if (ruleResult === "allow") return { allowed: true };
-    // ask ルールに一致したら自動許可 (ツール全体の許可・autorun) を使わず確認へ回す
-    const forceAsk = ruleResult === "ask";
-
-    // 自動許可: INHERENTLY_SAFE + ツール名だけの allow ルール + チャネルセッション許可
-    const sessionAllow = this.channelSessionAllow.get(source);
-    if (
-      !forceAsk &&
-      (INHERENTLY_SAFE_TOOLS.has(toolName) ||
-        isToolAllowedByRule(this.rules, toolName, source) ||
-        sessionAllow?.has(toolName))
-    ) {
+    if (INHERENTLY_SAFE_TOOLS.has(toolName)) {
       return { allowed: true };
     }
 
-    // 「今回のみ」承認キャッシュ (同一パラメータの再実行)
+    const cotMismatch = this._cotMismatchReason;
+    if (cotMismatch) {
+      warning =
+        `⚠ [CoT不整合検出] 思考ログでは「${cotMismatch}」と推論されていますが、ツール ${toolName} が呼び出されました。\n` +
+        warning;
+    }
+
+    if (!cotMismatch && ruleResult === "allow") return { allowed: true };
+    // ask ルールに一致、または CoT 不整合検出時は自動許可 (ツール全体の許可・autorun) を使わず確認へ回す
+    const forceAsk = ruleResult === "ask" || Boolean(cotMismatch);
+
+    // 自動許可: ツール名だけの allow ルール + チャネルセッション許可
+    const sessionAllow = this.channelSessionAllow.get(source);
+    if (!forceAsk && (isToolAllowedByRule(this.rules, toolName, source) || sessionAllow?.has(toolName))) {
+      return { allowed: true };
+    }
+
+    // 「今回のみ」承認キャッシュ (同一パラメータの再実行。CoT不整合時はバイパス)
     const cacheKey = `${source}:${toolName}:${hashParams(params)}`;
-    if (this.channelSessionApprovals.has(cacheKey)) {
+    if (!forceAsk && this.channelSessionApprovals.has(cacheKey)) {
       return { allowed: true };
     }
 
@@ -444,10 +463,14 @@ export class PermissionManager {
           `${ruleHint}して明示許可してください。`,
       };
     }
-    // autorun 無効時 (または ask ルールに一致) は、 ブリッジ確認に退避する (対話可能な環境向け)。 ブリッジが無ければ拒否。
+    // autorun 無効時 (または ask ルールに一致 / CoT不整合) は、 ブリッジ確認に退避する (対話可能な環境向け)。 ブリッジが無ければ拒否。
     const bridge = getInteractionBridge(source);
     if (!bridge?.requestPermission) {
-      const why = forceAsk ? "ask ルールに一致・確認手段なし" : "autorun 無効・確認手段なし";
+      const why = cotMismatch
+        ? `CoT不整合検出 (思考「${cotMismatch}」)・確認手段なし`
+        : forceAsk
+          ? "ask ルールに一致・確認手段なし"
+          : "autorun 無効・確認手段なし";
       return {
         allowed: false,
         reason: `${label}経由では ${toolName} は許可されていません（${why}。${ruleHint}すると許可できます）`,
@@ -533,6 +556,36 @@ export class PermissionManager {
     const dangerousRule = toolName === "bash" ? checkCommand((params.command as string) ?? "") : null;
     if (dangerousRule?.action === "block") {
       return { allowed: false, reason: dangerousRule.message };
+    }
+
+    if (INHERENTLY_SAFE_TOOLS.has(toolName)) {
+      return { allowed: true };
+    }
+
+    const cotMismatch = this._cotMismatchReason;
+    if (cotMismatch) {
+      if (toolName.startsWith("file_") || toolName === "glob" || toolName === "grep") {
+        const filePath = (params.path ?? params.file_path ?? params.pattern) as string | undefined;
+        if (filePath && !this.sandbox.isPathAllowed(filePath)) {
+          return { allowed: false, reason: `パス ${filePath} はサンドボックス外です` };
+        }
+      }
+      if (toolName === "browser_screenshot" && params.save_path) {
+        const savePath = params.save_path as string;
+        if (!this.sandbox.isPathAllowed(savePath)) {
+          return { allowed: false, reason: `save_path ${savePath} はサンドボックス外です` };
+        }
+      }
+      console.log(
+        chalk.yellow(
+          `\n  ⚠ [CoT不整合検出] 思考ログでは「${cotMismatch}」と推論されていますが、ツール ${toolName} が呼び出されました。自動承認をバイパスして確認します。`,
+        ),
+      );
+      if (dangerousRule?.action === "warn") {
+        console.log(chalk.yellow(`\n  WARNING: ${dangerousRule.message}`));
+      }
+      const cacheKey = `${toolName}:${hashParams(params)}`;
+      return this.askUserWithScope(toolName, params, cacheKey);
     }
 
     if (ruleResult === "allow") {
