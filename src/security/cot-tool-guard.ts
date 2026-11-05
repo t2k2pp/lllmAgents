@@ -27,7 +27,7 @@ const NO_TOOLS_DECLARED_PATTERNS: ReadonlyArray<RegExp> = [
   /\bdon'?t\s+need\s+to\s+(?:call|use|invoke|run)\s+(?:any\s+)?tools?\b/i,
   /\b(?:i\s+)?(?:will|shall|should)\s+not\s+(?:call|use|invoke|run)\s+(?:any\s+)?tools?\b/i,
   /\ba\s+simple\s+response\s+without\s+tool\s+calls?\b/i,
-  /ツール(?:の?(?:呼び出し|使用|実行|利用))?は?(?:一切)?(?:不要|使わない|伴わない|必要ない|行わない|呼び出さない)/,
+  /ツール(?:の?(?:呼び出し|使用|実行|利用))?[はがもを]?(?:一切)?(?:不要|使わない|伴わない|必要ない|行わない|呼び出さない)/,
   /ツールを(?:一切)?(?:使わずに|用いずに|呼び出さずに|伴わずに)(?:回答|応答|返答)/,
 ];
 
