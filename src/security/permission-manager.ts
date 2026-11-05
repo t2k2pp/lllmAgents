@@ -32,7 +32,7 @@ function isComputerUseTool(toolName: string): boolean {
  * 絶対パス（Windows/Unix）や ../ を含むパスを抽出し、cwd 配下以外を指していれば true。
  */
 function referencesOutsideCwd(command: string, cwd: string): boolean {
-  const absoluteWin = /[A-Za-z]:[\\/][^\s'"`|;&<>(){}]+/g;
+  const absoluteWin = /(?<![A-Za-z])[A-Za-z]:[\\/][^\s'"`|;&<>(){}]+/g;
   const absoluteUnix = /(?<![\w.\-/])\/[\w.\-/]+/g;
   const parentRef = /\.\.[\\/][\w.\-/\\]*/g;
 
@@ -180,7 +180,7 @@ export function hasSuspiciousNetworkOrRecon(scannedCommand: string): boolean {
   if (/\b(?:Get-DnsClientServerAddress|scutil\s+--dns|resolvectl)\b/i.test(scannedCommand)) return true;
   if (/\bipconfig\s+\/all\b/i.test(scannedCommand)) return true;
   if (
-    /(?:^|[|;&`\n]|\$\()\s*(?:which|where|command\s+-v|type)\s+[^|;&\n]*\b(?:curl|wget|nc|ncat|netcat|socat|dig|nslookup|host|ossutil|scp|sftp|ftp|telnet)\b/i.test(
+    /(?:^|[|;&`\n]|\$\()\s*(?:which|where(?:\.exe)?|command\s+-v|type)\s+[^|;&\n]*\b(?:curl|wget|nc|ncat|netcat|socat|dig|nslookup|host|ossutil|scp|sftp|ftp|telnet)\b/i.test(
       scannedCommand,
     )
   ) {

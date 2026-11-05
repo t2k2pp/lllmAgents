@@ -1,7 +1,7 @@
 # ハーネス側エグレス・IMDS・偵察防止およびCoT-ツール不整合ガード設計書
 
 > **作成日**: 2026-11-05
-> **Status**: in-progress
+> **Status**: implemented
 
 ## 1. 背景と目的
 
@@ -75,8 +75,8 @@
    * モデルの `thinking` テキスト内に「ツールは不要・呼び出さない」旨の明示的宣言（例: `No tools needed`, `without calling any tools`, `ツールは不要`, `ツールの呼び出しを伴わない` 等）が含まれているにもかかわらず、同じターンで実ツール（`response_complete` 以外）が呼び出された場合を検出する。
 2. **ハーネス側の強制介入 (`PermissionManager` & `AgentLoop`)**:
    * `AgentLoop` はツールバッチ実行前に `detectCotToolMismatch(thinkingContent, toolNames)` を評価する。
-   * 不整合を検出した場合、`ops-logger` に `security` 警告を記録し、コンソールに警告を表示した上で、`PermissionManager.setForceAskForTurn(reason)` を有効化する。
-   * `forceAskForTurn` が有効な間、`PermissionManager` は `auto` や `autorun`、セッション承認キャッシュによる無確認通過を停止し、CLIではユーザーへ「思考ログとツール呼び出しの不一致」を明示した上で確認を求め、非対話面（ヘッドレス）では安全側に倒して実行を拒否する。
+   * 不整合を検出した場合、`ops-logger` に `security` 警告を記録し、コンソールに警告を表示した上で、`PermissionManager.setCotMismatchForTurn(reason)` を有効化する。
+   * `setCotMismatchForTurn` が有効な間、`PermissionManager` は `auto` や `autorun`、セッション承認キャッシュによる無確認通過を停止し、CLIではユーザーへ「思考ログとツール呼び出しの不一致」を明示した上で確認を求め、非対話面（ヘッドレス）では安全側に倒して実行を拒否する。
 
 ### 3.4 環境変数のサニタイズと機密ファイル境界の強化
 
