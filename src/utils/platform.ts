@@ -29,14 +29,21 @@ export function safeResolvePath(targetPath: string): string {
   try {
     resolved = fs.realpathSync(resolved);
   } catch {
-    // ファイルが存在しない場合: 親ディレクトリを解決して子パスを追加
-    // (新規ファイル作成時のチェック)
-    const parentDir = path.dirname(resolved);
-    const basename = path.basename(resolved);
-    try {
-      resolved = path.join(fs.realpathSync(parentDir), basename);
-    } catch {
-      // 親ディレクトリも存在しない場合は path.resolve の結果を使う
+    // ファイルや親ディレクトリが存在しない場合: 存在する最深の祖先ディレクトリまで遡って realpathSync で解決し、
+    // 残りの子パスを結合する（macOS の /var → /private/var 等で複数階層下の未作成パスでも一致させるため）
+    const tailSegments: string[] = [];
+    let current = resolved;
+    while (true) {
+      const parentDir = path.dirname(current);
+      if (parentDir === current) break;
+      tailSegments.unshift(path.basename(current));
+      current = parentDir;
+      try {
+        resolved = path.join(fs.realpathSync(current), ...tailSegments);
+        break;
+      } catch {
+        // さらに上の親ディレクトリへ遡る
+      }
     }
   }
 
