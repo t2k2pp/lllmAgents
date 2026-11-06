@@ -15,7 +15,7 @@
 
 1. `vision_analyze` が 3 回とも `model does not support image` で失敗していた（`visionLLM` 未設定・メインの LLM が画像を読めない）。**撮った絵を一度も見ずに直していた**。→ 画像を読めるモデルを `/model vision` で設定する（スキルにも「目が無ければそう報告する」と書いた）。
 2. Windows の環境に `mcp-servers.json` が無く、MCP が無かった（前に使ったのは別の環境）。→ `--install-blender`。
-3. 手順が無く、Skin モディファイアで棒をつないだ形を選んでいた（付け根が割れる）。→ スキルに「断面の並び＋ボクセルで一体にする」手本 `references/organic_loft.py` と寸法の目安を入れた。
+3. 手順が無く、Skin モディファイアで棒をつないだ形を選んでいた（付け根が割れる）。→ スキルに部品箱 `bkit.py`・手順・見本・寸法の目安・様式の手引き・手本帳を入れた（§3）。
 
 ---
 
@@ -89,13 +89,26 @@ Blender を開く前に localllm を起動しても、サーバーはつなが�
 
 ## 3. スキル `blender-modeling`
 
+方針: **手本の無い物でも作れる**ようにする。手本を増やすのではなく、どんな物も組める「部品箱」と、「調べる → 部品に分ける → 寸法の表 → 組む → 撮る → 比べる」の手順を渡す。
+うまくできた物はエージェント自身が「手本帳」に残し、次の出発点にする（使うほど作れる物が増える）。
+
 | ファイル | 中身 |
 |:---|:---|
-| `SKILL.md` | 最初の確かめ（MCP・目・出力先）／やってはいけないこと／座標の決まり／生き物の作り方の手順／見る時の問い／MCP と画面無しの進め方／報告 |
-| `references/organic_loft.py` | 断面の並び（Catmull-Rom で補う）→ 筒 → ボクセルで一体化×2・Laplacian でならす → 面を減らす → 部位ごとの色 → 5 方向を Workbench で撮る → `.blend`/`.fbx`。馬の形入り。Blender 5.2 で動作確認（約 10 秒・約 3.9 万面） |
-| `references/proportions.md` | 馬の寸法の目安・四つ足の共通・人 |
+| `SKILL.md` | 最初の確かめ（MCP・目・出力先・手本帳・様式）／調べて部品に分ける（形の種類 → 道具の表）／やってはいけないこと／座標の決まり／作って確かめる・見る時の問い／様式（ローポリ・ボクセル・トゥーン・デフォルメは頼まれた時だけ）／MCP と画面無し／報告 |
+| `references/bkit.py` | 部品箱: `loft`（断面の並び）・`fuse`（継ぎ目を溶かして 1 枚の皮。Remesh＋Corrective Smooth×2。見た目はなめらか）・`paint_by_parts`・`box`・`cylinder`・`sphere`・`prism`（XZ/YZ/XY の押し出し）・`hull`（船体・車体）・`gable_roof`/`shed_roof`（屋根。傾ける向きの計算を中に持つ）・`cut`・`mirror_x`・`repeat`・`join`・`blob`・`tube`・`flatten_bottom`・`decimate`・`lowpoly`・`voxelize`（格子の内外を調べて積み木を置く・色を引き継ぐ）・`measure`・`render_views`・`export` |
+| `references/examples/` | 見本: `creatures.py`（馬・人）・`objects.py`（机・剣・家・車・船・江戸の町家）・`nature.py`（岩・木） |
+| `references/proportions.md` | 寸法の目安（人・動物・家具・道具・乗り物・建物）。無い物は `web_search` で調べる |
+| `references/styles.md` | 様式の見分けどころ（江戸の町家・農家・武家屋敷・明治の洋館・昭和・今の住宅・ファンタジー・和と洋の城・乗り物）と bkit での作り方 |
+| `references/library.md` | 手本帳の決まり（作業フォルダの `blender-library/`〔Git に残せる〕か `~/.localllm/blender-library/`。`INDEX.md`・`build.py`・`notes.md`・絵） |
 
-手本は MCP（`execute_blender_code`）でも画面無し（`blender -b --python organic_loft.py -- <出力>`）でも動く。
+手本は MCP（`execute_blender_code` で bkit を `exec` してから呼ぶ）でも画面無し（`blender -b --python examples/<file>.py -- <出力> <種類>`）でも動く。
+
+### 動作確認（2026-11-07・Windows 11・Blender 5.2.3）
+
+- 見本 10 個（机・剣・家・車・船・町家・馬・人・岩・木）を画面無しで実行し、全部の絵を目で確認。`measure` の寸法は表どおり（人 1.72m・馬 体高 1.6m／全高 2.05m・車 4.5 × 1.8 × 1.46m など）。
+- 手本の無い物の試し: 江戸の町家を bkit だけで組んだ（格子・のれん・虫籠窓・庇・瓦の切妻）。最初は屋根の板を自分で傾けて符号を間違えた → `gable_roof`/`shed_roof` を足し、スキルに「板を自分で傾けない」と書いた。
+- 直したこと: 細い手足が波打つ（Laplacian）→ Corrective Smooth。Remesh の Blocks でボクセルにすると脚が切れる → 自前の `voxelize`。髪が額にかかる → 断面を後ろへ。
+- 見た目は「なめらかで形は読める」段階（顔・指は無い）。細部は利用者の頼みに応じてエージェントが足す。
 
 ---
 
@@ -123,4 +136,5 @@ Blender を開く前に localllm を起動しても、サーバーはつなが�
 ## 6. テスト
 
 - `tests/blender/install-blender-mcp.test.ts`: uvx・Blender の探し方（Windows/macOS/Linux）、版の読み取りと選び方、設定の置き場所、初回の版で設定を保存しない判断、`mcp-servers.json` の書き足し（他を残す・旧設定の置き換え・2 回目は変わらない・壊れた JSON を触らない）、有効化の結果の読み取り。
-- 実機: Windows 11 + Blender 5.2.3（Steam）で `organic_loft.py` を画面無しで実行し、5 方向の絵を確認。`--install-blender` の実機実行は未確認（外からパッケージを取る操作のため利用者が実行）。
+- `tests/skills/blender-modeling-skill.test.ts`: スキルを読み込める・リンク先がある・SKILL.md の挙げる関数と見本が使う関数が bkit.py にある。
+- 実機: §3 の動作確認。`--install-blender` の実機実行は未確認（外からパッケージを取る操作のため利用者が実行）。
