@@ -1946,7 +1946,7 @@ export class REPL {
       } else if (provider === "ollama" || provider === "lmstudio" || provider === "llamacpp" || provider === "vllm") {
         // ローカル系: main は handleModelSetupLocal (npm run setup と同じ流れ)、 second / vision は setupLocalSlotLLM
         if (target === "main") {
-          await this.handleModelSetupLocal();
+          await this.handleModelSetupLocal(provider);
         } else {
           await this.setupLocalSlotLLM(provider, target);
         }
@@ -3684,7 +3684,8 @@ export class REPL {
     await this.previewConnectionAfterEndpointChange(ep, listCmd);
   }
 
-  private async handleModelSetupLocal(): Promise<void> {
+  /** provider: /models Add new で選んだサーバーの種類 (履歴はその種類に絞り、 wizard で種類を聞き直さない)。 */
+  private async handleModelSetupLocal(provider?: ProviderType): Promise<void> {
     const cur = this.config.mainLLM;
     const isCloud = [
       "vertex-ai",
@@ -3698,7 +3699,9 @@ export class REPL {
     // 履歴がある場合は冒頭で選択肢を提示 (ローカル系プロバイダのみに絞る)
     const localProviders = new Set(["ollama", "lmstudio", "llamacpp", "vllm"]);
     try {
-      if (await this.maybeOfferProfileHistory("main", (p) => localProviders.has(p.endpoint.providerType))) {
+      const matches = (p: LLMRegistryEntry) =>
+        provider ? p.endpoint.providerType === provider : localProviders.has(p.endpoint.providerType);
+      if (await this.maybeOfferProfileHistory("main", matches)) {
         return;
       }
     } catch (e) {
@@ -3712,6 +3715,7 @@ export class REPL {
     try {
       const result = await runLocalLLMSetup({
         headline: "メインLLM 再設定",
+        providerType: provider,
         current: isCloud
           ? undefined
           : {

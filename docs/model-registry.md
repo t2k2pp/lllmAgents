@@ -263,6 +263,8 @@ modelRef: <registry-id> # この registry entry を直接指定 (slot バイン�
 割り当てるスロット (main / second / vision) → プロバイダ (クラウド 9 種 + ローカル 4 種) の順に選ぶ → 各プロバイダの setup 手順で endpoint を作って保存し、
 そのスロットに割り当てて実行中へ反映する (`modelsAddNew`)。 **新規追加の入口はこれだけ** (旧 `/model setup` 系は 2026-10-25 に削除)。
 ローカル系は main なら `handleModelSetupLocal` (初回 wizard と同じ流れ)、 second / vision なら `setupLocalSlotLLM` (host / port → モデル一覧から選択)。
+ここで選んだサーバーの種類は wizard に渡し、 **種類をもう一度聞かない** (`runLocalLLMSetup` の `providerType`)。 「履歴から選ぶ / 新規セットアップ」 の履歴もその種類だけに絞る。
+今の main と違う種類を選んだ時は、 今の main の URL・モデル・枠を既定値に使わない。 枠の既定は同じモデルを選び直した時だけ前の値、 別のモデルならそのモデルの上限 (2026-11-06)。
 vertex-ai は選択肢に無い (config.json で設定する)。
 
 ### 4.3 Edit ダイアログ

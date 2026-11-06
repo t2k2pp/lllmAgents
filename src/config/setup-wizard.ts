@@ -1,10 +1,17 @@
 import { inquirer, withPrompt } from "../cli/prompt-gate.js";
 import chalk from "chalk";
 import { createSpinner } from "../utils/spinner.js";
-import { Config, LLMEndpoint, ProviderType, DEFAULT_PORTS, PROVIDER_LABELS, getDefaultConfig } from "./types.js";
+import {
+  type Config,
+  type LLMEndpoint,
+  type ProviderType,
+  DEFAULT_PORTS,
+  PROVIDER_LABELS,
+  getDefaultConfig,
+} from "./types.js";
 import { saveConfig } from "./config-manager.js";
 import { createProviderByType } from "../providers/provider-factory.js";
-import type { ModelInfo } from "./types.js";
+import type { ModelInfo, SecondLLMProviderType } from "./types.js";
 import { CONTEXT_SIZE_HINT, formatContextSize, parseContextSize } from "./context-size.js";
 
 /** ローカル系プロバイダーのみを対象としたセットアップ結果 */
@@ -19,6 +26,11 @@ export interface LocalLLMSetupOptions {
   current?: Partial<Pick<LLMEndpoint, "providerType" | "baseUrl" | "model" | "contextWindow" | "description">>;
   /** 見出し表示用ラベル ("初回セットアップ" / "メインLLM 再設定" など) */
   headline?: string;
+  /**
+   * サーバーの種類が決まっている時 (/models Add new で選び済み) に渡す。 渡せば種類をもう一度聞かない。
+   * current の種類と違う時は、 current の URL・モデル・枠を既定値に使わない。
+   */
+  providerType?: ProviderType;
 }
 
 /**
@@ -93,28 +105,19 @@ export async function runLocalLLMSetup(opts: LocalLLMSetupOptions = {}): Promise
     console.log(chalk.bold(`\n  ── ${opts.headline} セットアップ ──\n`));
   }
 
-  // 1. Provider type
-  const localProviderKeys = (Object.keys(PROVIDER_LABELS) as Array<keyof typeof PROVIDER_LABELS>).filter(
-    (k) => k === "ollama" || k === "lmstudio" || k === "llamacpp" || k === "vllm",
-  ) as ProviderType[];
-
-  const { providerType } = await withPrompt(() =>
-    inquirer.prompt<{ providerType: ProviderType }>([
-      {
-        type: "list",
-        name: "providerType",
-        message: "LLMサーバーの種類を選択してください:",
-        choices: localProviderKeys.map((key) => ({
-          name: PROVIDER_LABELS[key],
-          value: key,
-        })),
-        default: opts.current?.providerType,
-      },
-    ]),
-  );
+  // 1. Provider type (呼び出し側で選び済みなら聞き直さない)
+  // 選び済みの種類が今の設定と違う時、 今の設定の URL・モデル・枠は別のサーバーの値なので既定値に使わない
+  const current =
+    opts.providerType && opts.current?.providerType && opts.current.providerType !== opts.providerType
+      ? undefined
+      : opts.current;
+  const providerType = opts.providerType ?? (await askLocalProviderType(current?.providerType));
+  if (opts.providerType) {
+    console.log(chalk.dim(`  LLMサーバーの種類: ${PROVIDER_LABELS[opts.providerType]}`));
+  }
 
   // 2. Host
-  const currentHost = parseHostPort(opts.current?.baseUrl);
+  const currentHost = parseHostPort(current?.baseUrl);
   const { host } = await withPrompt(() =>
     inquirer.prompt<{ host: string }>([
       {
@@ -160,7 +163,7 @@ export async function runLocalLLMSetup(opts: LocalLLMSetupOptions = {}): Promise
             value: m.name,
           };
         }),
-        default: opts.current?.model,
+        default: current?.model,
       },
     ]),
   );
@@ -168,8 +171,10 @@ export async function runLocalLLMSetup(opts: LocalLLMSetupOptions = {}): Promise
   const selectedModel = models.find((m) => m.name === modelName)!;
 
   // 6. Context window
+  // 前の枠を既定にするのは同じモデルを選び直した時だけ (別のモデルなら、 そのモデルの上限)
   const defaultCtx =
-    opts.current?.contextWindow ?? (selectedModel.contextLength > 0 ? selectedModel.contextLength : 4096);
+    (current?.model === modelName ? current?.contextWindow : undefined) ??
+    (selectedModel.contextLength > 0 ? selectedModel.contextLength : 4096);
   // 一覧と同じ「131K」「1M」でも入力できる (K=1,000。 解釈できない入力は既定値に置き換えず、 もう一度聞く)
   const { contextWindowText } = await withPrompt(() =>
     inquirer.prompt<{ contextWindowText: string }>([
@@ -196,7 +201,7 @@ export async function runLocalLLMSetup(opts: LocalLLMSetupOptions = {}): Promise
         type: "input",
         name: "description",
         message: "LLMの特性説明 (100〜300文字推奨、任意):",
-        default: opts.current?.description ?? "",
+        default: current?.description ?? "",
       },
     ]),
   );
@@ -212,6 +217,29 @@ export async function runLocalLLMSetup(opts: LocalLLMSetupOptions = {}): Promise
   }
 
   return { endpoint, models };
+}
+
+/** ローカル系 LLM サーバーの種類を聞く (初回 wizard など、 種類が決まっていない時)。 */
+async function askLocalProviderType(current: SecondLLMProviderType | undefined): Promise<ProviderType> {
+  const localProviderKeys = (Object.keys(PROVIDER_LABELS) as Array<keyof typeof PROVIDER_LABELS>).filter(
+    (k) => k === "ollama" || k === "lmstudio" || k === "llamacpp" || k === "vllm",
+  ) as ProviderType[];
+
+  const { providerType } = await withPrompt(() =>
+    inquirer.prompt<{ providerType: ProviderType }>([
+      {
+        type: "list",
+        name: "providerType",
+        message: "LLMサーバーの種類を選択してください:",
+        choices: localProviderKeys.map((key) => ({
+          name: PROVIDER_LABELS[key],
+          value: key,
+        })),
+        default: current,
+      },
+    ]),
+  );
+  return providerType;
 }
 
 /**
