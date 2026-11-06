@@ -312,6 +312,17 @@ LLMが自律的に呼び出すツール:
 | `browser_screenshot` | 自動 | スクリーンショット取得 |
 | `vision_analyze` | 自動 | 画像をVision LLMで分析 |
 
+### Blender（MCP）
+
+```bash
+localllm --install-blender   # アドオンを入れて有効にし、~/.localllm/mcp-servers.json に登録
+localllm --check-blender     # uvx / Blender / 登録 / Blender の待ち受け(9876) を確かめる
+```
+
+uv（`uvx`）が要ります。Blender を開いてから localllm を起動すると `mcp__blender__*` の道具が使えます。
+形づくりの手順はビルトインスキル `blender-modeling`。形を目で確かめるには画像を読めるモデル（`/model vision`）が要ります。
+設計: docs/blender-mcp-integration.md
+
 ## サブエージェント
 
 `task` ツールで専門的なサブエージェントにタスクを委譲:

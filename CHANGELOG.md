@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### 追加
+
+- `localllm --install-blender` / `--check-blender`: Blender MCP（`mcp-for-blender` 2.2.7 に固定）のアドオンを入れて有効にし、`~/.localllm/mcp-servers.json` に登録する。他の項目は残し、前のファイルは `.bak`（docs/blender-mcp-integration.md）
+- ビルトインスキル `blender-modeling`: 寸法の表 → 断面の並び＋ボクセルで一体化 → 5 方向を撮って比べる、の手順と手本スクリプト・寸法の目安
+
 ## [0.5.3] - 2026-10-22
 
 ### セキュリティ

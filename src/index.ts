@@ -125,6 +125,8 @@ Options:
                       (to override LLLMAGENT_ENABLE_* for one run, set LLLMAGENT_DISABLE_ALTERNATE_SCREEN=1 / LLLMAGENT_DISABLE_MOUSE=1)
   --install-browser   Install the browser runtime
   --check-browser     Verify the browser runtime
+  --install-blender   Install the Blender MCP add-on and register it in ~/.localllm/mcp-servers.json
+  --check-blender     Verify the Blender MCP setup (uvx / Blender / registration / port 9876)
   --computer-use      Enable native OS window capture/input for this session
   --check-computer-use Verify native Computer Use dependencies and visible windows`;
 
@@ -244,6 +246,17 @@ async function main(): Promise<void> {
   if (args.includes("--install-browser")) {
     const { installPlaywright } = await import("./browser/install-playwright.js");
     process.exit(installPlaywright());
+  }
+
+  // Blender MCP のセットアップと確認。モデル設定不要なので最初に処理。
+  // docs/blender-mcp-integration.md
+  if (args.includes("--install-blender")) {
+    const { installBlenderMcp } = await import("./blender/install-blender-mcp.js");
+    process.exit(installBlenderMcp());
+  }
+  if (args.includes("--check-blender")) {
+    const { checkBlenderMcp } = await import("./blender/install-blender-mcp.js");
+    process.exit(await checkBlenderMcp());
   }
 
   // ブラウザ機能の健全性チェック (実機検証 / ユーザーの自己診断)。

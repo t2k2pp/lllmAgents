@@ -1,231 +1,126 @@
-# Blender MCP 連携 — 改修ポイント整理
+# Blender MCP 連携
 
 > **作成日**: 2026-05-03
+> **改訂**: 2026-11-07 — 1 コマンドのセットアップ（`--install-blender` / `--check-blender`）とビルトインスキル `blender-modeling` を追加。サーバーの名前が `blender-mcp` → `mcp-for-blender` に変わったのに合わせた。
 
 ---
 
-## 結論: セットアップのみで利用可能（コード改修不要）
+## 0. 結論
 
-本アプリ（LocalLLM Agent）は汎用的な **MCP (Model Context Protocol) クライアント機構**（`src/mcp/`）を既に実装済みであり、Blender MCP サーバーは **設定ファイルの追加のみ** で接続・利用可能です。アプリケーションコードの改修は不要です。
+- アプリの MCP クライアント（`src/mcp/`）はそのまま使える。Blender MCP は `~/.localllm/mcp-servers.json` に 1 項目足せば道具が並ぶ。
+- 新しい環境でも同じ状態にできるよう、**アドオンの導入・有効化と設定の登録を `localllm --install-blender` の 1 コマンドにした**（Playwright の `--install-browser` と同じ考え）。
+- 形づくりの手順は **ビルトインスキル `blender-modeling`**（`src/skills/builtin/blender-modeling/`。Git で追跡し、`sync-skills.js` / 配布の `skills/` で `~/.localllm/skills/` に入る）。
 
----
+### 2026-11 に分かったこと（馬を作らせて粗かった件）
 
-## 1. アーキテクチャ適合性の分析
-
-### 1.1 Blender MCP の通信方式
-
-| 項目 | Blender MCP の仕様 | 本アプリの対応状況 |
-|:---|:---|:---|
-| **プロトコル** | JSON-RPC 2.0 (MCP準拠) | ✅ `MCPClient` が完全対応 |
-| **トランスポート** | stdio (`uvx blender-mcp` を子プロセスとして起動) | ✅ `connectStdio()` で対応済み |
-| **初期化フロー** | `initialize` → `notifications/initialized` → `tools/list` | ✅ `MCPClient.connect()` で実装済み |
-| **ツール呼び出し** | `tools/call` | ✅ `MCPClient.callTool()` で対応済み |
-| **ツール自動登録** | MCPサーバーが公開するツールを動的に取得 | ✅ `MCPManager.createToolHandlers()` → `ToolRegistry.register()` |
-
-### 1.2 Blender MCP が提供するツール（代表例）
-
-Blender MCP サーバーは `tools/list` で以下のようなツールを公開します:
-
-- `get_scene_info` — シーン全体の情報取得
-- `create_object` — 3Dオブジェクト作成
-- `modify_object` — オブジェクト変更
-- `delete_object` — オブジェクト削除
-- `set_material` — マテリアル適用
-- `execute_blender_code` — 任意のPythonコード実行
-- `get_polyhaven_categories` — Poly Haven アセット検索
-- `download_polyhaven_asset` — Poly Haven アセットダウンロード
-- `get_hyper3d_rodin_status` — Hyper3D 3Dモデル生成
-
-これらは自動的に `mcp__blender__get_scene_info` のようにプレフィックス付きでToolRegistryに登録され、LLMから呼び出し可能になります。
+1. `vision_analyze` が 3 回とも `model does not support image` で失敗していた（`visionLLM` 未設定・メインの LLM が画像を読めない）。**撮った絵を一度も見ずに直していた**。→ 画像を読めるモデルを `/model vision` で設定する（スキルにも「目が無ければそう報告する」と書いた）。
+2. Windows の環境に `mcp-servers.json` が無く、MCP が無かった（前に使ったのは別の環境）。→ `--install-blender`。
+3. 手順が無く、Skin モディファイアで棒をつないだ形を選んでいた（付け根が割れる）。→ スキルに「断面の並び＋ボクセルで一体にする」手本 `references/organic_loft.py` と寸法の目安を入れた。
 
 ---
 
-## 2. セットアップ手順
+## 1. しくみ
 
-### 2.1 前提条件
+| 項目 | 内容 |
+|:---|:---|
+| サーバー | `mcp-for-blender`（PyPI。旧名 `blender-mcp` は互換の殻）。`uvx` で起動する stdio の MCP サーバー |
+| アドオン | 同じパッケージに同梱（`install-addon`）。Blender を開くと 9876 番で自動で待ち受ける（Auto-Start が既定で ON） |
+| 通信 | localllm ⇄(stdio)⇄ サーバー ⇄(TCP 9876)⇄ Blender のアドオン |
+| 版 | サーバーとアドオンの通信の版が合う必要があるので **版を固定**（`MCP_FOR_BLENDER_VERSION`。現行 2.2.7）。上げる時は定数を変えて `--install-blender` をやり直す |
+| 道具（2.2.7） | `get_addon_status`・`get_scene_info`・`execute_blender_code`・`look`（画面を撮る）・`viewport_capture`・`search_assets`/`import_asset`/`generate_3d`（外のサービス）ほか。`mcp__blender__<道具>` で登録される |
+| 絵 | MCP の画像は `renderMcpResult()` が一時ファイルに保存し、場所を返す → `vision_analyze` で見る |
 
-- **Blender 3.0以上** がインストール済みであること
-- **Python 3.10以上** がインストール済みであること
-- **uv パッケージマネージャー** がインストール済みであること
+---
 
-```bash
-# macOS
-brew install uv
-```
+## 2. セットアップ
 
-### 2.2 Blender アドオンのインストール
+### 2.1 前提
 
-1. [blender-mcp リポジトリ](https://github.com/ahujasid/blender-mcp) から `addon.py` をダウンロード
-2. Blender を起動
-3. **Edit > Preferences > Add-ons** を開く
-4. **Install...** をクリックし、ダウンロードした `addon.py` を選択
-5. **Interface: Blender MCP** の横のチェックボックスを有効化
+- Blender（4.2 以降を推奨。5.2 で確認）
+- uv（`uvx`）
+  - Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+  - macOS: `brew install uv`（または `curl -LsSf https://astral.sh/uv/install.sh | sh`）
 
-### 2.3 MCP サーバー設定ファイルの作成
+### 2.2 `localllm --install-blender`（`src/blender/install-blender-mcp.ts`）
 
-以下の **いずれか** のパスに `mcp-servers.json` を配置します（読み込み優先度順）:
+1. `uvx` を探す（PATH・`~/.local/bin`・`~/.cargo/bin`・macOS は Homebrew）。無ければ入れ方を表示して終わる。
+2. Blender を探す（`LOCALLLM_BLENDER`・PATH・`Program Files\Blender Foundation\Blender*`・Steam・`/Applications/Blender*.app`・Linux の定番）。`--version` で版を読み、一番新しい物を使う。
+3. `uvx mcp-for-blender@<版> install-addon --addons-dir <設定>/<版>/scripts/addons` でアドオンを置く。
+4. Blender を画面無しで起動し、アドオンを有効にして設定を保存する。次の時は飛ばして手作業を案内する:
+   - Blender が開いている（開いたままだと保存した設定が上書きされる）
+   - その版をまだ一度も開いておらず、他の版がある（初回の「設定を引き継ぐか」の問いを消さないため）
+5. `~/.localllm/mcp-servers.json` に `blender` を足す（他の項目は残す・前のファイルは `.bak`・読めない JSON は触らない）。
+   既に `blender` があれば、利用者が決める `permissionLevel`・`disabled`・`env` の追加分は残す。
 
-| 優先度 | パス | 用途 |
-|:---:|:---|:---|
-| 1 | `~/.localllm/mcp-servers.json` | ユーザーグローバル（推奨） |
-| 2 | `{プロジェクト}/.localllm/mcp-servers.json` | プロジェクト固有 |
-| 3 | `{プロジェクト}/.claude/mcp-servers.json` | Claude Code 互換 |
-
-#### 基本設定（推奨）
+登録される項目:
 
 ```json
 {
   "mcpServers": {
     "blender": {
-      "command": "uvx",
-      "args": ["blender-mcp"],
-      "transport": "stdio"
-    }
-  }
-}
-```
-
-#### テレメトリ無効化設定
-
-```json
-{
-  "mcpServers": {
-    "blender": {
-      "command": "uvx",
-      "args": ["blender-mcp"],
+      "name": "blender",
       "transport": "stdio",
-      "env": {
-        "DISABLE_TELEMETRY": "true"
-      }
-    }
-  }
-}
-```
-
-#### リモートBlender接続設定
-
-Blenderが別マシンで動作している場合:
-
-```json
-{
-  "mcpServers": {
-    "blender": {
-      "command": "uvx",
-      "args": ["blender-mcp"],
-      "transport": "stdio",
-      "env": {
-        "BLENDER_HOST": "192.168.1.100",
-        "BLENDER_PORT": "9876"
-      }
-    }
-  }
-}
-```
-
-### 2.4 使用開始
-
-1. **Blender** を起動し、サイドバー（Nキー）の **BlenderMCP** タブで **Connect to Claude** をクリック
-2. **LocalLLM Agent** を起動（`npm run start`）
-3. 起動ログに `✓ MCP: blender (N tools)` と表示されれば接続成功
-4. 自然言語で3Dモデリング指示を行う
-
----
-
-## 3. セキュリティに関する注意事項
-
-**⚠️ 重要**: Blender MCP の `execute_blender_code` ツールは **Blender内で任意のPythonコードを実行** します。
-本アプリの `PermissionManager` による権限確認が適用されるため、初回実行時にユーザー承認が求められますが、
-`security.rules.allow` に追加した場合 (例: `execute_blender_code`) は無確認で実行されるため注意が必要です。
-
-### 推奨セキュリティ設定
-
-MCPツールに対する権限レベルを `mcp-servers.json` 内で制御できます:
-
-```json
-{
-  "mcpServers": {
-    "blender": {
-      "command": "uvx",
-      "args": ["blender-mcp"],
-      "transport": "stdio",
+      "command": "C:\\Users\\<you>\\.local\\bin\\uvx.exe",
+      "args": ["mcp-for-blender@2.2.7"],
+      "env": { "DISABLE_TELEMETRY": "true" },
       "permissionLevel": "ask"
     }
   }
 }
 ```
 
-- `"ask"` (デフォルト): 毎回ユーザー確認を求める
-- `"auto"`: 自動許可（信頼できる環境のみ推奨）
+- `command` は `uvx` の絶対パス（GUI やサービスから起動されて PATH が違っても動くように）。
+- `permissionLevel: "ask"`: `execute_blender_code` は Blender の中で任意の Python を動かすので確認を出す。セッション中ずっと許すのは権限の確認で `2`。
+- 戻り値: 0 = 全部済んだ / 1 = 手作業が残った（表示どおりにする）。
+
+### 2.3 `localllm --check-blender`
+
+uvx・Blender・`mcp-servers.json` の登録・9876 番の待ち受け を OK/NG で表示する（0 = 全部 OK）。
+
+### 2.4 使い始める
+
+1. Blender を開く（アドオンが自動で待ち受ける。止まっていたら N キーのサイドバー「MCP for Blender」で Start）。
+2. localllm を起動（起動し直す）。`/mcp` で `blender` がつながっているか見られる。
+3. 「Blender で〇〇を作って」→ スキル `blender-modeling` が使われる。
+
+Blender を開く前に localllm を起動しても、サーバーはつながる（道具の呼び出しが失敗するだけ）。スキルは失敗したら Blender を開いてやり直すよう指示している。
 
 ---
 
-## 4. コード改修が不要である根拠
+## 3. スキル `blender-modeling`
 
-| 機能 | 実装箇所 | 対応状況 |
-|:---|:---|:---|
-| MCP設定ファイルの読み込み | `MCPManager.loadConfig()` | ✅ 3つのパスから自動検索 |
-| stdio子プロセスの起動・管理 | `MCPClient.connectStdio()` | ✅ `spawn()` + stdin/stdout管理 |
-| JSON-RPC 2.0 通信 | `MCPClient.sendRequest()` | ✅ リクエスト/レスポンスの非同期管理 |
-| ツールの動的発見・登録 | `MCPManager.connectAll()` | ✅ `tools/list` → ToolHandler変換 → ToolRegistry登録 |
-| ツール名の名前空間分離 | `mcpToolName()` | ✅ `mcp__blender__<tool>` 形式 |
-| 権限管理との統合 | `PermissionManager` | ✅ MCPツールにも同一ポリシー適用 |
-| フックとの統合 | `HookManager` | ✅ MCPツールにも PreToolUse/PostToolUse 適用 |
-| タイムアウト | `REQUEST_TIMEOUT_MS` | ✅ 5分（長時間の3D処理にも対応可能） |
-| コンテンツブロック処理 | `extractText()` | ✅ text/image/resource 型対応 |
-| クリーンアップ | `MCPManager.disconnectAll()` | ✅ 終了時に子プロセス SIGTERM → SIGKILL |
-
----
-
-## 5. Skillで拡張する場合（オプション）
-
-Blender操作のワークフローを定型化したい場合、**Skill**を作成して効率化できます。ただし、これは必須ではなくオプションです。
-
-### 例: Blender 3Dシーン作成スキル
-
-`.localllm/skills/blender-scene.md`:
-
-```markdown
----
-name: blender-scene
-description: Blender 3Dシーン作成ワークフロー
-trigger: /blender-scene
----
-# Blender 3D シーン作成
-
-## When to Use
-ユーザーが Blender で3Dシーンを作成したいとき
-
-## How It Works
-1. `mcp__blender__get_scene_info` で現在のシーン情報を確認
-2. ユーザーの要望に基づきオブジェクトを作成・配置
-3. マテリアルを適用
-4. ライティングとカメラの設定
-5. 完成したシーンの情報をユーザーに報告
-
-## Rules
-- 既存のオブジェクトを削除する前に必ずユーザーに確認する
-- 複雑な操作は `execute_blender_code` ではなく個別ツールを優先使用する
-- Poly Haven のアセットが利用可能な場合は積極的に提案する
-```
-
----
-
-## 6. トラブルシューティング
-
-| 症状 | 対処法 |
+| ファイル | 中身 |
 |:---|:---|
-| `⚠ MCP: blender 接続失敗` | `uv` がインストール済みか確認: `which uvx` |
-| ツール呼び出しでタイムアウト | Blender側のアドオンが **Connect to Claude** されているか確認 |
-| `Connection refused` | BlenderのソケットサーバーがポートL9876でlistenしているか確認 |
-| 起動時にMCPツールが0個 | Blenderアドオンが未起動の場合、サーバー起動成功でもツール0個になることがある。Blender側で接続後にアプリを再起動 |
+| `SKILL.md` | 最初の確かめ（MCP・目・出力先）／やってはいけないこと／座標の決まり／生き物の作り方の手順／見る時の問い／MCP と画面無しの進め方／報告 |
+| `references/organic_loft.py` | 断面の並び（Catmull-Rom で補う）→ 筒 → ボクセルで一体化×2・Laplacian でならす → 面を減らす → 部位ごとの色 → 5 方向を Workbench で撮る → `.blend`/`.fbx`。馬の形入り。Blender 5.2 で動作確認（約 10 秒・約 3.9 万面） |
+| `references/proportions.md` | 馬の寸法の目安・四つ足の共通・人 |
+
+手本は MCP（`execute_blender_code`）でも画面無し（`blender -b --python organic_loft.py -- <出力>`）でも動く。
 
 ---
 
-## 7. まとめ
+## 4. セキュリティ
 
-| 項目 | 結論 |
+- `execute_blender_code` は Blender の中で任意の Python を動かす（サンドボックス無し）。既定は `ask`。`auto` にするのは信頼できる環境だけ。
+- `generate_3d`・`import_asset` は外のサービス（有料・ライセンスあり）。スキルで「ユーザーが許した時だけ」と縛っている。
+- サーバーの送信（テレメトリ）は `DISABLE_TELEMETRY=true` で止める。アドオン側の送信は既定で OFF（設定で同意した時だけ）。
+
+---
+
+## 5. トラブルシューティング
+
+| 症状 | 対処 |
 |:---|:---|
-| **アプリコード改修** | **不要** |
-| **必要な作業** | ① Blenderアドオン導入 ② `mcp-servers.json` 設定 ③ Blender側で接続 |
-| **Skill作成** | オプション（ワークフロー定型化したい場合のみ） |
-| **セキュリティリスク** | `execute_blender_code` による任意コード実行に注意 |
+| `uvx が見つかりません` | §2.1 で uv を入れ、新しいターミナルで `--install-blender` |
+| `Blender が見つかりませんでした` | `LOCALLLM_BLENDER` に実行ファイルの場所を入れてやり直す（Steam を別ドライブに入れた時など） |
+| `Blender が開いているので…` | Blender を閉じてやり直すか、プリファレンス → アドオン → 「MCP for Blender」に印 |
+| 道具の呼び出しが connection refused | Blender が開いていない／待ち受けが止まっている。`--check-blender` の 9876 番を見る |
+| `MCP: blender 接続失敗` | `uvx mcp-for-blender@2.2.7 --help` が手で動くか（初回は取得に時間がかかる） |
+| 撮った絵を見られない | `/model vision` で画像を読めるモデルを設定（`model does not support image`） |
+
+---
+
+## 6. テスト
+
+- `tests/blender/install-blender-mcp.test.ts`: uvx・Blender の探し方（Windows/macOS/Linux）、版の読み取りと選び方、設定の置き場所、初回の版で設定を保存しない判断、`mcp-servers.json` の書き足し（他を残す・旧設定の置き換え・2 回目は変わらない・壊れた JSON を触らない）、有効化の結果の読み取り。
+- 実機: Windows 11 + Blender 5.2.3（Steam）で `organic_loft.py` を画面無しで実行し、5 方向の絵を確認。`--install-blender` の実機実行は未確認（外からパッケージを取る操作のため利用者が実行）。
