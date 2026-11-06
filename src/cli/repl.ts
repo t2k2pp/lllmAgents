@@ -36,7 +36,7 @@ import { progressIndicator } from "./progress-indicator.js";
 import { createCommandMenuProvider, createFileMenuProvider } from "./completer.js";
 import { getCommandRegistry, getRegistryHelpEntries } from "./commands/registry.js";
 import { executeRunControl, printRunControlFeedback } from "./commands/run-control.js";
-import { parseTokenCount } from "../config/types.js";
+import { isLocalProvider, LOCAL_PROVIDER_TYPES, parseTokenCount } from "../config/types.js";
 import type { Config, LLMEndpoint, SecondLLMEndpoint, SecondLLMProviderType } from "../config/types.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { PlanManager } from "../agent/plan-mode.js";
@@ -1928,6 +1928,7 @@ export class REPL {
           { name: "LM Studio (local)", value: "lmstudio" },
           { name: "llama.cpp (local)", value: "llamacpp" },
           { name: "vLLM (local)", value: "vllm" },
+          { name: "Gufo (local)", value: "gufo" },
         ],
       });
 
@@ -1943,7 +1944,7 @@ export class REPL {
         provider === "azure-anthropic"
       ) {
         await this.setupAzureLLM(target, provider);
-      } else if (provider === "ollama" || provider === "lmstudio" || provider === "llamacpp" || provider === "vllm") {
+      } else if (isLocalProvider(provider)) {
         // ローカル系: main は handleModelSetupLocal (npm run setup と同じ流れ)、 second / vision は setupLocalSlotLLM
         if (target === "main") {
           await this.handleModelSetupLocal(provider);
@@ -2142,6 +2143,7 @@ export class REPL {
         "lmstudio",
         "llamacpp",
         "vllm",
+        "gufo",
         "vertex-ai",
         "azure-openai",
         "azure-gpt",
@@ -2344,10 +2346,7 @@ export class REPL {
    * main 用の handleModelSetupLocal は main 専用前提で書かれているため、 second / vision 用は独立に実装。
    * host/port を聞いて connectAndListModels でモデル一覧 → 選択 → 設定に保存して実行中へ反映。
    */
-  private async setupLocalSlotLLM(
-    provider: "ollama" | "lmstudio" | "llamacpp" | "vllm",
-    target: "second" | "vision",
-  ): Promise<void> {
+  private async setupLocalSlotLLM(provider: ProviderType, target: "second" | "vision"): Promise<void> {
     const label = target === "vision" ? "Vision LLM" : "セカンドLLM";
     const defaultPort = DEFAULT_PORTS[provider];
     try {
@@ -3587,12 +3586,7 @@ export class REPL {
    */
   private async previewConnectionAfterEndpointChange(ep: LLMEndpoint, listCmd: string): Promise<void> {
     const providerType = ep.providerType;
-    if (
-      providerType !== "ollama" &&
-      providerType !== "lmstudio" &&
-      providerType !== "llamacpp" &&
-      providerType !== "vllm"
-    ) {
+    if (!isLocalProvider(providerType)) {
       // クラウド系は host/port では設定しない
       return;
     }
@@ -3697,10 +3691,9 @@ export class REPL {
     ].includes(cur.providerType);
 
     // 履歴がある場合は冒頭で選択肢を提示 (ローカル系プロバイダのみに絞る)
-    const localProviders = new Set(["ollama", "lmstudio", "llamacpp", "vllm"]);
     try {
       const matches = (p: LLMRegistryEntry) =>
-        provider ? p.endpoint.providerType === provider : localProviders.has(p.endpoint.providerType);
+        provider ? p.endpoint.providerType === provider : isLocalProvider(p.endpoint.providerType);
       if (await this.maybeOfferProfileHistory("main", matches)) {
         return;
       }
@@ -5497,7 +5490,7 @@ export class REPL {
           await this.handleModelPortCommand("main", args.slice(1).join(" ").trim());
         } else if (args[0] === "provider") {
           const newProvider = args[1]?.trim();
-          const localProviders: ProviderType[] = ["ollama", "lmstudio", "llamacpp", "vllm"];
+          const localProviders: readonly ProviderType[] = LOCAL_PROVIDER_TYPES;
           const cloudProviders = [
             "vertex-ai",
             "azure-openai",

@@ -35,3 +35,14 @@ describe("parseContextSize", () => {
     }
   });
 });
+
+describe("parseTokenCount (/model context と同じ解釈)", () => {
+  it("parseContextSize と同じ値・解釈できない時は NaN", async () => {
+    const { parseTokenCount } = await import("../../src/config/types.js");
+    expect(parseTokenCount("131K")).toBe(131000);
+    expect(parseTokenCount("131,072")).toBe(131072);
+    expect(parseTokenCount("200k")).toBe(200000);
+    expect(parseTokenCount("0")).toBeNaN();
+    expect(parseTokenCount("abc")).toBeNaN();
+  });
+});

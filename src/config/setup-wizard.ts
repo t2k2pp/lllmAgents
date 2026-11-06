@@ -7,6 +7,7 @@ import {
   type ProviderType,
   DEFAULT_PORTS,
   PROVIDER_LABELS,
+  LOCAL_PROVIDER_TYPES,
   getDefaultConfig,
 } from "./types.js";
 import { saveConfig } from "./config-manager.js";
@@ -221,17 +222,13 @@ export async function runLocalLLMSetup(opts: LocalLLMSetupOptions = {}): Promise
 
 /** ローカル系 LLM サーバーの種類を聞く (初回 wizard など、 種類が決まっていない時)。 */
 async function askLocalProviderType(current: SecondLLMProviderType | undefined): Promise<ProviderType> {
-  const localProviderKeys = (Object.keys(PROVIDER_LABELS) as Array<keyof typeof PROVIDER_LABELS>).filter(
-    (k) => k === "ollama" || k === "lmstudio" || k === "llamacpp" || k === "vllm",
-  ) as ProviderType[];
-
   const { providerType } = await withPrompt(() =>
     inquirer.prompt<{ providerType: ProviderType }>([
       {
         type: "list",
         name: "providerType",
         message: "LLMサーバーの種類を選択してください:",
-        choices: localProviderKeys.map((key) => ({
+        choices: LOCAL_PROVIDER_TYPES.map((key) => ({
           name: PROVIDER_LABELS[key],
           value: key,
         })),

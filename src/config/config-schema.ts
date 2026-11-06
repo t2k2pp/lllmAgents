@@ -10,11 +10,11 @@
  *   z.object が黙って strip するため、元オブジェクトから不正パスだけを削る方式にする
  */
 import { z } from "zod";
-import type { Config } from "./types.js";
+import { type Config, LOCAL_PROVIDER_TYPES } from "./types.js";
 
 // ─── 部品スキーマ (すべて partial = 型チェックのみ) ───
 
-const localProviders = ["ollama", "lmstudio", "llamacpp", "vllm"] as const;
+const localProviders = LOCAL_PROVIDER_TYPES;
 const cloudProviders = [
   "vertex-ai",
   "azure-openai",

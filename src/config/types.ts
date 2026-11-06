@@ -2,7 +2,14 @@ import { getDefaultRoomConfig } from "../agent/room-types.js";
 import type { RoomConfig } from "../agent/room-types.js";
 export type { RoomConfig } from "../agent/room-types.js";
 
-export type ProviderType = "ollama" | "lmstudio" | "llamacpp" | "vllm";
+/** ローカルの推論サーバーの種類。 並びは選択肢の並び (足すのは後ろへ)。 */
+export const LOCAL_PROVIDER_TYPES = ["ollama", "lmstudio", "llamacpp", "vllm", "gufo"] as const;
+export type ProviderType = (typeof LOCAL_PROVIDER_TYPES)[number];
+
+/** ローカルの推論サーバーの種類か (host / port で接続する物)。 */
+export function isLocalProvider(type: string | undefined): type is ProviderType {
+  return (LOCAL_PROVIDER_TYPES as readonly string[]).includes(type ?? "");
+}
 
 export type CloudProviderType =
   | "vertex-ai"
@@ -637,18 +644,18 @@ export interface ModelDetail extends ModelInfo {
 
 /**
  * 人間可読なトークン数表記をパースする。
- * "128k" → 128000, "256K" → 256000, "1m" → 1000000, "4096" → 4096
- * パース不能なら NaN を返す。
+ * "128k" → 128000, "256K" → 256000, "1m" → 1000000, "4096" → 4096, "131,072" → 131072 (K=1,000)
+ * パース不能・0 以下・単位の無い小数は NaN を返す。
  */
 export function parseTokenCount(input: string): number {
-  const trimmed = input.trim().toLowerCase();
-  const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*([km]?)$/);
-  if (!match) return NaN;
-  const num = parseFloat(match[1]);
-  const suffix = match[2];
-  if (suffix === "k") return Math.round(num * 1000);
-  if (suffix === "m") return Math.round(num * 1000000);
-  return Math.round(num);
+  const s = input.trim().replace(/[,_\s]/g, "");
+  const m = /^(\d+(?:\.\d+)?)([kKmM]?)$/.exec(s);
+  if (!m) return NaN;
+  const unit = m[2].toLowerCase();
+  if (unit === "" && m[1].includes(".")) return NaN; // トークン数は整数
+  const scale = unit === "k" ? 1_000 : unit === "m" ? 1_000_000 : 1;
+  const tokens = Math.round(Number(m[1]) * scale);
+  return Number.isSafeInteger(tokens) && tokens > 0 ? tokens : NaN;
 }
 
 export const DEFAULT_PORTS: Record<ProviderType, number> = {
@@ -656,6 +663,8 @@ export const DEFAULT_PORTS: Record<ProviderType, number> = {
   lmstudio: 1234,
   llamacpp: 8080,
   vllm: 8000,
+  // Gufo の文書に既定値の記載が無く、 例が 8080 (docs/gufo-provider.md)
+  gufo: 8080,
 };
 
 export const PROVIDER_LABELS: Record<SecondLLMProviderType, string> = {
@@ -663,6 +672,7 @@ export const PROVIDER_LABELS: Record<SecondLLMProviderType, string> = {
   lmstudio: "LM Studio",
   llamacpp: "llama.cpp",
   vllm: "vLLM",
+  gufo: "Gufo",
   "vertex-ai": "Vertex AI",
   "azure-openai": "Azure OpenAI (Chat Completions)",
   "azure-gpt": "Azure OpenAI (Responses API)",

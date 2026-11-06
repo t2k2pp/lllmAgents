@@ -5,6 +5,7 @@ import { OllamaProvider } from "./ollama.js";
 import { LMStudioProvider } from "./lmstudio.js";
 import { LlamaCppProvider } from "./llamacpp.js";
 import { VLLMProvider } from "./vllm.js";
+import { GufoProvider } from "./gufo.js";
 import { VertexAIProvider } from "./vertex-ai.js";
 import { AzureOpenAIProvider } from "./azure-openai.js";
 import { AzureGPTProvider } from "./azure-gpt.js";
@@ -202,6 +203,8 @@ export function createProviderByType(type: ProviderType, baseUrl: string): LLMPr
       return new LlamaCppProvider(baseUrl);
     case "vllm":
       return new VLLMProvider(baseUrl);
+    case "gufo":
+      return new GufoProvider(baseUrl);
     default:
       throw new Error(`Unknown provider type: ${type}`);
   }

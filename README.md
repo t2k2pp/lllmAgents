@@ -4,7 +4,7 @@
 
 ## 特徴
 
-- **ローカルLLM対応**: Ollama, LM Studio, llama.cpp, vLLM をサポート
+- **ローカルLLM対応**: Ollama, LM Studio, llama.cpp, vLLM, Gufo をサポート
 - **クラウドLLM対応**: Anthropic API 直接 / Claude Code CLI (`claude -p`) / Azure OpenAI / Azure Claude / Azure Anthropic / Azure Foundry / Vertex AI
 - **豊富なツール群**: ファイル操作、コマンド実行、ブラウザ操作、Web検索をLLMが自律的に実行
 - **セキュリティ**: Claude Code準拠の3段階権限モデル（自動許可/要確認/禁止）+ 50以上の危険コマンド検出パターン
@@ -45,7 +45,7 @@ npm start
 
 ### セットアップウィザードの流れ
 
-1. LLMサーバーの種類を選択（Ollama / LM Studio / llama.cpp / vLLM）
+1. LLMサーバーの種類を選択（Ollama / LM Studio / llama.cpp / vLLM / Gufo）
 2. サーバーのIPアドレスとポートを入力
 3. 接続テスト → 利用可能モデル一覧を自動取得
 4. モデルをリストから選択（手入力不要）
@@ -379,6 +379,7 @@ src/
 │   ├── ollama.ts           # Ollama（/api/tags, /api/show）
 │   ├── lmstudio.ts         # LM Studio
 │   ├── llamacpp.ts         # llama.cpp
+│   ├── gufo.ts             # Gufo (docs/gufo-provider.md)
 │   ├── vllm.ts             # vLLM
 │   ├── anthropic.ts        # Anthropic API (api.anthropic.com)
 │   ├── claude-cli.ts       # Claude Code CLI (`claude -p`) ラッパー
@@ -579,7 +580,7 @@ npm run format
 ## 必要環境
 
 - Node.js 22+（推奨: 24 LTS の最新パッチ版。20 以前は EOL。`build:exe` の exe にはビルドに使った Node が埋め込まれるため、セキュリティリリース後は最新パッチ版で再ビルドする。詳細: docs/nodejs-security-review-2026-10.md）
-- ローカルLLMサーバー（Ollama / LM Studio / llama.cpp / vLLM）
+- ローカルLLMサーバー（Ollama / LM Studio / llama.cpp / vLLM / Gufo）
 - Playwright（ブラウザ操作を使う場合）
 
 ## ライセンス

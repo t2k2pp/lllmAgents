@@ -260,7 +260,7 @@ modelRef: <registry-id> # この registry entry を直接指定 (slot バイン�
 
 #### Add new... (`a` キー)
 
-割り当てるスロット (main / second / vision) → プロバイダ (クラウド 9 種 + ローカル 4 種) の順に選ぶ → 各プロバイダの setup 手順で endpoint を作って保存し、
+割り当てるスロット (main / second / vision) → プロバイダ (クラウド 9 種 + ローカル 5 種。 Gufo は [gufo-provider.md](gufo-provider.md)) の順に選ぶ → 各プロバイダの setup 手順で endpoint を作って保存し、
 そのスロットに割り当てて実行中へ反映する (`modelsAddNew`)。 **新規追加の入口はこれだけ** (旧 `/model setup` 系は 2026-10-25 に削除)。
 ローカル系は main なら `handleModelSetupLocal` (初回 wizard と同じ流れ)、 second / vision なら `setupLocalSlotLLM` (host / port → モデル一覧から選択)。
 ここで選んだサーバーの種類は wizard に渡し、 **種類をもう一度聞かない** (`runLocalLLMSetup` の `providerType`)。 「履歴から選ぶ / 新規セットアップ」 の履歴もその種類だけに絞る。

@@ -157,7 +157,7 @@
 
 | キー | 型 | 必須 | 説明 |
 |------|-----|------|------|
-| `providerType` | ProviderType (ローカル) または CloudProviderType | Yes | 推論サーバーの種別。 ローカル: `"ollama"` \| `"lmstudio"` \| `"llamacpp"` \| `"vllm"`。 クラウド: `"vertex-ai"` \| `"azure-openai"` \| `"azure-gpt"` \| `"azure-claude"` \| `"azure-foundry"` \| `"azure-anthropic"` \| `"anthropic"` \| `"claude-cli"` |
+| `providerType` | ProviderType (ローカル) または CloudProviderType | Yes | 推論サーバーの種別。 ローカル: `"ollama"` \| `"lmstudio"` \| `"llamacpp"` \| `"vllm"` \| `"gufo"` ([gufo-provider.md](gufo-provider.md))。 クラウド: `"vertex-ai"` \| `"azure-openai"` \| `"azure-gpt"` \| `"azure-claude"` \| `"azure-foundry"` \| `"azure-anthropic"` \| `"anthropic"` \| `"claude-cli"` |
 | `baseUrl` | string | Local Only | APIエンドポイントURL (ローカル系のみ)。 クラウド系では `endpoint` / `apiKey` を使う |
 | `model` | string | Yes | モデル名（サーバーに登録されている名前） |
 | `contextWindow` | number | No | コンテキストウィンドウサイズ（トークン数）。未指定時はサーバー値→既知モデル名の順で解決し、どちらも不明なら推測値へ置換せず設定を要求して起動停止。小さすぎる枠も起動時に止まる（下限は [context](#context) の「枠の下限」） |
@@ -190,6 +190,7 @@
 | LM Studio | 1234 |
 | llama.cpp | 8080 |
 | vLLM | 8000 |
+| Gufo | 8080 |
 
 ## サンプリングパラメータ
 

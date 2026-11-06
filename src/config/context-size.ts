@@ -6,6 +6,8 @@
  * 「131K」が 134,144 になってモデルの上限 131,072 を超え、 サーバが 400 を返すため。
  */
 
+import { parseTokenCount } from "./types.js";
+
 /** 解釈できない入力のときのメッセージ (validate がそのまま利用者に見せる)。 */
 export const CONTEXT_SIZE_HINT = "数字か K/M 付きで入力してください (例: 131072 / 131K / 128k / 1M / 1.5M)";
 
@@ -14,15 +16,8 @@ export const CONTEXT_SIZE_HINT = "数字か K/M 付きで入力してくださ�
  * 空・0 以下・整数にならない・解釈できない入力は null (黙って既定値に置き換えない)。
  */
 export function parseContextSize(text: string): number | null {
-  const s = text.trim().replace(/[,_\s]/g, "");
-  const m = /^(\d+(?:\.\d+)?)([kKmM]?)$/.exec(s);
-  if (!m) return null;
-  const unit = m[2].toLowerCase();
-  const scale = unit === "k" ? 1_000 : unit === "m" ? 1_000_000 : 1;
-  const tokens = Math.round(Number(m[1]) * scale);
-  if (!Number.isSafeInteger(tokens) || tokens <= 0) return null;
-  if (unit === "" && m[1].includes(".")) return null; // 単位の無い小数 (トークン数は整数)
-  return tokens;
+  const tokens = parseTokenCount(text); // 解釈の正は types.ts の parseTokenCount (/model context 128k と同じ)
+  return Number.isNaN(tokens) ? null : tokens;
 }
 
 /**

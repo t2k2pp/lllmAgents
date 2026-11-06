@@ -18,7 +18,7 @@ import {
 } from "./openai-sampling-compat.js";
 
 /** chat_template_kwargs.enable_thinking を解釈するセルフホスト系サーバ (ChatParams.disableThinking) */
-const THINKING_TOGGLE_PROVIDERS = new Set<string>(["llamacpp", "vllm"]);
+const THINKING_TOGGLE_PROVIDERS = new Set<string>(["llamacpp", "vllm", "gufo"]);
 
 interface OpenAIModelResponse {
   data: Array<{ id: string; object: string }>;

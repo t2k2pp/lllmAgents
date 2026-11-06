@@ -32,7 +32,7 @@
  * 切った理由は種類 (利用者 user / 古い stale / 差し替え replaced / 終了 stop) と中身を、 記録 (side_call の abortKind・
  * abortReason と PrewarmOutcome) に残す。
  */
-import type { ProviderType, SecondLLMProviderType } from "../config/types.js";
+import { LOCAL_PROVIDER_TYPES, type ProviderType, type SecondLLMProviderType } from "../config/types.js";
 import type { LLMProvider, Message } from "../providers/base-provider.js";
 import { fingerprintPrompt, type PromptFingerprint } from "./prompt-fingerprint.js";
 import type { MainCallRequest } from "./reduction-summary.js";
@@ -85,12 +85,7 @@ export class PrewarmAbortReason {
  * クラウドは入力トークンに課金されるうえ (先読みの分だけ全部の入力をもう 1 回払う)、 キャッシュの扱いが provider 任せ
  * (明示の cache_control・数分で消える自動キャッシュ・子プロセスが自分で並びを組む claude-cli など) で、 待ち時間を減らせる保証も無い。
  */
-const LOCAL_SERVER_TYPES: ReadonlySet<SecondLLMProviderType> = new Set<ProviderType>([
-  "llamacpp",
-  "vllm",
-  "lmstudio",
-  "ollama",
-]);
+const LOCAL_SERVER_TYPES: ReadonlySet<SecondLLMProviderType> = new Set<ProviderType>(LOCAL_PROVIDER_TYPES);
 
 /**
  * 先読みを送れない理由を返す (送れるなら null)。 自動の先読みの入切はここでは見ない (呼び出し側が見る)。
