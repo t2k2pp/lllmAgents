@@ -239,6 +239,7 @@ modelRef: <registry-id> # この registry entry を直接指定 (slot バイン�
 - `[main]` `[second]` タグは slot 割当を反映
 - `★` は最終利用 (lastUsedAt が直近)
 - 既定の並びは `lastUsedAt 降順`
+- 実装の一覧 (`modelsListMenu`) は **先頭に `+ Add new...`**、 その下に登録エントリ、 末尾に `Exit`。 登録が増えてもスクロールせずに新規追加へ行けるようにするため (2026-11-06)
 
 #### アクションメニュー (選択して Enter)
 

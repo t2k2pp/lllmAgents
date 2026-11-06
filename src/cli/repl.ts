@@ -1677,7 +1677,8 @@ export class REPL {
         value: `entry:${e.id}`,
       };
     });
-    choices.push({ name: chalk.green("  + Add new..."), value: "add" });
+    // Add new は登録が増えてもスクロールせずに見えるよう先頭に置く (docs/model-registry.md §4.2)
+    choices.unshift({ name: chalk.green("  + Add new..."), value: "add" });
     choices.push({ name: chalk.dim("  Exit"), value: "exit" });
 
     let chosen: string;
