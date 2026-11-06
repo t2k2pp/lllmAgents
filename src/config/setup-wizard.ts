@@ -5,6 +5,7 @@ import { Config, LLMEndpoint, ProviderType, DEFAULT_PORTS, PROVIDER_LABELS, getD
 import { saveConfig } from "./config-manager.js";
 import { createProviderByType } from "../providers/provider-factory.js";
 import type { ModelInfo } from "./types.js";
+import { CONTEXT_SIZE_HINT, formatContextSize, parseContextSize } from "./context-size.js";
 
 /** ローカル系プロバイダーのみを対象としたセットアップ結果 */
 export interface LocalLLMSetupResult {
@@ -169,16 +170,20 @@ export async function runLocalLLMSetup(opts: LocalLLMSetupOptions = {}): Promise
   // 6. Context window
   const defaultCtx =
     opts.current?.contextWindow ?? (selectedModel.contextLength > 0 ? selectedModel.contextLength : 4096);
-  const { contextWindow } = await withPrompt(() =>
-    inquirer.prompt<{ contextWindow: number }>([
+  // 一覧と同じ「131K」「1M」でも入力できる (K=1,000。 解釈できない入力は既定値に置き換えず、 もう一度聞く)
+  const { contextWindowText } = await withPrompt(() =>
+    inquirer.prompt<{ contextWindowText: string }>([
       {
-        type: "number",
-        name: "contextWindow",
-        message: `コンテキストウインドウサイズ (トークン数):`,
-        default: defaultCtx,
+        type: "input",
+        name: "contextWindowText",
+        message: `コンテキストウインドウサイズ (トークン数。 131072 / 131K / 1M など):`,
+        default: String(defaultCtx),
+        validate: (v: string) => parseContextSize(v) !== null || CONTEXT_SIZE_HINT,
       },
     ]),
   );
+  const contextWindow = parseContextSize(contextWindowText) as number;
+  console.log(chalk.dim(`  → ${contextWindow.toLocaleString("en-US")} トークン`));
 
   // 7. 特性説明 (任意)
   console.log(chalk.dim("\n  モデルの特性を記述しておくと、サブエージェント委任時の判断材料になります。"));
@@ -200,7 +205,7 @@ export async function runLocalLLMSetup(opts: LocalLLMSetupOptions = {}): Promise
     providerType,
     baseUrl,
     model: modelName,
-    contextWindow: contextWindow || defaultCtx,
+    contextWindow,
   };
   if (description.trim()) {
     endpoint.description = description.trim();
@@ -316,12 +321,6 @@ async function setupVisionLLM() {
     baseUrl: visionBaseUrl,
     model: visionModel,
   };
-}
-
-function formatContextSize(tokens: number): string {
-  if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
-  if (tokens >= 1000) return `${Math.round(tokens / 1000)}K`;
-  return `${tokens}`;
 }
 
 function formatSize(bytes: number): string {
