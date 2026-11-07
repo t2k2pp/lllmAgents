@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentLoop } from "../../src/agent/agent-loop.js";
-import { checkContextWindowFits } from "../../src/agent/context-budget.js";
+import { findMinimumContextWindow } from "../../src/agent/context-budget.js";
 import { MessageHistory } from "../../src/agent/message-history.js";
 import { SUMMARY_HEADINGS } from "../../src/agent/reduction-summary.js";
 import { estimateMessageTokens, estimateToolDefinitionTokens } from "../../src/agent/token-counter.js";
@@ -287,12 +287,12 @@ function makeBigRegistry(): ToolRegistry {
   return registry;
 }
 
-/** 起動時の検査に通る最小の W (T3: 固定部分 + 直近 3 回のツール結果 + 会話の最小限 + 予約 R) */
+/** 起動時の検査に通る最小の W (T3: 固定部分 + 直近 3 回のツール結果 + 会話の最小限 + 最低限の予約。 予約は W に比例する) */
 function minimumWindow(loop: AgentLoop, registry: ToolRegistry): number {
   const fixed =
     estimateMessageTokens([loop.getHistory().getMessages()[0]]) +
     estimateToolDefinitionTokens(registry.getDefinitions());
-  return checkContextWindowFits({ contextWindow: 0, tier: "T3", fixedTokens: fixed }).requiredTokens;
+  return findMinimumContextWindow("T3", fixed);
 }
 
 /**

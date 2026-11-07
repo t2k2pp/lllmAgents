@@ -11,6 +11,7 @@ import { setDisplayJpyRate } from "../cost/money-format.js";
 import { displayHelp, type SkillSummary } from "./renderer.js";
 import { estimateMessageTokens } from "../agent/token-counter.js";
 import { TIER_CONTEXT_BUDGETS } from "../agent/capability-tier.js";
+import { computeContextBudget } from "../agent/context-budget.js";
 import { formatTodos, formatTodosActive, clearTodos, archiveCompletedTodos } from "../tools/definitions/todo-write.js";
 import type { GoalDefinition } from "../agent/goal-slot.js";
 import { getGoal as getGoalSlot } from "../agent/goal-slot.js";
@@ -6163,6 +6164,7 @@ export class REPL {
 
         // ─── Capability (main) ───
         console.log(chalk.dim("\n  ── Capability (main) ──"));
+        const ctxBudget = computeContextBudget(cap.contextWindow, cap.tier);
         console.log(
           chalk.dim(
             `  tier=${cap.tier}  promptStyle=${cap.promptStyle}  toolCalling=${cap.supportsToolCalling}  parallel=${cap.supportsParallelTools}`,
@@ -6170,7 +6172,7 @@ export class REPL {
         );
         console.log(
           chalk.dim(
-            `  loopCheck=${cap.loopCheckInterval}回ごと  toolResult≤${TIER_CONTEXT_BUDGETS[cap.tier].toolResultLimitTokens}tok (1 応答で計${TIER_CONTEXT_BUDGETS[cap.tier].toolResultTotalTokens}tok)  maxOutput=${TIER_CONTEXT_BUDGETS[cap.tier].outputTokenLimit}tok  keepRecentToolUses=${TIER_CONTEXT_BUDGETS[cap.tier].keepRecentToolUses}`,
+            `  loopCheck=${cap.loopCheckInterval}回ごと  toolResult≤${ctxBudget.toolResultLimitTokens}tok (1 応答で計${ctxBudget.toolResultTotalTokens}tok)  maxOutput=${ctxBudget.outputTokenLimit}tok  keepRecentToolUses=${TIER_CONTEXT_BUDGETS[cap.tier].keepRecentToolUses}  (枠 ${ctxBudget.contextWindow.toLocaleString("en-US")} に比例)`,
           ),
         );
         console.log(chalk.dim(`  判定根拠: ${cap.reason}`));

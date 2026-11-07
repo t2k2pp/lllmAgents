@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### 変更
+
+- コンテキストの予約 R を枠に比例させ、上限・下限で挟むようにした（ティアの値は上限。131K・T2 で 67,584 → 37,355）。出力の見込みは直近の実際の出力の最大 × 1.5
+- 予約 R に届かないだけでは止めず、本体の出力上限を空きに合わせて縮めて続ける。止めるのは整理しても最低限の予約（最低の出力 4,096 + ツール結果 + 余白）が入らないときだけ（docs/context-reduction-redesign.md §4.2）
+
 ### 追加
 
 - `localllm --install-blender` / `--check-blender`: Blender MCP（`mcp-for-blender` 2.2.7 に固定）のアドオンを入れて有効にし、`~/.localllm/mcp-servers.json` に登録する。他の項目は残し、前のファイルは `.bak`（docs/blender-mcp-integration.md）

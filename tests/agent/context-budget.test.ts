@@ -4,13 +4,18 @@ import {
   checkContextWindowFits,
   checkUserInputFits,
   computeContextBudget,
+  computeMainOutputTokens,
   computeReductionGoal,
   DEFAULT_REQUEST_GROWTH_TOKENS,
   exceedsBoundaryLimit,
   exceedsForcedLimit,
+  exceedsMinimumLimit,
+  findMinimumContextWindow,
   formatContextWindowTooSmall,
   formatUserInputTooLarge,
+  MAX_RESERVE_RATIO,
   MIN_CONVERSATION_TOKENS,
+  MIN_MAIN_OUTPUT_TOKENS,
   measurePromptSize,
   RequestGrowthTracker,
   resolveRequestGrowth,
@@ -22,14 +27,67 @@ const W_256K = 262_144;
 const W_1M = 1_048_576;
 const W_384K = 393_216;
 
-describe("予約 R (docs/context-reduction-redesign.md §4.2)", () => {
-  it("ティアごとの R = O + T + M + S", () => {
-    expect(computeContextBudget(W_256K, "T1").reserveTokens).toBe(71_680);
-    expect(computeContextBudget(W_256K, "T2").reserveTokens).toBe(67_584);
-    expect(computeContextBudget(W_256K, "T3").reserveTokens).toBe(17_408);
+describe("予約 R (docs/context-reduction-redesign.md §4.2。 2026-11-07 枠に比例)", () => {
+  it("枠に比例し、 ティアの値を上限にする (1M の枠ではティアの上限そのもの)", () => {
+    expect(computeContextBudget(W_1M, "T1").reserveTokens).toBe(71_680);
+    expect(computeContextBudget(W_1M, "T2").reserveTokens).toBe(67_584);
+    expect(computeContextBudget(W_1M, "T3").reserveTokens).toBe(17_408);
   });
 
-  it("T1・T2 とも O=32,768 / T=24,576 (§14.2-6)、 K は 6 / 5 / 3", () => {
+  it("131K の T2 は O 16,384 / T 13,107 / M・S 3,932 で R 37,355 (以前の 67,584 は枠の 52%)", () => {
+    const b = computeContextBudget(131_072, "T2");
+    expect(b).toMatchObject({
+      outputTokenLimit: 16_384,
+      outputReserveTokens: 16_384,
+      outputReserveSource: "limit",
+      toolResultTotalTokens: 13_107,
+      toolResultLimitTokens: 5_120,
+      estimateMarginTokens: 3_932,
+      reductionMarginTokens: 3_932,
+      reserveTokens: 37_355,
+      minimumReserveTokens: MIN_MAIN_OUTPUT_TOKENS + 13_107 + 3_932 + 3_932,
+    });
+  });
+
+  it("どの枠でも R は枠の 35% まで、 枠が大きいほど割合は下がる", () => {
+    let lastRatio = 1;
+    for (const w of [16_384, 32_768, 65_536, 131_072, 262_144, W_1M]) {
+      for (const tier of ["T1", "T2", "T3"] as const) {
+        const b = computeContextBudget(w, tier);
+        expect(b.reserveTokens, `${w} ${tier}`).toBeLessThanOrEqual(Math.floor(w * MAX_RESERVE_RATIO));
+        expect(b.minimumReserveTokens).toBeLessThanOrEqual(b.reserveTokens);
+        expect(b.toolResultLimitTokens).toBeLessThanOrEqual(b.toolResultTotalTokens);
+      }
+      const ratio = computeContextBudget(w, "T2").reserveTokens / w;
+      expect(ratio).toBeLessThanOrEqual(lastRatio);
+      lastRatio = ratio;
+    }
+  });
+
+  it("合計 T は、 O の中で出せる最多の呼び出しの短い注記 (6 トークン) と長い注記 1 件が入る大きさを保つ (§4.3)", () => {
+    for (const w of [32_768, 65_536, 131_072, 200_000, 262_144, W_1M]) {
+      for (const tier of ["T1", "T2", "T3"] as const) {
+        const b = computeContextBudget(w, tier);
+        const maxCalls = Math.floor(b.outputTokenLimit / 9);
+        expect(140 + (maxCalls - 1) * 6, `${w} ${tier}`).toBeLessThanOrEqual(b.toolResultTotalTokens);
+      }
+    }
+  });
+
+  it("出力の見込みは直近 3 件以上の実際の出力の最大 × 1.5 (O の上限と最低の出力で挟む)", () => {
+    const w = 131_072;
+    expect(computeContextBudget(w, "T2", { recentOutputTokens: [575, 9_748] }).outputReserveSource).toBe("limit");
+    const b = computeContextBudget(w, "T2", { recentOutputTokens: [575, 9_748, 5_004] });
+    expect(b.outputReserveSource).toBe("recent");
+    expect(b.outputReserveTokens).toBe(14_622);
+    expect(b.reserveTokens).toBe(14_622 + 13_107 + 3_932 + 3_932);
+    expect(computeContextBudget(w, "T2", { recentOutputTokens: [10, 20, 30] }).outputReserveTokens).toBe(
+      MIN_MAIN_OUTPUT_TOKENS,
+    );
+    expect(computeContextBudget(w, "T2", { recentOutputTokens: [50_000, 1, 1] }).outputReserveTokens).toBe(16_384);
+  });
+
+  it("ティアの上限 (T1・T2 とも O=32,768 / T=24,576、 K は 6 / 5 / 3)", () => {
     for (const tier of ["T1", "T2"] as const) {
       expect(TIER_CONTEXT_BUDGETS[tier].outputTokenLimit).toBe(32_768);
       expect(TIER_CONTEXT_BUDGETS[tier].toolResultTotalTokens).toBe(24_576);
@@ -40,9 +98,30 @@ describe("予約 R (docs/context-reduction-redesign.md §4.2)", () => {
   });
 });
 
-describe("§4.7 の数字 (T1、 G = 80,000、 R = 71,680)", () => {
+describe("予約に届かなくても止めない (2026-11-07)", () => {
+  // 実機 (2026-11-07 猫のモデル): 131K・T2 で、 整理後の P 64,010 + R 67,584 > 131,072 で止まった。 実際の出力の最大は 9,748
+  const b = computeContextBudget(131_072, "T2");
+
+  it("止めるのは P + 最低限の予約が枠を超えるときだけ", () => {
+    expect(exceedsMinimumLimit(64_010, b)).toBe(false);
+    const limit = 131_072 - b.minimumReserveTokens;
+    expect(exceedsMinimumLimit(limit, b)).toBe(false);
+    expect(exceedsMinimumLimit(limit + 1, b)).toBe(true);
+  });
+
+  it("本体の maxTokens は min(O の上限, W − P − T − M − S)", () => {
+    expect(computeMainOutputTokens(30_000, b)).toBe(16_384);
+    const p = 100_000;
+    expect(computeMainOutputTokens(p, b)).toBe(131_072 - p - 13_107 - 3_932 - 3_932);
+    // 最低限の予約が入る P なら、 最低の出力以上が残る
+    expect(computeMainOutputTokens(131_072 - b.minimumReserveTokens, b)).toBe(MIN_MAIN_OUTPUT_TOKENS);
+    expect(computeMainOutputTokens(200_000, b)).toBe(0);
+  });
+});
+
+describe("§4.7 の数字 (T1、 G = 80,000。 256K は M が 7,864 で R = 71,352、 384K・1M は R = 71,680)", () => {
   const cases = [
-    { w: W_256K, rule1: 190_464, rule2: 110_464 },
+    { w: W_256K, rule1: 190_792, rule2: 110_792 },
     { w: W_1M, rule1: 976_896, rule2: 896_896 },
     { w: W_384K, rule1: 321_536, rule2: 241_536 },
   ];
@@ -126,19 +205,19 @@ describe("ひと仕事の増分 G (§4.5)", () => {
   });
 
   it("(W − R) ÷ 2 で頭打ちにする", () => {
-    // (262,144 − 71,680) ÷ 2 = 95,232
+    // (262,144 − 71,352) ÷ 2 = 95,396
     expect(resolveRequestGrowth([300_000, 1_000, 1_000], budget)).toEqual({
-      tokens: 95_232,
+      tokens: 95_396,
       source: "recent-max",
       capped: true,
-      capTokens: 95_232,
+      capTokens: 95_396,
     });
   });
 
   it("既定値も頭打ちを受ける (小さい枠)", () => {
     const small = computeContextBudget(200_000, "T1");
-    // (200,000 − 71,680) ÷ 2 = 64,160 < 80,000
-    expect(resolveRequestGrowth([], small)).toMatchObject({ tokens: 64_160, source: "default", capped: true });
+    // 200K の T1 は R = 57,000。 (200,000 − 57,000) ÷ 2 = 71,500 < 80,000
+    expect(resolveRequestGrowth([], small)).toMatchObject({ tokens: 71_500, source: "default", capped: true });
   });
 
   it("1 件の増分 = 最後の P + その出力 − 最初の P、 途中の整理で減らした量は足し戻す", () => {
@@ -232,23 +311,23 @@ describe("ひと仕事の増分 G (§4.5)", () => {
 });
 
 describe("起動時の検査 (§6.3)", () => {
-  it("固定部分 + K × 1 件の上限 + 16,384 + R ≤ W なら通る", () => {
-    // T2: K=5、 1 件の上限 5,120 トークン、 R=67,584
+  it("固定部分 + K × 1 件の上限 + 16,384 + 最低限の予約 ≤ W なら通る", () => {
+    // T2・1M: K=5、 1 件の上限 5,120 トークン、 最低限の予約 = 4,096 + 24,576 + 4,096 + 6,144 = 38,912
     const fit = checkContextWindowFits({
       contextWindow: W_1M,
       tier: "T2",
       fixedTokens: 20_000,
     });
-    expect(fit).toEqual({
+    expect(fit).toMatchObject({
       ok: true,
       contextWindow: W_1M,
-      requiredTokens: 20_000 + 5 * 5_120 + MIN_CONVERSATION_TOKENS + 67_584,
+      requiredTokens: 20_000 + 5 * 5_120 + MIN_CONVERSATION_TOKENS + 38_912,
       fixedTokens: 20_000,
       keepRecentToolUses: 5,
       toolResultLimitTokens: 5_120,
       recentToolResultTokens: 5 * 5_120,
       conversationTokens: 16_384,
-      reserveTokens: 67_584,
+      reserveTokens: 38_912,
     });
   });
 
@@ -264,51 +343,50 @@ describe("起動時の検査 (§6.3)", () => {
     }
   });
 
-  // 固定部分 約 11k (いまの system + ツール定義の実測に近い値) で、 各ティアが起動できる最小の枠
+  // 固定部分 約 11k (いまの system + ツール定義の実測に近い値) での必要量 (予約が枠に比例するので枠ごとに違う)
   it.each([
-    // T1: 11,000 + 6 × 8,192 + 16,384 + 71,680 = 148,216 → 200K 枠 (Claude 等) で起動できる
-    ["T1", 200_000, 148_216],
-    // T2: 11,000 + 5 × 5,120 + 16,384 + 67,584 = 120,568 → 128K 枠で起動できる
-    ["T2", 128_000, 120_568],
-    // T3: 11,000 + 3 × 2,048 + 16,384 + 17,408 = 50,936 → 64K 枠で起動できる
-    ["T3", 65_536, 50_936],
+    // T1・200K: 11,000 + 6 × 8,000 + 16,384 + 最低限の予約 36,096 = 111,480
+    ["T1", 200_000, 111_480],
+    // T2・128K: 11,000 + 5 × 5,120 + 16,384 + 最低限の予約 24,576 = 77,560
+    ["T2", 128_000, 77_560],
+    // T3・64K: 11,000 + 3 × 2,048 + 16,384 + 最低限の予約 15,769 = 49,297
+    ["T3", 65_536, 49_297],
   ] as const)("固定部分 11k のとき %s は %i の枠で起動できる (必要量 %i)", (tier, window, required) => {
     const fit = checkContextWindowFits({ contextWindow: window, tier, fixedTokens: 11_000 });
     expect(fit.requiredTokens).toBe(required);
     expect(fit.ok).toBe(true);
   });
 
-  it("ちょうど W に等しければ通り、 1 でも超えれば止める", () => {
+  it("起動できる最小の枠ちょうどなら通り、 1 でも小さければ止めて、 その最小の枠を案内する", () => {
     const base = { tier: "T3" as const, fixedTokens: 5_000 };
-    const required = checkContextWindowFits({ ...base, contextWindow: 1 }).requiredTokens;
-    expect(checkContextWindowFits({ ...base, contextWindow: required }).ok).toBe(true);
-    const tooSmall = checkContextWindowFits({ ...base, contextWindow: required - 1 });
+    const min = findMinimumContextWindow("T3", 5_000);
+    expect(checkContextWindowFits({ ...base, contextWindow: min }).ok).toBe(true);
+    const tooSmall = checkContextWindowFits({ ...base, contextWindow: min - 1 });
     expect(tooSmall.ok).toBe(false);
+    expect(tooSmall.minimumContextWindow).toBe(min);
     const message = formatContextWindowTooSmall(tooSmall, "qwen2.5-7b", "T3");
     expect(message).toContain("contextWindow が小さすぎます");
-    expect(message).toContain(required.toLocaleString("en-US"));
+    expect(message).toContain(`サーバ側の枠を ${min.toLocaleString("en-US")} トークン以上`);
     expect(message).toContain("直近 3 回のツール結果");
   });
 
-  it("T3 の 32K 枠は入らない (R と会話の最小限だけで 33,792)", () => {
-    const fit = checkContextWindowFits({
-      contextWindow: 32_768,
-      tier: "T3",
-      fixedTokens: 0,
-    });
-    expect(fit.ok).toBe(false);
+  it("固定部分 11k なら T1 55,446・T2 52,283・T3 46,919 の枠から起動できる (32K 枠は入らない)", () => {
+    expect(findMinimumContextWindow("T1", 11_000)).toBe(55_446);
+    expect(findMinimumContextWindow("T2", 11_000)).toBe(52_283);
+    expect(findMinimumContextWindow("T3", 11_000)).toBe(46_919);
+    expect(checkContextWindowFits({ contextWindow: 32_768, tier: "T3", fixedTokens: 11_000 }).ok).toBe(false);
   });
 });
 
 describe("利用者の入力の検査 (§4.3)", () => {
   it("入力 + 固定部分 + 最小限の保護部分 + R ≤ W なら受け付ける (境目ちょうどは通る)", () => {
-    // T1、 200K 枠、 固定部分 11k: 起動時の必要量 148,216 → 入力は 51,784 まで
+    // T1、 200K 枠、 固定部分 11k: 起動時の必要量 111,480 → 入力は 88,520 まで
     const base = { contextWindow: 200_000, tier: "T1" as const, fixedTokens: 11_000 };
-    const atLimit = checkUserInputFits({ ...base, inputTokens: 51_784 });
-    expect(atLimit).toEqual({ ok: true, inputTokens: 51_784, maxInputTokens: 51_784, contextWindow: 200_000 });
-    const over = checkUserInputFits({ ...base, inputTokens: 51_785 });
+    const atLimit = checkUserInputFits({ ...base, inputTokens: 88_520 });
+    expect(atLimit).toEqual({ ok: true, inputTokens: 88_520, maxInputTokens: 88_520, contextWindow: 200_000 });
+    const over = checkUserInputFits({ ...base, inputTokens: 88_521 });
     expect(over.ok).toBe(false);
-    expect(over.maxInputTokens).toBe(51_784);
+    expect(over.maxInputTokens).toBe(88_520);
   });
 
   it("断るときはファイルにして渡すよう案内する", () => {
@@ -317,12 +395,12 @@ describe("利用者の入力の検査 (§4.3)", () => {
     const message = formatUserInputTooLarge(fit);
     expect(message).toContain("受け付けませんでした");
     expect(message).toContain("20,000");
-    expect(message).toContain((65_536 - 50_936).toLocaleString("en-US"));
+    expect(message).toContain((65_536 - 49_297).toLocaleString("en-US"));
     expect(message).toContain("ファイルに保存");
   });
 
   it("枠が起動時の必要量より小さければ入れられる量は 0 (負にしない)", () => {
-    const fit = checkUserInputFits({ contextWindow: 32_768, tier: "T3", fixedTokens: 0, inputTokens: 1 });
+    const fit = checkUserInputFits({ contextWindow: 32_768, tier: "T3", fixedTokens: 11_000, inputTokens: 1 });
     expect(fit.maxInputTokens).toBe(0);
     expect(fit.ok).toBe(false);
   });

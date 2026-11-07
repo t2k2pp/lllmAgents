@@ -15,33 +15,136 @@ import { estimateMessageTokens, estimateToolDefinitionTokens } from "./token-cou
 
 // ─── 予約 R ───────────────────────────────────────────────
 
+/*
+ * 予約の大きさは枠 W に比例させ、 上限・下限で挟む (2026-11-07 利用者と決定。 設計書 §4.2)。
+ * 以前はティアごとの決め打ち (T2 で R = 67,584) で、 131K の枠では R が枠の 52% を占め、 実際の出力
+ * (最大 9,748) の何倍もの場所を空けたまま「整理しても入らない」 で止まった。
+ * ティアの値 (TIER_CONTEXT_BUDGETS) は大きさの上限として使い、 割合と下限はここで決める。
+ */
+
+/** O の割合と下限 (上限はティアの outputTokenLimit) */
+export const OUTPUT_RATIO = 0.125;
+export const OUTPUT_FLOOR_TOKENS = 4_096;
+/** T の割合と下限 (上限はティアの toolResultTotalTokens) */
+export const TOOL_RESULT_TOTAL_RATIO = 0.1;
+export const TOOL_RESULT_TOTAL_FLOOR_TOKENS = 4_096;
+/** ツール結果 1 件の上限 = T × この割合 (下限あり。 上限はティアの toolResultLimitTokens) */
+export const TOOL_RESULT_LIMIT_RATIO = 0.4;
+export const TOOL_RESULT_LIMIT_FLOOR_TOKENS = 1_024;
+/** M の割合と下限 (上限はティアの estimateMarginTokens) */
+export const ESTIMATE_MARGIN_RATIO = 0.03;
+export const ESTIMATE_MARGIN_FLOOR_TOKENS = 2_048;
+/** S の割合と下限 (上限はティアの reductionMarginTokens。 下限は要約の出力 3,072 が入る量) */
+export const REDUCTION_MARGIN_RATIO = 0.03;
+export const REDUCTION_MARGIN_FLOOR_TOKENS = 3_072;
+/** R は枠のこの割合まで (超えるなら O と T を同じ比で縮める) */
+export const MAX_RESERVE_RATIO = 0.35;
+/**
+ * 本体呼び出しの出力に最低限残す量。 整理しても P + (この量 + T + M + S) が枠を超えるときだけ止める。
+ * 予約 R (目標) に届かないだけなら止めず、 その回の maxTokens を空きに縮めて続ける。
+ */
+export const MIN_MAIN_OUTPUT_TOKENS = 4_096;
+/** 出力の見込みを実際の出力から決めるのに要る件数と、 実際の最大に掛ける倍率 */
+export const OUTPUT_HISTORY_MIN_SAMPLES = 3;
+export const OUTPUT_HISTORY_FACTOR = 1.5;
+
 export interface ContextBudget {
   tier: Tier;
   /** W */
   contextWindow: number;
-  /** O */
+  /** O の上限: 本体呼び出しに渡す maxTokens の上限 (生成の暴走の歯止め) */
   outputTokenLimit: number;
+  /** O の見込み: R に数える出力の量 (実際の出力が 3 件以上あれば 最大 × 1.5、 O の上限まで) */
+  outputReserveTokens: number;
+  /** 見込みの出どころ。 limit = O の上限そのまま、 recent = 実際の出力から */
+  outputReserveSource: "limit" | "recent";
   /** T */
   toolResultTotalTokens: number;
+  /** ツール結果 1 件の上限 (切り詰めと起動時検査に使う) */
+  toolResultLimitTokens: number;
   /** M */
   estimateMarginTokens: number;
   /** S */
   reductionMarginTokens: number;
-  /** R = O + T + M + S */
+  /** R = O の見込み + T + M + S。 超えたら整理する (目標) */
   reserveTokens: number;
+  /** 最低限の予約 = 最低の出力 + T + M + S。 整理してもこれが入らないときだけ止める */
+  minimumReserveTokens: number;
 }
 
-export function computeContextBudget(contextWindow: number, tier: Tier): ContextBudget {
-  const d = TIER_CONTEXT_BUDGETS[tier];
+export interface ContextBudgetOptions {
+  /** 直近の本体呼び出しの出力の実数 (古い順)。 3 件以上あれば O の見込みに使う */
+  recentOutputTokens?: readonly number[];
+}
+
+const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
+
+export function computeContextBudget(
+  contextWindow: number,
+  tier: Tier,
+  options: ContextBudgetOptions = {},
+): ContextBudget {
+  const cap = TIER_CONTEXT_BUDGETS[tier];
+  const w = Math.max(0, contextWindow);
+  // 下限が上限を超えるティア (T3 の O 4,096 など) では上限を優先する
+  const scaled = (ratio: number, floor: number, hi: number): number =>
+    Math.floor(clamp(w * ratio, Math.min(floor, hi), hi));
+  let output = scaled(OUTPUT_RATIO, OUTPUT_FLOOR_TOKENS, cap.outputTokenLimit);
+  let toolTotal = scaled(TOOL_RESULT_TOTAL_RATIO, TOOL_RESULT_TOTAL_FLOOR_TOKENS, cap.toolResultTotalTokens);
+  const margin = scaled(ESTIMATE_MARGIN_RATIO, ESTIMATE_MARGIN_FLOOR_TOKENS, cap.estimateMarginTokens);
+  const reduction = scaled(REDUCTION_MARGIN_RATIO, REDUCTION_MARGIN_FLOOR_TOKENS, cap.reductionMarginTokens);
+  // 下限のせいで R が枠の 35% を超える小さい枠では、 O と T を同じ比で縮める
+  const maxOutputAndTools = Math.floor(w * MAX_RESERVE_RATIO) - margin - reduction;
+  if (output + toolTotal > maxOutputAndTools) {
+    const k = Math.max(0, maxOutputAndTools) / (output + toolTotal);
+    output = Math.floor(output * k);
+    toolTotal = Math.floor(toolTotal * k);
+  }
+  // 1 件の上限は T に比例させる (T を超えない)
+  const toolLimit = Math.min(
+    toolTotal,
+    Math.floor(
+      clamp(
+        toolTotal * TOOL_RESULT_LIMIT_RATIO,
+        Math.min(TOOL_RESULT_LIMIT_FLOOR_TOKENS, cap.toolResultLimitTokens),
+        cap.toolResultLimitTokens,
+      ),
+    ),
+  );
+  const recent = (options.recentOutputTokens ?? []).filter((v) => Number.isFinite(v) && v >= 0);
+  const fromRecent = recent.length >= OUTPUT_HISTORY_MIN_SAMPLES;
+  const minOutput = Math.min(MIN_MAIN_OUTPUT_TOKENS, output);
+  const outputReserve = fromRecent
+    ? Math.min(output, Math.max(minOutput, Math.ceil(Math.max(...recent) * OUTPUT_HISTORY_FACTOR)))
+    : output;
   return {
     tier,
     contextWindow,
-    outputTokenLimit: d.outputTokenLimit,
-    toolResultTotalTokens: d.toolResultTotalTokens,
-    estimateMarginTokens: d.estimateMarginTokens,
-    reductionMarginTokens: d.reductionMarginTokens,
-    reserveTokens: d.outputTokenLimit + d.toolResultTotalTokens + d.estimateMarginTokens + d.reductionMarginTokens,
+    outputTokenLimit: output,
+    outputReserveTokens: outputReserve,
+    outputReserveSource: fromRecent ? "recent" : "limit",
+    toolResultTotalTokens: toolTotal,
+    toolResultLimitTokens: toolLimit,
+    estimateMarginTokens: margin,
+    reductionMarginTokens: reduction,
+    reserveTokens: outputReserve + toolTotal + margin + reduction,
+    minimumReserveTokens: minOutput + toolTotal + margin + reduction,
   };
+}
+
+/**
+ * 本体呼び出しに渡す maxTokens = min(O の上限, W − P − T − M − S)。 出力の後に入るツール結果と整理の余白は空けておく。
+ * 予約 R (目標) に届かず整理でも戻せなかったときも、 ここで縮めて呼び出しを続ける (止めるのは最低限の予約も入らないときだけ)。
+ * 戻り値が MIN_MAIN_OUTPUT_TOKENS 未満なら、 最低限の予約が入っていない (呼び出し側は送らない)。
+ */
+export function computeMainOutputTokens(promptTokens: number, budget: ContextBudget): number {
+  const room =
+    budget.contextWindow -
+    promptTokens -
+    budget.toolResultTotalTokens -
+    budget.estimateMarginTokens -
+    budget.reductionMarginTokens;
+  return Math.max(0, Math.min(budget.outputTokenLimit, room));
 }
 
 // ─── P の求め方 ───────────────────────────────────────────
@@ -89,6 +192,11 @@ export function measurePromptSize(input: PromptSizeInput): PromptSize {
 /** 規則 1 (強制): P + R > W なら、 次の本体呼び出しの前に整理する */
 export function exceedsForcedLimit(promptTokens: number, budget: ContextBudget): boolean {
   return promptTokens + budget.reserveTokens > budget.contextWindow;
+}
+
+/** 整理しても P + 最低限の予約 > W なら、 次の本体呼び出しは本当に入らない (止める条件) */
+export function exceedsMinimumLimit(promptTokens: number, budget: ContextBudget): boolean {
+  return promptTokens + budget.minimumReserveTokens > budget.contextWindow;
 }
 
 /** 規則 2 (強い区切りでの先回り): P + R + G > W なら整理する */
@@ -302,11 +410,14 @@ export interface ContextWindowFit {
   requiredTokens: number;
   fixedTokens: number;
   keepRecentToolUses: number;
-  /** ツール結果 1 件の上限 (TIER_CONTEXT_BUDGETS の toolResultLimitTokens。 切り詰めと同じ値) */
+  /** ツール結果 1 件の上限 (computeContextBudget の toolResultLimitTokens。 切り詰めと同じ値) */
   toolResultLimitTokens: number;
   recentToolResultTokens: number;
   conversationTokens: number;
+  /** 最低限の予約 (止める条件と同じ。 R の目標ではない) */
   reserveTokens: number;
+  /** この固定部分とティアで起動できる最小の枠 (必要量は枠に比例して増えるので、 requiredTokens とは別に求める) */
+  minimumContextWindow: number;
 }
 
 /**
@@ -315,22 +426,54 @@ export interface ContextWindowFit {
  */
 export function checkContextWindowFits(input: ContextWindowFitInput): ContextWindowFit {
   const budget = computeContextBudget(input.contextWindow, input.tier);
-  const { keepRecentToolUses, toolResultLimitTokens } = TIER_CONTEXT_BUDGETS[input.tier];
+  const { keepRecentToolUses } = TIER_CONTEXT_BUDGETS[input.tier];
+  const { toolResultLimitTokens } = budget;
   // 1 件の上限はツール結果を履歴に入れるときの切り詰め (tool-result-limit.ts) と同じトークン数・同じ数え方なので、
   // 最悪値に直さずにそのまま掛ける (file_write / file_edit は切らないが、 結果は短い)
   const recentToolResultTokens = keepRecentToolUses * toolResultLimitTokens;
-  const requiredTokens = input.fixedTokens + recentToolResultTokens + MIN_CONVERSATION_TOKENS + budget.reserveTokens;
+  // 止める条件 (exceedsMinimumLimit) と同じく、 最低限の予約で確かめる (R は整理を始める目標で、 届かなくても止めない)
+  const requiredTokens =
+    input.fixedTokens + recentToolResultTokens + MIN_CONVERSATION_TOKENS + budget.minimumReserveTokens;
   return {
     ok: requiredTokens <= input.contextWindow,
     contextWindow: input.contextWindow,
+    minimumContextWindow: findMinimumContextWindow(input.tier, input.fixedTokens),
     requiredTokens,
     fixedTokens: input.fixedTokens,
     keepRecentToolUses,
     toolResultLimitTokens,
     recentToolResultTokens,
     conversationTokens: MIN_CONVERSATION_TOKENS,
-    reserveTokens: budget.reserveTokens,
+    reserveTokens: budget.minimumReserveTokens,
   };
+}
+
+/** 起動時検査の必要量 (枠 W のとき) */
+function requiredTokensAt(contextWindow: number, tier: Tier, fixedTokens: number): number {
+  const budget = computeContextBudget(contextWindow, tier);
+  const { keepRecentToolUses } = TIER_CONTEXT_BUDGETS[tier];
+  return (
+    fixedTokens +
+    keepRecentToolUses * budget.toolResultLimitTokens +
+    MIN_CONVERSATION_TOKENS +
+    budget.minimumReserveTokens
+  );
+}
+
+/**
+ * 起動時検査に通る最小の枠。 必要量は枠に比例して増える (予約が W に比例するため) が、 増え方は W より緩いので
+ * 「必要量 ≤ W」 は W について単調。 二分探索で求める。
+ */
+export function findMinimumContextWindow(tier: Tier, fixedTokens: number): number {
+  let lo = 0;
+  let hi = 1 << 24;
+  if (requiredTokensAt(hi, tier, fixedTokens) > hi) return hi;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (requiredTokensAt(mid, tier, fixedTokens) <= mid) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
 }
 
 /** 検査に通らなかったときに利用者へ示す文 (理由と必要量) */
@@ -341,7 +484,7 @@ export function formatContextWindowTooSmall(fit: ContextWindowFit, modelId: stri
     `${n(fit.contextWindow)} トークンに対して、 整理しても必ず残る部分と次の呼び出しの予約で ${n(fit.requiredTokens)} トークン要ります ` +
     `(固定部分 ${n(fit.fixedTokens)} + 直近 ${fit.keepRecentToolUses} 回のツール結果 ${n(fit.recentToolResultTokens)} + ` +
     `会話の最小限 ${n(fit.conversationTokens)} + 予約 ${n(fit.reserveTokens)})。 ` +
-    `サーバ側の枠を ${n(fit.requiredTokens)} トークン以上にして mainLLM.contextWindow を合わせるか、 枠の大きいモデルを使ってください。`
+    `サーバ側の枠を ${n(fit.minimumContextWindow)} トークン以上にして mainLLM.contextWindow を合わせるか、 枠の大きいモデルを使ってください。`
   );
 }
 

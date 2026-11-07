@@ -531,6 +531,34 @@ describe("整理イベント (書き換えない)", () => {
   });
 });
 
+describe("整理イベント: 予約 R に届かなくても、 最低限の予約が入れば止めない (2026-11-07)", () => {
+  // 262,144・T2: R = 67,584 (W − R = 194,560)、 最低限の予約 = 38,912 (W − 最低限 = 223,232)
+  it("規則 1 で、 整理後の P が W − R を超えても W − 最低限の予約以下なら書き換えて成功し、 届かなかった量を記録する", async () => {
+    const raw = [user("調べて"), ...read("/a"), ...read("/b"), reply("調べました")];
+    const history = historyWith(raw);
+    const result = await runReductionEvent(
+      eventInput(history, { trigger: "forced", promptSize: { tokens: 200_000, basis: "usage" } }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const after = result.record.promptTokensAfter;
+    expect(after).toBeGreaterThan(262_144 - budget.reserveTokens);
+    expect(after).toBeLessThanOrEqual(262_144 - budget.minimumReserveTokens);
+    expect(result.record.reserveShortfallTokens).toBe(after + budget.reserveTokens - 262_144);
+    expect(history.takeRewriteReasons()).toEqual(["reduction:r-1"]);
+  });
+
+  it("予約 R に届いたときは届かなかった量を記録しない", async () => {
+    const history = historyWith(toolHeavyHistory());
+    const result = await runReductionEvent(
+      eventInput(history, { trigger: "forced", promptSize: { tokens: 200_000, basis: "usage" } }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.record.reserveShortfallTokens).toBeUndefined();
+  });
+});
+
 // ─── 規則 2 の見送り (§4.6。 2026-10-26 利用者の決定: clear_at_least と同じ考え方) ───
 
 describe("規則 2: 減る量の見込みが最低量 F に届くときだけ書き換える", () => {
@@ -824,5 +852,50 @@ describe("AgentLoop: 規則 1 の整理に失敗したら本体呼び出しを�
     expect(outcomes).toEqual(["error"]);
     const last = loop.getHistory().getRawMessages().at(-1);
     expect(String(last?.content)).toContain("コンテキストの整理に失敗したため送れませんでした");
+  });
+});
+
+describe("AgentLoop: 予約 R に届かないだけなら止めず、 maxTokens を空きに合わせて縮める (2026-11-07)", () => {
+  it("減らせるものが無くても最低限の予約が入れば本体を呼び、 maxTokens = W − P − T − M − S", async () => {
+    const requests: ChatWithToolsParams[] = [];
+    const W = 128_000;
+    // T2 (qwen3-32b)・128K: R = 36,480、 最低限の予約 = 24,576。 P を W − 30,000 にすると R には届かないが最低限は入る
+    const p = W - 30_000;
+    const provider = scriptedProvider(
+      [
+        toolCallChunks("p1", { promptTokens: p, completionTokens: 10 }),
+        [
+          { type: "text", text: "終わりました。" },
+          { type: "done", finishReason: "stop" },
+        ],
+      ],
+      requests,
+    );
+    const loop = new AgentLoop(
+      provider,
+      "qwen3-32b",
+      probeRegistry("ok"),
+      new PermissionManager(securityConfig(["probe"])),
+      W,
+    );
+    const b = computeContextBudget(W, "T2");
+    expect(b.reserveTokens).toBe(36_480);
+    expect(b.minimumReserveTokens).toBe(24_576);
+    await loop.run("調べてください？");
+
+    expect(requests.length).toBeGreaterThanOrEqual(2);
+    // 1 回目は O の上限そのまま、 2 回目は空きに合わせて縮む
+    expect(requests[0].maxTokens).toBe(b.outputTokenLimit);
+    const second = requests[1].maxTokens ?? 0;
+    expect(second).toBeLessThan(b.outputTokenLimit);
+    expect(second).toBeGreaterThanOrEqual(4_096);
+    expect(second).toBeLessThanOrEqual(
+      W - p - b.toolResultTotalTokens - b.estimateMarginTokens - b.reductionMarginTokens,
+    );
+    const contents = loop
+      .getHistory()
+      .getRawMessages()
+      .map((m) => String(m.content));
+    expect(contents.some((c) => c.includes("コンテキストの整理に失敗したため送れませんでした"))).toBe(false);
   });
 });

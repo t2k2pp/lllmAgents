@@ -180,9 +180,14 @@ export function formatReductionStatus(s: ReductionStatus): string {
   const out: string[] = [];
   out.push(chalk.bold("  コンテキストの整理"));
   out.push(`    次に送る量 P: 約 ${n(P)} トークン (${basisLabel(s.promptSize.basis)})`);
+  const outputBasis = b.outputReserveSource === "recent" ? "直近の出力の最大 × 1.5" : "上限と同じ";
   out.push(
-    `    予約 R: ${n(b.reserveTokens)} = 出力の上限 O ${n(b.outputTokenLimit)} + ツール結果の合計 T ${n(b.toolResultTotalTokens)}` +
-      ` + 推定の余白 M ${n(b.estimateMarginTokens)} + 整理の余白 S ${n(b.reductionMarginTokens)}`,
+    `    予約 R: ${n(b.reserveTokens)} = 出力の見込み ${n(b.outputReserveTokens)} (${outputBasis}) + ツール結果の合計 T ${n(b.toolResultTotalTokens)}` +
+      ` + 推定の余白 M ${n(b.estimateMarginTokens)} + 整理の余白 S ${n(b.reductionMarginTokens)} (枠 W に比例・上限と下限あり)`,
+  );
+  out.push(
+    `    出力の上限 O: ${n(b.outputTokenLimit)} (呼び出しごとに W − P − T − M − S まで縮める)  ` +
+      `止まるのは P が ${n(b.contextWindow - b.minimumReserveTokens)} (= W − 最低限の予約 ${n(b.minimumReserveTokens)}) を整理しても超えるときだけ`,
   );
   const distance = (limit: number): string =>
     P > limit ? chalk.yellow(`いま ${n(P - limit)} 超えています`) : `あと ${n(limit - P)}`;

@@ -31,9 +31,13 @@ import {
 import {
   checkContextWindowFits,
   checkUserInputFits,
+  type ContextBudget,
   computeContextBudget,
+  computeMainOutputTokens,
   exceedsBoundaryLimit,
   exceedsForcedLimit,
+  exceedsMinimumLimit,
+  MIN_MAIN_OUTPUT_TOKENS,
   formatContextWindowTooSmall,
   formatUserInputTooLarge,
   measurePromptSize,
@@ -378,6 +382,13 @@ export class AgentLoop {
    * セッションに保存し (saveCurrentSession)、 再開で戻す (restoreSession)。 会話の載せ替え (importConversation) では会話ごとに持ち替える。
    */
   private requestGrowth = new RequestGrowthTracker();
+  /**
+   * 直近の本体呼び出しの出力の実数 (古い順、 最大 RECENT_MAIN_OUTPUT_COUNT 件)。 予約 R の出力の見込みに使う
+   * (computeContextBudget の recentOutputTokens。 2026-11-07)。 モデルを替えたら空にする。 セッションには保存しない
+   * (再開直後は O の上限で見込む側に倒す)
+   */
+  private recentMainOutputs: number[] = [];
+  private static readonly RECENT_MAIN_OUTPUT_COUNT = 20;
   /**
    * 直近の整理イベント (/compact と /context の表示用。 利用者向けだけで、 モデルには見せない)。
    * 整理した履歴オブジェクトと組にして持ち、 会話の載せ替え・再開の後は出さない。
@@ -1467,6 +1478,7 @@ export class AgentLoop {
                     this.lastPromptSend = { kind: "main", promptTokens: recordedInput, fingerprint };
                     // 依頼 1 件の増分 G の材料 (最初と最後の本体呼び出しの実数)
                     this.requestGrowth.noteMainCall(recordedInput, outputTokens);
+                    this.noteMainOutput(outputTokens);
                     this.lastMainCall = {
                       history: this.history,
                       revision: sentRevision,
@@ -2522,7 +2534,7 @@ export class AgentLoop {
    * @returns 整理イベントを行った (か見送った) なら、 その結果。 発火しなければ null
    */
   private async judgeBoundary(kind: BoundaryKind): Promise<ReductionEventResult | ReductionSkippedResult | null> {
-    const budget = computeContextBudget(this.contextWindow, this.capability.tier);
+    const budget = this.contextBudget();
     const size = this.measureNextPrompt(this.getFilteredToolDefs());
     const growth = this.requestGrowth.resolve(budget).tokens;
     if (!exceedsBoundaryLimit(size.tokens, budget, growth)) return null;
@@ -2718,6 +2730,25 @@ export class AgentLoop {
   // ─── 整理イベント (docs/context-reduction-redesign.md §6.1) ───
 
   /**
+   * いまの予算 (docs/context-reduction-redesign.md §4.2)。 予約は枠 W に比例させて上限・下限で挟み、 出力の見込みは
+   * 直近の本体呼び出しの実際の出力から決める (2026-11-07)。 予算を使う所は必ずここを通す (所ごとに数え方を変えない)
+   */
+  private contextBudget(): ContextBudget {
+    return computeContextBudget(this.contextWindow, this.capability.tier, {
+      recentOutputTokens: this.recentMainOutputs,
+    });
+  }
+
+  /** 本体呼び出しの出力の実数を記録する (予約 R の出力の見込み) */
+  private noteMainOutput(outputTokens: number): void {
+    if (!Number.isFinite(outputTokens) || outputTokens < 0) return;
+    this.recentMainOutputs.push(outputTokens);
+    if (this.recentMainOutputs.length > AgentLoop.RECENT_MAIN_OUTPUT_COUNT) {
+      this.recentMainOutputs = this.recentMainOutputs.slice(-AgentLoop.RECENT_MAIN_OUTPUT_COUNT);
+    }
+  }
+
+  /**
    * 本体呼び出しの送り方 (method と params) を作る。 本体呼び出しと段階 3 の要約の呼び出しが同じものを使う
    * (思考・サンプリング・ツール定義の差で前方が変わるとキャッシュが使えない。 §5.8 の申し送り)。
    * 出力上限 O (ティアの outputTokenLimit) を必ず渡す (§4.2 / §4.3)。 役割は (1) 同じ文を繰り返し続ける
@@ -2726,7 +2757,13 @@ export class AgentLoop {
    * finish_reason="length" になり、 「続きを出力」 の処理が次の本体呼び出しとして続ける。
    */
   private buildMainCallRequest(toolDefs: ToolDefinition[], signal: AbortSignal): MainCallRequest {
-    const maxTokens = TIER_CONTEXT_BUDGETS[this.capability.tier].outputTokenLimit;
+    // 2026-11-07: 出力上限は min(O の上限, W − P − T − M − S)。 予約 R に届かないまま続けるときは、 ここで空きに合わせて縮む。
+    // 規則 1 (enforceForcedLimit) が最低限の予約を保証するので、 ふつうは最低の出力 4,096 以上になる (推定の誤差の分だけ下支えする)
+    const budget = this.contextBudget();
+    const maxTokens = Math.max(
+      Math.min(MIN_MAIN_OUTPUT_TOKENS, budget.outputTokenLimit),
+      computeMainOutputTokens(this.measureNextPrompt(toolDefs).tokens, budget),
+    );
     const params = {
       model: this.model,
       messages: this.history.getMessages(),
@@ -2773,11 +2810,16 @@ export class AgentLoop {
    *   (終わり方の記録と履歴上の印は済ませてある)
    */
   private async enforceForcedLimit(): Promise<boolean> {
-    const budget = computeContextBudget(this.contextWindow, this.capability.tier);
+    const budget = this.contextBudget();
     const size = this.measureNextPrompt(this.getFilteredToolDefs());
     if (!exceedsForcedLimit(size.tokens, budget)) return true;
     const result = await this.runReductionEvent("forced", size);
     if (result.ok) return true;
+    // 減らせるものが無くても、 最低限の予約 (最低の出力 + T + M + S) が入るなら止めない。
+    // 予約 R は整理を始める目標で、 届かないだけなら maxTokens を空きに合わせて縮めて続ける (2026-11-07)
+    if (!this._aborted && result.reason === "nothing-to-reduce" && !exceedsMinimumLimit(size.tokens, budget)) {
+      return true;
+    }
     if (this._aborted) {
       console.log(chalk.yellow("\n  (処理を中断しました)"));
       this.appendAbortMarker("");
@@ -2810,7 +2852,7 @@ export class AgentLoop {
   ): Promise<ReductionEventResult | ReductionSkippedResult> {
     const toolDefs = this.getFilteredToolDefs();
     const promptSize = size ?? this.measureNextPrompt(toolDefs);
-    const budget = computeContextBudget(this.contextWindow, this.capability.tier);
+    const budget = this.contextBudget();
     const raw = this.history.getRawMessages();
     const reducedHistory = this.history;
     const id = `r-${++this.reductionSeq}-${Date.now().toString(36)}`;
@@ -2865,6 +2907,12 @@ export class AgentLoop {
     } else if (result.reason === "nothing-to-reduce" && trigger !== "forced") {
       spinner.info(line);
       this.notice("info", line);
+    } else if (result.reason === "nothing-to-reduce" && !exceedsMinimumLimit(promptSize.tokens, budget)) {
+      // 規則 1 で減らせなかったが、 最低限の予約は入るので止めない (enforceForcedLimit が続ける。 2026-11-07)。 失敗ではなく注意
+      const note = `${line} (最低限の予約は入るので、 出力の上限を縮めて続けます)`;
+      spinner.warn(note);
+      logger.warn(`[reduction] ${note}`);
+      this.notice("warn", note);
     } else {
       spinner.fail(line);
       logger.error(`[reduction] ${line}`);
@@ -2939,14 +2987,14 @@ export class AgentLoop {
   getReductionStatus(): ReductionStatus {
     const toolDefs = this.getFilteredToolDefs();
     const promptSize = this.measureNextPrompt(toolDefs);
-    const budget = computeContextBudget(this.contextWindow, this.capability.tier);
+    const budget = this.contextBudget();
     const tierBudget = TIER_CONTEXT_BUDGETS[this.capability.tier];
     const growth = this.requestGrowth.resolve(budget);
     const raw = this.history.getRawMessages();
     return {
       budget,
       keepRecentToolUses: tierBudget.keepRecentToolUses,
-      toolResultLimitTokens: tierBudget.toolResultLimitTokens,
+      toolResultLimitTokens: budget.toolResultLimitTokens,
       promptSize,
       growth,
       recentGrowths: this.requestGrowth.recentGrowths(),
@@ -3447,7 +3495,7 @@ export class AgentLoop {
    * - 合計の上限で切った・省いたときは、 応答ごとに 1 行で利用者に知らせる。
    */
   private async withToolBatch(toolCalls: readonly ToolCall[], run: (batch: ToolResultBatch) => Promise<boolean>) {
-    const budget = TIER_CONTEXT_BUDGETS[this.capability.tier];
+    const budget = this.contextBudget();
     const batch = new ToolResultBatch(
       { perResultTokens: budget.toolResultLimitTokens, totalTokens: budget.toolResultTotalTokens },
       toolCalls.map((c) => c.function.name),
@@ -4315,6 +4363,8 @@ export class AgentLoop {
     this.intentClassifier.setProvider(this.provider, model);
     this.evaluator.setMainProvider(this.provider, model);
     this.capability = capability;
+    // 出力の見込み (予約 R) は前のモデルの出力から作らない
+    this.recentMainOutputs = [];
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, model)} (${this.capability.reason})`);
     // model は送り方の設定に入る。 先読みの並びは古くなる (§9.5)
     this.invalidatePrewarm("model を替えたため");
@@ -4346,6 +4396,8 @@ export class AgentLoop {
     this.intentClassifier.setProvider(this.provider, this.model);
     this.evaluator.setMainProvider(this.provider, this.model);
     this.capability = capability;
+    // 接続先・モデルが替わりうるので、 出力の見込み (予約 R) は作り直す
+    this.recentMainOutputs = [];
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, this.model)} (${this.capability.reason})`);
   }
 

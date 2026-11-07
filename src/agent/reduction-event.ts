@@ -17,7 +17,7 @@
  * 途中で失敗したら写しを捨てるだけで、 履歴は元のまま。 失敗は結果 (ok: false) として返し、 呼び出し側が利用者に見せる。
  * ただし段階 3 の要約の失敗は設定 context.summaryFailure に従う (2026-10-25 利用者の決定。 §6.1):
  *   - continue (既定): 失敗を記録と 1 行に必ず出したうえで、 段階 0〜2 の写しだけで差し替える
- *     (規則 1 で段階 0〜2 だけでは入らないときは still-too-large で止める)
+ *     (規則 1 で段階 0〜2 だけでは最低限の予約も入らないときは still-too-large で止める)
  *   - stop: イベント全体を失敗にする (写しを捨てる)
  * Esc で要約が切れたとき (signal が中断済み) は設定にかかわらず失敗にする (利用者が止めた処理を続けない)。
  * 記録 (§10.1 の reduction_event) は成功・失敗のどちらでも返す。 ログへの書き込みと画面の表示は呼び出し側 (AgentLoop)。
@@ -30,6 +30,7 @@ import {
   type ContextBudget,
   computeReductionGoal,
   exceedsForcedLimit,
+  exceedsMinimumLimit,
   type PromptSize,
   type ReductionGoal,
   type RequestGrowth,
@@ -77,7 +78,7 @@ export type ReductionFailureReason =
   | "summary-error"
   /** 減らせるものが無かった (書き換えない) */
   | "nothing-to-reduce"
-  /** 規則 1 の発火で、 整理しても次の本体呼び出しが入らない */
+  /** 規則 1 の発火で、 整理しても最低限の予約 (最低の出力 + T + M + S) が入らない */
   | "still-too-large"
   /** 差し替える直前の検証・差し替えが失敗した */
   | "apply-error";
@@ -126,6 +127,11 @@ export interface ReductionEventRecord {
   clearedCurrentThinking: number;
   /** 整理後の P の推定 (= 整理前の P − total)。 書き換えなかったときは整理前と同じ */
   promptTokensAfter: number;
+  /**
+   * 規則 1 で、 整理の後も予約 R (目標) に届かなかった量 (P + R − W)。 止めずに、 本体呼び出しの maxTokens を縮めて続ける
+   * (2026-11-07。 最低限の予約が入る限り止めない)。 届いたときは無し
+   */
+  reserveShortfallTokens?: number;
   summary: ReductionSummaryRecord;
   /** 要約に失敗したときの扱い (設定 context.summaryFailure) */
   summaryFailurePolicy: SummaryFailurePolicy;
@@ -470,13 +476,17 @@ export async function runReductionEvent(
     );
   }
   const promptTokensAfter = promptSize.tokens - total;
-  if (input.trigger === "forced" && exceedsForcedLimit(promptTokensAfter, budget)) {
+  if (input.trigger === "forced" && exceedsMinimumLimit(promptTokensAfter, budget)) {
     const n = (v: number) => v.toLocaleString("en-US");
     return fail(
       "still-too-large",
-      `整理しても次の呼び出しが入りません (整理後の推定 P ${n(promptTokensAfter)} + 予約 R ${n(budget.reserveTokens)} > ` +
+      `整理しても次の呼び出しが入りません (整理後の推定 P ${n(promptTokensAfter)} + 最低限の予約 ${n(budget.minimumReserveTokens)} > ` +
         `contextWindow ${n(budget.contextWindow)}。 要約: ${record.summary.status}${summaryNote})`,
     );
+  }
+  if (input.trigger === "forced" && exceedsForcedLimit(promptTokensAfter, budget)) {
+    // 予約 R (目標) には届かないが、 最低限の予約は入る。 止めずに続ける (本体の maxTokens は空きに合わせて縮む)
+    record.reserveShortfallTokens = promptTokensAfter + budget.reserveTokens - budget.contextWindow;
   }
 
   // 5. 検証して 1 回だけ差し替える
