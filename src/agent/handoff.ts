@@ -231,6 +231,11 @@ export interface HandoffOptions {
    * 保存したセッション ID を返すと、 引き継ぎメモに復元先として併記する。
    */
   saveSession?: () => string | undefined;
+  /**
+   * メモの作り方を差し替える (providedNote が無いときだけ使う)。 タスクの引き継ぎ文書があるとき、 AgentLoop は
+   * 文書を更新してから描いたメモを返す (docs/task-handoff-design.md §7)。 note=null なら履歴を変えずに失敗にする
+   */
+  generateNote?: () => Promise<HandoffNoteResult>;
 }
 
 /**
@@ -255,7 +260,9 @@ export async function runHandoff(
   }
   const { note, reason } = fromFile
     ? { note: opts.providedNote?.trim(), reason: undefined }
-    : await generateHandoffNote(provider, model, history.getRawMessages());
+    : opts.generateNote
+      ? await opts.generateNote()
+      : await generateHandoffNote(provider, model, history.getRawMessages());
   if (!note) {
     return { applied: false, note: null, freedTokens: 0, reason: reason ?? "引き継ぎメモを生成できませんでした" };
   }

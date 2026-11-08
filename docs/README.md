@@ -19,7 +19,7 @@
 | ツールを足す・権限を変える | [external_design.md](external_design.md) §3・§4 | [security_assessment.md](security_assessment.md)、 [wsl-sandbox-design.md](wsl-sandbox-design.md) |
 | システムプロンプト・モデルへの説明文を変える | [prompt-prefix-stability.md](prompt-prefix-stability.md) (前方一致を壊さない) | [system-prompt-redesign.md](system-prompt-redesign.md)、 [prompt-language-policy.md](prompt-language-policy.md)、 [internal_design.md](internal_design.md) §16 |
 | ハーネスの促し・ToDo・Goal の振る舞い | [internal_design.md](internal_design.md) §16 | [strategic-todo-design.md](strategic-todo-design.md)、 [reactive-intervention-coherence-design.md](reactive-intervention-coherence-design.md)、 [request-elaboration-design.md](request-elaboration-design.md)、 [goal-seek-mode-design.md](goal-seek-mode-design.md) |
-| コンテキストの整理・`/compact`・`/prewarm` (先読み)・`/handoff`・キャッシュが外れる | [context-reduction-redesign.md](context-reduction-redesign.md) | [internal_design.md](internal_design.md) §2.5、 [handoff-design.md](handoff-design.md)、 [prompt-prefix-stability.md](prompt-prefix-stability.md) |
+| コンテキストの整理・`/compact`・`/prewarm` (先読み)・`/handoff`・キャッシュが外れる | [context-reduction-redesign.md](context-reduction-redesign.md) | [internal_design.md](internal_design.md) §2.5、 [handoff-design.md](handoff-design.md)、 [task-handoff-design.md](task-handoff-design.md)、 [prompt-prefix-stability.md](prompt-prefix-stability.md) |
 | LLM の動作が遅い (ローカル LLM) | [prompt-prefix-stability.md](prompt-prefix-stability.md) | [todo-local-llm-speed.md](todo-local-llm-speed.md)、 [server-aware-runtime-design.md](server-aware-runtime-design.md) (サーバの枠・スロットに合わせる)、 [response-latency-improvement.md](response-latency-improvement.md) |
 | プロバイダ・モデル設定 (`/models`) | [model-registry.md](model-registry.md) | [model-orchestration.md](model-orchestration.md)、 [model-apply-immediacy.md](model-apply-immediacy.md)、 各プロバイダの設計書 |
 | セカンド LLM・サブエージェント・評価 | [v030_second_llm_design.md](v030_second_llm_design.md) | [internal_design.md](internal_design.md) §2.2、 [evaluation-loop.md](evaluation-loop.md)、 [main_second_swap_design.md](main_second_swap_design.md) |
@@ -64,6 +64,7 @@ Status の記載が無いものは `implemented`。
 | [ephemeral-context-design.md](ephemeral-context-design.md) | | 揮発メッセージ (`Message.ephemeral`。 整理イベントでまとめて除く) |
 | [context-intelligence.md](context-intelligence.md) | | 意図の分類 (A 節が現行。 B 節の階層圧縮は削除済みで記録扱い) |
 | [handoff-design.md](handoff-design.md) | | `/handoff` (引き継ぎメモを残してリセット)・メモの形 |
+| [task-handoff-design.md](task-handoff-design.md) | in-progress | タスクごとの引き継ぎ文書 (正本)・別の依頼で前のタスクを 1 行に畳む (第 1 段 実装済み。 第 2 段 = 要約を文書の抜粋に置き換える は未実装) |
 | [context-inspector.md](context-inspector.md) | | `/context` のドリルダウン |
 | [evaluation-loop.md](evaluation-loop.md) | | 評価ループ (書き込み後の Evaluator・`/try`) |
 | [tool-call-salvage-pipe-format-design.md](tool-call-salvage-pipe-format-design.md) | | ツール呼び出しのサルベージ (`<\|tool\|>call:` 形式) |

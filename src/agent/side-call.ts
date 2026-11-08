@@ -30,6 +30,8 @@ import { fingerprintPrompt, type PromptFingerprint } from "./prompt-fingerprint.
  * - progress: 進み具合の判定
  * - goal-promotion: Goal 昇格のための受け入れ条件の抽出
  * - handoff: 引き継ぎメモの作成
+ * - task-handoff: タスクの引き継ぎ文書の判断の節の更新 (docs/task-handoff-design.md §4.4)
+ * - task-switch: 新しい発言が前のタスクの続きか別かの分類 (同 §5)
  * - prewarm: 先読み (prewarm.ts。 次の本体呼び出しと同じ並びを出力上限 1 で送る)
  * - subagent: サブエージェント (task ツール) の各呼び出し
  * - second-llm: セカンド LLM (相談・委任・評価) の各呼び出し
@@ -43,6 +45,8 @@ export type SideCallPurpose =
   | "progress"
   | "goal-promotion"
   | "handoff"
+  | "task-handoff"
+  | "task-switch"
   | "prewarm"
   | "subagent"
   | "second-llm"

@@ -275,6 +275,7 @@ stateDiagram-v2
 | `side-call.ts` | 本体の会話ループ以外の LLM 呼び出しの入口 `sideCall(目的, …)`。 `side_call` を記録し、 先読み中は待つ |
 | `cache-miss.ts` | `diagnoseCacheMiss`: 本体呼び出しの `tokensCached` が「比べる相手 (前回の本体呼び出しか、 その後に送り終えた先読み) の入力 − 4,096」 を下回ったら、 間の整理・書き換え理由・脇の呼び出しを原因に、 相手との並びのずれ (`divergence`) を添えて `cache_miss` に記録 |
 | `prompt-fingerprint.ts` | 送った並びの指紋 (設定・道具の定義・messages の 1 件ずつの短いハッシュ)。 本体呼び出しの `request`、 先読み・要約の `side_call` に残し、 ずれ始めの位置を求める |
+| `task-handoff.ts` / `task-handoff-tracker.ts` | タスクごとの引き継ぎ文書 (正本。 `~/.localllm/sessions/<id>.tasks/`)。 区切り・整理の差し替えの直前 (`beforeRewrite`) に書き、 別の依頼では前のタスクを 1 行のポインタに畳む (正本は `docs/task-handoff-design.md`) |
 
 AgentLoop との組み込み:
 - 本体呼び出しの再試行ループの先頭で、 先読みの終わりを待ち (`PrewarmRunner.wait`)、 記録しておいた区切り (ToDo の全部完了・Goal の達成) を判定し、

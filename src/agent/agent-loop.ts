@@ -20,7 +20,17 @@ import type { PermissionManager, RequestSource } from "../security/permission-ma
 import { detectCotToolMismatch } from "../security/cot-tool-guard.js";
 import type { HookManager } from "../hooks/hook-manager.js";
 import { MessageHistory, toSentMessage } from "./message-history.js";
-import { generateHandoffNote, runHandoff, type HandoffResult } from "./handoff.js";
+import { generateHandoffNote, runHandoff, type HandoffNoteResult, type HandoffResult } from "./handoff.js";
+import {
+  buildFoldedMessages,
+  buildTaskPointerLine,
+  extractConstraintsFromHandoffNote,
+  renderHandoffNoteFromTask,
+  type TaskCheckpointKind,
+  type TaskHandoffStore,
+} from "./task-handoff.js";
+import { type RefineContext, TaskHandoffTracker } from "./task-handoff-tracker.js";
+import { isRateLimitError } from "../providers/utils/rate-limit.js";
 import {
   resolveCapability,
   formatCapabilityLabel,
@@ -407,6 +417,11 @@ export class AgentLoop {
   private requestEndSettled = false;
   /** 整理イベント ID の通し番号 */
   private reductionSeq = 0;
+  /**
+   * タスクの引き継ぎ文書 (docs/task-handoff-design.md)。 enableTaskHandoff() で有効にしたときだけ動く
+   * (対話の起動 src/index.ts が有効にする。 テストの AgentLoop は有効にしない)
+   */
+  private taskHandoff: TaskHandoffTracker | null = null;
   /**
    * いま処理中の依頼を始めた利用者の発言 (run() の間だけ)。 整理イベントの前処理で
    * 「これより前が終わった依頼」 の境目にする。 依頼の外では null。
@@ -915,6 +930,12 @@ export class AgentLoop {
         }
         // 先読みの前の準備 (判定と整理。 §9.4) の途中なら終わるまで待つ (整理の差し替えと発言の追加を重ねない)
         await this.prewarmPrepared();
+        // タスクの引き継ぎ文書: 前のタスクの続きか別かを決め、 別なら前のタスクを文書に閉じて 1 行に畳む
+        // (docs/task-handoff-design.md §5。 最低量 F を見ない。 新しい発言を履歴に入れる前に行う)
+        if (await this.taskHandoffOnNewRequest(userMessage)) {
+          this.runStats.outcome = "error";
+          return;
+        }
         // 規則 2 の「新しい依頼が届いた」 (docs/context-reduction-redesign.md §4.4)。 前の依頼の終わりで判定していないとき
         // (中断・エラー・再開のあと) だけ、 新しい発言を履歴に入れる前に判定する (前の依頼は全部終わった依頼として扱う)
         await this.judgeNewRequestBoundary();
@@ -959,6 +980,7 @@ export class AgentLoop {
         for (const message of messages) {
           this.history.addUserMessage(message);
           this.chatLogger?.logUser(message);
+          this.taskHandoffNoteFollowUp(message);
         }
         userMessageText = [userMessageText, ...messages].join("\n");
         const boundaryLabel = boundary === "tool" ? "tool完了" : "応答";
@@ -2494,6 +2516,8 @@ export class AgentLoop {
   private async finishRequest(): Promise<void> {
     const outcome = this.runStats.outcome;
     if (outcome === "incomplete") return;
+    // 依頼の終わりのタスクの引き継ぎ文書 (docs/task-handoff-design.md §4.3)。 整理の判定より前に書く
+    await this.taskHandoffAtRequestEnd(outcome === "completed");
     this.requestGrowth.endRequest();
     if (outcome !== "completed") {
       // 中断・エラー・ループ停止: 次の依頼の始まりで「新しい依頼が届いた」 として判定する
@@ -2524,6 +2548,8 @@ export class AgentLoop {
     const kind = this.pendingBoundary;
     if (kind === null) return;
     this.pendingBoundary = null;
+    // ToDo の全部完了・Goal の達成でタスクの引き継ぎ文書を書く (docs/task-handoff-design.md §4.3)
+    await this.taskHandoffCheckpoint(kind, this.taskHandoff?.shouldRefine(this.history) ?? false);
     await this.judgeBoundary(kind);
   }
 
@@ -2880,6 +2906,10 @@ export class AgentLoop {
         // 書き換えると決めた時点で、 走っている先読みを切る (書き換えた後の並びは先読みの並びで始まらない。 §9.5)。
         // 規則 2 の見送りでは呼ばれないので、 まだ使える先読みは残る
         onWillRewrite: () => this.prewarm.cut(PREWARM_ABORT_REASONS.reduction),
+        // 落とす前にタスクの引き継ぎ文書を書く (docs/task-handoff-design.md §6)
+        beforeRewrite: this.taskHandoff
+          ? () => this.taskHandoffBeforeReduction(toolDefs, signal, promptSize, budget)
+          : undefined,
       });
     } finally {
       this.llmAbortController = null;
@@ -3835,17 +3865,270 @@ export class AgentLoop {
    * 引き継ぎメモの生成に失敗したら履歴には触れない。
    */
   async runHandoffNow(providedNote?: string): Promise<HandoffResult> {
+    const tracker = this.taskHandoff;
+    const hasDoc = tracker?.activeDoc(this.history) != null;
+    if (tracker && hasDoc && providedNote !== undefined) {
+      // 利用者が書いたファイルは入力としてだけ読む: 決まりを文書に写す (docs/task-handoff-design.md §7)
+      try {
+        tracker.importConstraints(this.history, extractConstraintsFromHandoffNote(providedNote));
+      } catch (e) {
+        return {
+          applied: false,
+          note: null,
+          freedTokens: 0,
+          reason: `タスクの引き継ぎ文書に決まりを写せなかったためリセットしませんでした: ${e instanceof Error ? e.message : String(e)}`,
+        };
+      }
+    }
     return await runHandoff(this.provider, this.model, this.history, {
       providedNote,
       saveSession: () => {
         return this.saveHandoffArchive();
       },
+      generateNote: tracker && hasDoc ? () => this.handoffNoteFromTask() : undefined,
     });
   }
 
   /** 引き継ぎメモを作って返すだけ (/handoff dry)。 履歴は変更しない */
   async buildHandoffPreview(): Promise<{ note: string | null; reason?: string }> {
+    if (this.taskHandoff?.activeDoc(this.history)) return await this.handoffNoteFromTask();
     return await generateHandoffNote(this.provider, this.model, this.history.getRawMessages());
+  }
+
+  /** タスクの引き継ぎ文書を更新してから /handoff のメモを描く (docs/task-handoff-design.md §7)。 失敗したら note=null */
+  private async handoffNoteFromTask(): Promise<HandoffNoteResult> {
+    const tracker = this.taskHandoff;
+    if (!tracker) return { note: null, reason: "タスクの引き継ぎ文書が有効ではありません" };
+    let result: Awaited<ReturnType<TaskHandoffTracker["checkpoint"]>>;
+    try {
+      result = await tracker.checkpoint(this.history, "handoff", {
+        refine: this.taskRefineContext(this.getFilteredToolDefs(), new AbortController().signal),
+      });
+    } catch (e) {
+      if (isRateLimitError(e)) throw e;
+      return {
+        note: null,
+        reason: `タスクの引き継ぎ文書を書けませんでした: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
+    if (!result) return { note: null, reason: "使っているタスクの引き継ぎ文書がありません" };
+    if (result.refineFailure) return { note: null, reason: result.refineFailure };
+    return { note: renderHandoffNoteFromTask(result.doc, result.paths.md) };
+  }
+
+  // ─── タスクの引き継ぎ文書 (docs/task-handoff-design.md) ───
+
+  /**
+   * タスクの引き継ぎ文書を有効にする (対話の起動が呼ぶ)。 保存先は store の baseDir の下の `<セッション ID>.tasks/`。
+   * 有効にしないとき (テスト・サブエージェント) は何もしない
+   */
+  enableTaskHandoff(store: TaskHandoffStore): void {
+    this.taskHandoff = new TaskHandoffTracker({
+      store,
+      provider: () => this.provider,
+      model: () => this.model,
+      sessionId: () => this.session.meta.id,
+      todos: () => getTodosCurrent().map((t) => ({ content: t.content, status: t.status })),
+      log: (record) => this.llmLogger.logTaskHandoff(record),
+    });
+  }
+
+  /** テスト・表示用: 使っているタスクの引き継ぎ文書のパス (無ければ null) */
+  getActiveTaskHandoffPaths(): { json: string; md: string; history: string } | null {
+    return this.taskHandoff?.activePaths(this.history) ?? null;
+  }
+
+  /** 判断の節の更新に渡す本体と同じ並び (attachDynamicContext() の前に作る) */
+  private taskRefineContext(toolDefs: ToolDefinition[], signal: AbortSignal): RefineContext {
+    return {
+      request: this.buildMainCallRequest(toolDefs, signal),
+      promptTokens: this.measureNextPrompt(toolDefs).tokens,
+      budget: this.contextBudget(),
+    };
+  }
+
+  private taskHandoffWarn(message: string, level: "warn" | "error" = "warn"): void {
+    console.log(level === "error" ? chalk.red(`\n  ${message}`) : chalk.yellow(`\n  ${message}`));
+    if (level === "error") logger.error(`[task-handoff] ${message}`);
+    else logger.warn(`[task-handoff] ${message}`);
+    this.notice(level, message);
+  }
+
+  /** 途中の追加入力を依頼の原文に足す (保存に失敗しても作業は止めない。 警告する) */
+  private taskHandoffNoteFollowUp(text: string): void {
+    if (!this.taskHandoff) return;
+    try {
+      this.taskHandoff.noteFollowUp(this.history, text);
+    } catch (e) {
+      this.taskHandoffWarn(
+        `タスクの引き継ぎ文書に追加入力を書けませんでした: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  /**
+   * 区切りで文書を書く (§4.3)。 refine なら判断の節も LLM で直す (Esc で切れる)。 レート制限は投げる (作業を止める)。
+   * ほかの失敗は警告して続ける (区切りの書き込みは履歴を落とさないので、 書けなくても失うものは無い)
+   */
+  private async taskHandoffCheckpoint(kind: TaskCheckpointKind, refine: boolean): Promise<void> {
+    const tracker = this.taskHandoff;
+    if (!tracker?.activeDoc(this.history)) return;
+    const controller = refine ? new AbortController() : null;
+    if (controller) this.llmAbortController = controller;
+    try {
+      const result = await tracker.checkpoint(this.history, kind, {
+        refine: controller ? this.taskRefineContext(this.getFilteredToolDefs(), controller.signal) : null,
+      });
+      if (result?.refineFailure) this.taskHandoffWarn(result.refineFailure);
+    } catch (e) {
+      if (isRateLimitError(e)) throw e;
+      this.taskHandoffWarn(
+        `タスクの引き継ぎ文書を書けませんでした (${kind}): ${e instanceof Error ? e.message : String(e)}`,
+      );
+    } finally {
+      if (controller && this.llmAbortController === controller) this.llmAbortController = null;
+    }
+  }
+
+  /** 依頼の終わり (§4.3)。 正常に終わったときだけ判断の節を直す (中断・エラーでは機械的な節だけ) */
+  private async taskHandoffAtRequestEnd(completed: boolean): Promise<void> {
+    const tracker = this.taskHandoff;
+    if (!tracker?.activeDoc(this.history)) return;
+    const openTodos = getCurrentTodos().filter((t) => t.status === "pending" || t.status === "in_progress");
+    tracker.noteRequestEnd(this.history, completed && openTodos.length === 0);
+    try {
+      await this.taskHandoffCheckpoint("request-end", completed && tracker.shouldRefine(this.history));
+    } catch (e) {
+      // 依頼の終わりは応答を届けた後なので、 レート制限でも止める作業が無い。 知らせるだけにする
+      this.taskHandoffWarn(
+        `タスクの引き継ぎ文書を書けませんでした (request-end): ${e instanceof Error ? e.message : String(e)}`,
+        "error",
+      );
+    }
+  }
+
+  /**
+   * 整理イベントが履歴を差し替える直前 (§6)。 判断の節を直して書く。 保存の失敗・レート制限は投げる (差し替えない)。
+   * 判断の節の更新の失敗は機械的な節を書いたうえで警告し、 投げない
+   */
+  private async taskHandoffBeforeReduction(
+    toolDefs: ToolDefinition[],
+    signal: AbortSignal,
+    promptSize: PromptSize,
+    budget: ContextBudget,
+  ): Promise<void> {
+    const tracker = this.taskHandoff;
+    if (!tracker) return;
+    // 依頼の外の /compact などで文書がまだ無ければ、 履歴から作る (落とす前に)
+    if (!tracker.activeDoc(this.history)) tracker.adoptHistory(this.history);
+    const result = await tracker.checkpoint(this.history, "before-reduction", {
+      refine: { request: this.buildMainCallRequest(toolDefs, signal), promptTokens: promptSize.tokens, budget },
+    });
+    if (result?.refineFailure) this.taskHandoffWarn(result.refineFailure);
+  }
+
+  /**
+   * 新しい依頼の始まり (§5)。 前のタスクの続きか別かを決め、 別なら前のタスクを閉じて履歴を 1 行のポインタに畳む。
+   * @returns 依頼を止めるなら true (レート制限)
+   */
+  private async taskHandoffOnNewRequest(userMessage: string | ContentPart[]): Promise<boolean> {
+    const tracker = this.taskHandoff;
+    if (!tracker) return false;
+    const text =
+      typeof userMessage === "string"
+        ? userMessage
+        : userMessage
+            .filter((p): p is { type: "text"; text: string } => p.type === "text")
+            .map((p) => p.text)
+            .join("\n");
+    try {
+      const previous = tracker.activeDoc(this.history) ?? tracker.adoptHistory(this.history);
+      if (!previous) {
+        tracker.startTask(this.history, text);
+        return false;
+      }
+      const decision = await tracker.classify(this.history, text);
+      if (decision.basis === "failed") {
+        this.taskHandoffWarn(`前のタスクの続きか別かを決められなかったため、 続きとして扱います: ${decision.detail}`);
+      }
+      if (decision.decision === "same") {
+        tracker.noteFollowUp(this.history, text);
+        return false;
+      }
+      await this.foldPreviousTask(tracker, text);
+      return false;
+    } catch (e) {
+      if (isRateLimitError(e)) {
+        this.taskHandoffWarn(
+          `レート制限のため依頼を止めました (タスクの引き継ぎ文書の処理中): ${e instanceof Error ? e.message : String(e)}`,
+          "error",
+        );
+        return true;
+      }
+      this.taskHandoffWarn(
+        `タスクの引き継ぎ文書の処理に失敗しました。 履歴は畳まずに続けます: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * 前のタスクを文書に閉じて、 履歴をポインタ 1 件に畳む (§5 の 4)。 文書の更新・保存・セッションの保存のどれかが失敗したら畳まない。
+   * 畳み込みは整理イベントではないので最低量 F を見ない
+   */
+  private async foldPreviousTask(tracker: TaskHandoffTracker, newText: string): Promise<void> {
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    this.llmAbortController = controller;
+    let checkpoint: Awaited<ReturnType<TaskHandoffTracker["checkpoint"]>>;
+    try {
+      checkpoint = await tracker.checkpoint(this.history, "new-request", {
+        refine: this.taskRefineContext(this.getFilteredToolDefs(), controller.signal),
+      });
+    } finally {
+      if (this.llmAbortController === controller) this.llmAbortController = null;
+    }
+    if (checkpoint?.refineFailure) {
+      // 判断の節が書けていないまま落とさない。 前のタスクは閉じ、 履歴は残して新しいタスクを始める
+      this.taskHandoffWarn(`${checkpoint.refineFailure}。 前のタスクの履歴は畳まずに残します`);
+      tracker.close(this.history, tracker.closingStatus(this.history));
+      tracker.startTask(this.history, newText);
+      return;
+    }
+    // 畳む前の完全な履歴を別のセッションとして残す (/handoff と同じ。 失敗したら投げて畳まない)
+    const archiveId = this.saveHandoffArchive();
+    const status = tracker.closingStatus(this.history);
+    const summaries = TaskHandoffTracker.countSummaries(this.history);
+    const closed = tracker.close(this.history, status, archiveId);
+    if (!closed) {
+      tracker.startTask(this.history, newText);
+      return;
+    }
+    const raw = this.history.getRawMessages();
+    const folded = buildFoldedMessages(raw, buildTaskPointerLine(closed.doc, closed.paths.md));
+    const before = estimateMessageTokens(this.history.getMessages());
+    const id = `f-${++this.reductionSeq}-${Date.now().toString(36)}`;
+    this.prewarm.cut(PREWARM_ABORT_REASONS.reduction);
+    this.history.replaceMessages(folded, `task-fold:${id}`);
+    this.history.queueStateHandover("");
+    const freed = Math.max(0, before - estimateMessageTokens(this.history.getMessages()));
+    this.cacheMissCauses.noteReductionEvent(id);
+    this.requestGrowth.noteReduction(freed);
+    this.llmLogger.logTaskHandoff({
+      action: "fold",
+      taskId: closed.doc.id,
+      path: closed.paths.md,
+      status,
+      kind: "new-request",
+      refined: checkpoint?.refined ?? false,
+      detail: `${id}: ${raw.length} 件 (要約 ${summaries} 件) をポインタ 1 件に畳み、 約 ${freed.toLocaleString("en-US")} トークン減。 畳む前の履歴はセッション ${archiveId}`,
+      durationMs: Date.now() - startedAt,
+    });
+    const line = `前のタスク「${closed.doc.title}」 を引き継ぎ文書に畳みました (${status}。 約 ${freed.toLocaleString("en-US")} トークン減): ${closed.paths.md}`;
+    console.log(chalk.dim(`  ${line}`));
+    logger.info(`[task-handoff] ${line}`);
+    this.notice("info", line);
+    tracker.startTask(this.history, newText);
   }
 
   private saveHandoffArchive(): string {
@@ -3867,6 +4150,10 @@ export class AgentLoop {
     const handover = this.history.getPendingStateHandover();
     if (handover === null) delete this.session.pendingStateHandover;
     else this.session.pendingStateHandover = handover;
+    // 使っているタスクの引き継ぎ文書 (docs/task-handoff-design.md §4.1)。 再開で読み戻す
+    const taskPaths = this.taskHandoff?.activePaths(this.history);
+    if (taskPaths) this.session.taskHandoff = { activeDocPath: taskPaths.json };
+    else if (this.taskHandoff) delete this.session.taskHandoff;
     saveSession(this.session);
     logger.debug(`Session saved: ${this.session.meta.id}`);
   }
@@ -4122,6 +4409,7 @@ export class AgentLoop {
       }
     }
     this.restoreReductionState(sessionData);
+    this.restoreTaskHandoff(sessionData);
     // docs/todo-goal-lifecycle.md §2.3 — in-memory slot 復元 (旧 session は optional のためスキップ)
     if (sessionData.todos && sessionData.todos.length > 0) {
       setTodosFromGoal(sessionData.todos);
@@ -4138,6 +4426,19 @@ export class AgentLoop {
    * セッションから、 整理に使う状態 (増分 G の記録・要約後の渡し直しの預かり) を戻す。 壊れていれば黙って空にせず知らせる。
    * 再開した直後は前の依頼の終わりで判定したかが分からないので、 次の依頼の始まりで規則 2 を判定する。
    */
+  /** 使っていたタスクの引き継ぎ文書を読み戻す。 読めなければ警告して使わない (次の依頼の始まりで履歴から作り直す) */
+  private restoreTaskHandoff(sessionData: SessionData): void {
+    const docPath = sessionData.taskHandoff?.activeDocPath;
+    if (!this.taskHandoff || typeof docPath !== "string") return;
+    try {
+      this.taskHandoff.restore(this.history, docPath);
+    } catch (e) {
+      const message = `保存されていたタスクの引き継ぎ文書を読めませんでした (${e instanceof Error ? e.message : String(e)})。 次の依頼の始まりで履歴から作り直します`;
+      console.warn(chalk.yellow(`  [resume] ${message}`));
+      logger.warn(`[resume] ${message}`);
+    }
+  }
+
   private restoreReductionState(sessionData: SessionData): void {
     const growth = RequestGrowthTracker.restore(sessionData.requestGrowth);
     if (growth.ok) {

@@ -3,6 +3,9 @@
 > **ステータス**: implemented
 > **作成日**: 2026-10-25 (docs 整理。 それまでメモの形の正本だった `docs/archive/context-strategy.md` §2.2 と、 実装 `src/agent/handoff.ts` / `src/cli/commands/handoff.ts` から書き起こした)
 > **関連**: `docs/context-reduction-redesign.md` §7 (自動の整理とは別の、 手動のリセット)
+> **2026-11-08 追記**: タスクの引き継ぎ文書 (`docs/task-handoff-design.md`) が有効で使っている文書があるとき、 `/handoff` と `/handoff dry` のメモは
+> LLM に書かせず、 文書を更新してから描いたもの (`renderHandoffNoteFromTask`。 同書 §7) になる。 §3 の約束 (メモと保存の両方に成功してから消す) と §4 の形は変わらない。
+> `/handoff from-file` のファイルは入力としてだけ読み、 「守るべき制約・決定事項」 を文書の「決まり・制約」 に写す。
 
 ---
 

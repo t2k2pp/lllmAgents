@@ -81,7 +81,9 @@ export type ReductionFailureReason =
   /** 規則 1 の発火で、 整理しても最低限の予約 (最低の出力 + T + M + S) が入らない */
   | "still-too-large"
   /** 差し替える直前の検証・差し替えが失敗した */
-  | "apply-error";
+  | "apply-error"
+  /** 差し替える前のタスクの引き継ぎ文書の書き込み (beforeRewrite) が失敗した (docs/task-handoff-design.md §6) */
+  | "task-handoff-failed";
 
 /** 段階 3 の要約の記録 (§10.1)。 tokens 系は全試行の合計 */
 export interface ReductionSummaryRecord {
@@ -271,6 +273,13 @@ export interface ReductionEventInput {
    * (書き換えた後の並びは先読みの並びで始まらないので、 先読みを待つのも、 サーバに計算させ続けるのも無駄)
    */
   onWillRewrite?: () => void;
+  /**
+   * 差し替えると決まり、 写しの検証まで済んだ直後 (replaceMessages() の直前) に 1 回だけ呼ぶ (docs/task-handoff-design.md §6)。
+   * AgentLoop はここでタスクの引き継ぎ文書を書く (書いてから落とす)。 投げたら差し替えず task-handoff-failed で失敗にする。
+   * 見送り・nothing-to-reduce・still-too-large では呼ばない (規則 1 は減らせなくても毎回判定するので、 その度に書かない)。
+   * 第 2 段 (同 §9) では、 書いた文書から作った抜粋で既存の要約を置き換える口にする
+   */
+  beforeRewrite?: () => Promise<void>;
 }
 
 /** 忘却の記録 1 回分の本文 (§5.3 / §5.4 の行に、 見出しと読み直しの案内を付ける) */
@@ -492,6 +501,17 @@ export async function runReductionEvent(
   // 5. 検証して 1 回だけ差し替える
   const pairingError = findToolPairingError(next);
   if (pairingError) return fail("apply-error", `差し替え前の写しのツールの対が壊れています: ${pairingError}`);
+  // 落とす前にタスクの引き継ぎ文書を書く。 書けなければ履歴は元のまま (docs/task-handoff-design.md §6)
+  if (input.beforeRewrite) {
+    try {
+      await input.beforeRewrite();
+    } catch (e) {
+      return fail(
+        "task-handoff-failed",
+        `タスクの引き継ぎ文書を書けなかったため、 履歴を書き換えませんでした: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
   try {
     history.replaceMessages(next, `reduction:${input.id}`);
   } catch (e) {

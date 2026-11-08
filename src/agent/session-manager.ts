@@ -10,6 +10,11 @@ import type { RequestGrowthSnapshot } from "./context-budget.js";
 import { parseDurableRunCheckpoint } from "./durable-run-checkpoint.js";
 
 const SESSION_DIR = path.join(os.homedir(), ".localllm", "sessions");
+
+/** セッションの保存先 (絶対パス)。 タスクの引き継ぎ文書もこの下の `<id>.tasks/` に置く (docs/task-handoff-design.md §4.1) */
+export function getSessionDir(): string {
+  return SESSION_DIR;
+}
 const MAX_SESSION_TITLE_LENGTH = 80;
 
 /** session名を一覧・terminalで安全に表示できる可視1行へ正規化する。 */
@@ -106,6 +111,11 @@ export interface SessionData {
    * 添えたら消える (無ければ欄ごと無い)。
    */
   pendingStateHandover?: string;
+  /**
+   * 使っているタスクの引き継ぎ文書の正本 (JSON) の絶対パス (docs/task-handoff-design.md §4.1)。 再開で読み戻す。
+   * 機能が切れている・まだ依頼が無いときは欄ごと無い
+   */
+  taskHandoff?: { activeDocPath: string };
   // 注: paradigm モード (forward / goal-seek) は永続化しない。 goal-seek は必ず goal slot を
   // 伴うため、 restoreSession() が goal の有無からモードを一意に導出する (単一情報源)。
   // docs/room-model-design.md §10-3。

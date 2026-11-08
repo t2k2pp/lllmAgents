@@ -701,7 +701,8 @@ bash 2 件を合わせて 8 件目の結果の後) に、 AgentLoop が「計画
   `promptSize` (整理前の P)、 `growthTokens` (G)、 `currentRequestStart`、 `buildMainCallRequest` (本体呼び出しと同じ組み立て関数)、
   `cacheMissCauses`、 `growth` (RequestGrowthTracker)。
 - 出力: `{ ok: true, record }` か `{ ok: false, reason, detail, record }`。 reason は `stages-error` / `summary-failed` / `summary-error` /
-  `nothing-to-reduce` / `still-too-large` / `apply-error`。 記録 `record` は §10.1 の欄 (下) で、 成功・失敗のどちらも返す。
+  `nothing-to-reduce` / `still-too-large` / `apply-error` / `task-handoff-failed` (2026-11-08。 差し替え直前の `beforeRewrite` でタスクの引き継ぎ文書を書けなかった。 `docs/task-handoff-design.md` §6)。
+  記録 `record` は §10.1 の欄 (下) で、 成功・失敗のどちらも返す。
   `formatReductionEventLine(result)` が利用者向けの 1 行。
 - 成功したときだけ `replaceMessages(写し, "reduction:<id>")` を 1 回呼び、 続けて `cacheMissCauses.noteReductionEvent(id)`、
   `growth.noteReduction(減った量)`、 要約があれば `queueStateHandover()`。 失敗したら写しを捨てるだけで、 履歴・書き換え理由・
@@ -1119,6 +1120,7 @@ reason は `not-local-server` / `empty-history` / `auto-off` (自動の先読み
 
 脇の呼び出しはすべて 1 つの入口 (目的タグを必須にした関数) を通し、 目的・`tokensIn`・`tokensCached`・所要時間を記録する。
 目的: `summarize` / `intent` / `completion` / `progress` / `goal-promotion` / `handoff` / `prewarm` / `subagent`
+(2026-11-08 に `task-handoff` (タスクの引き継ぎ文書の判断の節の更新。 本体と同じ並び + 指示) と `task-switch` (続きか別かの分類) を足した。 `docs/task-handoff-design.md`)
 (サブエージェントは別の文脈で何度も呼ぶため、 スロットが 1 つなら戻った後のメイン呼び出しが全部の読み直しになる。 影響が最も大きい見込み)。
 
 実装 (タスク 1、 2026-10-25):
@@ -1211,6 +1213,7 @@ AgentLoop は整理イベントのたびに `loadConfig()` から読む (変更�
 | `docs/ephemeral-context-design.md` | 揮発の印の考えは残る。 除く時期を「応答のたび」 から「整理イベント」 に変えた旨を先頭に追記 (タスク 7 で済み) |
 | `docs/prompt-prefix-stability.md` | 前提として残る。 §2.3 の「span 境界の除去は依頼 1 件につき 1 回なので許容」 を本書で改めた旨を §2.3 の表 (タスク 7) と先頭 (タスク 12) に追記 |
 | `docs/archive/context-reduction-reasoning-model-fix.md` | 記録扱い (先頭に注記。 タスク 12 で済み)。 **段階 3 は思考をオフにしない** (§5.6。 オフにすると system の先頭が変わり全部の読み直しになる)。 同書の「思考オフで呼ぶ」 知見は、 キャッシュを使わない脇の呼び出しにだけ当てはまる。 同書の対象 `forgetting.ts` / `hierarchical-compressor.ts` は削除した |
+| `docs/task-handoff-design.md` | 2026-11-08。 要約の要約を重ねて床が上がる問題 (2026-11-07 の実機) への対策。 第 1 段: 整理の差し替えの直前にタスクの引き継ぎ文書を書く (`beforeRewrite`)、 別の依頼では前のタスクを 1 行のポインタに畳む (最低量 F を見ない。 整理イベントの外)。 第 2 段 (未実装): 段階 3 の既存の要約を文書の抜粋に置き換える |
 | `docs/README.md` | 本書を `implemented` (実機確認が残る旨を添える) に、 上の 2 書を `superseded` にした (タスク 12 で済み) |
 | README.md / `config-reference.md` / `external_design.md` / `internal_design.md` | 新しい整理に合わせて書き直した (タスク 12 で済み。 `external_design.md` §2.3、 `internal_design.md` §2.5 に要点) |
 

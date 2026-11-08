@@ -16,6 +16,7 @@ import type { PrewarmSkipReason, PrewarmTrigger } from "./prewarm.js";
 import type { PromptFingerprint } from "./prompt-fingerprint.js";
 import type { ReductionEventRecord, ReductionSkipRecord } from "./reduction-event.js";
 import type { SideCallRecord } from "./side-call.js";
+import type { TaskHandoffLogRecord } from "./task-handoff-tracker.js";
 
 /**
  * 全レコード共通の文脈タグ (docs/async-surface-permission-delivery-design.md R-4/5.5)。
@@ -167,6 +168,14 @@ export interface LLMPrewarmSkippedLog extends LogContext {
   detail: string;
 }
 
+/** タスクの引き継ぎ文書の記録 (docs/task-handoff-design.md §8) */
+export interface LLMTaskHandoffLog extends LogContext, TaskHandoffLogRecord {
+  ts: string;
+  turn: number;
+  agentId: string;
+  type: "task_handoff";
+}
+
 /** logRequest() の返り値。 前方一致が保たれたかを呼び出し側が判定するのに使う。 */
 export interface RequestPrefixInfo {
   messageOffset: number;
@@ -183,7 +192,8 @@ export type LLMLogEntry =
   | LLMCacheMissLog
   | LLMReductionEventLog
   | LLMReductionSkippedLog
-  | LLMPrewarmSkippedLog;
+  | LLMPrewarmSkippedLog
+  | LLMTaskHandoffLog;
 
 export interface LLMLoggerOptions {
   logsDir?: string;
@@ -392,6 +402,17 @@ export class LLMLogger {
       turn: this.turn,
       agentId: this.agentId,
       type: "reduction_skipped",
+      ...record,
+    });
+  }
+
+  /** タスクの引き継ぎ文書の作成・更新・閉じる・畳み込み・分類を記録する (docs/task-handoff-design.md §8) */
+  logTaskHandoff(record: TaskHandoffLogRecord): void {
+    this.write({
+      ts: new Date().toISOString(),
+      turn: this.turn,
+      agentId: this.agentId,
+      type: "task_handoff",
       ...record,
     });
   }

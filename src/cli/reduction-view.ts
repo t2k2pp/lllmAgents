@@ -37,6 +37,8 @@ function failureLabel(reason: ReductionFailureReason): string {
       return "整理しても次の呼び出しが入りません";
     case "apply-error":
       return "履歴の差し替えに失敗しました";
+    case "task-handoff-failed":
+      return "タスクの引き継ぎ文書を書けませんでした";
     default: {
       const exhaustive: never = reason;
       return String(exhaustive);

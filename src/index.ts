@@ -83,7 +83,8 @@ import { PROVIDER_LABELS } from "./config/types.js";
 import { buildLLMProfiles } from "./agent/llm-profiles.js";
 import { DiscordBot } from "./discord/discord-bot.js";
 import { CredentialVault } from "./security/credential-vault.js";
-import { getLatestSession, loadSession } from "./agent/session-manager.js";
+import { getLatestSession, getSessionDir, loadSession } from "./agent/session-manager.js";
+import { TaskHandoffStore } from "./agent/task-handoff.js";
 import { RoomManager } from "./agent/room-manager.js";
 import { RoomRunQueue } from "./agent/room-run-queue.js";
 import { HookManager } from "./hooks/hook-manager.js";
@@ -325,7 +326,7 @@ async function main(): Promise<void> {
 
   // メインLLM が暗号化された apiKey を持つクラウド系の場合、起動時に合言葉を取得する。
   // セカンドLLM 側でも同じパスフレーズを使い回せるよう shared scope で保持。
-  let sharedPassphrase: string | undefined = undefined;
+  let sharedPassphrase: string | undefined;
   if (config.mainLLM.apiKey && CredentialVault.isEncrypted(config.mainLLM.apiKey)) {
     const { inquirer } = await import("./cli/prompt-gate.js");
     const { secret } = await withPrompt(() =>
@@ -727,6 +728,10 @@ async function main(): Promise<void> {
   // 起動時の provider は config.mainLLM から作っているので、実行中バインディングとして記録する
   // (docs/model-apply-immediacy.md §3.1)。これが無いと「設定したのに反映されていない」を検出できない。
   agent.setLiveBinding(config.mainLLM);
+
+  // タスクの引き継ぎ文書 (タスクごとの正本) を ~/.localllm/sessions/<セッション ID>.tasks/ に置く。
+  // 再開 (restoreSession) より前に有効にする (docs/task-handoff-design.md §4.1)
+  agent.enableTaskHandoff(new TaskHandoffStore(getSessionDir()));
 
   // クラッシュ時の緊急セッション保存 (agent 確定後に登録)。saveCurrentSession は同期処理。
   setCrashContext({ saveSession: () => agent.saveCurrentSession() });
