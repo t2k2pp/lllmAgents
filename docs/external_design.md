@@ -505,7 +505,9 @@ graph TD
 
 Claude Code 互換のパターンルール。 書き方・評価順の正本は docs/config-reference.md の「rules — 権限ルール」。
 
-**ルール評価順序 (CLI): deny → 引数パターン付き allow → ask → autorun → ツール名だけの allow → 確認**
+**ルール評価順序 (CLI): deny → 引数パターン付き allow → ask → MCP ツールの決まり → autorun → ツール名だけの allow → 確認**
+
+MCP ツールの決まり (中身の検査器 → `mcp-servers.json` の `permissionLevel`・`tools` → 注釈) は docs/mcp-tool-permission-design.md。
 
 ルール形式:
 ```
@@ -901,6 +903,13 @@ MCPは外部ツールサーバーと通信するためのJSON-RPC 2.0ベース�
 }
 ```
 
+権限の項目 (任意。 詳細は docs/mcp-tool-permission-design.md):
+
+| 項目 | 値 | 意味 |
+|:---|:---|:---|
+| `permissionLevel` | `ask` / `auto` / `autorun` | サーバーの道具の既定。 `autorun` は自律実行モードの間だけ自動許可。 無ければ注釈 (`readOnlyHint`) で判定し、 それ以外は確認 |
+| `tools` | `{ "<ツール名>": "ask" \| "auto" \| "autorun" \| "inspect" }` | ツールごとの上書き。 `inspect` は中身の検査器 (組み込みは Blender の `execute_blender_code`) |
+
 ### 11.3 トランスポート
 
 | トランスポート | 説明 | 必須設定 |
@@ -910,7 +919,7 @@ MCPは外部ツールサーバーと通信するためのJSON-RPC 2.0ベース�
 
 ### 11.4 MCPツールの利用
 
-MCPサーバーが提供するツールは起動時に自動検出され、`mcp__<サーバー名>__<ツール名>` の命名規則でLLMに提示されます。既存のパーミッションシステム・フックシステムと統合されるため、MCP経由のツールにも同じセキュリティポリシーが適用されます。
+MCPサーバーが提供するツールは起動時に自動検出され、`mcp__<サーバー名>__<ツール名>` の命名規則でLLMに提示されます。既存のパーミッションシステム・フックシステムと統合されるため、MCP経由のツールにも同じセキュリティポリシーが適用されます。それに加えて、 `permissionLevel`・`tools`・ツールの注釈 (`tools/list` の `annotations`) で確認を減らせます (§11.2)。
 
 ### 11.5 ライフサイクル
 

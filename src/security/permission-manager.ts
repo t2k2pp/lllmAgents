@@ -16,6 +16,7 @@ import {
 import { isBashNetworkContained } from "./containment.js";
 import { isDestructiveCommand } from "./destructive-commands.js";
 import { INHERENTLY_SAFE_TOOLS } from "./inherently-safe-tools.js";
+import { evaluateMcpToolPolicy } from "./mcp-tool-policy.js";
 import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { getInteractionBridge } from "../agent/interaction-bridge-registry.js";
 import * as logger from "../utils/logger.js";
@@ -433,6 +434,18 @@ export class PermissionManager {
       return { allowed: true };
     }
 
+    // MCP ツールの決まり (中身の検査器 → mcp-servers.json の設定 → 注釈)。 その面の autorun を見る
+    // (docs/mcp-tool-permission-design.md §3)。 ask ルール・CoT 不整合のときは使わない
+    let mcpAskReason: string | undefined;
+    if (!forceAsk && toolName.startsWith("mcp__")) {
+      const mcp = evaluateMcpToolPolicy(toolName, params, this.channelAutorun(source));
+      if (mcp?.decision === "allow") return { allowed: true };
+      if (mcp?.decision === "ask" && mcp.reason) {
+        mcpAskReason = mcp.reason;
+        warning += `⚠ ${mcp.reason}\n`;
+      }
+    }
+
     // 5.3 (R-2 権限側): 非同期面は人が15分以内に確認できず、同期ボタン確認は失効 interaction
     // token 経由で必ず 401 になる (徹夜暴走の権限側の原因)。 ここに到達 = deny/サンドボックス/
     // 危険コマンド(block) は通過済み。 autorun なら自動許可するが、
@@ -459,7 +472,7 @@ export class PermissionManager {
       return {
         allowed: false,
         reason:
-          `${label}経由では ${toolName} を自動実行できません (破壊的操作または確認が必要な操作)。` +
+          `${label}経由では ${toolName} を自動実行できません (${mcpAskReason ?? "破壊的操作または確認が必要な操作"})。` +
           `${ruleHint}して明示許可してください。`,
       };
     }
@@ -470,7 +483,9 @@ export class PermissionManager {
         ? `CoT不整合検出 (思考「${cotMismatch}」)・確認手段なし`
         : forceAsk
           ? "ask ルールに一致・確認手段なし"
-          : "autorun 無効・確認手段なし";
+          : mcpAskReason
+            ? `${mcpAskReason}・確認手段なし`
+            : "autorun 無効・確認手段なし";
       return {
         allowed: false,
         reason: `${label}経由では ${toolName} は許可されていません（${why}。${ruleHint}すると許可できます）`,
@@ -591,6 +606,18 @@ export class PermissionManager {
     if (ruleResult === "allow") {
       return { allowed: true };
     }
+
+    // MCP ツールの決まり (中身の検査器 → mcp-servers.json の設定 → 注釈。 docs/mcp-tool-permission-design.md §3)。
+    // ask ルールに一致したときは自動許可に使わず、 検査器の理由を確認の画面に出すだけ
+    let mcpNotice: string | undefined;
+    if (toolName.startsWith("mcp__")) {
+      const mcp = evaluateMcpToolPolicy(toolName, params, this._autorunMode);
+      if (mcp?.decision === "allow" && ruleResult !== "ask") {
+        logger.debug(`[mcp-policy] ${toolName} を自動許可 (${mcp.reason})`);
+        return { allowed: true };
+      }
+      if (mcp?.decision === "ask") mcpNotice = mcp.reason;
+    }
     // ruleResult === "ask" の場合はそのまま確認ダイアログへ進む
     // ruleResult === null の場合は autorun → ツール単位のレベル (ツール名だけの allow ルール等) で判定
 
@@ -672,7 +699,7 @@ export class PermissionManager {
       }
     }
 
-    return this.askUserWithScope(toolName, params, cacheKey);
+    return this.askUserWithScope(toolName, params, cacheKey, mcpNotice);
   }
 
   /**
@@ -737,6 +764,8 @@ export class PermissionManager {
     toolName: string,
     params: Record<string, unknown>,
     cacheKey: string,
+    /** 確認の理由 (MCP の検査器が引っかけた所など)。 確認の画面に出す */
+    notice?: string,
   ): Promise<{ allowed: boolean; reason?: string; abortExecution?: boolean }> {
     // 並列ツール実行時でも確認を1件ずつ直列化する
     let resolveQueue!: () => void;
@@ -749,6 +778,7 @@ export class PermissionManager {
     try {
       const summary = formatToolSummary(toolName, params);
       console.log(chalk.cyan(`\n  [${toolName}] ${summary}`));
+      if (notice) console.log(chalk.yellow(`  ⚠ 確認する理由: ${notice}`));
 
       // 非TTYモード（パイプ等）: readline テキストメニューにフォールバック
       if (!process.stdin.isTTY) {

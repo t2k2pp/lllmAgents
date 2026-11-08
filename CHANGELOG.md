@@ -8,6 +8,8 @@
 
 - コンテキストの予約 R を枠に比例させ、上限・下限で挟むようにした（ティアの値は上限。131K・T2 で 67,584 → 37,355）。出力の見込みは直近の実際の出力の最大 × 1.5
 - 予約 R に届かないだけでは止めず、本体の出力上限を空きに合わせて縮めて続ける。止めるのは整理しても最低限の予約（最低の出力 4,096 + ツール結果 + 余白）が入らないときだけ（docs/context-reduction-redesign.md §4.2）
+- MCP ツールの権限: `mcp-servers.json` の `permissionLevel` が効くようにした（今まで読まれていなかった）。値は `ask`・`auto`・`autorun`（自律実行モードの間だけ自動許可）。ツールごとの上書き `tools` と、中身を見る `inspect` を足し、ツールの注釈（`readOnlyHint`・`destructiveHint`）も使う（docs/mcp-tool-permission-design.md）
+- `--install-blender` の既定を `permissionLevel: "autorun"`＋`tools.execute_blender_code: "inspect"` にした。自律実行モードでも毎回出ていた `execute_blender_code` の確認は、ふつうの形づくりのコードでは出ず、ファイルを消す・外へ書く・プロセスを動かす等のときだけ理由つきで出る
 
 ### 追加
 

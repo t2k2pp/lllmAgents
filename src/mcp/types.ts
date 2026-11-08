@@ -31,6 +31,11 @@ export interface JsonRpcError {
 
 export type MCPTransport = "stdio" | "sse";
 
+/** mcp-servers.json の permissionLevel に書ける値 */
+export type MCPServerPermissionLevel = "ask" | "auto" | "autorun";
+/** mcp-servers.json の tools.<ツール名> に書ける値 */
+export type MCPToolPermissionLevel = MCPServerPermissionLevel | "inspect";
+
 export interface MCPServerConfig {
   /** サーバー名（ツール名のプレフィックスに使用） */
   name: string;
@@ -44,8 +49,19 @@ export interface MCPServerConfig {
   env?: Record<string, string>;
   /** sse: サーバーURL */
   url?: string;
-  /** サーバーが提供するツールに対するパーミッション ("auto" | "ask") */
-  permissionLevel?: "auto" | "ask";
+  /**
+   * サーバーが提供するツールの権限の既定 (docs/mcp-tool-permission-design.md)。
+   * - "ask": 毎回確認 (従来どおり)
+   * - "auto": 常に自動許可 (destructiveHint のツールは除く)
+   * - "autorun": 自律実行モード (autorun) の間だけ自動許可 (destructiveHint のツールは除く)
+   * 未指定ならツールの注釈 (readOnlyHint) で判定し、 それ以外は確認。
+   */
+  permissionLevel?: MCPServerPermissionLevel;
+  /**
+   * ツールごとの上書き (キーはサーバー側のツール名。 例 "execute_blender_code")。
+   * "inspect" は登録された中身の検査器で判定する (検査器が無ければ確認)。
+   */
+  tools?: Record<string, MCPToolPermissionLevel>;
   /**
    * Phase F-1b: このサーバーを **設定ファイルに残したまま** 接続スキップする。
    * デフォルト false (= 接続する)。 true なら mcp-servers.json から削除せず一時無効化できる。
@@ -82,9 +98,19 @@ export interface MCPInitializeResult {
   };
 }
 
+/** MCP 標準のツール注釈 (tools/list の annotations)。 どれも「ヒント」でありサーバーの自己申告 */
+export interface MCPToolAnnotations {
+  title?: string;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
 export interface MCPTool {
   name: string;
   description?: string;
+  annotations?: MCPToolAnnotations;
   inputSchema: {
     type: "object";
     properties?: Record<string, unknown>;

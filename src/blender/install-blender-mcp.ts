@@ -214,7 +214,8 @@ export interface BlenderServerEntry {
   command: string;
   args: string[];
   env: Record<string, string>;
-  permissionLevel: "ask" | "auto";
+  permissionLevel: "ask" | "auto" | "autorun";
+  tools?: Record<string, "ask" | "auto" | "autorun" | "inspect">;
   disabled?: boolean;
 }
 
@@ -225,13 +226,16 @@ export function blenderServerEntry(uvxPath: string): BlenderServerEntry {
     command: uvxPath,
     args: [`${MCP_FOR_BLENDER_PACKAGE}@${MCP_FOR_BLENDER_VERSION}`],
     env: { DISABLE_TELEMETRY: "true" },
-    permissionLevel: "ask",
+    // 自律実行モード (autorun) の間は道具を自動で許し、 任意の Python を動かす execute_blender_code だけは
+    // 中身の検査器で見る (ファイルを消す・外へ書く・プロセスを動かす等は確認)。 docs/mcp-tool-permission-design.md
+    permissionLevel: "autorun",
+    tools: { execute_blender_code: "inspect" },
   };
 }
 
 /**
  * mcp-servers.json の中身に blender の項目を足す（他の項目はそのまま）。
- * 既に blender があれば、利用者が決める所（permissionLevel・disabled・env の追加分）は残して作り直す。
+ * 既に blender があれば、利用者が決める所（permissionLevel・tools・disabled・env の追加分）は残して作り直す。
  * 読めない JSON は触らない（throw）。
  */
 export function mergeBlenderServer(existingText: string | null, uvxPath: string): { text: string; changed: boolean } {
@@ -249,7 +253,9 @@ export function mergeBlenderServer(existingText: string | null, uvxPath: string)
   const prev = servers[BLENDER_MCP_SERVER_KEY];
   const next: Record<string, unknown> = { ...blenderServerEntry(uvxPath) };
   if (prev && typeof prev === "object") {
-    if (prev.permissionLevel === "auto" || prev.permissionLevel === "ask") next.permissionLevel = prev.permissionLevel;
+    if (prev.permissionLevel === "auto" || prev.permissionLevel === "ask" || prev.permissionLevel === "autorun")
+      next.permissionLevel = prev.permissionLevel;
+    if (prev.tools && typeof prev.tools === "object" && !Array.isArray(prev.tools)) next.tools = prev.tools;
     if (typeof prev.disabled === "boolean") next.disabled = prev.disabled;
     if (prev.env && typeof prev.env === "object") {
       next.env = { ...(prev.env as Record<string, string>), ...(next.env as Record<string, string>) };

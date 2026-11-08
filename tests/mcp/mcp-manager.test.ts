@@ -52,6 +52,7 @@ import * as fs from "node:fs";
 import { MCPManager } from "../../src/mcp/mcp-manager.js";
 import { MCPClient } from "../../src/mcp/mcp-client.js";
 import { ToolRegistry } from "../../src/tools/tool-registry.js";
+import { getMcpToolPolicy, resetMcpToolPolicies } from "../../src/security/mcp-tool-policy.js";
 
 describe("MCPManager", () => {
   let registry: ToolRegistry;
@@ -169,6 +170,76 @@ describe("MCPManager", () => {
 
       expect(config).toEqual({});
       consoleSpy.mockRestore();
+    });
+  });
+
+  describe("権限の決まり (docs/mcp-tool-permission-design.md)", () => {
+    beforeEach(() => resetMcpToolPolicies());
+
+    it("permissionLevel・tools・注釈をツールごとに登録し、 切断で消す", async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({
+          mcpServers: {
+            blender: {
+              transport: "stdio",
+              command: "uvx",
+              permissionLevel: "autorun",
+              tools: { execute_blender_code: "inspect", look: "bogus" },
+            },
+          },
+        }),
+      );
+      const client = {
+        name: "blender",
+        connected: true,
+        tools: [
+          { name: "execute_blender_code", inputSchema: { type: "object" } },
+          { name: "get_scene_info", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } },
+          { name: "look", inputSchema: { type: "object" } },
+        ],
+        connect: vi.fn(),
+        disconnect: vi.fn(async () => {}),
+      };
+      vi.mocked(MCPClient).mockImplementation(asConstructor(() => client as unknown as MCPClient));
+      const err = vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const manager = new MCPManager("/test/project");
+      await manager.connectAll(registry);
+
+      expect(getMcpToolPolicy("mcp__blender__execute_blender_code")).toMatchObject({
+        server: "blender",
+        tool: "execute_blender_code",
+        serverLevel: "autorun",
+        toolLevel: "inspect",
+      });
+      expect(getMcpToolPolicy("mcp__blender__get_scene_info")?.annotations).toEqual({ readOnlyHint: true });
+      // 知らない値は確認 (ask) として扱い、 警告を出す
+      expect(getMcpToolPolicy("mcp__blender__look")?.toolLevel).toBe("ask");
+      expect(err).toHaveBeenCalledWith(expect.stringContaining("bogus"));
+
+      await manager.disconnectAll();
+      expect(getMcpToolPolicy("mcp__blender__get_scene_info")).toBeUndefined();
+      vi.restoreAllMocks();
+    });
+
+    it("plugin の permissionLevel・tools は ask だけ読む (自分に自動許可を与えられない)", () => {
+      const pluginRoot = path.resolve("/plugins/p");
+      const pluginConfigPath = path.join(pluginRoot, ".mcp.json");
+      vi.mocked(fs.existsSync).mockImplementation((p) => String(p) === pluginConfigPath);
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({
+          mcpServers: {
+            a: { transport: "stdio", command: "x", permissionLevel: "auto", tools: { run: "auto", rm: "ask" } },
+            b: { transport: "stdio", command: "x", permissionLevel: "ask" },
+          },
+        }),
+      );
+      const manager = new MCPManager("/test/project", [{ pluginName: "p", pluginRoot, path: pluginConfigPath }]);
+      const config = manager.loadConfig();
+      expect(config.p__a.permissionLevel).toBeUndefined();
+      expect(config.p__a.tools).toEqual({ rm: "ask" });
+      expect(config.p__b.permissionLevel).toBe("ask");
     });
   });
 

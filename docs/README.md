@@ -138,6 +138,7 @@ Status の記載が無いものは `implemented`。
 | [native-computer-use.md](native-computer-use.md) | | Native Computer Use (`computer_*`) の安全境界と OS ドライバ |
 | [workflow-learning.md](workflow-learning.md) | | 操作学習 (browser / computer の操作を手動起動の skill に) |
 | [plugin-bundle-design.md](plugin-bundle-design.md) | | 明示的に信頼したローカル plugin bundle |
+| [mcp-tool-permission-design.md](mcp-tool-permission-design.md) | | MCP ツールの権限 (mcp-servers.json の permissionLevel・tools、 注釈、 Blender のコードの検査器) |
 | [safe-mode-design.md](safe-mode-design.md) | | `--safe-mode` (カスタマイズを止めて診断) |
 | [claude-code-driver-skill.md](claude-code-driver-skill.md) | | claude-code-driver スキル |
 | [ascii-art-skill-design.md](ascii-art-skill-design.md) | | ASCII アート化スキル |
@@ -161,7 +162,7 @@ Status の記載が無いものは `implemented`。
 | ドキュメント | Status | 内容 |
 |---|---|---|
 | [setup-mac.md](setup-mac.md) | reference | macOS のセットアップ手順 |
-| [blender-mcp-integration.md](blender-mcp-integration.md) | reference | Blender MCP の接続手順 (コード改修なし) |
+| [blender-mcp-integration.md](blender-mcp-integration.md) | reference | Blender MCP の接続手順 |
 | [nodejs-security-review-2026-10.md](nodejs-security-review-2026-10.md) | reference | Node.js のセキュリティ調査 (2026-10-22 時点) と本アプリへの影響 |
 
 ## 未解決の判断事項

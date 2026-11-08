@@ -117,14 +117,15 @@ describe("版と置き場所", () => {
 
 describe("mergeBlenderServer", () => {
   const uvx = "C:\\Users\\u\\.local\\bin\\uvx.exe";
-  it("ファイルが無ければ作る（版を固定・確認あり・送信しない）", () => {
+  it("ファイルが無ければ作る（版を固定・autorun の間だけ自動・コードは検査器・送信しない）", () => {
     const { text, changed } = mergeBlenderServer(null, uvx);
     expect(changed).toBe(true);
     const entry = JSON.parse(text).mcpServers.blender;
     expect(entry.command).toBe(uvx);
     expect(entry.args).toEqual([`${MCP_FOR_BLENDER_PACKAGE}@${MCP_FOR_BLENDER_VERSION}`]);
     expect(entry.transport).toBe("stdio");
-    expect(entry.permissionLevel).toBe("ask");
+    expect(entry.permissionLevel).toBe("autorun");
+    expect(entry.tools).toEqual({ execute_blender_code: "inspect" });
     expect(entry.env.DISABLE_TELEMETRY).toBe("true");
   });
   it("他のサーバーと他の項目は残す", () => {
@@ -150,8 +151,23 @@ describe("mergeBlenderServer", () => {
     const entry = JSON.parse(mergeBlenderServer(before, uvx).text).mcpServers.blender;
     expect(entry.args[0]).toContain(MCP_FOR_BLENDER_PACKAGE);
     expect(entry.permissionLevel).toBe("auto");
+    expect(entry.tools).toEqual({ execute_blender_code: "inspect" });
     expect(entry.disabled).toBe(true);
     expect(entry.env).toEqual({ BLENDER_HOST: "10.0.0.2", DISABLE_TELEMETRY: "true" });
+  });
+  it("利用者の permissionLevel・tools はやり直しても残す", () => {
+    const before = JSON.stringify({
+      mcpServers: {
+        blender: { permissionLevel: "ask", tools: { execute_blender_code: "ask", get_scene_info: "auto" } },
+      },
+    });
+    const entry = JSON.parse(mergeBlenderServer(before, uvx).text).mcpServers.blender;
+    expect(entry.permissionLevel).toBe("ask");
+    expect(entry.tools).toEqual({ execute_blender_code: "ask", get_scene_info: "auto" });
+    const autorun = JSON.parse(
+      mergeBlenderServer(JSON.stringify({ mcpServers: { blender: { permissionLevel: "autorun" } } }), uvx).text,
+    ).mcpServers.blender;
+    expect(autorun.permissionLevel).toBe("autorun");
   });
   it("2 回目は変わらない", () => {
     const first = mergeBlenderServer(null, uvx).text;

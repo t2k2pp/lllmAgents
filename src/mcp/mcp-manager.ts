@@ -18,6 +18,12 @@ import type { MCPServerConfig, MCPServersConfig, MCPTool, MCPContentBlock } from
 import type { ToolHandler, ToolResult, ToolRegistry } from "../tools/tool-registry.js";
 import type { ToolDefinition } from "../providers/base-provider.js";
 import { expandPluginRoot, type PluginComponentSource } from "../plugins/plugin-loader.js";
+import {
+  isServerPermissionLevel,
+  isToolPermissionLevel,
+  registerMcpToolPolicy,
+  unregisterMcpServerPolicies,
+} from "../security/mcp-tool-policy.js";
 
 /** MCPツール名にサーバープレフィックスを付与する形式 */
 function mcpToolName(serverName: string, toolName: string): string {
@@ -107,6 +113,7 @@ export class MCPManager {
       }
       await client.disconnect().catch(() => {});
       this.clients.delete(key);
+      unregisterMcpServerPolicies(client.name);
       break;
     }
     return { removed };
@@ -131,10 +138,10 @@ export class MCPManager {
       if (sn !== name) continue;
       try {
         const client = new MCPClient(c);
-        this.observeTools(client, registry);
+        this.observeTools(client, registry, c);
         await client.connect();
         this.clients.set(key, client);
-        const handlers = this.createToolHandlers(client);
+        const handlers = this.createToolHandlers(client, c);
         for (const h of handlers) {
           registry.register(h);
         }
@@ -221,8 +228,17 @@ export class MCPManager {
             throw new Error(`server name '${originalName}' contains unsupported characters`);
           }
           const namespacedName = `${source.pluginName}__${originalName}`;
+          // plugin は自分の道具に自動許可を与えられない: permissionLevel・tools は確認を増やす "ask" だけ読む
+          // (自動許可は利用者の allow ルールで)。 docs/mcp-tool-permission-design.md §2
+          const { permissionLevel: pluginLevel, tools: pluginTools, ...pluginServer } = serverConfig;
+          const askTools =
+            pluginTools && typeof pluginTools === "object" && !Array.isArray(pluginTools)
+              ? Object.fromEntries(Object.entries(pluginTools).filter(([, level]) => level === "ask"))
+              : {};
           merged[namespacedName] = {
-            ...serverConfig,
+            ...pluginServer,
+            ...(pluginLevel === "ask" ? { permissionLevel: "ask" as const } : {}),
+            ...(Object.keys(askTools).length > 0 ? { tools: askTools } : {}),
             name: namespacedName,
             command: mapOptionalString(serverConfig.command, source.pluginRoot),
             args: serverConfig.args?.map((arg) => expandPluginRoot(arg, source.pluginRoot)),
@@ -275,12 +291,12 @@ export class MCPManager {
       }
       try {
         const client = new MCPClient(config);
-        this.observeTools(client, registry);
+        this.observeTools(client, registry, config);
         await client.connect();
         this.clients.set(key, client);
 
         // ツールをToolHandlerに変換して登録
-        const handlers = this.createToolHandlers(client);
+        const handlers = this.createToolHandlers(client, config);
         for (const handler of handlers) {
           registry.register(handler);
         }
@@ -323,20 +339,32 @@ export class MCPManager {
   /**
    * MCPクライアントのツールをToolHandlerに変換する
    */
-  private createToolHandlers(client: MCPClient): ToolHandler[] {
-    return client.tools.map((mcpTool) => this.mcpToolToHandler(client, mcpTool));
+  private createToolHandlers(client: MCPClient, config?: MCPServerConfig): ToolHandler[] {
+    unregisterMcpServerPolicies(client.name);
+    const policy = readPermissionPolicy(client.name, config);
+    return client.tools.map((mcpTool) => {
+      registerMcpToolPolicy(mcpToolName(client.name, mcpTool.name), {
+        server: client.name,
+        tool: mcpTool.name,
+        serverLevel: policy.serverLevel,
+        toolLevel: policy.tools[mcpTool.name],
+        annotations: mcpTool.annotations,
+      });
+      return this.mcpToolToHandler(client, mcpTool);
+    });
   }
 
-  private observeTools(client: MCPClient, registry: ToolRegistry): void {
+  private observeTools(client: MCPClient, registry: ToolRegistry, config?: MCPServerConfig): void {
     client.onToolsChanged = (error) => {
       for (const name of registry.getToolNames()) {
         if (name.startsWith(`mcp__${client.name}__`)) registry.unregister(name);
       }
       if (error) {
+        unregisterMcpServerPolicies(client.name);
         console.error(`MCP ${client.name}: tools refresh failed: ${error.message}. Run /mcp reload.`);
         return;
       }
-      for (const handler of this.createToolHandlers(client)) registry.register(handler);
+      for (const handler of this.createToolHandlers(client, config)) registry.register(handler);
     };
   }
 
@@ -409,8 +437,56 @@ export class MCPManager {
       disconnectPromises.push(client.disconnect().catch(() => {}));
     }
     await Promise.all(disconnectPromises);
+    for (const [, client] of this.clients) unregisterMcpServerPolicies(client.name);
     this.clients.clear();
   }
+}
+
+/**
+ * mcp-servers.json の権限の項目を読む。 知らない値は黙って読み替えず、 警告して「確認 (ask)」 にする
+ * (自動許可に倒さない)。 docs/mcp-tool-permission-design.md §2
+ */
+export function readPermissionPolicy(
+  serverName: string,
+  config: MCPServerConfig | undefined,
+): {
+  serverLevel?: MCPServerConfig["permissionLevel"];
+  tools: Record<string, NonNullable<MCPServerConfig["tools"]>[string]>;
+} {
+  const tools: Record<string, NonNullable<MCPServerConfig["tools"]>[string]> = {};
+  if (!config) return { tools };
+  let serverLevel: MCPServerConfig["permissionLevel"];
+  if (config.permissionLevel !== undefined) {
+    if (isServerPermissionLevel(config.permissionLevel)) serverLevel = config.permissionLevel;
+    else {
+      console.error(
+        chalk.yellow(
+          `  ⚠ MCP: ${serverName} の permissionLevel "${String(config.permissionLevel)}" は使えない値です (ask / auto / autorun)。 確認 (ask) として扱います`,
+        ),
+      );
+      serverLevel = "ask";
+    }
+  }
+  if (config.tools !== undefined) {
+    if (typeof config.tools !== "object" || config.tools === null || Array.isArray(config.tools)) {
+      console.error(
+        chalk.yellow(`  ⚠ MCP: ${serverName} の tools はオブジェクトではありません。 無視します (確認のまま)`),
+      );
+    } else {
+      for (const [tool, level] of Object.entries(config.tools)) {
+        if (isToolPermissionLevel(level)) tools[tool] = level;
+        else {
+          console.error(
+            chalk.yellow(
+              `  ⚠ MCP: ${serverName} の tools.${tool} "${String(level)}" は使えない値です (ask / auto / autorun / inspect)。 確認 (ask) として扱います`,
+            ),
+          );
+          tools[tool] = "ask";
+        }
+      }
+    }
+  }
+  return { serverLevel, tools };
 }
 
 function mapOptionalString(value: string | undefined, pluginRoot: string): string | undefined {

@@ -2,6 +2,7 @@
 
 > **作成日**: 2026-05-03
 > **改訂**: 2026-11-07 — 1 コマンドのセットアップ（`--install-blender` / `--check-blender`）とビルトインスキル `blender-modeling` を追加。サーバーの名前が `blender-mcp` → `mcp-for-blender` に変わったのに合わせた。
+> **改訂**: 2026-11-08 — `permissionLevel` が実際に効くようにし、既定を `autorun`＋`execute_blender_code` は中身の検査器（`inspect`）にした（docs/mcp-tool-permission-design.md）。
 
 ---
 
@@ -50,7 +51,7 @@
    - Blender が開いている（開いたままだと保存した設定が上書きされる）
    - その版をまだ一度も開いておらず、他の版がある（初回の「設定を引き継ぐか」の問いを消さないため）
 5. `~/.localllm/mcp-servers.json` に `blender` を足す（他の項目は残す・前のファイルは `.bak`・読めない JSON は触らない）。
-   既に `blender` があれば、利用者が決める `permissionLevel`・`disabled`・`env` の追加分は残す。
+   既に `blender` があれば、利用者が決める `permissionLevel`・`tools`・`disabled`・`env` の追加分は残す。
 
 登録される項目:
 
@@ -63,14 +64,17 @@
       "command": "C:\\Users\\<you>\\.local\\bin\\uvx.exe",
       "args": ["mcp-for-blender@2.2.7"],
       "env": { "DISABLE_TELEMETRY": "true" },
-      "permissionLevel": "ask"
+      "permissionLevel": "autorun",
+      "tools": { "execute_blender_code": "inspect" }
     }
   }
 }
 ```
 
 - `command` は `uvx` の絶対パス（GUI やサービスから起動されて PATH が違っても動くように）。
-- `permissionLevel: "ask"`: `execute_blender_code` は Blender の中で任意の Python を動かすので確認を出す。セッション中ずっと許すのは権限の確認で `2`。
+- `permissionLevel: "autorun"`: 自律実行モード（`/autorun`）の間は Blender の道具を確認なしで使う。通常モードでは従来どおり確認する。
+- `tools.execute_blender_code: "inspect"`: 任意の Python を動かすので、自律実行モードでも中身の検査器が見る。ふつうの形づくり（bpy・bmesh・math…・作業フォルダの中の絶対パスへの保存や撮影・スキルの部品箱の読み込み）は通し、`subprocess`・`os.remove`・作業フォルダの外への書き出し・`exec` などは理由を出して確認する（一覧は docs/mcp-tool-permission-design.md §4）。
+- いつも確認したいなら `permissionLevel` を `"ask"` に、いつも許すなら `"auto"` にする（`tools` も同じ値で道具ごとに上書きできる）。
 - 戻り値: 0 = 全部済んだ / 1 = 手作業が残った（表示どおりにする）。
 
 ### 2.3 `localllm --check-blender`
@@ -114,7 +118,7 @@ Blender を開く前に localllm を起動しても、サーバーはつなが�
 
 ## 4. セキュリティ
 
-- `execute_blender_code` は Blender の中で任意の Python を動かす（サンドボックス無し）。既定は `ask`。`auto` にするのは信頼できる環境だけ。
+- `execute_blender_code` は Blender の中で任意の Python を動かす（サンドボックス無し）。既定は `inspect`（自律実行モードの間だけ、検査器が通したコードを確認なしで動かす）。検査器は文字の並びを見る見当で、すり抜けを完全には防げない。`auto` にするのは信頼できる環境だけ。
 - `generate_3d`・`import_asset` は外のサービス（有料・ライセンスあり）。スキルで「ユーザーが許した時だけ」と縛っている。
 - サーバーの送信（テレメトリ）は `DISABLE_TELEMETRY=true` で止める。アドオン側の送信は既定で OFF（設定で同意した時だけ）。
 
