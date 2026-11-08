@@ -123,6 +123,8 @@ export const TOMBSTONE_MARKER = "[忘却の記録]";
 /**
  * 忘却の記録を写しに入れる (docs/archive/context-forgetting.md §4.4)。 既存の記録があればそこへ追記して 1 件にまとめ、
  * 無ければ「最初に忘却した位置」 に 1 件だけ挿入する (履歴中に散乱させない)。 入力の配列は書き換えない。
+ * 追記した記録は直近 TOMBSTONE_BLOCKS_KEPT 回分だけ残し、 それより前は回数だけの 1 行にする
+ * (長い 1 つのタスクで記録が際限なく伸びて床を押し上げないため。 docs/task-handoff-design.md §9.5)。
  */
 export function insertTombstone(next: Message[], text: string, insertAt: number): Message[] {
   const existing = next.findIndex((m) => m.role === "system" && contentToText(m.content).startsWith(TOMBSTONE_MARKER));
@@ -130,12 +132,39 @@ export function insertTombstone(next: Message[], text: string, insertAt: number)
     const merged = [...next];
     merged[existing] = {
       role: "system",
-      content: `${contentToText(merged[existing].content)}\n\n${text}`,
+      content: capTombstoneBlocks(`${contentToText(merged[existing].content)}\n\n${text}`),
     };
     return merged;
   }
   const at = Math.max(0, Math.min(insertAt, next.length));
   return [...next.slice(0, at), { role: "system", content: text }, ...next.slice(at)];
+}
+
+/** 忘却の記録に残す直近の整理の回数 (それより前は「省略」 の 1 行の回数に足す) */
+export const TOMBSTONE_BLOCKS_KEPT = 4;
+const TOMBSTONE_OMITTED = new RegExp(
+  `^${TOMBSTONE_MARKER.replace(/[[\]]/g, "\\$&")} それより前の整理 (\\d+) 回分の記録は省略しました`,
+);
+
+/**
+ * 忘却の記録 (1 件の system) を、 直近 TOMBSTONE_BLOCKS_KEPT 回分 (各回は目印で始まる塊) と、 省いた回数の 1 行にする。
+ * 消した中身は記録からも戻らないので、 要るときはツールで取り直す (読み直しの案内は各回の締めの行と同じ)
+ */
+export function capTombstoneBlocks(content: string, keep = TOMBSTONE_BLOCKS_KEPT): string {
+  const blocks = content.split(new RegExp(`\\n\\n(?=${TOMBSTONE_MARKER.replace(/[[\]]/g, "\\$&")})`));
+  let omitted = 0;
+  const events: string[] = [];
+  for (const b of blocks) {
+    const m = TOMBSTONE_OMITTED.exec(b);
+    if (m) omitted += Number(m[1]);
+    else events.push(b);
+  }
+  if (events.length <= keep) return content;
+  omitted += events.length - keep;
+  return [
+    `${TOMBSTONE_MARKER} それより前の整理 ${omitted} 回分の記録は省略しました (消した内容は戻りません。 要るときはツールで取り直してください)`,
+    ...events.slice(events.length - keep),
+  ].join("\n\n");
 }
 
 /** 呼び出しと結果の対ごと外したときの、 忘却の記録の 1 行 */

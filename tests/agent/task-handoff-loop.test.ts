@@ -6,10 +6,17 @@ import { AgentLoop } from "../../src/agent/agent-loop.js";
 import { clearGoal } from "../../src/agent/goal-slot.js";
 import { LLMLogger } from "../../src/agent/llm-logger.js";
 import { MessageHistory } from "../../src/agent/message-history.js";
+import type { ReductionEventRecord } from "../../src/agent/reduction-event.js";
 import { TOMBSTONE_MARKER } from "../../src/agent/reduction-stages.js";
 import { SUMMARY_MESSAGE_CLOSE, SUMMARY_MESSAGE_OPEN } from "../../src/agent/reduction-summary.js";
 import { createSession } from "../../src/agent/session-manager.js";
-import { isTaskPointerMessage, type TaskHandoffDoc, TaskHandoffStore } from "../../src/agent/task-handoff.js";
+import {
+  buildTaskPointerMessage,
+  isTaskHandoffExcerptMessage,
+  isTaskPointerMessage,
+  type TaskHandoffDoc,
+  TaskHandoffStore,
+} from "../../src/agent/task-handoff.js";
 import { TASK_HANDOFF_UPDATE_TAG, TASK_SWITCH_TAG } from "../../src/agent/task-handoff-tracker.js";
 import { estimateMessageTokens } from "../../src/agent/token-counter.js";
 import type { SecurityConfig } from "../../src/config/types.js";
@@ -336,6 +343,13 @@ describe("整理の前の書き込み (§6)", () => {
     expect(calls.updates).toBe(1);
     expect(order).toEqual(["save:create", "save:before-reduction", "replace:reduction"]);
     expect(readDocs()[0].current).toBe("古い結果を消す前の状態");
+    // 第 2 段 (§9): 要約は呼ばず、 書いた文書から抜き出した抜粋 1 件に置き換えた。 依頼の原文はそのまま抜粋に入る
+    expect(result.record.taskExcerpt).toMatchObject({ status: "applied", counts: { userMessages: 1 } });
+    const raw = loop.getHistory().getRawMessages();
+    expect(raw.filter(isTaskHandoffExcerptMessage)).toHaveLength(1);
+    expect(isTaskHandoffExcerptMessage(raw[0])).toBe(true);
+    expect(String(raw[0].content)).toContain(`- ${CAT}`);
+    expect(String(raw[0].content)).toContain("古い結果を消す前の状態");
   });
 
   it("文書を書けなければ履歴を書き換えない (task-handoff-failed)", async () => {
@@ -355,6 +369,92 @@ describe("整理の前の書き込み (§6)", () => {
     expect(result.reason).toBe("task-handoff-failed");
     expect(result.detail).toContain("ディスクがいっぱい");
     expect(loop.getHistory().getRawMessages()).toEqual(before);
+  });
+});
+
+describe("整理で要約を抜粋に置き換える (§9。 第 2 段)", () => {
+  it("回帰 (2026-11-07): 要約 21 件で埋まった長い 1 つのタスクを続けると、 整理 (再開の後の新しい依頼の区切り) で要約 21 件と忘却の記録が抜粋 1 件になり、 ポインタは先頭のまま、 次の呼び出しは枠を大きく下回る", async () => {
+    const calls: Calls = { main: [], updates: 0, switches: 0 };
+    const main: ChatChunk[][] = [];
+    for (let i = 0; i < 6; i++) main.push(call(`p${i}`, `C:/work/cat-${i}.py`));
+    main.push(text("耳を付けました。"));
+    const provider = scriptedProvider({ main, update: "## 現状\n胴体と頭まで作った\n## 次の一手\n耳を付ける" }, calls);
+    const { loop } = makeLoop(provider);
+    const pointer = buildTaskPointerMessage(["- 前の犬: C:/s/t-dog.md（完了）"]);
+    const messages: Message[] = [
+      { role: "user", content: pointer },
+      { role: "user", content: CAT },
+    ];
+    for (let i = 0; i < 21; i++) {
+      messages.push({
+        role: "assistant",
+        content: `${SUMMARY_MESSAGE_OPEN}\n# Summary of the conversation so far\n${"猫の作業の要約。".repeat(520)}\n${SUMMARY_MESSAGE_CLOSE}`,
+      });
+    }
+    messages.push({ role: "system", content: `${TOMBSTONE_MARKER} 整理 r-25: ${"記録".repeat(3_000)}` });
+    const session = createSession("test-model-7b");
+    session.messages = messages;
+    loop.restoreSession(session);
+    const records: ReductionEventRecord[] = [];
+    const realLog = LLMLogger.prototype.logReductionEvent;
+    vi.spyOn(LLMLogger.prototype, "logReductionEvent").mockImplementation(function (this: LLMLogger, record) {
+      records.push(record);
+      return realLog.call(this, record);
+    });
+
+    await loop.run("続けて、 耳を付けて");
+
+    expect(records.length).toBeGreaterThanOrEqual(1);
+    expect(records[0].taskExcerpt).toMatchObject({ status: "applied", counts: { summaries: 21, forgetNotes: 1 } });
+    expect(records[0].promptTokensAfter).toBeLessThan(W * 0.2);
+    const raw = loop.getHistory().getRawMessages();
+    expect(raw[0].content).toBe(pointer);
+    expect(raw.filter(isTaskHandoffExcerptMessage)).toHaveLength(1);
+    const excerpt = String(raw.find(isTaskHandoffExcerptMessage)?.content);
+    expect(excerpt).toContain(`- ${CAT}`);
+    expect(excerpt).toContain("- (追加) 続けて、 耳を付けて");
+    expect(excerpt).toContain("胴体と頭まで作った");
+    expect(raw.some((m) => String(m.content).startsWith(SUMMARY_MESSAGE_OPEN))).toBe(false);
+    // 整理の後の本体呼び出しは小さい
+    expect(estimateMessageTokens(calls.main.at(-1)?.messages ?? [])).toBeLessThan(W * 0.3);
+  });
+
+  it("判断の節を直せなければ抜粋を使わず要約の動作にし、 記録 (reduction_event) と /context の直近の整理に出す", async () => {
+    const calls: Calls = { main: [], updates: 0, switches: 0 };
+    const provider = scriptedProvider({ main: [text("x")], update: "形の違う出力" }, calls);
+    const { loop } = makeLoop(provider);
+    const messages: Message[] = [{ role: "user", content: CAT }];
+    for (let i = 0; i < 4; i++) {
+      messages.push({
+        role: "assistant",
+        content: `${SUMMARY_MESSAGE_OPEN}\n${"要約。".repeat(800)}\n${SUMMARY_MESSAGE_CLOSE}`,
+      });
+    }
+    for (let i = 0; i < 8; i++) {
+      messages.push({
+        role: "assistant",
+        content: "",
+        tool_calls: [{ id: `c${i}`, type: "function", function: { name: "probe", arguments: "{}" } }],
+      });
+      messages.push({ role: "tool", tool_call_id: `c${i}`, content: "y".repeat(8_000) });
+    }
+    messages.push({ role: "assistant", content: "途中まで出来ました。" });
+    const session = createSession("test-model-7b");
+    session.messages = messages;
+    loop.restoreSession(session);
+    const logged: unknown[] = [];
+    vi.spyOn(LLMLogger.prototype, "logReductionEvent").mockImplementation((record) => {
+      logged.push(record);
+    });
+    const result = await loop.runReductionEvent("manual");
+    expect(result.ok).toBe(true);
+    expect(result.record.taskExcerpt).toMatchObject({ status: "fallback", reason: "refine-failed" });
+    expect(logged).toEqual([
+      expect.objectContaining({ taskExcerpt: expect.objectContaining({ reason: "refine-failed" }) }),
+    ]);
+    const last = loop.getLastReductionEvent();
+    expect(last && "record" in last ? last.record.taskExcerpt.status : null).toBe("fallback");
+    expect(loop.getHistory().getRawMessages().some(isTaskHandoffExcerptMessage)).toBe(false);
   });
 });
 

@@ -46,6 +46,7 @@ function record(overrides: Partial<ReductionEventRecord> = {}): ReductionEventRe
     clearedCurrentThinking: 0,
     promptTokensAfter: 98_000,
     summary: { status: "nothing-to-summarize" },
+    taskExcerpt: { status: "not-used" },
     summaryFailurePolicy: "continue",
     continuedWithoutSummary: false,
     prewarm: null,

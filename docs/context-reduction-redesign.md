@@ -636,7 +636,9 @@ bash 2 件を合わせて 8 件目の結果の後) に、 AgentLoop が「計画
 1. 発火 (規則 1 / 規則 2 / 手動)
 2. 写しに前処理 (借りの返済) → 段階 0 → 1 → 2 を順に適用。 満たしたら止める
 3. まだ届かなければ段階 3: キャッシュ済みの並び + 指示で要約を得る (書き換え前に呼ぶ)
-4. 写しに要約を当てはめ、 忘却の記録を 1 件にまとめて入れる (既存 insertTombstone の追記統合)
+4. 写しに要約を当てはめ、 忘却の記録を 1 件にまとめて入れる (既存 insertTombstone の追記統合。 2026-11-08 から直近 4 回分だけ残し、 それより前は回数の 1 行。 `docs/task-handoff-design.md` §9.5)
+   - 2026-11-08 (第 2 段): 使っているタスクの引き継ぎ文書があれば、 段階 3 は要約の代わりに、 範囲 (既存の要約・忘却の記録・今のタスクのやり取り) を文書から抜き出し直した抜粋 1 件に置き換える。
+     文書を書く `beforeRewrite` は抜粋を描く直前に呼ぶ。 文書が無い・判断の節を直せないときは要約のまま (記録 `taskExcerpt`。 `docs/task-handoff-design.md` §9)
 5. ツールの対を検証して、 MessageHistory.replaceMessages() で 1 回だけ差し替える
    (書き換え理由は "reduction:<イベント ID>" の 1 件)
 6. 記録 (§10) → 依頼の境目なら先読み (§9)
@@ -1073,6 +1075,7 @@ reason は `not-local-server` / `empty-history` / `auto-off` (自動の先読み
 到達した段階、 段階ごとの減った量 (前処理・0・1・2・3)、 返した借り (揮発 N 件・思考 N 件)、 整理後の P (推定)、
 段階 3 の要約呼び出しの `tokensIn` / `tokensCached` / `tokensOut` / 所要時間、 先読みの有無と所要時間。
 実装の欄の名前と形は §6.4 (タスク 7)。
+2026-11-08 から `taskExcerpt` (段階 3 をタスクの引き継ぎ文書の抜粋で行ったか: `not-used` / `applied` (内訳つき) / `fallback` (理由 `no-doc` / `refine-failed` / `not-smaller`)。 `docs/task-handoff-design.md` §9.6) も書く。
 規則 2 を見送ったとき (減る量の見込みが最低量 F に届かない) は `reduction_event` ではなく `reduction_skipped` を 1 件書く (欄は §4.6)。
 
 ### 10.2 キャッシュが外れた原因の特定 (`cache_miss`)
@@ -1213,7 +1216,7 @@ AgentLoop は整理イベントのたびに `loadConfig()` から読む (変更�
 | `docs/ephemeral-context-design.md` | 揮発の印の考えは残る。 除く時期を「応答のたび」 から「整理イベント」 に変えた旨を先頭に追記 (タスク 7 で済み) |
 | `docs/prompt-prefix-stability.md` | 前提として残る。 §2.3 の「span 境界の除去は依頼 1 件につき 1 回なので許容」 を本書で改めた旨を §2.3 の表 (タスク 7) と先頭 (タスク 12) に追記 |
 | `docs/archive/context-reduction-reasoning-model-fix.md` | 記録扱い (先頭に注記。 タスク 12 で済み)。 **段階 3 は思考をオフにしない** (§5.6。 オフにすると system の先頭が変わり全部の読み直しになる)。 同書の「思考オフで呼ぶ」 知見は、 キャッシュを使わない脇の呼び出しにだけ当てはまる。 同書の対象 `forgetting.ts` / `hierarchical-compressor.ts` は削除した |
-| `docs/task-handoff-design.md` | 2026-11-08。 要約の要約を重ねて床が上がる問題 (2026-11-07 の実機) への対策。 第 1 段: 整理の差し替えの直前にタスクの引き継ぎ文書を書く (`beforeRewrite`)、 別の依頼では前のタスクを 1 行のポインタに畳む (最低量 F を見ない。 整理イベントの外)。 第 2 段 (未実装): 段階 3 の既存の要約を文書の抜粋に置き換える |
+| `docs/task-handoff-design.md` | 2026-11-08。 要約の要約を重ねて床が上がる問題 (2026-11-07 の実機) への対策。 第 1 段: 整理の差し替えの直前にタスクの引き継ぎ文書を書く (`beforeRewrite`)、 別の依頼では前のタスクを 1 行のポインタに畳む (最低量 F を見ない。 整理イベントの外)。 第 2 段 (実装済み): 段階 3 を、 既存の要約・忘却の記録・今のタスクのやり取りを文書から抜き出し直した抜粋 1 件への置き換えで行う (文書が無い・判断の節を直せないときは要約)。 忘却の記録に上限 |
 | `docs/README.md` | 本書を `implemented` (実機確認が残る旨を添える) に、 上の 2 書を `superseded` にした (タスク 12 で済み) |
 | README.md / `config-reference.md` / `external_design.md` / `internal_design.md` | 新しい整理に合わせて書き直した (タスク 12 で済み。 `external_design.md` §2.3、 `internal_design.md` §2.5 に要点) |
 

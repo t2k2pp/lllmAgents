@@ -387,27 +387,64 @@ export function renderTaskHandoffMarkdown(doc: TaskHandoffDoc, paths?: TaskDocPa
   return `${out.join("\n")}\n`;
 }
 
+/** 抜粋のメッセージの目印 (user メッセージの先頭。 第 2 段の整理が置く。 §9) */
+export const TASK_EXCERPT_OPEN = "<task-handoff-excerpt";
+export const TASK_EXCERPT_CLOSE = "</task-handoff-excerpt>";
+/** 抜粋の中の忘却の記録の見出し (前回の抜粋から行を読み戻すのに使う) */
+export const TASK_EXCERPT_FORGET_HEADING = "## 忘却の記録";
+
+/** 抜粋に添える忘却の記録 (直近の行と、 省いた行の数。 §9.5) */
+export interface ExcerptForgetDigest {
+  lines: string[];
+  omitted: number;
+}
+
+export function isTaskHandoffExcerptMessage(m: Message): boolean {
+  return m.role === "user" && typeof m.content === "string" && m.content.startsWith(TASK_EXCERPT_OPEN);
+}
+
 /**
- * 文脈に置く抜粋 (第 2 段で使う。 §9.2)。 依頼の原文は頭だけ、 ほかの節は上限内の全部。
- * 文書から毎回作り直すので、 何回作っても薄まらない。
+ * 文脈に置く抜粋 (第 2 段。 §9.2)。 依頼の原文は最初の依頼と新しい追加から順に requestChars 字まで (途中の古い追加は件数だけ)、
+ * ほかの節は上限内の全部。 文書から毎回作り直すので、 何回作っても薄まらない。 forget があれば忘却の記録の節を足す (§9.5)
  */
-export function renderTaskHandoffExcerpt(doc: TaskHandoffDoc, mdPath: string, requestChars = 6_000): string {
+export function renderTaskHandoffExcerpt(
+  doc: TaskHandoffDoc,
+  mdPath: string,
+  requestChars = 6_000,
+  forget?: ExcerptForgetDigest,
+): string {
   const S = TASK_HANDOFF_SECTIONS;
-  const out: string[] = [`<task-handoff-excerpt task="${doc.id}" status="${doc.status}">`, `引き継ぎ文書: ${mdPath}`];
+  const out: string[] = [
+    `${TASK_EXCERPT_OPEN} task="${doc.id}" status="${doc.status}">`,
+    "(ハーネスが置いた記録です。 利用者の新しい発言ではありません。 ここより前の会話は、 このタスクの引き継ぎ文書から抜き出したこの抜粋に置き換えました。 詳細は文書を file_read で読んでください)",
+    `引き継ぎ文書: ${mdPath}`,
+  ];
   out.push("", `## ${S.requests}`);
+  // 最初の依頼 (錨) を先に、 次に新しい追加から古い方へ字数を配る。 描くのは元の順
+  const texts = doc.requests.map((r) => r.text.replace(/\r/g, "").trim());
+  const shown: Array<string | null> = texts.map(() => null);
+  const order = texts.length === 0 ? [] : [0, ...texts.map((_, i) => texts.length - 1 - i).filter((i) => i > 0)];
   let budget = requestChars;
-  let omitted = 0;
-  for (const r of doc.requests) {
-    if (budget <= 0) {
-      omitted++;
-      continue;
-    }
-    const text = r.text.replace(/\r/g, "").trim();
-    const shown = text.length <= budget ? text : `${text.slice(0, budget)}… (続きは文書)`;
-    budget -= shown.length;
-    out.push(`- ${r.kind === "follow-up" ? "(追加) " : ""}${shown}`);
+  for (const i of order) {
+    if (budget <= 0) break;
+    const text = texts[i];
+    shown[i] = text.length <= budget ? text : `${text.slice(0, budget)}… (続きは文書)`;
+    budget -= Math.min(text.length, budget);
   }
-  if (omitted > 0) out.push(`- (ほか ${omitted} 件は文書の全文を読む)`);
+  let omitted = 0;
+  doc.requests.forEach((r, i) => {
+    const text = shown[i];
+    if (text === null) {
+      omitted++;
+      return;
+    }
+    if (omitted > 0) {
+      out.push(`- (ほか ${omitted} 件の追加は文書の全文を読む)`);
+      omitted = 0;
+    }
+    out.push(`- ${r.kind === "follow-up" ? "(追加) " : ""}${text}`);
+  });
+  if (omitted > 0) out.push(`- (ほか ${omitted} 件の追加は文書の全文を読む)`);
   out.push("", `## ${S.constraints}`, bullets(doc.constraints));
   out.push("", `## ${S.current}`, doc.current.trim() || "(未記入)");
   if (doc.todos.length > 0) out.push(...todoLines(doc.todos));
@@ -415,7 +452,12 @@ export function renderTaskHandoffExcerpt(doc: TaskHandoffDoc, mdPath: string, re
   out.push("", `## ${S.failures}`, bullets(doc.failures));
   out.push("", `## ${S.next}`, nextText(doc) || "(未記入)");
   out.push("", `## ${S.files}`, bullets(doc.files.slice(0, 10)));
-  out.push("</task-handoff-excerpt>");
+  if (forget && (forget.lines.length > 0 || forget.omitted > 0)) {
+    out.push("", `${TASK_EXCERPT_FORGET_HEADING} (履歴から消したツール結果など。 要るときはツールで取り直す)`);
+    if (forget.omitted > 0) out.push(`- (これより前の ${forget.omitted} 行は省略)`);
+    out.push(...forget.lines);
+  }
+  out.push(TASK_EXCERPT_CLOSE);
   return out.join("\n");
 }
 

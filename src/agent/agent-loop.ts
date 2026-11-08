@@ -25,8 +25,10 @@ import {
   buildFoldedMessages,
   buildTaskPointerLine,
   extractConstraintsFromHandoffNote,
+  isTaskHandoffExcerptMessage,
   renderHandoffNoteFromTask,
   type TaskCheckpointKind,
+  type TaskHandoffDoc,
   type TaskHandoffStore,
 } from "./task-handoff.js";
 import { type RefineContext, TaskHandoffTracker } from "./task-handoff-tracker.js";
@@ -2910,9 +2912,30 @@ export class AgentLoop {
         beforeRewrite: this.taskHandoff
           ? () => this.taskHandoffBeforeReduction(toolDefs, signal, promptSize, budget)
           : undefined,
+        // 段階 3 は、 引き継ぎ文書があれば文書から抜き出し直した抜粋に置き換える (同 §9。 要約の要約をしない)
+        taskExcerpt: this.taskHandoff
+          ? (() => {
+              const tracker = this.taskHandoff;
+              return {
+                peek: () => tracker.peekDoc(reducedHistory),
+                mdPathOf: (doc: TaskHandoffDoc) => tracker.store.pathsFor(doc).md,
+              };
+            })()
+          : undefined,
       });
     } finally {
       this.llmAbortController = null;
+    }
+    if (result.ok && result.record.taskExcerpt.status === "applied") {
+      // 今の依頼の始まりの発言を抜粋に任せて落としたときは、 抜粋を今の依頼の始まりにする (前処理の境目。 抜粋の後ろが今の依頼)
+      const after = reducedHistory.getRawMessages();
+      if (this.currentRequestMessage !== null && !after.includes(this.currentRequestMessage)) {
+        this.currentRequestMessage = after.find(isTaskHandoffExcerptMessage) ?? null;
+      }
+    }
+    if (result.ok) {
+      const ex = result.record.taskExcerpt;
+      if (ex.status === "fallback") logger.warn(`[reduction] ${id}: ${ex.detail} (${ex.reason})`);
     }
     if ("skipped" in result) {
       // 規則 2 の見送り (§4.6): 履歴も要約も触っていない。 画面には出さず (区切りのたびに出ると煩わしい)、
@@ -4009,22 +4032,24 @@ export class AgentLoop {
 
   /**
    * 整理イベントが履歴を差し替える直前 (§6)。 判断の節を直して書く。 保存の失敗・レート制限は投げる (差し替えない)。
-   * 判断の節の更新の失敗は機械的な節を書いたうえで警告し、 投げない
+   * 判断の節の更新の失敗は機械的な節を書いたうえで警告し、 投げない。
+   * 書いた文書を返す。 判断の節を直せなかったとき (古い現状のまま) は null を返し、 整理は抜粋を使わず要約の動作にする (§9)
    */
   private async taskHandoffBeforeReduction(
     toolDefs: ToolDefinition[],
     signal: AbortSignal,
     promptSize: PromptSize,
     budget: ContextBudget,
-  ): Promise<void> {
+  ): Promise<TaskHandoffDoc | null> {
     const tracker = this.taskHandoff;
-    if (!tracker) return;
+    if (!tracker) return null;
     // 依頼の外の /compact などで文書がまだ無ければ、 履歴から作る (落とす前に)
     if (!tracker.activeDoc(this.history)) tracker.adoptHistory(this.history);
     const result = await tracker.checkpoint(this.history, "before-reduction", {
       refine: { request: this.buildMainCallRequest(toolDefs, signal), promptTokens: promptSize.tokens, budget },
     });
     if (result?.refineFailure) this.taskHandoffWarn(result.refineFailure);
+    return result && !result.refineFailure ? result.doc : null;
   }
 
   /**

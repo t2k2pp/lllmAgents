@@ -20,6 +20,7 @@ import {
   applyTaskHandoffUpdate,
   collectFilesFromMessages,
   createTaskHandoffDoc,
+  isTaskHandoffExcerptMessage,
   isTaskPointerMessage,
   messageText,
   parseTaskHandoffUpdate,
@@ -130,6 +131,7 @@ export function buildTaskUpdateInstruction(doc: TaskHandoffDoc, newMessageCount:
     "(次にやることを書き直した本文)",
     "",
     "「依頼の原文」 と「関係するファイル」 はハーネスが書くので、 書かないでください。",
+    "依頼の後に利用者が足した指示・制約 (やり方の指定・禁止・好み) は、 必ず「決まり・制約」 に足してください。 整理のとき、 文書の「依頼の原文」 にある利用者の発言は履歴から外れ、 この文書の抜粋だけが残ります。",
     ...(retryNote ? ["", `前回の出力は使えませんでした: ${retryNote}`] : []),
     "",
     "## タスクの引き継ぎ文書 (今の版)",
@@ -242,7 +244,9 @@ export function looksLikeContinuation(text: string): boolean {
 
 /** 履歴の中で、 利用者の言葉として依頼の原文に入れてよい発言か (ポインタ・引き継ぎメモ・ハーネスの促しを除く) */
 function isUserWords(m: Message): boolean {
-  if (m.role !== "user" || m.ephemeral === true || isTaskPointerMessage(m)) return false;
+  if (m.role !== "user" || m.ephemeral === true || isTaskPointerMessage(m) || isTaskHandoffExcerptMessage(m)) {
+    return false;
+  }
   return !messageText(m).startsWith(HANDOFF_MARKER);
 }
 
@@ -300,8 +304,24 @@ export class TaskHandoffTracker {
    */
   adoptHistory(history: MessageHistory): TaskHandoffDoc | null {
     if (this.activeDoc(history)) return this.activeDoc(history);
-    const raw = history.getRawMessages();
-    const content = raw.filter((m) => !isTaskPointerMessage(m));
+    const doc = this.buildAdoptedDoc(history);
+    if (!doc) return null;
+    const paths = this.put(history, doc);
+    this.log({ action: "create", taskId: doc.id, path: paths.md, kind: "create", detail: "履歴から作成" });
+    return doc;
+  }
+
+  /**
+   * 整理の見込み用の文書 (docs/task-handoff-design.md §9)。 使っている文書があればそれ、 無ければ履歴から作る仮の文書
+   * (保存しない。 実際に書き換えるときは整理の前の書き込みが adoptHistory で作る)。 履歴に中身が無ければ null
+   */
+  peekDoc(history: MessageHistory): TaskHandoffDoc | null {
+    return this.activeDoc(history) ?? this.buildAdoptedDoc(history);
+  }
+
+  /** 履歴の利用者の発言から文書を組み立てる (保存しない) */
+  private buildAdoptedDoc(history: MessageHistory): TaskHandoffDoc | null {
+    const content = history.getRawMessages().filter((m) => !isTaskPointerMessage(m));
     if (content.length === 0) return null;
     const words = content.filter(isUserWords).map((m) => ({ text: messageText(m) }));
     const doc = createTaskHandoffDoc({
@@ -310,8 +330,6 @@ export class TaskHandoffTracker {
     });
     doc.todos = this.deps.todos();
     doc.files = addTaskFiles(doc, collectFilesFromMessages(content)).files;
-    const paths = this.put(history, doc);
-    this.log({ action: "create", taskId: doc.id, path: paths.md, kind: "create", detail: "履歴から作成" });
     return doc;
   }
 
@@ -335,7 +353,9 @@ export class TaskHandoffTracker {
 
   /** 前回の更新より後に増えたメッセージ */
   private delta(history: MessageHistory, state: TrackerState): Message[] {
-    return history.getRawMessages().filter((m) => !state.covered.has(m) && !isTaskPointerMessage(m));
+    return history
+      .getRawMessages()
+      .filter((m) => !state.covered.has(m) && !isTaskPointerMessage(m) && !isTaskHandoffExcerptMessage(m));
   }
 
   /**

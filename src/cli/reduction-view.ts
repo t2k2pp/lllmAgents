@@ -47,19 +47,37 @@ function failureLabel(reason: ReductionFailureReason): string {
 }
 
 /** 段階ごとの減った量の行 (記録の freedTokens) */
-function stageLines(f: ReductionEventRecord["freedTokens"] | Omit<ReductionEventRecord["freedTokens"], "stage3">) {
+function stageLines(
+  f: ReductionEventRecord["freedTokens"] | Omit<ReductionEventRecord["freedTokens"], "stage3">,
+  stage3Label = "段階 3 (要約)",
+) {
   const rows: Array<[string, number]> = [
     ["前の依頼の片付け (補助メッセージ・思考)", f.preprocess],
     ["段階 0 (読み直し・重複・やり直しの除去)", f.stage0],
     ["段階 1 (古いツール結果)", f.stage1],
     ["段階 2 (古い思考)", f.stage2],
   ];
-  if ("stage3" in f) rows.push(["段階 3 (要約)", f.stage3]);
+  if ("stage3" in f) rows.push([stage3Label, f.stage3]);
   return rows.map(([label, v]) => `      ${label.padEnd(28)} 約 ${n(v)}`);
 }
 
 /** 要約の行。 失敗したときは設定 context.summaryFailure に応じた結果も書く */
 function summaryLine(r: ReductionEventRecord): string {
+  const ex = r.taskExcerpt;
+  if (ex.status === "applied") {
+    const c = ex.counts;
+    return (
+      `要約: 呼んでいません。 タスクの引き継ぎ文書から抜き出し直した抜粋 1 件に置き換えました ` +
+      `(要約 ${c.summaries} 件・前の抜粋 ${c.excerpts} 件・忘却の記録 ${c.forgetNotes} 件・文書にある利用者の発言 ${c.userMessages} 件・` +
+      `そのほか ${c.otherMessages} 件を外し、 ${c.keptMessages} 件は残しました。 忘却の記録は抜粋に直近 ${ex.forgetLines} 行` +
+      `${ex.forgetOmitted > 0 ? ` (ほか ${ex.forgetOmitted} 行は省略)` : ""})`
+    );
+  }
+  const head = ex.status === "fallback" ? `${ex.detail}。 ` : "";
+  return head + summaryBody(r);
+}
+
+function summaryBody(r: ReductionEventRecord): string {
   const s = r.summary;
   switch (s.status) {
     case "done":
@@ -125,7 +143,8 @@ export function formatCompactResult(
     out.push(`    整理前: 約 ${n(r.promptTokensBefore)} トークン (${basisLabel(r.promptBasis)})`);
     out.push(`    整理後: 約 ${n(r.promptTokensAfter)} トークン (推定)`);
     out.push(`    減った量: 約 ${n(r.freedTokens.total)} トークン (忘却の記録の分を差し引いた値)`);
-    out.push(...stageLines(r.freedTokens).map((l) => chalk.dim(l)));
+    const stage3Label = r.taskExcerpt?.status === "applied" ? "段階 3 (引き継ぎ文書の抜粋)" : undefined;
+    out.push(...stageLines(r.freedTokens, stage3Label).map((l) => chalk.dim(l)));
     const line = summaryLine(r);
     out.push(`    ${r.continuedWithoutSummary ? chalk.yellow(line) : line}`);
   } else {
@@ -170,6 +189,8 @@ function lastEventLines(last: LastReductionEvent | LastReductionSkip | null): st
     ];
   }
   const parts = [`約 ${n(r.freedTokens.total)} トークン減 (${n(r.promptTokensBefore)} → ${n(r.promptTokensAfter)})`];
+  if (r.taskExcerpt?.status === "applied") parts.push("引き継ぎ文書の抜粋に置き換え");
+  if (r.taskExcerpt?.status === "fallback") parts.push(`抜粋は使わず要約の動作 (${r.taskExcerpt.reason})`);
   if (r.summary.status === "done") parts.push(`要約 ${r.summary.segments ?? 0} 区間`);
   if (r.continuedWithoutSummary) parts.push("要約に失敗し段階 0〜2 だけ");
   return [head, chalk.dim(`      ${parts.join("、 ")}`)];

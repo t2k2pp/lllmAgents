@@ -5,7 +5,10 @@
  *   1. 履歴の写しに前処理 (借りの返済) → 段階 0 → 1 → 2 を最後まで当てはめる (reduction-stages.ts)
  *   2. まだ目標と最低量に届かなければ段階 3: 書き換え前の現在の並び + 指示で要約を得る (reduction-summary.ts)。
  *      手動の /compact は届いていても、 要約してよい最大の範囲を要約する (段階 0〜3 を最後まで。 §7)
- *   3. 写しに要約を当てはめ、 忘却の記録を 1 件にまとめて入れる (既存の記録があれば追記)
+ *      ただし使っているタスクの引き継ぎ文書があれば、 要約の代わりに、 範囲 (既存の要約・忘却の記録・今のタスクのやり取り) を
+ *      文書から抜き出し直した抜粋 1 件に置き換える (docs/task-handoff-design.md §9。 第 2 段。 要約の要約をしない)。
+ *      文書を書く (beforeRewrite) のは抜粋を描く直前。 文書が無い・判断の節を直せなかったときは要約に切り替え、 記録 taskExcerpt に出す
+ *   3. 写しに要約を当てはめ、 忘却の記録を 1 件にまとめて入れる (既存の記録があれば追記。 抜粋のときは抜粋の末尾に写す)
  *   4. ツールの対を検証して、 MessageHistory.replaceMessages() で 1 回だけ差し替える
  *      (書き換え理由は "reduction:<イベント ID>" の 1 件)
  *   5. cache_miss の原因に整理イベントを記録し (次の外れが expected になる)、 依頼の増分 G に減らした量を足し戻す
@@ -38,6 +41,13 @@ import {
 } from "./context-budget.js";
 import { findToolPairingError, type MessageHistory } from "./message-history.js";
 import {
+  applyTaskExcerpt,
+  type ExcerptCounts,
+  type ExcerptPlan,
+  planTaskExcerpt,
+  renderExcerptMessage,
+} from "./reduction-excerpt.js";
+import {
   applyReductionStages,
   estimateSentMessageTokens,
   insertTombstone,
@@ -54,6 +64,7 @@ import {
   type SummaryRangeResult,
   selectSummaryRange,
 } from "./reduction-summary.js";
+import type { TaskHandoffDoc } from "./task-handoff.js";
 
 /**
  * 発火の種類 (§4.4 / §7)。 forced = 規則 1 (本体呼び出しの直前に入らない)、
@@ -103,6 +114,25 @@ export interface ReductionSummaryRecord {
   extraTextChars?: number;
 }
 
+/**
+ * 段階 3 を引き継ぎ文書の抜粋で行ったか (docs/task-handoff-design.md §9)。
+ * not-used = 抜粋の口が無い (機能が切れている) か段階 3 が要らない、 applied = 抜粋に置き換えた、
+ * fallback = 文書が無い (no-doc)・判断の節を直せなかった (refine-failed)・置き換えても減らない (not-smaller) ので要約の動作にした
+ */
+export type TaskExcerptRecord =
+  | { status: "not-used" }
+  | {
+      status: "applied";
+      taskId: string;
+      /** 範囲の内訳 (落とした要約・前回の抜粋・忘却の記録・利用者の発言・そのほか、 残したもの) */
+      counts: ExcerptCounts;
+      /** 抜粋に写した忘却の記録の行と、 省いた行の数 */
+      forgetLines: number;
+      forgetOmitted: number;
+      excerptChars: number;
+    }
+  | { status: "fallback"; reason: "no-doc" | "refine-failed" | "not-smaller"; detail: string };
+
 /** 整理イベントの記録 (§10.1 の reduction_event)。 セッションログに 1 件ずつ書く */
 export interface ReductionEventRecord {
   id: string;
@@ -135,6 +165,8 @@ export interface ReductionEventRecord {
    */
   reserveShortfallTokens?: number;
   summary: ReductionSummaryRecord;
+  /** 段階 3 を引き継ぎ文書の抜粋で行ったか (docs/task-handoff-design.md §9) */
+  taskExcerpt: TaskExcerptRecord;
   /** 要約に失敗したときの扱い (設定 context.summaryFailure) */
   summaryFailurePolicy: SummaryFailurePolicy;
   /** 要約に失敗し、 設定 continue に従って段階 0〜2 の分だけで進めた (成功・失敗のどちらの結果にも付く) */
@@ -277,9 +309,18 @@ export interface ReductionEventInput {
    * 差し替えると決まり、 写しの検証まで済んだ直後 (replaceMessages() の直前) に 1 回だけ呼ぶ (docs/task-handoff-design.md §6)。
    * AgentLoop はここでタスクの引き継ぎ文書を書く (書いてから落とす)。 投げたら差し替えず task-handoff-failed で失敗にする。
    * 見送り・nothing-to-reduce・still-too-large では呼ばない (規則 1 は減らせなくても毎回判定するので、 その度に書かない)。
-   * 第 2 段 (同 §9) では、 書いた文書から作った抜粋で既存の要約を置き換える口にする
+   * 書いた文書を返す (判断の節を直せなかった・文書が無いときは null)。 抜粋の道 (taskExcerpt) では、 段階 3 の要約の代わりに
+   * 抜粋を描く直前に呼び、 返った文書から抜粋を描く。 null なら要約の動作に切り替える (同 §9)
    */
-  beforeRewrite?: () => Promise<void>;
+  beforeRewrite?: () => Promise<TaskHandoffDoc | null>;
+  /**
+   * タスクの引き継ぎ文書の抜粋で段階 3 を行う口 (docs/task-handoff-design.md §9)。 無ければ要約だけ (今までどおり)。
+   * peek は今の文書 (保存していない仮のものでもよい。 書き換えるかと減る量の見込みにだけ使う)。 無ければ null
+   */
+  taskExcerpt?: {
+    peek: () => TaskHandoffDoc | null;
+    mdPathOf: (doc: TaskHandoffDoc) => string;
+  };
 }
 
 /** 忘却の記録 1 回分の本文 (§5.3 / §5.4 の行に、 見出しと読み直しの案内を付ける) */
@@ -321,6 +362,7 @@ export async function runReductionEvent(
     clearedCurrentThinking: 0,
     promptTokensAfter: promptSize.tokens,
     summary: { status: "not-needed" },
+    taskExcerpt: { status: "not-used" },
     summaryFailurePolicy: input.summaryFailure,
     continuedWithoutSummary: false,
     prewarm: null,
@@ -366,12 +408,16 @@ export async function runReductionEvent(
   const continueAfterSummaryFailure = (): boolean =>
     input.summaryFailure === "continue" && input.signal?.aborted !== true;
 
-  // 2〜3. 足りなければ (手動の /compact なら必ず) 段階 3 (書き換え前の並び + 指示で要約を得て、 写しに当てはめる)
-  const rangeResult = selectStage3Range(input.trigger, stages, raw.length, input.keepRecentToolUses);
+  // 2〜3. 足りなければ (手動の /compact なら必ず) 段階 3。 使っている引き継ぎ文書があれば抜粋に置き換える (task-handoff-design §9)。
+  // 無ければ書き換え前の並び + 指示で要約を得て、 写しに当てはめる
+  const excerpt = planExcerptStage(input, stages, record);
+  let rangeResult =
+    excerpt === null ? selectStage3Range(input.trigger, stages, raw.length, input.keepRecentToolUses) : null;
   const boundary = isBoundaryTrigger(input.trigger);
   if (isBoundaryTrigger(input.trigger)) {
     // 規則 2: 要約を呼ぶ前に、 見込みが最低量 F に届くかを決める。 届かなければ書き換えずに見送る (§4.6)
-    const worth = assessReductionWorth(stages, rangeResult, goal);
+    const worth =
+      excerpt === null ? assessReductionWorth(stages, rangeResult, goal) : excerptWorth(stages, excerpt.freed, goal);
     if (!worth.worthIt) {
       return {
         ok: false,
@@ -397,6 +443,50 @@ export async function runReductionEvent(
     }
     // 見込みが F に届くので書き換える。 要約の呼び出しより前に知らせる (先読みを待たせない)
     input.onWillRewrite?.();
+  }
+  /** 文書を書いたか (抜粋の道で、 抜粋を描く前に書く。 書いていなければ差し替えの直前に書く) */
+  let handoffWritten = false;
+  /** 抜粋に置き換えた (忘却の記録は抜粋の末尾に写したので system の記録を足さない) */
+  let excerptApplied = false;
+  if (excerpt !== null) {
+    // 落とす前に文書を書き (判断の節を直す)、 書いた文書から抜粋を描き直す (薄まらない)
+    let doc: TaskHandoffDoc | null;
+    try {
+      doc = input.beforeRewrite ? await input.beforeRewrite() : null;
+    } catch (e) {
+      return fail(
+        "task-handoff-failed",
+        `タスクの引き継ぎ文書を書けなかったため、 履歴を書き換えませんでした: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    handoffWritten = true;
+    const plan = doc ? planTaskExcerpt(stages.messages, input.keepRecentToolUses, doc, stages.recordLines) : null;
+    if (doc && plan) {
+      const text = renderExcerptMessage(doc, input.taskExcerpt?.mdPathOf(doc) ?? "", plan);
+      next = applyTaskExcerpt(stages.messages, plan, text);
+      record.reachedStage = 3;
+      record.freedTokens.stage3 = estimateSentMessageTokens(stages.messages) - estimateSentMessageTokens(next);
+      record.taskExcerpt = {
+        status: "applied",
+        taskId: doc.id,
+        counts: plan.counts,
+        forgetLines: plan.forget.lines.length,
+        forgetOmitted: plan.forget.omitted,
+        excerptChars: text.length,
+      };
+      tombstoneAt = null;
+      excerptApplied = true;
+    } else {
+      // 判断の節を直せなかった (文書は機械的な節だけ書いてある) ので、 古い現状の抜粋で落とさず要約の動作にする
+      record.taskExcerpt = {
+        status: "fallback",
+        reason: doc ? "not-smaller" : "refine-failed",
+        detail: doc
+          ? "書いた文書で置き換える範囲に落とせるものがありませんでした。 要約の動作にしました"
+          : "引き継ぎ文書の判断の節を更新できなかったため、 要約の動作にしました",
+      };
+      rangeResult = selectStage3Range(input.trigger, stages, raw.length, input.keepRecentToolUses);
+    }
   }
   if (rangeResult !== null) {
     if (!rangeResult.ok) {
@@ -470,8 +560,8 @@ export async function runReductionEvent(
     }
   }
 
-  // 4. 忘却の記録を 1 件にまとめて入れる (既存の記録があれば追記)
-  if (stages.recordLines.length > 0) {
+  // 4. 忘却の記録を 1 件にまとめて入れる (既存の記録があれば追記)。 抜粋のときは抜粋の末尾に写してあるので足さない
+  if (stages.recordLines.length > 0 && !excerptApplied) {
     next = insertTombstone(next, buildReductionTombstoneText(input.id, stages.recordLines), tombstoneAt ?? next.length);
   }
 
@@ -501,8 +591,9 @@ export async function runReductionEvent(
   // 5. 検証して 1 回だけ差し替える
   const pairingError = findToolPairingError(next);
   if (pairingError) return fail("apply-error", `差し替え前の写しのツールの対が壊れています: ${pairingError}`);
-  // 落とす前にタスクの引き継ぎ文書を書く。 書けなければ履歴は元のまま (docs/task-handoff-design.md §6)
-  if (input.beforeRewrite) {
+  // 落とす前にタスクの引き継ぎ文書を書く。 書けなければ履歴は元のまま (docs/task-handoff-design.md §6)。
+  // 抜粋の道では抜粋を描く前に書いてある
+  if (input.beforeRewrite && !handoffWritten) {
     try {
       await input.beforeRewrite();
     } catch (e) {
@@ -548,6 +639,56 @@ function selectStage3Range(
     shortfall: stages.shortfall,
     widest: manual,
   });
+}
+
+/**
+ * 段階 3 を引き継ぎ文書の抜粋で行うかを決める (docs/task-handoff-design.md §9)。 段階 3 が要る (手動は常に) ときだけ。
+ * 今の文書 (peek) で置き換えた写しを作り、 減る見込みがあれば抜粋の道にする (見込みは規則 2 の見送りの判断にだけ使う。
+ * 実際の抜粋は beforeRewrite で書いた文書から描き直す)。 使わないなら null を返し、 理由を記録に書く
+ */
+function planExcerptStage(
+  input: ReductionEventInput,
+  stages: ReductionStagesResult,
+  record: ReductionEventRecord,
+): { plan: ExcerptPlan; freed: number } | null {
+  if (!input.taskExcerpt) return null;
+  if (!stages.needsSummary && input.trigger !== "manual") return null;
+  const doc = input.taskExcerpt.peek();
+  if (!doc) {
+    record.taskExcerpt = {
+      status: "fallback",
+      reason: "no-doc",
+      detail: "使っているタスクの引き継ぎ文書が無いため、 要約の動作にしました",
+    };
+    return null;
+  }
+  const plan = planTaskExcerpt(stages.messages, input.keepRecentToolUses, doc, stages.recordLines);
+  const freed =
+    plan === null
+      ? 0
+      : estimateSentMessageTokens(stages.messages) -
+        estimateSentMessageTokens(
+          applyTaskExcerpt(stages.messages, plan, renderExcerptMessage(doc, input.taskExcerpt.mdPathOf(doc), plan)),
+        );
+  if (plan === null || freed <= 0) {
+    record.taskExcerpt = {
+      status: "fallback",
+      reason: "not-smaller",
+      detail: `引き継ぎ文書の抜粋に置き換えても減らないため、 要約の動作にしました (見込み ${freed.toLocaleString("en-US")} トークン)`,
+    };
+    return null;
+  }
+  return { plan, freed };
+}
+
+/** 抜粋の道の、 減る量の見込みが最低量 F に届くか (規則 2) */
+function excerptWorth(stages: ReductionStagesResult, freed: number, goal: ReductionGoal): ReductionWorth {
+  const total = stages.freedTokens.total + freed;
+  return {
+    worthIt: total >= goal.minimumReductionTokens,
+    withSummary: false,
+    expectedFreedTokens: { stages: stages.freedTokens.total, summary: freed, total },
+  };
 }
 
 // ─── 見込み・状態 (/context) ───
@@ -708,7 +849,9 @@ export function formatReductionEventLine(result: ReductionEventResult): string {
     );
   }
   const parts = [`約 ${n(r.freedTokens.total)} トークン減`];
+  if (r.taskExcerpt.status === "applied") parts.push("引き継ぎ文書の抜粋に置き換え");
   if (r.summary.status === "done") parts.push(`要約 ${r.summary.segments} 区間`);
+  if (r.taskExcerpt.status === "fallback") parts.push(`抜粋は使わず要約の動作 (${r.taskExcerpt.reason})`);
   if (r.repaid.ephemeral + r.repaid.thinking > 0) {
     parts.push(`前の依頼の補助メッセージ ${r.repaid.ephemeral} 件・思考 ${r.repaid.thinking} 件を削除`);
   }

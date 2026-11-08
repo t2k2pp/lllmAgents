@@ -179,7 +179,7 @@ function classify(messages: readonly Message[]): Kind[] {
  * 直近 K 回のツール呼び出しと最新の応答の組は残す (reduction-stages.ts と同じ数え方)。
  * ツール呼び出しが 1 つも無ければ、 最後のモデルの発言から後ろを残す。
  */
-function protectedTailStart(messages: readonly Message[], keepRecentToolUses: number): number {
+export function protectedTailStart(messages: readonly Message[], keepRecentToolUses: number): number {
   const callHeads: number[] = [];
   let lastBatchHead = -1;
   for (let i = 0; i < messages.length; i++) {
