@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ROOT_ANCESTORS } from "../../src/agent/delegation-context.js";
+import { createSharedWorkspace, resolveWorkspacePath } from "../../src/agent/workspace-context.js";
 import { readImageSize } from "../../src/tools/image-attachment.js";
 import { fileReadTool } from "../../src/tools/definitions/file-read.js";
 import type { ToolExecutionContext } from "../../src/tools/tool-registry.js";
@@ -40,13 +41,14 @@ describe("file_read の画像 (docs/in-context-vision-design.md §8)", () => {
   it("見られるときは短い説明と画像の添付を返す (本文に base64 を入れない)", async () => {
     const result = await fileReadTool.execute({ file_path: png }, ON);
     expect(result.success).toBe(true);
-    // 作業場所の解決はパスを正規化する (Windows では小文字になる) ので大小文字を区別せずに比べる
-    expect(result.output.toLowerCase()).toContain(png.toLowerCase());
+    // 作業場所の解決はパスを正規化する (Windows は小文字・macOS は /private の実パス) ので、 同じ解決をした値と比べる
+    const resolved = resolveWorkspacePath(createSharedWorkspace(), png);
+    expect(result.output).toContain(resolved);
     expect(result.output).toContain("1200×900 px");
     expect(result.output).toContain("33 バイト");
     expect(result.images).toHaveLength(1);
     expect(result.images?.[0].mimeType).toBe("image/png");
-    expect(result.images?.[0].label.toLowerCase()).toBe(png.toLowerCase());
+    expect(result.images?.[0].label).toBe(resolved);
     expect(Buffer.from(result.images?.[0].data ?? "", "base64")).toEqual(fs.readFileSync(png));
     expect(result.output).not.toContain(result.images?.[0].data);
   });
