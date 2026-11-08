@@ -52,7 +52,7 @@ describe("file_read の画像 (docs/in-context-vision-design.md §8)", () => {
   beforeEach(async () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "file-read-image-"));
     png = path.join(dir, "render.png");
-    fs.writeFileSync(png, await renderLikePng(1200, 900));
+    fs.writeFileSync(png, await renderLikePng(400, 300));
   });
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -63,13 +63,13 @@ describe("file_read の画像 (docs/in-context-vision-design.md §8)", () => {
     // 作業場所の解決はパスを正規化する (Windows は小文字・macOS は /private の実パス) ので、 同じ解決をした値と比べる
     const resolved = resolveWorkspacePath(createSharedWorkspace(), png);
     expect(result.output).toContain(resolved);
-    expect(result.output).toContain("1200×900 px");
+    expect(result.output).toContain("400×300 px");
     expect(result.images).toHaveLength(1);
     const image = result.images?.[0];
     expect(image?.label.startsWith(resolved)).toBe(true);
     // 元の大きさと送る大きさを書く
-    expect(image?.label).toMatch(/元 1200×900 PNG [\d.]+(KB|MB) → 送る 1200×900 JPEG [\d.]+KB/);
-    expect(result.output).toContain("送る 1200×900 JPEG");
+    expect(image?.label).toMatch(/元 400×300 PNG [\d.]+(KB|MB) → 送る 400×300 JPEG [\d.]+KB/);
+    expect(result.output).toContain("送る 400×300 JPEG");
     const sent = Buffer.from(image?.data ?? "", "base64");
     expect(sent.length).toBeLessThan(original.length);
     expect(image?.mimeType).toBe("image/jpeg");
@@ -122,17 +122,17 @@ describe("file_read の画像 (docs/in-context-vision-design.md §8)", () => {
 
 describe("prepareImageForModel (§3.1 縮小と付け直し)", () => {
   it("長辺を上限まで縮め、 元より小さくする", async () => {
-    const big = await renderLikePng(2400, 1800);
-    const prepared = await prepareImageForModel(big, "image/png", "big.png", LIMITS);
+    const big = await renderLikePng(800, 600);
+    const prepared = await prepareImageForModel(big, "image/png", "big.png", { ...LIMITS, maxLongSide: 320 });
     expect(prepared.ok).toBe(true);
     if (!prepared.ok) return;
     const sent = Buffer.from(prepared.attachment.data, "base64");
     const decoded = await Jimp.read(sent);
-    expect(Math.max(decoded.width, decoded.height)).toBe(1280);
-    expect(decoded.height).toBe(960);
+    expect(Math.max(decoded.width, decoded.height)).toBe(320);
+    expect(decoded.height).toBe(240);
     expect(sent.length).toBeLessThan(big.length);
-    expect(prepared.note).toContain("元 2400×1800 PNG");
-    expect(prepared.note).toContain("送る 1280×960");
+    expect(prepared.note).toContain("元 800×600 PNG");
+    expect(prepared.note).toContain("送る 320×240");
   });
 
   it("透過のある画像は PNG のまま (JPEG にしない)", async () => {
