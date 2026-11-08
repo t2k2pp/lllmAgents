@@ -57,10 +57,9 @@ async function build() {
       "chromium-bidi/*",
       "playwright",
       "playwright-core",
-      // jimp v1.x は内部で @jimp/wasm-* (WASM バイナリ) を使い esbuild で解決不能。
-      // playwright と同じく外部化し、実行時に createRequire で node_modules から読む。
-      "jimp",
-      "@jimp/*",
+      // jimp は束ねる (2026-11-09)。 既定の jimp は純 JS の PNG/JPEG の符号器だけで、 esbuild で束ねて動く
+      // (以前は外部化しており、 exe では ~/.localllm/node_modules に無いと使えなかった)。 会話に載せる画像の縮小
+      // (src/tools/image-attachment.ts。 docs/in-context-vision-design.md §3.1) が exe でも動くようにする。
     ],
     define: {
       "import.meta.url": "import_meta_url",

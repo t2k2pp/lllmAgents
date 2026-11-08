@@ -87,14 +87,18 @@ export interface ToolImage {
  * 同じ応答のツール結果の画像を、 1 件の運び役の本文にする。
  * 先頭の文字パートで「利用者の発言ではない」 ことと一覧を示し、 各画像の直前に見出しを置く
  */
-export function buildToolImageNote(images: readonly ToolImage[], omitted: readonly ToolImage[] = []): ContentPart[] {
+export function buildToolImageNote(
+  images: readonly ToolImage[],
+  omitted: readonly ToolImage[] = [],
+  omittedReason = `1 回の応答で載せられる画像は ${MAX_LIVE_IMAGES} 枚まで`,
+): ContentPart[] {
   const lines = [
     `${TOOL_IMAGE_NOTE_MARKER}: 直前のツール結果が返した画像です。 利用者の発言ではありません。 画像を自分の目で確かめ、 作業を続けてください。`,
     ...images.map((x, i) => `- 画像 ${i + 1}: ${x.toolName} — ${x.image.label}`),
   ];
   if (omitted.length > 0) {
     lines.push(
-      `- 1 回の応答で載せられる画像は ${MAX_LIVE_IMAGES} 枚までのため、 次の ${omitted.length} 枚は載せていません: ` +
+      `- ${omittedReason}のため、 次の ${omitted.length} 枚は載せていません: ` +
         omitted.map((x) => `${x.toolName} — ${x.image.label}`).join(", "),
     );
   }
@@ -176,6 +180,75 @@ export function retireOldImages(
   return { messages: out, retired };
 }
 
+/** "1.2MB" のような表記 */
+export function formatImageBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)}KB`;
+  return `${bytes}B`;
+}
+
+/** 画像パートの base64 の長さ (送る本文に占めるバイト数の目安) */
+export function imagePartBytes(part: ContentPart): number {
+  const url = part.image_url?.url ?? "";
+  const i = url.indexOf(";base64,");
+  return i >= 0 ? url.length - i - ";base64,".length : url.length;
+}
+
+/** 履歴の中で生きている画像の base64 の合計 */
+export function liveImageBytes(messages: readonly Message[]): number {
+  let total = 0;
+  for (const m of messages) {
+    if (typeof m.content === "string") continue;
+    for (const p of m.content) if (p.type === "image_url") total += imagePartBytes(p);
+  }
+  return total;
+}
+
+/**
+ * 新しい画像から数えて、 枚数が maxCount 以下・base64 の合計が maxBytes 以下に収まるところまで残し、
+ * それより古い画像を全部置き換え文にする (古い方から外す)。 変えたメッセージだけ新しいオブジェクト
+ */
+export function retireImagesToFit(
+  messages: readonly Message[],
+  limits: { maxCount: number; maxBytes: number },
+  reason: string,
+): { messages: Message[]; retired: number; retiredBytes: number } {
+  let count = 0;
+  let bytes = 0;
+  let full = false;
+  let retired = 0;
+  let retiredBytes = 0;
+  const out = [...messages];
+  for (let i = out.length - 1; i >= 0; i--) {
+    const m = out[i];
+    if (typeof m.content === "string" || countImageParts(m) === 0) continue;
+    const parts = m.content;
+    const retireSet = new Set<number>();
+    for (let j = parts.length - 1; j >= 0; j--) {
+      const p = parts[j];
+      if (p.type !== "image_url") continue;
+      const size = imagePartBytes(p);
+      if (!full && count + 1 <= limits.maxCount && bytes + size <= limits.maxBytes) {
+        count++;
+        bytes += size;
+        continue;
+      }
+      full = true;
+      retireSet.add(j);
+      retired++;
+      retiredBytes += size;
+    }
+    if (retireSet.size === 0) continue;
+    out[i] = {
+      ...m,
+      content: parts.map((p, j) =>
+        retireSet.has(j) ? { type: "text", text: retiredImageText(p, labelBefore(parts, j), reason) } : p,
+      ),
+    };
+  }
+  return { messages: out, retired, retiredBytes };
+}
+
 /** 履歴の中で生きている (置き換えていない) 画像の枚数 */
 export function countLiveImages(messages: readonly Message[]): number {
   return messages.reduce((n, m) => n + countImageParts(m), 0);
@@ -186,6 +259,25 @@ export function countLiveImages(messages: readonly Message[]): number {
 /** config の mainLLM.vision。 未指定は auto */
 export type ImageInputPreference = "auto" | "on" | "off";
 
+/** 載せる前に縮める長辺の既定 (px)。 config mainLLM.visionMaxLongSide */
+export const DEFAULT_VISION_MAX_LONG_SIDE = 1280;
+
+/**
+ * 履歴に載っている画像の base64 の合計の既定の上限 (4 MiB)。 config mainLLM.visionImageBudgetBytes。
+ * 2026-11-09 の Gufo は本文 7 MiB まで通し、 8 MiB から 413 (payload_too_large) を返した。 文字の分を残すため 4 MiB
+ */
+export const DEFAULT_VISION_IMAGE_BUDGET_BYTES = 4 * 1024 * 1024;
+
+/** config の画像の上限 (mainLLM.visionMaxLongSide / visionImageBudgetBytes)。 未指定・不正は既定 */
+export interface ImageInputLimitsConfig {
+  visionMaxLongSide?: number;
+  visionImageBudgetBytes?: number;
+}
+
+function positiveInt(v: number | undefined, fallback: number): number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 1 ? Math.floor(v) : fallback;
+}
+
 /**
  * メインのモデルが画像を見られるかを決める。 config の明示 (on/off) があればそれ、 auto なら provider に問う。
  * provider が失敗したら unknown (失敗の中身つき) を返す。 推測で on/off にしない
@@ -194,27 +286,51 @@ export async function resolveImageInput(
   provider: Pick<LLMProvider, "supportsVision" | "providerType">,
   model: string,
   preference: ImageInputPreference | undefined,
+  limitsConfig: ImageInputLimitsConfig = {},
 ): Promise<ImageInputState> {
+  const limits = {
+    maxLongSide: positiveInt(limitsConfig.visionMaxLongSide, DEFAULT_VISION_MAX_LONG_SIDE),
+    budgetBytes: positiveInt(limitsConfig.visionImageBudgetBytes, DEFAULT_VISION_IMAGE_BUDGET_BYTES),
+  };
   const pref = preference ?? "auto";
-  if (pref === "on") return { mode: "on", source: "config", detail: `${model}: config の mainLLM.vision = "on"` };
-  if (pref === "off") return { mode: "off", source: "config", detail: `${model}: config の mainLLM.vision = "off"` };
+  if (pref === "on") {
+    return { mode: "on", source: "config", detail: `${model}: config の mainLLM.vision = "on"`, ...limits };
+  }
+  if (pref === "off") {
+    return { mode: "off", source: "config", detail: `${model}: config の mainLLM.vision = "off"`, ...limits };
+  }
   try {
     const supported = await provider.supportsVision(model);
     return supported
-      ? { mode: "on", source: "provider", detail: `${model}: ${provider.providerType} が画像の入力に対応と報告` }
+      ? {
+          mode: "on",
+          source: "provider",
+          detail: `${model}: ${provider.providerType} が画像の入力に対応と報告`,
+          ...limits,
+        }
       : {
           mode: "off",
           source: "provider",
           detail: `${model}: ${provider.providerType} が画像の入力に非対応と報告 (対応なら mainLLM.vision = "on")`,
+          ...limits,
         };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { mode: "unknown", source: "provider", detail: `${model}: ${provider.providerType} の判定に失敗: ${msg}` };
+    return {
+      mode: "unknown",
+      source: "provider",
+      detail: `${model}: ${provider.providerType} の判定に失敗: ${msg}`,
+      ...limits,
+    };
   }
 }
 
 /** 起動時・/status に出す 1 行 */
 export function formatImageInputLine(state: ImageInputState): string {
   const label = state.mode === "on" ? "見る (ON)" : state.mode === "off" ? "見ない (OFF)" : "判定できず";
-  return `画像 (メインのモデル): ${label} — ${state.detail}`;
+  const limits =
+    state.mode === "on"
+      ? ` (長辺 ${state.maxLongSide}px まで縮める・載せる画像の合計 ${(state.budgetBytes / (1024 * 1024)).toFixed(1)} MiB まで)`
+      : "";
+  return `画像 (メインのモデル): ${label} — ${state.detail}${limits}`;
 }

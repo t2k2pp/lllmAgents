@@ -1,6 +1,6 @@
 # メインのモデルが画像を自分で見る (in-context vision) 設計書
 
-> **ステータス**: implemented (2026-11-09。 自動テストは通過。 実機 (Gufo + Blender) の通しの確認は未)
+> **ステータス**: implemented (2026-11-09。 実機で狼の目の誤りを本体が自分で見つけた。 その後の 413 の対策 §3.1・§6・§6.1 は自動テストだけ)
 > **作成日**: 2026-11-09
 > **関連**: [prompt-prefix-stability.md](prompt-prefix-stability.md) (前方一致を壊さない)、 [context-reduction-redesign.md](context-reduction-redesign.md) (整理イベント)、
 > [ephemeral-context-design.md](ephemeral-context-design.md) (揮発メッセージ)、 [llm-logging.md](llm-logging.md)、 [blender-mcp-integration.md](blender-mcp-integration.md)、 [config-reference.md](config-reference.md)
@@ -53,6 +53,24 @@ interface ToolExecutionContext { …; imageInput?: ImageInputState; taskRequest?
 - `label` はファイルのパス (MCP の画像は保存した一時ファイルのパス)。 会話の見出しと、退役した後の置き換え文 (「file_read で読み直す」) に使う
 - `ToolExecutor` が `imageInput` と `taskRequest` を context に入れる。 入れるのはメインの `AgentLoop` だけ
 
+### 3.1 載せる前に縮めて書き直す (2026-11-09 の 413 の対策)
+
+実機 (再開した狼のセッション) で、 本体は file_read で描画を見て、 あごの高さの目と光線の原因を自分で見つけた。 ところが 1200×900 の PNG
+(1 枚 約 1.1 MB・base64 で 約 1.5 MB) を 6 枚ほど読んだところで、 本体の呼び出しが `TypeError: fetch failed` ×3 の後に
+`HTTP 413 {"error":{"message":"request body is too large","code":"payload_too_large"}}` で止まった。 Gufo の本文の上限を詰め物の JSON で測ると、
+7 MiB は通り 8 MiB から 413 だった。 枚数の上限 (8 枚) だけでは本文の大きさを守れない。
+
+そこで、 画像を返すツール (file_read・MCP) は `prepareImageForModel()` (`src/tools/image-attachment.ts`) を通してから添付する:
+- 長辺が `maxLongSide` (config `mainLLM.visionMaxLongSide`、 既定 **1280 px**) を超えていれば縮める
+- PNG と、 透過が無ければ JPEG (品質 88) に書き直し、 縮めていなければ元のままも含めて一番小さいものを使う (透過のある画像は PNG のまま)。
+  描画に似た画像では PNG 433 KB → JPEG 29 KB (900×448 の MCP の絵)
+- 見出し (label) と結果の文に「元 1200×900 PNG 1.1MB → 送る 1200×900 JPEG 180KB」 の形で、 元の大きさと送る大きさを書く
+- 書き直した base64 が 1 枚で容量の上限 (§6 の budgetBytes) を超えたら **載せずに、 理由と直し方 (書き出し直す・visionMaxLongSide を下げる) を結果の文に書く**
+- jimp が解けない形式 (WebP など) は元のまま載せ、 縮められなかったことを書く
+
+jimp は exe に束ねる (`build-exe.js` の external から外した)。 以前は外部化していて、 exe では `~/.localllm/node_modules` に無いと使えなかった。
+既定の jimp は純 JS の PNG/JPEG の符号器だけで esbuild で束ねて動くことを確かめた (exe は 約 2 MB 増える)。
+
 ## 4. 会話への載せ方 (`AgentLoop.withToolBatch`)
 
 1 回の応答のツール結果は `withToolBatch` の中で入れ、ハーネスの促しはその応答の結果を全部入れた後に足す決まりがある (結果の途中に挟むと `findToolPairingError` で対が切れる)。 画像も同じ所で扱う:
@@ -89,7 +107,23 @@ base64 の長さでは数えない (数十万文字 = 数万トークンと誤�
 2. **上限**: 運び役を足した後で生きている画像が `MAX_LIVE_IMAGES` (8) 枚を超えたら、古い画像を `KEEP_RECENT_IMAGES` 枚まで退役させ、
    `history.replaceMessages(next, "image-retire")` で差し替える (`prefix_break` は理由つき = unexpected ではない)。 8 枚を超えた時だけまとめて 3 枚まで減らすので、書き換えは 5 枚に 1 回程度
 
+3. **容量の上限** (2026-11-09 に追加): 履歴に載っている画像の base64 の合計を `budgetBytes` (config `mainLLM.visionImageBudgetBytes`、
+   既定 **4 MiB**。 Gufo の本文の上限 7〜8 MiB に文字の分を残す) 以下に保つ。
+   - 1 回の応答の画像は、 新しい方から枚数と容量に収まる分だけ載せ、 収まらない古い方は名前を挙げて「載せていません」 と書く
+   - 運び役を足した後で合計が上限を超えたら、 古い画像から収まるまで置き換え文にし、 枚数の上限と同じく 1 回の `replaceMessages(next, "image-retire")` にまとめる
+     (`retireImagesToFit`。 置き換え文の理由は「載せている画像の合計が 4.0MB を超えたため」)
+   - 起動時の 1 行に長辺と容量の上限も出す
+
 `tests/agent/prompt-prefix-invariant.test.ts` は緩めていない。
+
+### 6.1 本文が大きすぎるとき (413)
+
+provider が 413 / `payload_too_large` / `request body is too large` を返したら、 利用者に見せるエラーに次を足す (`describeRequestTooLarge`):
+「送ったリクエストの本文 (約 N MB) がサーバーの上限を超えました。 会話に載せた画像や大きなツール結果が原因のことが多いです。
+/compact で整理するか、 mainLLM.visionImageBudgetBytes や mainLLM.visionMaxLongSide を下げてから、 もう一度送ってください」。
+本文が 6 MiB 以上のときの接続切れ (`fetch failed`) にも「本文の大きさで接続を切った可能性」 を足す (実機では 413 の前に fetch failed が 3 回出た)。
+**自動で送り直さない・画像を黙って外して送り直さない** (AGENTS.md)。 送り直すかは今までどおり利用者が選ぶ。
+送った本文のおおよそのバイト数 (messages と tools の JSON) は LLM ログの request に `requestBytes` として書く (ログを書くために作る JSON の長さを足すだけ)。
 
 ## 7. 文字にする所・ログ・セッション
 
@@ -137,7 +171,9 @@ base64 の長さでは数えない (数十万文字 = 数万トークンと誤�
 - [x] vision_analyze の説明と依頼の原文の前置き
 - [x] Blender のスキル (自分で見る・横の寄り・数値の確かめ・写さない)
 - [x] テスト (`tests/agent/image-content.test.ts`・`tests/agent/in-context-vision-loop.test.ts`・`tests/agent/session-image-save.test.ts`・`tests/tools/file-read-image.test.ts`・`tests/mcp/mcp-content.test.ts`)
-- [ ] 実機: Gufo の Qwen3.8 Flash Next で狼の続きを動かし、 file_read で絵を見て目の高さを直せるかを確かめる (未)
+- [x] 実機: Gufo の Qwen3.8 Flash Next で狼の続きを動かし、 file_read で絵を見てあごの高さの目と光線の原因を見つけた (2026-11-09。 6 枚ほどで 413)
+- [x] 載せる前の縮小と付け直し・容量の上限・413 の説明 (§3.1・§6・§6.1)
+- [ ] 実機: 縮小と容量の上限を入れた exe で、 413 が出ずに続けられるか (未)
 - [ ] サブエージェントでも見せる (モデルごとの判定を持たせる。 今は名指しで載せない)
 
 ## 12. 未確認・今後

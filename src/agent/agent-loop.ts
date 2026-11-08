@@ -23,7 +23,12 @@ import {
   KEEP_RECENT_IMAGES,
   MAX_LIVE_IMAGES,
   resolveImageInput,
-  retireOldImages,
+  DEFAULT_VISION_IMAGE_BUDGET_BYTES,
+  DEFAULT_VISION_MAX_LONG_SIDE,
+  formatImageBytes,
+  liveImageBytes,
+  retireImagesToFit,
+  TOOL_IMAGE_NOTE_MARKER,
   type ToolImage,
 } from "./image-content.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
@@ -1234,6 +1239,7 @@ export class AgentLoop {
               toolDefs.length > 0 ? toolDefs : undefined,
               fingerprint,
             );
+            this.lastRequestBytes = prefixInfo.requestBytes;
             // 送信済みの部分が変わった = プロンプトキャッシュが外れた。 忘却・圧縮など理由の分かる
             // 書き換えでなければ退行の疑いなので警告する (docs/prompt-prefix-stability.md §7)。
             const rewriteReasons = this.history.takeRewriteReasons();
@@ -1612,7 +1618,10 @@ export class AgentLoop {
               connectionRetries,
             });
             writeRuntimeError(chalk.red(`\n  エラー: ${err.message}`));
-            this.notice("error", `LLM 呼び出しエラー: ${err.message}`);
+            // 本文が大きすぎる (413) ときは、 原因 (画像・大きなツール結果) と直し方を示す (自動では送り直さない)
+            const bodyHint = describeRequestTooLarge(err, this.lastRequestBytes);
+            if (bodyHint) writeRuntimeError(chalk.yellow(`  ${bodyHint}`));
+            this.notice("error", `LLM 呼び出しエラー: ${err.message}${bodyHint ? ` — ${bodyHint}` : ""}`);
             const action = await askUserOnError(err);
 
             if (action === "retry") {
@@ -3626,15 +3635,50 @@ export class AgentLoop {
    */
   private addToolImageNote(images: readonly ToolImage[]): void {
     if (images.length === 0) return;
-    const shown = images.slice(0, MAX_LIVE_IMAGES);
-    const omitted = images.slice(MAX_LIVE_IMAGES);
-    this.history.addUserMessage(buildToolImageNote(shown, omitted), { ephemeral: true });
+    const budget = this.imageInput.budgetBytes;
+    // 新しい方から、 枚数 (MAX_LIVE_IMAGES) と容量 (budgetBytes) に収まる分だけ載せる。 収まらない古い方は名前を挙げて載せない
+    let shownCount = 0;
+    let shownBytes = 0;
+    for (let i = images.length - 1; i >= 0; i--) {
+      const size = images[i].image.data.length;
+      if (shownCount + 1 > MAX_LIVE_IMAGES || shownBytes + size > budget) break;
+      shownCount++;
+      shownBytes += size;
+    }
+    const shown = images.slice(images.length - shownCount);
+    const omitted = images.slice(0, images.length - shownCount);
+    const omittedReason =
+      images.length > MAX_LIVE_IMAGES && shownCount === MAX_LIVE_IMAGES
+        ? `1 回の応答で載せられる画像は ${MAX_LIVE_IMAGES} 枚まで`
+        : `載せる画像の合計の上限 ${formatImageBytes(budget)} (mainLLM.visionImageBudgetBytes)`;
+    if (shown.length === 0) {
+      // ツールは 1 枚で上限を超える画像を返さない (prepareImageForModel)。 来たときも黙って捨てない
+      this.history.addUserMessage(
+        `${TOOL_IMAGE_NOTE_MARKER}: ${omittedReason}を超えるため、 次の画像は載せていません: ` +
+          omitted.map((x) => `${x.toolName} — ${x.image.label}`).join(", "),
+        { ephemeral: true },
+      );
+      return;
+    }
+    this.history.addUserMessage(buildToolImageNote(shown, omitted, omittedReason), { ephemeral: true });
+    // 枚数が上限を超えたら KEEP_RECENT_IMAGES 枚まで、 容量が上限を超えたら収まるまで、 古い画像を 1 回の書き換えで外す
     const raw = this.history.getRawMessages();
-    if (countLiveImages(raw) <= MAX_LIVE_IMAGES) return;
-    const retired = retireOldImages(raw, KEEP_RECENT_IMAGES, `生きている画像が ${MAX_LIVE_IMAGES} 枚を超えたため`);
+    const overCount = countLiveImages(raw) > MAX_LIVE_IMAGES;
+    const overBytes = liveImageBytes(raw) > budget;
+    if (!overCount && !overBytes) return;
+    const reason = overCount
+      ? `生きている画像が ${MAX_LIVE_IMAGES} 枚を超えたため`
+      : `載せている画像の合計が ${formatImageBytes(budget)} を超えたため`;
+    const retired = retireImagesToFit(
+      raw,
+      { maxCount: overCount ? KEEP_RECENT_IMAGES : MAX_LIVE_IMAGES, maxBytes: budget },
+      reason,
+    );
     if (retired.retired === 0) return;
     this.history.replaceMessages(retired.messages, "image-retire");
-    logger.info(`[image-input] 古い画像 ${retired.retired} 枚を文脈から外しました (image-retire)`);
+    logger.info(
+      `[image-input] 古い画像 ${retired.retired} 枚 (${formatImageBytes(retired.retiredBytes)}) を文脈から外しました (image-retire: ${reason})`,
+    );
   }
 
   /** いまのタスクの依頼の原文 (引き継ぎ文書から。 無ければ今の依頼の発言)。 長いときは頭を残して切る */
@@ -4821,9 +4865,18 @@ export class AgentLoop {
   // ─── メインのモデルが画像を見られるか (docs/in-context-vision-design.md §2) ───
 
   /** いまの判定 (判定前・判定中は unknown) */
-  private imageInput: ImageInputState = { mode: "unknown", source: "provider", detail: "まだ判定していません" };
+  private imageInput: ImageInputState = {
+    mode: "unknown",
+    source: "provider",
+    detail: "まだ判定していません",
+    maxLongSide: DEFAULT_VISION_MAX_LONG_SIDE,
+    budgetBytes: DEFAULT_VISION_IMAGE_BUDGET_BYTES,
+  };
   /** 走っている判定 (接続先・モデルの切替で始める。 run() の頭で待つ) */
   private imageInputPending: Promise<ImageInputState> | null = null;
+
+  /** 直前に送った本文のおおよそのバイト数 (413 の説明に使う) */
+  private lastRequestBytes = 0;
 
   /** いまの判定 (/status の表示・テスト用) */
   getImageInput(): ImageInputState {
@@ -4838,7 +4891,11 @@ export class AgentLoop {
     const provider = this.rawProvider;
     const model = this.model;
     const preference = this.liveEndpoint?.vision;
-    const pending: Promise<ImageInputState> = resolveImageInput(provider, model, preference).then((state) => {
+    const limits = {
+      visionMaxLongSide: this.liveEndpoint?.visionMaxLongSide,
+      visionImageBudgetBytes: this.liveEndpoint?.visionImageBudgetBytes,
+    };
+    const pending: Promise<ImageInputState> = resolveImageInput(provider, model, preference, limits).then((state) => {
       // 判定の間に接続先・モデルが替わっていたら、 古い判定で上書きしない
       if (this.imageInputPending === pending) {
         this.imageInput = state;
@@ -4850,7 +4907,7 @@ export class AgentLoop {
     });
     this.imageInputPending = pending;
     // 判定中は「判定中」 として扱う (前のモデルの判定を使わない)
-    this.imageInput = { mode: "unknown", source: "provider", detail: `${model}: 判定中` };
+    this.imageInput = { ...this.imageInput, mode: "unknown", source: "provider", detail: `${model}: 判定中` };
     this.toolExecutor.setImageInput(this.imageInput);
     return pending;
   }
@@ -5130,6 +5187,32 @@ function getPartialTagLength(text: string): number {
     }
   }
   return 0;
+}
+
+/**
+ * サーバーが本文の大きさで断ったとき (HTTP 413・payload_too_large) の説明。 当てはまらなければ null。
+ * 原因 (画像や大きなツール結果で本文が大きくなった) と送った大きさ、 直し方を 1 文で返す。 自動で送り直さない
+ * (docs/in-context-vision-design.md §6.1)
+ */
+/** 接続が切れたとき、 本文の大きさを疑う目安 (6 MiB。 Gufo の上限は 7〜8 MiB) */
+const LARGE_REQUEST_BYTES = 6 * 1024 * 1024;
+
+export function describeRequestTooLarge(err: Error, requestBytes: number): string | null {
+  const tooLarge = /\b413\b|payload_too_large|request body is too large|request entity too large/i.test(err.message);
+  // 本文が大きすぎるとき、 サーバーが 413 を返さずに接続を切る (fetch failed) こともある (2026-11-09 の Gufo)
+  const largeAndCut = !tooLarge && isConnectionError(err) && requestBytes >= LARGE_REQUEST_BYTES;
+  if (!tooLarge && !largeAndCut) return null;
+  if (largeAndCut) {
+    return (
+      `送ったリクエストの本文が約 ${formatImageBytes(requestBytes)} と大きく、 サーバーが本文の大きさで接続を切った可能性があります。 ` +
+      `/compact で整理するか、 config.json の mainLLM.visionImageBudgetBytes や mainLLM.visionMaxLongSide を下げてください。`
+    );
+  }
+  const size = requestBytes > 0 ? `約 ${formatImageBytes(requestBytes)}` : "大きさ不明";
+  return (
+    `送ったリクエストの本文 (${size}) がサーバーの上限を超えました。 会話に載せた画像や大きなツール結果が原因のことが多いです。 ` +
+    `/compact で整理するか、 config.json の mainLLM.visionImageBudgetBytes (載せる画像の合計) や mainLLM.visionMaxLongSide (長辺) を下げてから、 もう一度送ってください。`
+  );
 }
 
 function isConnectionError(err: Error): boolean {

@@ -26,6 +26,10 @@ export interface ImageInputState {
   source: "config" | "provider";
   /** 表示用の説明 (モデル名・判定の理由・失敗の中身) */
   detail: string;
+  /** 載せる前に縮める長辺の上限 (px)。 config mainLLM.visionMaxLongSide (既定 1280) */
+  maxLongSide: number;
+  /** 履歴に載っている画像の base64 の合計の上限 (バイト)。 config mainLLM.visionImageBudgetBytes (既定 4 MiB) */
+  budgetBytes: number;
 }
 
 export interface ToolResult {

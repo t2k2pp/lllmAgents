@@ -2,8 +2,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AgentLoop } from "../../src/agent/agent-loop.js";
-import { countLiveImages, isToolImageNote } from "../../src/agent/image-content.js";
+import { AgentLoop, describeRequestTooLarge } from "../../src/agent/agent-loop.js";
+import { countLiveImages, isToolImageNote, liveImageBytes } from "../../src/agent/image-content.js";
 import { findToolPairingError, MessageHistory } from "../../src/agent/message-history.js";
 import type { ChatChunk, ChatWithToolsParams, LLMProvider, Message } from "../../src/providers/base-provider.js";
 import { PermissionManager } from "../../src/security/permission-manager.js";
@@ -210,5 +210,77 @@ describe("ツール結果の画像を会話に載せる (in-context vision)", ()
     expect(carriers).toHaveLength(2);
     expect(JSON.stringify(carriers[0].content)).toContain("文脈から外しました");
     expect(findToolPairingError(last.filter((m) => m.role !== "system"))).toBeNull();
+  });
+
+  it("載せている画像の合計が容量の上限を超えたら、 古い画像を 1 回の書き換えで外し、 image-retire を申告する", async () => {
+    const requests: ChatWithToolsParams[] = [];
+    const registry = new ToolRegistry();
+    // 1 枚 約 40KB (base64) の画像を 1 回に 2 枚返す。 上限 100KB なら 2 回目で 4 枚 = 160KB になり超える
+    const oneImage = Buffer.alloc(30_000, 7).toString("base64");
+    let n = 0;
+    registry.register({
+      name: "render_pair",
+      definition: {
+        type: "function",
+        function: { name: "render_pair", description: "test", parameters: { type: "object", properties: {} } },
+      },
+      execute: async (_params, context) => {
+        expect(context?.imageInput?.budgetBytes).toBe(100_000);
+        const images = [0, 1].map((i) => ({
+          mimeType: "image/png" as const,
+          data: oneImage,
+          label: `${dir}/p${n}-${i}.png`,
+        }));
+        n++;
+        return { success: true, output: "rendered 2", images };
+      },
+    });
+    const reasons: string[] = [];
+    const original = MessageHistory.prototype.replaceMessages;
+    vi.spyOn(MessageHistory.prototype, "replaceMessages").mockImplementation(function (
+      this: MessageHistory,
+      next: Message[],
+      reason?: string,
+    ) {
+      reasons.push(reason ?? "replace");
+      return original.call(this, next, reason);
+    });
+    const provider = scriptedProvider(
+      [
+        toolCalls(["c1", "render_pair", { tag: 1 }]),
+        toolCalls(["c2", "render_pair", { tag: 2 }]),
+        textReply("確認しました。"),
+      ],
+      requests,
+      true,
+    );
+    const loop = makeLoop(provider, registry, dir);
+    loop.setLiveBinding({ providerType: "gufo", model: "test-model-7b", visionImageBudgetBytes: 100_000 });
+    expect((await loop.refreshImageInput()).budgetBytes).toBe(100_000);
+    await loop.run("描画を確かめてください？");
+
+    expect(reasons).toContain("image-retire");
+    const last = requests.at(-1)?.messages as Message[];
+    expect(liveImageBytes(last)).toBeLessThanOrEqual(100_000);
+    expect(countLiveImages(last)).toBe(2);
+    const carriers = last.filter(isToolImageNote);
+    expect(JSON.stringify(carriers[0].content)).toContain("載せている画像の合計が");
+    expect(JSON.stringify(carriers[0].content)).toContain("p0-0.png");
+    expect(findToolPairingError(last.filter((m) => m.role !== "system"))).toBeNull();
+  });
+
+  it("413 (本文が大きすぎる) は、 原因と送った大きさと直し方を示す", () => {
+    const hint = describeRequestTooLarge(
+      new Error('HTTP 413 {"error":{"message":"request body is too large","code":"payload_too_large"}}'),
+      8_500_000,
+    );
+    expect(hint).toContain("8.1MB");
+    expect(hint).toContain("画像");
+    expect(hint).toContain("/compact");
+    expect(hint).toContain("mainLLM.visionImageBudgetBytes");
+    // 本文が大きいときに接続が切れた (fetch failed) ときも大きさを疑わせる。 小さければ何も足さない
+    expect(describeRequestTooLarge(new Error("TypeError: fetch failed"), 7 * 1024 * 1024)).toContain("接続を切った");
+    expect(describeRequestTooLarge(new Error("TypeError: fetch failed"), 100_000)).toBeNull();
+    expect(describeRequestTooLarge(new Error("HTTP 500 boom"), 9_000_000)).toBeNull();
   });
 });

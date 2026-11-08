@@ -170,6 +170,8 @@
 | `top_k` | number | No | Top-k sampling。[後述](#サンプリングパラメータ) |
 | `repetition_penalty` | number | No | 繰り返しペナルティ。[後述](#サンプリングパラメータ) |
 | `vision` | `"auto"` \| `"on"` \| `"off"` | No | メインのモデルにツール結果の画像 (file_read で開いた PNG・MCP の画像) を見せるか。 既定 `"auto"` = provider に問う (Gufo は `/v1/models` の `input_modalities`。 openai-compat の基底は判定せず非対応扱い)。 `"on"` / `"off"` は問わずに決める。 判定できないときは起動時に黄色で理由を出し、画像は載せない。 起動時と `/status` に `画像 (メインのモデル): …` の 1 行が出る。 [in-context-vision-design.md](in-context-vision-design.md) |
+| `visionMaxLongSide` | number | No | 会話に載せる画像の長辺の上限 (px。 既定 1280)。 これより大きい画像は縮め、 PNG/JPEG のうち小さい方に書き直してから載せる |
+| `visionImageBudgetBytes` | number | No | 履歴に載せている画像の base64 の合計の上限 (バイト。 既定 4194304 = 4 MiB)。 超えたら古い画像を置き換え文にする。 1 枚でこれを超える画像は載せずに理由を示す。 サーバーの本文の上限 (Gufo は 8 MiB で 413) より十分小さくする |
 
 未知・独自モデルは、context長だけで能力tierを推測しない。モデル名から判定できない場合は次のように明示する。
 

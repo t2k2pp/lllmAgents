@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import type { MCPToolCallResult } from "./types.js";
 import type { ImageAttachment, ToolExecutionContext } from "../tools/tool-registry.js";
-import { attachmentFromBytes, imageInputUnavailableNote, isImageMime } from "../tools/image-attachment.js";
+import { imageInputUnavailableNote, isImageMime, prepareImageForModel } from "../tools/image-attachment.js";
 
 /** MCP の結果を会話に入れる形にしたもの: 文字と、 メインのモデルが見る画像 */
 export interface RenderedMcpResult {
@@ -17,10 +17,13 @@ export interface RenderedMcpResult {
  * メインのモデルが画像を見られるとき (context.imageInput.mode === "on") は画像を添付にし、
  * 見られないときは今までどおりファイルのパスと vision_analyze の案内を返す (base64 は文字にしない)。
  */
-export function renderMcpResult(result: MCPToolCallResult, context?: ToolExecutionContext): RenderedMcpResult {
+export async function renderMcpResult(
+  result: MCPToolCallResult,
+  context?: ToolExecutionContext,
+): Promise<RenderedMcpResult> {
   const parts: string[] = [];
   const images: ImageAttachment[] = [];
-  const seeImages = context?.imageInput?.mode === "on";
+  const state = context?.imageInput;
   for (const block of result.content) {
     if (block.type === "text") parts.push(block.text ?? "");
     else if (block.type === "resource" && typeof block.resource?.text === "string") {
@@ -37,11 +40,17 @@ export function renderMcpResult(result: MCPToolCallResult, context?: ToolExecuti
       const directory = fs.mkdtempSync(path.join(os.tmpdir(), "localllm-mcp-image-"));
       const file = path.join(directory, `image.${extension}`);
       fs.writeFileSync(file, bytes, { flag: "wx", mode: 0o600 });
-      if (seeImages && isImageMime(block.mimeType)) {
-        images.push(attachmentFromBytes(bytes, block.mimeType, file));
-        parts.push(
-          `MCP image saved: ${file}\nThe image is attached after this tool result. Look at it yourself and check it against the task.`,
-        );
+      if (state?.mode === "on" && isImageMime(block.mimeType)) {
+        // 長辺を縮めて小さい形式に書き直す。 1 枚で載せられる量を超えたら載せずに理由を書く (docs/in-context-vision-design.md §3.1)
+        const prepared = await prepareImageForModel(bytes, block.mimeType, file, state);
+        if (prepared.ok) {
+          images.push({ ...prepared.attachment, label: `${file} (${prepared.note})` });
+          parts.push(
+            `MCP image saved: ${file}\nThe image is attached after this tool result (${prepared.note}). Look at it yourself and check it against the task.`,
+          );
+        } else {
+          parts.push(`MCP image saved: ${file}\n[画像] ${prepared.reason}`);
+        }
       } else {
         parts.push(
           `MCP image saved: ${file}\nImage has NOT been visually verified. Use vision_analyze with image_path and a configured vision model. Remove the temporary image when no longer needed.\n${imageInputUnavailableNote(context)}`,

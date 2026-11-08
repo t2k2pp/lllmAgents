@@ -62,6 +62,13 @@ export interface LLMEndpoint extends SamplingParams {
    * "auto" (既定) = provider に問う / "on" = 見せる / "off" = 見せない (vision_analyze を使う)
    */
   vision?: "auto" | "on" | "off";
+  /** 画像を載せる前に縮める長辺の上限 (px。 mainLLM でだけ使う。 既定 1280。 docs/in-context-vision-design.md §3.1) */
+  visionMaxLongSide?: number;
+  /**
+   * 履歴に載せている画像の base64 の合計の上限 (バイト。 mainLLM でだけ使う。 既定 4 MiB)。
+   * サーバーの本文の上限 (Gufo は 8 MiB で 413) より十分小さくする (docs/in-context-vision-design.md §6)
+   */
+  visionImageBudgetBytes?: number;
 }
 
 /**

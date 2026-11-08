@@ -403,7 +403,7 @@ export class MCPManager {
           }
 
           // 画像はメインのモデルが見られるときだけ添付にする (docs/in-context-vision-design.md §8)
-          const rendered = renderMcpResult(result, context);
+          const rendered = await renderMcpResult(result, context);
           return rendered.images.length > 0
             ? { success: true, output: rendered.text, images: rendered.images }
             : { success: true, output: rendered.text };

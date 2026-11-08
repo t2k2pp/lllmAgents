@@ -44,6 +44,8 @@ export interface LLMRequestLog extends LogContext {
   messageOffset?: number;
   /** このリクエスト時点の履歴総件数。 */
   messageTotal?: number;
+  /** 送った本文 (messages と tools の JSON) のおおよそのバイト数 (docs/in-context-vision-design.md §6.1) */
+  requestBytes?: number;
   tools?: unknown[];
   /**
    * 送った並びの指紋 (設定・道具の定義・messages の 1 件ずつの短いハッシュ)。 先読み・要約の side_call の指紋と並べて、
@@ -181,6 +183,8 @@ export interface RequestPrefixInfo {
   messageOffset: number;
   previousTotal: number;
   toolsChanged: boolean;
+  /** 送った本文 (messages と tools の JSON) のおおよそのバイト数。 413 の原因を示すのに使う */
+  requestBytes: number;
 }
 
 export type LLMLogEntry =
@@ -328,6 +332,9 @@ export class LLMLogger {
     const previousTotal = prev.length;
     this.previousMessageJsons = messageJsons;
     const toolsJson = tools === undefined ? undefined : JSON.stringify(sanitizeLogValue(tools));
+    // 送る本文の大きさ (サーバーの本文の上限 = 413 を見分けるため)。 messages の JSON は上で作ったものを使う
+    let requestBytes = toolsJson === undefined ? 0 : Buffer.byteLength(toolsJson, "utf-8");
+    for (const json of messageJsons) requestBytes += Buffer.byteLength(json, "utf-8") + 1;
     const changedTools = toolsJson !== this.previousToolsJson ? tools : undefined;
     this.previousToolsJson = toolsJson;
     this.write({
@@ -339,10 +346,16 @@ export class LLMLogger {
       messages: messageDelta,
       messageOffset,
       messageTotal: messages.length,
+      requestBytes,
       tools: changedTools,
       ...(fingerprint ? { fingerprint } : {}),
     });
-    return { messageOffset, previousTotal, toolsChanged: previousTotal > 0 && changedTools !== undefined };
+    return {
+      messageOffset,
+      previousTotal,
+      toolsChanged: previousTotal > 0 && changedTools !== undefined,
+      requestBytes,
+    };
   }
 
   /**

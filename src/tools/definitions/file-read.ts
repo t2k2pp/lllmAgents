@@ -2,10 +2,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ImageMimeType, ToolExecutionContext, ToolHandler, ToolResult } from "../tool-registry.js";
 import {
-  attachmentFromBytes,
   imageInputUnavailableNote,
   imageMimeFromExtension,
   MAX_IMAGE_BYTES,
+  prepareImageForModel,
   readImageSize,
 } from "../image-attachment.js";
 import { createSharedWorkspace, resolveWorkspacePath } from "../../agent/workspace-context.js";
@@ -72,7 +72,7 @@ export const fileReadTool: ToolHandler = {
     // 画像 (PNG/JPEG/WebP): メインのモデルが画像を見られるときは画像そのものを結果に付ける
     // (docs/in-context-vision-design.md §8)。 見られないときはそのことを明示する (文字として読まない)
     const imageMime = imageMimeFromExtension(path.extname(filePath));
-    if (imageMime) return readImageFile(filePath, imageMime, stat.size, context);
+    if (imageMime) return await readImageFile(filePath, imageMime, stat.size, context);
 
     const raw = fs.readFileSync(filePath, "utf-8");
     // 表示は LF に揃える。 file_edit / file_write はファイルの改行コードを保って書くので、
@@ -110,12 +110,12 @@ export const fileReadTool: ToolHandler = {
 };
 
 /** 画像のファイルを読む: 見られるなら短い説明 + 画像の添付、 見られないならその旨 (理由と vision_analyze の案内) */
-function readImageFile(
+async function readImageFile(
   filePath: string,
   mimeType: ImageMimeType,
   size: number,
   context: ToolExecutionContext | undefined,
-): ToolResult {
+): Promise<ToolResult> {
   if (size > MAX_IMAGE_BYTES) {
     return {
       success: false,
@@ -129,13 +129,17 @@ function readImageFile(
   const header =
     `[file_read] 画像 ${filePath} (${mimeType}, ${bytes.length} バイト` +
     (dims ? `, ${dims.width}×${dims.height} px)` : ", 大きさは読めず)");
-  if (context?.imageInput?.mode !== "on") {
+  const state = context?.imageInput;
+  if (state?.mode !== "on") {
     return { success: true, output: `${header}\n${imageInputUnavailableNote(context)}` };
   }
+  // 長辺を縮めて小さい形式に書き直す。 1 枚で載せられる量を超えたら載せずに理由を書く (docs/in-context-vision-design.md §3.1)
+  const prepared = await prepareImageForModel(bytes, mimeType, filePath, state);
+  if (!prepared.ok) return { success: true, output: `${header}\n[画像] ${prepared.reason}` };
   return {
     success: true,
-    output: `${header}\n画像はこのツール結果の後に添付します。 自分の目で中身を確かめてください。`,
-    images: [attachmentFromBytes(bytes, mimeType, filePath)],
+    output: `${header}\n画像はこのツール結果の後に添付します (${prepared.note})。 自分の目で中身を確かめてください。`,
+    images: [{ ...prepared.attachment, label: `${filePath} (${prepared.note})` }],
   };
 }
 
