@@ -57,6 +57,11 @@ export interface LLMEndpoint extends SamplingParams {
   deploymentName?: string;
   /** モデル特性の自由記述 (100〜300文字程度)。サブ/セカンドエージェント選択の判断材料としてシステムプロンプトに注入される */
   description?: string;
+  /**
+   * メインのモデルにツール結果の画像を見せるか (mainLLM でだけ使う。 docs/in-context-vision-design.md §2)。
+   * "auto" (既定) = provider に問う / "on" = 見せる / "off" = 見せない (vision_analyze を使う)
+   */
+  vision?: "auto" | "on" | "off";
 }
 
 /**

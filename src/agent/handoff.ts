@@ -17,6 +17,7 @@ import type { LLMProvider, Message } from "../providers/base-provider.js";
 import { collectResponse } from "../providers/base-provider.js";
 import type { MessageHistory } from "./message-history.js";
 import { estimateMessageTokens } from "./token-counter.js";
+import { contentToText as imageSafeContentToText } from "./image-content.js";
 import { isRateLimitError } from "../providers/utils/rate-limit.js";
 import * as logger from "../utils/logger.js";
 import { sideCall } from "./side-call.js";
@@ -66,8 +67,9 @@ export const HANDOFF_TEMPLATE = [
 
 // ─── 会話ダイジェスト ───
 
+/** 本文を文字にする (画像は置き換え文。 base64 をダイジェストに入れない) */
 function contentToText(content: Message["content"]): string {
-  return typeof content === "string" ? content : JSON.stringify(content);
+  return imageSafeContentToText(content);
 }
 
 function clip(text: string, max: number): string {

@@ -169,7 +169,7 @@ export function createBrowserTools(manager: PlaywrightManager): ToolHandler[] {
 
         return {
           success: true,
-          output: `Screenshot saved to: ${targetPath}\nYou can use vision_analyze with image_path="${targetPath}" to analyze this screenshot.`,
+          output: `Screenshot saved to: ${targetPath}\nYou can use vision_analyze with image_path="${targetPath}" to analyze this screenshot, or file_read the same path to look at it yourself when the main model can see images.`,
         };
       } catch (e) {
         return { success: false, output: "", error: String(e) };

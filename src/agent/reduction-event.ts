@@ -154,6 +154,8 @@ export interface ReductionEventRecord {
   freedTokens: { preprocess: number; stage0: number; stage1: number; stage2: number; stage3: number; total: number };
   /** 前処理で返した借り (終わった依頼の揮発メッセージ・思考の件数) */
   repaid: { ephemeral: number; thinking: number };
+  /** 前処理で置き換え文にした古い画像の枚数 (docs/in-context-vision-design.md §6) */
+  retiredImages: number;
   /** 段階 0・1 で消した呼び出しの件数と、 段階 2 で消した今の依頼の思考の件数 */
   forgottenCalls: number;
   clearedCurrentThinking: number;
@@ -358,6 +360,7 @@ export async function runReductionEvent(
     reachedStage: null,
     freedTokens: { preprocess: 0, stage0: 0, stage1: 0, stage2: 0, stage3: 0, total: 0 },
     repaid: { ephemeral: 0, thinking: 0 },
+    retiredImages: 0,
     forgottenCalls: 0,
     clearedCurrentThinking: 0,
     promptTokensAfter: promptSize.tokens,
@@ -397,6 +400,7 @@ export async function runReductionEvent(
   record.reachedStage = 2;
   record.freedTokens = { ...stages.freedTokens, stage3: 0 };
   record.repaid = { ...stages.repaid };
+  record.retiredImages = stages.retiredImages;
   record.forgottenCalls = stages.forgotten.length;
   record.clearedCurrentThinking = stages.clearedCurrentThinking;
 
@@ -855,6 +859,7 @@ export function formatReductionEventLine(result: ReductionEventResult): string {
   if (r.repaid.ephemeral + r.repaid.thinking > 0) {
     parts.push(`前の依頼の補助メッセージ ${r.repaid.ephemeral} 件・思考 ${r.repaid.thinking} 件を削除`);
   }
+  if (r.retiredImages > 0) parts.push(`古い画像 ${r.retiredImages} 枚を文脈から外す`);
   return (
     `コンテキストを整理しました (${label}): ${parts.join("、 ")}。 ` +
     `推定 ${n(r.promptTokensBefore)} → ${n(r.promptTokensAfter)} トークン (${r.id})`

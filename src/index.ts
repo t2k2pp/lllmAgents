@@ -12,6 +12,7 @@ import { ToolRegistry } from "./tools/tool-registry.js";
 import { PermissionManager } from "./security/permission-manager.js";
 import { PlaywrightManager } from "./browser/playwright-manager.js";
 import { VisionService, createVisionTool } from "./tools/definitions/vision.js";
+import { formatImageInputLine } from "./agent/image-content.js";
 import { ImageService } from "./image/image-service.js";
 import { createImageGenerateTool } from "./tools/definitions/image-generate.js";
 import { PlanManager } from "./agent/plan-mode.js";
@@ -728,6 +729,14 @@ async function main(): Promise<void> {
   // 起動時の provider は config.mainLLM から作っているので、実行中バインディングとして記録する
   // (docs/model-apply-immediacy.md §3.1)。これが無いと「設定したのに反映されていない」を検出できない。
   agent.setLiveBinding(config.mainLLM);
+
+  // メインのモデルが画像を見られるか (ツール結果の画像を会話に載せるか) を判定して表示する
+  // (docs/in-context-vision-design.md §2)。 判定できなければ理由を出し、 画像は載せない
+  {
+    const imageInput = await agent.refreshImageInput();
+    const line = `  ${formatImageInputLine(imageInput)}`;
+    console.log(imageInput.mode === "unknown" ? chalk.yellow(line) : chalk.dim(line));
+  }
 
   // タスクの引き継ぎ文書 (タスクごとの正本) を ~/.localllm/sessions/<セッション ID>.tasks/ に置く。
   // 再開 (restoreSession) より前に有効にする (docs/task-handoff-design.md §4.1)

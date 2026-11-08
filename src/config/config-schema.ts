@@ -44,6 +44,7 @@ const llmEndpointSchema = z
     top_p: z.number(),
     top_k: z.number(),
     repetition_penalty: z.number(),
+    vision: z.enum(["auto", "on", "off"]),
   })
   .partial();
 

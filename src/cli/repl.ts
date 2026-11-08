@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import chalk from "chalk";
+import { formatImageInputLine } from "../agent/image-content.js";
 import type { AgentLoop } from "../agent/agent-loop.js";
 import type { SecondLLMManager } from "../second-llm/second-llm-manager.js";
 import { bashTool } from "../tools/definitions/bash.js";
@@ -6155,6 +6156,8 @@ export class REPL {
         } else {
           console.log(chalk.dim(`  Vision:  ${chalk.yellow("未設定")} (main が画像を担当)`));
         }
+        // メインのモデルがツール結果の画像を自分で見るか (docs/in-context-vision-design.md §2)
+        console.log(chalk.dim(`  ${formatImageInputLine(this.agent.getImageInput())}`));
 
         // ─── Context ───
         console.log(chalk.dim("\n  ── Context ──"));

@@ -169,6 +169,7 @@
 | `top_p` | number | No | Top-p (nucleus sampling)。[後述](#サンプリングパラメータ) |
 | `top_k` | number | No | Top-k sampling。[後述](#サンプリングパラメータ) |
 | `repetition_penalty` | number | No | 繰り返しペナルティ。[後述](#サンプリングパラメータ) |
+| `vision` | `"auto"` \| `"on"` \| `"off"` | No | メインのモデルにツール結果の画像 (file_read で開いた PNG・MCP の画像) を見せるか。 既定 `"auto"` = provider に問う (Gufo は `/v1/models` の `input_modalities`。 openai-compat の基底は判定せず非対応扱い)。 `"on"` / `"off"` は問わずに決める。 判定できないときは起動時に黄色で理由を出し、画像は載せない。 起動時と `/status` に `画像 (メインのモデル): …` の 1 行が出る。 [in-context-vision-design.md](in-context-vision-design.md) |
 
 未知・独自モデルは、context長だけで能力tierを推測しない。モデル名から判定できない場合は次のように明示する。
 

@@ -15,7 +15,7 @@ import chalk from "chalk";
 import { MCPClient } from "./mcp-client.js";
 import { renderMcpResult } from "./mcp-content.js";
 import type { MCPServerConfig, MCPServersConfig, MCPTool, MCPContentBlock } from "./types.js";
-import type { ToolHandler, ToolResult, ToolRegistry } from "../tools/tool-registry.js";
+import type { ToolExecutionContext, ToolHandler, ToolResult, ToolRegistry } from "../tools/tool-registry.js";
 import type { ToolDefinition } from "../providers/base-provider.js";
 import { expandPluginRoot, type PluginComponentSource } from "../plugins/plugin-loader.js";
 import {
@@ -386,7 +386,7 @@ export class MCPManager {
     return {
       name: toolName,
       definition,
-      async execute(params: Record<string, unknown>): Promise<ToolResult> {
+      async execute(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
         try {
           const result = await client.callTool({
             name: mcpTool.name, // MCPサーバーにはオリジナル名で送る
@@ -402,8 +402,11 @@ export class MCPManager {
             };
           }
 
-          const output = renderMcpResult(result);
-          return { success: true, output };
+          // 画像はメインのモデルが見られるときだけ添付にする (docs/in-context-vision-design.md §8)
+          const rendered = renderMcpResult(result, context);
+          return rendered.images.length > 0
+            ? { success: true, output: rendered.text, images: rendered.images }
+            : { success: true, output: rendered.text };
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
           return { success: false, output: "", error: errMsg };

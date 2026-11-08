@@ -17,6 +17,7 @@
   船体・車体・飛行機の胴（流れる形）     hull()（断面の形を自分で決める loft）
   自然の物（岩・木・茂み・雲）          blob()（揺らした球）＋ tube()（幹・枝）
   確かめ                                render_views()（5 方向の絵）・measure()（寸法）
+                                        render_closeup()（横からの頭の寄り）・landmark_fraction() + check_range()（目・鼻・耳の位置を数値で）
 """
 import math
 import os
@@ -551,6 +552,81 @@ def render_views(target, out_dir, prefix, views=("side", "front", "rear", "top",
     except TypeError:
         pass
     return paths
+
+
+def render_closeup(out_dir, prefix, center, size, view="side", res=(1200, 900)):
+    """決まった向きの正投影で、center を中心に一辺 size(m) の範囲だけを撮る（頭の寄り・顔のつくりの確かめ）。
+    view は "side"（右から。目・鼻・耳の高さの確かめに必ず使う）・"front"・"top"。撮った絵の場所を返す。
+    前から見た絵では目の高さの誤り（あごの高さに目がある等）が分からない。高さは横から確かめる。"""
+    os.makedirs(out_dir, exist_ok=True)
+    sc = bpy.context.scene
+    prev_engine, prev_cam = sc.render.engine, sc.camera
+    try:
+        sc.render.engine = "BLENDER_WORKBENCH"
+    except TypeError:
+        pass
+    sh = sc.display.shading
+    sh.light, sh.color_type, sh.show_shadows, sh.show_cavity = "STUDIO", "MATERIAL", True, True
+    sc.render.resolution_x, sc.render.resolution_y = res
+    center = Vector(center)
+    dirs = {"side": Vector((1, 0, 0)), "front": Vector((0, -1, 0)), "top": Vector((0, 0, 1))}
+    cam_data = bpy.data.cameras.new("CloseupCam")
+    cam_data.type = "ORTHO"
+    cam_data.ortho_scale = size * max(1.0, res[0] / res[1])
+    cam = bpy.data.objects.new("CloseupCam", cam_data)
+    sc.collection.objects.link(cam)
+    sc.camera = cam
+    cam.location = center + dirs[view] * size * 4
+    cam.rotation_euler = (0, 0, 0) if view == "top" else (center - cam.location).to_track_quat("-Z", "Y").to_euler()
+    cam_data.clip_end = size * 10
+    sc.render.filepath = os.path.join(out_dir, f"{prefix}_closeup_{view}.png")
+    bpy.ops.render.render(write_still=True)
+    path = sc.render.filepath
+    print("shot:", path)
+    bpy.data.objects.remove(cam)
+    sc.camera = prev_cam
+    try:
+        sc.render.engine = prev_engine
+    except TypeError:
+        pass
+    return path
+
+
+def section_extent(ob, y, band=0.01, z_min=None):
+    """y の位置の断面（|頂点の y - y| <= band）の z の下端・上端を返す (low, high)。
+    z_min を渡すとそれより下の頂点（首・胸・前脚など）を除く。頂点が無ければ例外。"""
+    deps = bpy.context.evaluated_depsgraph_get()
+    ev = ob.evaluated_get(deps)
+    mesh = ev.to_mesh()
+    try:
+        zs = []
+        for v in mesh.vertices:
+            w = ev.matrix_world @ v.co
+            if abs(w.y - y) <= band and (z_min is None or w.z >= z_min):
+                zs.append(w.z)
+    finally:
+        ev.to_mesh_clear()
+    if not zs:
+        raise ValueError(f"section_extent: y={y:.3f} ±{band} に {ob.name} の頂点がありません（band を広げる）")
+    return min(zs), max(zs)
+
+
+def landmark_fraction(ob, point, band=0.01, z_min=None):
+    """目・鼻・耳の付け根などの点が、その y の頭の断面の高さの何割にあるか（0=下端・1=上端）。
+    置く道具（光線で表面を探す等）を信じず、置いた後にこれで数値を確かめる。"""
+    low, high = section_extent(ob, point[1], band, z_min)
+    frac = (point[2] - low) / max(high - low, 1e-6)
+    print(f"landmark_fraction: y={point[1]:.3f} z={point[2]:.3f} 断面 {low:.3f}〜{high:.3f} → {frac:.2f}")
+    return frac
+
+
+def check_range(label, value, lo, hi):
+    """数値が範囲に入っているか確かめ、外れていたら止める（「できた」と言う前の決まり）。"""
+    ok = lo <= value <= hi
+    print(f"check: {label} = {value:.3f}（{lo}〜{hi}）{'OK' if ok else 'NG'}")
+    if not ok:
+        raise AssertionError(f"{label} = {value:.3f} が {lo}〜{hi} の外です。位置を直してから撮り直す")
+    return value
 
 
 def export(ob_name, out_dir, unity=True):

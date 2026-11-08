@@ -1,6 +1,7 @@
 import type { Message } from "../providers/base-provider.js";
 import type { SessionTerminalTranscript } from "../agent/session-manager.js";
 import { stripAnsi } from "../utils/display-width.js";
+import { isToolImageNote } from "../agent/image-content.js";
 import type { ScreenManager } from "./screen-manager.js";
 
 export type TranscriptRestoreMode = "exact" | "recovered" | "legacy" | "invalid";
@@ -27,6 +28,8 @@ function contentLines(content: string): string[] {
 export function reconstructLegacyTranscript(messages: Message[]): string[] {
   const lines: string[] = [];
   for (const message of messages) {
+    // 画像の運び役はハーネスの注入 (利用者の発言ではない)。 画面の記録には出さない
+    if (isToolImageNote(message)) continue;
     const body = contentText(message.content);
     if (message.role === "user") {
       const [first = "", ...rest] = contentLines(body);
@@ -75,6 +78,7 @@ function recoverMissingDialogue(savedLines: string[], messages: Message[]): { li
 
   for (const message of messages) {
     if (message.role !== "user" && message.role !== "assistant") continue;
+    if (isToolImageNote(message)) continue;
     const body = contentText(message.content);
     if (!body.trim() || isCoveredByTranscript(body, normalizedTranscript)) continue;
     const bodyLines = contentLines(body);

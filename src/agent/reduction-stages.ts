@@ -17,6 +17,7 @@ import type { Message, ToolCall } from "../providers/base-provider.js";
 import type { ReductionGoal } from "./context-budget.js";
 import { findToolPairingError, toSentMessage } from "./message-history.js";
 import { estimateMessageTokens, estimateTokens } from "./token-counter.js";
+import { contentToText as imageSafeContentToText, KEEP_RECENT_IMAGES, retireOldImages } from "./image-content.js";
 
 // ─── 目印と、 忘却の写しの書き方 ───
 
@@ -38,8 +39,9 @@ const THIN_KEEP_ARG_KEYS = new Set(["file_path", "path", "url"]);
 /** 忘却の記録に 1 行ずつ列挙する「呼び出しごと外した tool_call」 の上限 (超過分は件数で示す) */
 export const REMOVED_CALLS_LISTED = 10;
 
+/** 本文を文字にする (画像は `[画像: …]` の置き換え文。 base64 を出さない。 実体は image-content.ts) */
 export function contentToText(content: Message["content"]): string {
-  return typeof content === "string" ? content : JSON.stringify(content);
+  return imageSafeContentToText(content);
 }
 
 /** 改行・連続空白を潰して 1 行に収める */
@@ -291,6 +293,8 @@ export interface ReductionStagesResult {
   freedTokens: { preprocess: number; stage0: number; stage1: number; stage2: number; total: number };
   /** 前処理で返した借り (§5.2): 除いた揮発メッセージと、 消した終わった依頼の思考の件数 */
   repaid: { ephemeral: number; thinking: number };
+  /** 前処理で置き換え文にした古い画像の枚数 (新しい KEEP_RECENT_IMAGES 枚は残す) */
+  retiredImages: number;
   /** 段階 2 で消した今の依頼の思考の件数 */
   clearedCurrentThinking: number;
   /** 段階 0・1 で消したもの (古い順) */
@@ -358,6 +362,19 @@ export function applyReductionStages(input: ReductionStagesInput): ReductionStag
       continue;
     }
     pre.push(e);
+  }
+  // 前処理 (画像。 docs/in-context-vision-design.md §6): 新しい KEEP_RECENT_IMAGES 枚を残し、 古い画像を置き換え文にする。
+  // 画像の運び役 (ハーネスの user) の中身に触れる唯一の所。 整理イベントは書き換え理由を申告するので前方一致の破壊は予期したもの
+  const retiredImages = retireOldImages(
+    pre.map((e) => e.message),
+    KEEP_RECENT_IMAGES,
+    "整理",
+  );
+  if (retiredImages.retired > 0) {
+    for (let i = 0; i < pre.length; i++) {
+      const next = retiredImages.messages[i];
+      if (next !== pre[i].message) pre[i] = { ...pre[i], message: next };
+    }
   }
   const sizePre = sizeOf(pre);
 
@@ -458,6 +475,7 @@ export function applyReductionStages(input: ReductionStagesInput): ReductionStag
     originalIndices: s2.map((e) => e.orig),
     freedTokens,
     repaid: { ephemeral: repaidEphemeral, thinking: repaidThinking },
+    retiredImages: retiredImages.retired,
     clearedCurrentThinking: clearAt.size,
     forgotten: forgotten.map(({ orig: _orig, ...item }) => item),
     recordLines: buildReductionRecordLines(forgotten, clearAt.size),

@@ -1,4 +1,5 @@
 import type { Message, ToolCall, ContentPart } from "../providers/base-provider.js";
+import { contentToText } from "./image-content.js";
 
 /** アシスタントメッセージ追加時のコールバック */
 export type AssistantMessageCallback = (content: string, toolCalls?: ToolCall[]) => void;
@@ -81,7 +82,7 @@ export function toSentMessage(m: Message): Message {
   // 修正: 標準 <thinking> タグ + 明示的命令 (**以下を踏まえ答えを出す**) で
   // 「これは consume するもの、 出力は新規生成」 を model に伝える。
   if (m.role === "assistant" && m.thinking) {
-    const baseContent = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+    const baseContent = contentToText(m.content);
     const inlined =
       `<thinking>\n` + `**以下を踏まえ答えを出す**\n` + `${m.thinking}\n` + `</thinking>\n\n` + `${baseContent}`;
     const out: Message = { role: m.role, content: inlined };
@@ -360,7 +361,7 @@ export class MessageHistory {
     const recent = this.messages.slice(-(turns * 2));
     return recent
       .map((m) => {
-        const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+        const content = contentToText(m.content);
         return `[${m.role}]: ${content}`;
       })
       .join("\n");
@@ -369,7 +370,7 @@ export class MessageHistory {
   getFullText(): string {
     return this.messages
       .map((m) => {
-        const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+        const content = contentToText(m.content);
         return `${m.role}: ${content}`;
       })
       .join("\n");

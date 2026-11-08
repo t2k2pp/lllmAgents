@@ -1,4 +1,5 @@
 import type { Message, ToolDefinition } from "../providers/base-provider.js";
+import { contentForTokenCount, IMAGE_TOKEN_ESTIMATE } from "./image-content.js";
 
 /**
  * Simple token counter using character-based estimation.
@@ -30,8 +31,9 @@ export function estimateMessageTokens(messages: Message[]): number {
   for (const msg of messages) {
     // Role overhead
     total += MESSAGE_OVERHEAD_TOKENS;
-    const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
-    total += estimateTokens(content);
+    // 画像は 1 枚を決まった数で数える (base64 の長さで数えない。 docs/in-context-vision-design.md §5)
+    const { text, images } = contentForTokenCount(msg.content);
+    total += estimateTokens(text) + images * IMAGE_TOKEN_ESTIMATE;
     if (msg.tool_calls) {
       total += estimateTokens(JSON.stringify(msg.tool_calls));
     }

@@ -14,7 +14,18 @@ import { nonTTYReader } from "../utils/non-tty-reader.js";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
 import type { LLMProvider, ToolCall, ToolDefinition, ContentPart, Message } from "../providers/base-provider.js";
-import type { ToolRegistry, ToolResult } from "../tools/tool-registry.js";
+import type { ImageAttachment, ImageInputState, ToolRegistry, ToolResult } from "../tools/tool-registry.js";
+import {
+  buildToolImageNote,
+  countLiveImages,
+  formatImageInputLine,
+  isToolImageNote,
+  KEEP_RECENT_IMAGES,
+  MAX_LIVE_IMAGES,
+  resolveImageInput,
+  retireOldImages,
+  type ToolImage,
+} from "./image-content.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import type { PermissionManager, RequestSource } from "../security/permission-manager.js";
 import { detectCotToolMismatch } from "../security/cot-tool-guard.js";
@@ -26,6 +37,7 @@ import {
   buildTaskPointerLine,
   extractConstraintsFromHandoffNote,
   isTaskHandoffExcerptMessage,
+  messageText,
   renderHandoffNoteFromTask,
   type TaskCheckpointKind,
   type TaskHandoffDoc,
@@ -621,6 +633,10 @@ export class AgentLoop {
     //    確定した後に runCheckpointMaintenance() で実行する (復元対象を誤って消さないため)。
     this.toolExecutor = new ToolExecutor(toolRegistry, permissions, hookManager, undefined, this.checkpointManager);
     this.toolExecutor.setParallelExecutionAllowed(this.maxParallelTools > 1);
+    // 画像の判定は起動時に index.ts が refreshImageInput() で行う。 それまでは unknown (画像を載せない)
+    this.toolExecutor.setImageInput(this.imageInput);
+    // vision_analyze が問いの前置きにするいまのタスクの依頼の原文 (docs/in-context-vision-design.md §9)
+    this.toolExecutor.setTaskRequestProvider(() => this.currentTaskRequestText());
     this.session = createSession(model);
     // チェックポイントは resume を跨いで安定な session.meta.id で採番する (H1)
     this.checkpointManager.rebind(this.session.meta.id);
@@ -881,6 +897,8 @@ export class AgentLoop {
     options?: { source?: RequestSource; durableResume?: DurableRunCheckpoint },
   ): Promise<void> {
     const durableResume = options?.durableResume;
+    // 接続先・モデルの切替で始めた「画像を見られるか」 の判定を待つ (古い判定で画像を載せない)
+    if (this.imageInputPending) await this.imageInputPending;
     this.currentSource = options?.source ?? "cli";
     this.runApiGate.beginRun(this.currentSource);
     this.isProcessing = true;
@@ -2626,7 +2644,8 @@ export class AgentLoop {
     const messages = this.history.getRawMessages();
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
-      if (m.role === "user") {
+      // 画像の運び役はハーネスの注入 (利用者の発言ではない) なので飛ばす
+      if (m.role === "user" && !isToolImageNote(m)) {
         const content = typeof m.content === "string" ? m.content : "";
         return /セカンド\s*(?:llm|エージェント|モデル)?|second\s*llm|サブ\s*エージェント|sub.?agent|委任|頼んで|依頼/i.test(
           content,
@@ -3553,7 +3572,7 @@ export class AgentLoop {
       { perResultTokens: budget.toolResultLimitTokens, totalTokens: budget.toolResultTotalTokens },
       toolCalls.map((c) => c.function.name),
     );
-    const scope = { filled: new Set<string>(), notes: [] as string[] };
+    const scope = { filled: new Set<string>(), notes: [] as string[], images: [] as ToolImage[] };
     const outer = this.toolBatchScope;
     this.toolBatchScope = scope;
     try {
@@ -3570,12 +3589,66 @@ export class AgentLoop {
       }
       this.toolBatchScope = outer;
       this.reportToolResultBatch(batch);
+      // 画像はその応答の結果を全部入れた後に 1 件の運び役として足す (結果の途中に挟まない。 docs/in-context-vision-design.md §4)
+      this.addToolImageNote(scope.images);
       for (const note of scope.notes) this.history.addUserMessage(note, { ephemeral: true });
     }
   }
 
   /** 応答の結果を入れている範囲 (withToolBatch)。 範囲の外では null */
-  private toolBatchScope: { filled: Set<string>; notes: string[] } | null = null;
+  private toolBatchScope: { filled: Set<string>; notes: string[]; images: ToolImage[] } | null = null;
+
+  /**
+   * ツール結果の画像を受け取る (結果を履歴に入れた直後に呼ぶ)。 メインのモデルが画像を見られないときは載せず、
+   * そのことを促しとして伝える (ツールは本来その場合に画像を返さない。 判定が途中で替わったときの守り)
+   */
+  private collectToolImages(toolName: string, images: ImageAttachment[] | undefined): void {
+    if (!images || images.length === 0) return;
+    if (this.imageInput.mode !== "on") {
+      this.addInTurnNote(
+        `[ハーネス] ${toolName} が画像 ${images.length} 枚を返しましたが、 メインのモデルは画像を見られない判定のため載せていません ` +
+          `(${this.imageInput.detail})。 vision_analyze を使ってください。`,
+      );
+      return;
+    }
+    const target = this.toolBatchScope?.images;
+    if (target) {
+      for (const image of images) target.push({ toolName, image });
+    } else {
+      this.addToolImageNote(images.map((image) => ({ toolName, image })));
+    }
+  }
+
+  /**
+   * 画像の運び役 (揮発のハーネスの user。 本文は文字の説明 + 画像) を 1 件足す。 1 回に載せるのは MAX_LIVE_IMAGES 枚まで。
+   * 足した後で生きている画像が MAX_LIVE_IMAGES 枚を超えたら、 古い画像を KEEP_RECENT_IMAGES 枚まで退役させる
+   * (送信済みの書き換えなので理由 image-retire を申告する。 毎回は書き換えないよう、 上限を超えたときだけまとめて行う)
+   */
+  private addToolImageNote(images: readonly ToolImage[]): void {
+    if (images.length === 0) return;
+    const shown = images.slice(0, MAX_LIVE_IMAGES);
+    const omitted = images.slice(MAX_LIVE_IMAGES);
+    this.history.addUserMessage(buildToolImageNote(shown, omitted), { ephemeral: true });
+    const raw = this.history.getRawMessages();
+    if (countLiveImages(raw) <= MAX_LIVE_IMAGES) return;
+    const retired = retireOldImages(raw, KEEP_RECENT_IMAGES, `生きている画像が ${MAX_LIVE_IMAGES} 枚を超えたため`);
+    if (retired.retired === 0) return;
+    this.history.replaceMessages(retired.messages, "image-retire");
+    logger.info(`[image-input] 古い画像 ${retired.retired} 枚を文脈から外しました (image-retire)`);
+  }
+
+  /** いまのタスクの依頼の原文 (引き継ぎ文書から。 無ければ今の依頼の発言)。 長いときは頭を残して切る */
+  private currentTaskRequestText(): string | undefined {
+    const doc = this.taskHandoff?.activeDoc(this.history);
+    const text = doc
+      ? doc.requests.map((r) => r.text).join("\n")
+      : this.currentRequestMessage
+        ? messageText(this.currentRequestMessage)
+        : "";
+    const trimmed = text.trim();
+    if (trimmed.length === 0) return undefined;
+    return trimmed.length > 2000 ? `${trimmed.slice(0, 2000)}…` : trimmed;
+  }
 
   /**
    * ハーネスの in-turn の促し (揮発の user) を足す。 ツール結果を入れている範囲の中なら、 その応答の結果を全部入れた後に足す
@@ -3713,6 +3786,8 @@ export class AgentLoop {
 
     // 1 件の上限と同じ応答の合計の上限に合わせて、 頭と尻尾を残して入れる (tool-result-limit.ts)
     this.addLimitedToolResult(batch, toolCall, resultContent);
+    // 結果の画像は応答の結果を全部入れた後に 1 件にまとめて載せる (withToolBatch)
+    this.collectToolImages(toolName, result.images);
 
     // P0-A: 失敗時に sliding-window で「同じ轍」 を検出して self-check 注入
     if (!result.success) {
@@ -3845,6 +3920,7 @@ export class AgentLoop {
 
         // 1 件の上限と同じ応答の合計の上限 (並列ルートも settled の順 = toolCalls の順に数える)
         this.addLimitedToolResult(batch, toolCall, resultContent);
+        this.collectToolImages(toolCall.function.name, result.images);
 
         // P0-A: 並列ルートでも同じ sliding-window 失敗検出を適用
         if (!result.success) {
@@ -4411,7 +4487,8 @@ export class AgentLoop {
     // キャッシュを使えず、 全部を読み直すことになる (docs/context-reduction-redesign.md §9.4)
     for (const msg of sessionData.messages) {
       if (msg.role === "user") {
-        this.history.addUserMessage(typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content), {
+        // 配列の本文 (画像付きの発言・画像の運び役。 保存時に画像は置き換え文になっている) は配列のまま戻す
+        this.history.addUserMessage(msg.content, {
           ephemeral: msg.ephemeral === true,
           contextNote: msg.contextNote,
         });
@@ -4694,6 +4771,8 @@ export class AgentLoop {
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, model)} (${this.capability.reason})`);
     // model は送り方の設定に入る。 先読みの並びは古くなる (§9.5)
     this.invalidatePrewarm("model を替えたため");
+    // 画像を見られるかはモデルごとに違う。 判定し直す (次の run() の頭で待つ)
+    void this.refreshImageInput();
   }
 
   /**
@@ -4725,6 +4804,8 @@ export class AgentLoop {
     // 接続先・モデルが替わりうるので、 出力の見込み (予約 R) は作り直す
     this.recentMainOutputs = [];
     logger.info(`[capability] ${formatCapabilityLabel(this.capability, this.model)} (${this.capability.reason})`);
+    // 画像を見られるかは接続先・モデルごとに違う。 判定し直す (次の run() の頭で待つ)
+    void this.refreshImageInput();
   }
 
   /**
@@ -4735,6 +4816,43 @@ export class AgentLoop {
     const liveModel = model ?? this.model;
     this.liveEndpoint = { ...endpoint, model: liveModel };
     this.liveBinding = makeLiveBinding(this.liveEndpoint, liveModel);
+  }
+
+  // ─── メインのモデルが画像を見られるか (docs/in-context-vision-design.md §2) ───
+
+  /** いまの判定 (判定前・判定中は unknown) */
+  private imageInput: ImageInputState = { mode: "unknown", source: "provider", detail: "まだ判定していません" };
+  /** 走っている判定 (接続先・モデルの切替で始める。 run() の頭で待つ) */
+  private imageInputPending: Promise<ImageInputState> | null = null;
+
+  /** いまの判定 (/status の表示・テスト用) */
+  getImageInput(): ImageInputState {
+    return this.imageInput;
+  }
+
+  /**
+   * メインのモデルが画像を見られるかを判定し直す。 config の mainLLM.vision (auto/on/off) が on/off ならそれ、
+   * auto なら provider に問う。 判定できなければ unknown (理由つき)。 起動時に index.ts が待って結果を表示する
+   */
+  refreshImageInput(): Promise<ImageInputState> {
+    const provider = this.rawProvider;
+    const model = this.model;
+    const preference = this.liveEndpoint?.vision;
+    const pending: Promise<ImageInputState> = resolveImageInput(provider, model, preference).then((state) => {
+      // 判定の間に接続先・モデルが替わっていたら、 古い判定で上書きしない
+      if (this.imageInputPending === pending) {
+        this.imageInput = state;
+        this.toolExecutor.setImageInput(state);
+        this.imageInputPending = null;
+        logger.info(`[image-input] ${formatImageInputLine(state)}`);
+      }
+      return state;
+    });
+    this.imageInputPending = pending;
+    // 判定中は「判定中」 として扱う (前のモデルの判定を使わない)
+    this.imageInput = { mode: "unknown", source: "provider", detail: `${model}: 判定中` };
+    this.toolExecutor.setImageInput(this.imageInput);
+    return pending;
   }
 
   /**

@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { writeFileAtomic } from "../utils/atomic-file.js";
+import { countImageParts, retireImagesInMessage } from "./image-content.js";
 import type { Message } from "../providers/base-provider.js";
 import type { TodoItem } from "../tools/definitions/todo-write.js";
 import type { GoalDefinition, EvaluationRecord } from "./goal-slot.js";
@@ -185,8 +186,13 @@ export function saveSession(session: SessionData): void {
   }
 
   const filePath = path.join(SESSION_DIR, `${session.meta.id}.json`);
+  // 画像 (base64) はセッションに残さない: 置き換え文にして書く (docs/in-context-vision-design.md §7)。
+  // 再開すると画像は見えなくなるが、 置き換え文が file_read で読み直す手を示す。 メモリ上の履歴は書き換えない
+  const stored = session.messages.some((m) => countImageParts(m) > 0)
+    ? { ...session, messages: session.messages.map((m) => retireImagesInMessage(m, "セッションの保存")) }
+    : session;
   // 書き込み途中のプロセス死でセッションが破損しないようアトミックに書く (PR-02)
-  writeFileAtomic(filePath, JSON.stringify(session, null, 2));
+  writeFileAtomic(filePath, JSON.stringify(stored, null, 2));
 }
 
 export function loadSession(id: string): SessionData | null {

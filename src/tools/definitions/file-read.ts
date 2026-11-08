@@ -1,6 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ToolHandler, ToolResult } from "../tool-registry.js";
+import type { ImageMimeType, ToolExecutionContext, ToolHandler, ToolResult } from "../tool-registry.js";
+import {
+  attachmentFromBytes,
+  imageInputUnavailableNote,
+  imageMimeFromExtension,
+  MAX_IMAGE_BYTES,
+  readImageSize,
+} from "../image-attachment.js";
 import { createSharedWorkspace, resolveWorkspacePath } from "../../agent/workspace-context.js";
 import { detectLineEnding, toLF } from "../line-endings.js";
 
@@ -12,7 +19,8 @@ export const fileReadTool: ToolHandler = {
       name: "file_read",
       description:
         "ファイルの内容を行番号付きで読み取る。\n" +
-        "[使うべき場面] テキスト/コードファイルの内容確認、既存ファイルの編集前の現状把握。\n" +
+        "[使うべき場面] テキスト/コードファイルの内容確認、既存ファイルの編集前の現状把握。 " +
+        "画像 (.png/.jpg/.jpeg/.webp) を読むと、 メインのモデルが画像を見られる設定なら画像そのものが会話に載り、 自分の目で確かめられる (描画結果の検証など)。\n" +
         "[使うべきでない] (1) ディレクトリ一覧 → glob を使う。 " +
         "(2) ファイルを書き換える → file_edit/file_write。 " +
         "(3) 大量ファイルの横断調査 → grep。\n" +
@@ -61,6 +69,11 @@ export const fileReadTool: ToolHandler = {
       };
     }
 
+    // 画像 (PNG/JPEG/WebP): メインのモデルが画像を見られるときは画像そのものを結果に付ける
+    // (docs/in-context-vision-design.md §8)。 見られないときはそのことを明示する (文字として読まない)
+    const imageMime = imageMimeFromExtension(path.extname(filePath));
+    if (imageMime) return readImageFile(filePath, imageMime, stat.size, context);
+
     const raw = fs.readFileSync(filePath, "utf-8");
     // 表示は LF に揃える。 file_edit / file_write はファイルの改行コードを保って書くので、
     // モデルが \r を指定に含める必要は無い (docs/file-tools-line-endings.md)
@@ -95,6 +108,36 @@ export const fileReadTool: ToolHandler = {
     return { success: true, output: numbered + truncatedNote + eolNote };
   },
 };
+
+/** 画像のファイルを読む: 見られるなら短い説明 + 画像の添付、 見られないならその旨 (理由と vision_analyze の案内) */
+function readImageFile(
+  filePath: string,
+  mimeType: ImageMimeType,
+  size: number,
+  context: ToolExecutionContext | undefined,
+): ToolResult {
+  if (size > MAX_IMAGE_BYTES) {
+    return {
+      success: false,
+      output: "",
+      error: `画像が大きすぎます (${size} バイト > 上限 ${MAX_IMAGE_BYTES} バイト): ${filePath}。 縮小して書き出し直してください。`,
+      errorKind: "permanent",
+    };
+  }
+  const bytes = fs.readFileSync(filePath);
+  const dims = readImageSize(bytes);
+  const header =
+    `[file_read] 画像 ${filePath} (${mimeType}, ${bytes.length} バイト` +
+    (dims ? `, ${dims.width}×${dims.height} px)` : ", 大きさは読めず)");
+  if (context?.imageInput?.mode !== "on") {
+    return { success: true, output: `${header}\n${imageInputUnavailableNote(context)}` };
+  }
+  return {
+    success: true,
+    output: `${header}\n画像はこのツール結果の後に添付します。 自分の目で中身を確かめてください。`,
+    images: [attachmentFromBytes(bytes, mimeType, filePath)],
+  };
+}
 
 /**
  * File not found 時の自助情報生成 (Phase 5-A1)

@@ -2,9 +2,40 @@ import type { ToolDefinition } from "../providers/base-provider.js";
 import type { AncestorTypes } from "../agent/delegation-context.js";
 import type { WorkspaceContext } from "../agent/workspace-context.js";
 
+/** ツール結果に付ける画像の形式 (docs/in-context-vision-design.md §3) */
+export type ImageMimeType = "image/png" | "image/jpeg" | "image/webp";
+
+/** ツール結果に付ける画像 1 枚。 検査は src/tools/image-attachment.ts */
+export interface ImageAttachment {
+  mimeType: ImageMimeType;
+  /** base64 (data URL の前置きは付けない) */
+  data: string;
+  /** 何の画像か (ファイルのパス・MCP のツール名など)。 会話の見出しと、 退役後の置き換え文に使う */
+  label: string;
+}
+
+/**
+ * メインのモデルが画像を見られるか (起動時と接続先・モデルの切替で判定する。 docs/in-context-vision-design.md §2)。
+ * - on: ツール結果の画像を会話に載せる
+ * - off: 載せない (ツールは理由と vision_analyze を案内する文を返す)
+ * - unknown: 判定できなかった (provider の失敗)。 載せずに理由を示す
+ */
+export interface ImageInputState {
+  mode: "on" | "off" | "unknown";
+  /** 決め手: config の明示 (mainLLM.vision) か provider の判定か */
+  source: "config" | "provider";
+  /** 表示用の説明 (モデル名・判定の理由・失敗の中身) */
+  detail: string;
+}
+
 export interface ToolResult {
   success: boolean;
   output: string;
+  /**
+   * 結果に付ける画像。 メインのモデルが画像を見られるときだけツールが入れる。 AgentLoop が同じ応答の結果を
+   * 全部入れた後に 1 件のハーネスの user メッセージとして会話に載せる (docs/in-context-vision-design.md §4)
+   */
+  images?: ImageAttachment[];
   error?: string;
   /**
    * 失敗の種別 (P4 circuit-breaker 用)。 "permanent" = 同一 params で再試行しても結論が
@@ -40,6 +71,13 @@ export interface ToolExecutionContext {
   source?: "cli" | "discord" | "slack";
   /** agent固有のfilesystem実行境界。sub-agent worktreeではprocess.cwd()と異なる。 */
   workspace?: WorkspaceContext;
+  /**
+   * メインのモデルが画像を見られるか。 メインの AgentLoop だけが入れる。 無い経路 (サブエージェント等) は
+   * 画像を会話に載せない (docs/in-context-vision-design.md §2)
+   */
+  imageInput?: ImageInputState;
+  /** いまのタスクの依頼の原文 (vision_analyze が問いの前置きに使う。 取れなければ無し) */
+  taskRequest?: string;
 }
 
 export interface ToolHandler {

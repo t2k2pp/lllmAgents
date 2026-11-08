@@ -1,7 +1,7 @@
 import { isRateLimitError } from "../providers/utils/rate-limit.js";
 import chalk from "chalk";
 import type { ToolCall } from "../providers/base-provider.js";
-import type { ToolRegistry, ToolResult } from "./tool-registry.js";
+import type { ImageInputState, ToolRegistry, ToolResult } from "./tool-registry.js";
 import type { PermissionManager, RequestSource } from "../security/permission-manager.js";
 import { formatToolSummary } from "../security/permission-manager.js";
 import type { HookManager } from "../hooks/hook-manager.js";
@@ -58,6 +58,19 @@ export class ToolExecutor {
 
   setParallelExecutionAllowed(allowed: boolean): void {
     this.parallelExecutionAllowed = allowed;
+  }
+
+  /** メインのモデルが画像を見られるか (メインの AgentLoop だけが入れる。 docs/in-context-vision-design.md §2) */
+  private imageInput: ImageInputState | undefined;
+  /** いまのタスクの依頼の原文を返す関数 (vision_analyze の前置き用) */
+  private taskRequestProvider: (() => string | undefined) | undefined;
+
+  setImageInput(state: ImageInputState | undefined): void {
+    this.imageInput = state;
+  }
+
+  setTaskRequestProvider(provider: (() => string | undefined) | undefined): void {
+    this.taskRequestProvider = provider;
   }
 
   constructor(
@@ -184,7 +197,13 @@ export class ToolExecutor {
         };
       }
       logger.debug(`Executing tool: ${toolName}`, params);
-      const result = await handler.execute(params, { ancestors: this.ancestors, source, workspace: this.workspace });
+      const result = await handler.execute(params, {
+        ancestors: this.ancestors,
+        source,
+        workspace: this.workspace,
+        imageInput: this.imageInput,
+        taskRequest: this.taskRequestProvider?.(),
+      });
 
       if (!result.success && isRateLimitError(result.error)) {
         result.abortExecution = true;

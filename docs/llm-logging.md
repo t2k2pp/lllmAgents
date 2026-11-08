@@ -146,6 +146,7 @@ interface OpsLogEntry {
 - API キー (`x-api-key` / `Authorization`) は常にマスク (`***`)
 - TRACE で wire body を出すときも、Anthropic では平文だが HTTP ヘッダの認証情報はマスク
 - ユーザープロンプト本文も機密情報を含み得る。ローカル保存であっても、機密キー名・Bearer token・主要API token形式は常にマスクする
+- 画像の data URL (`data:image/…;base64,…`) は `[image <mime> <bytes>B]` に置き換えて書く (`redactImageDataUrls`。 [in-context-vision-design.md](in-context-vision-design.md) §7)
 
 ## 設定
 

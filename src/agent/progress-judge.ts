@@ -14,10 +14,11 @@
  * - tool 非依存、 すべての response_complete に発火可能
  */
 
-import type { LLMProvider, ToolCall } from "../providers/base-provider.js";
+import type { ContentPart, LLMProvider, ToolCall } from "../providers/base-provider.js";
 import { collectResponse } from "../providers/base-provider.js";
 import * as logger from "../utils/logger.js";
 import { sideCall } from "./side-call.js";
+import { contentToText } from "./image-content.js";
 
 export type ProgressVerdict = "answered" | "took_step" | "stalled";
 
@@ -106,6 +107,13 @@ export function parseJudgeResponse(raw: string): JudgeProgressResult {
  * 直近のツール履歴 + 結果から軽量要約を作る。
  * 案 (ii): ツール名 + 引数の短縮 + 結果サイズ。 元 chat 履歴をそのまま渡すより軽い。
  */
+/** 本文を文字にする (画像は置き換え文。 base64 を要約の材料に入れない) */
+function textOfUnknownContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return contentToText(content as ContentPart[]);
+  return JSON.stringify(content);
+}
+
 export function buildRecentSummary(
   messages: Array<{ role: string; content: unknown; tool_calls?: ToolCall[] }>,
   maxTurns: number = 5,
@@ -122,11 +130,11 @@ export function buildRecentSummary(
         lines.push(`call: ${tc.function.name}(${args}${args.length >= 100 ? "..." : ""})`);
       }
     } else if (m.role === "tool") {
-      const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      const content = textOfUnknownContent(m.content);
       const summary = content.replace(/\s+/g, " ").slice(0, 100);
       lines.push(`  → ${summary}${content.length >= 100 ? "..." : ""}`);
     } else if (m.role === "user") {
-      const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      const content = textOfUnknownContent(m.content);
       // [ハーネス通知] 等のシステム inject は要約に含めない (ノイズ)
       if (content.startsWith("[ハーネス") || content.startsWith("[自己点検")) continue;
       const summary = content.replace(/\s+/g, " ").slice(0, 100);

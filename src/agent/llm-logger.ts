@@ -225,11 +225,24 @@ function isSecretKey(key: string): boolean {
   );
 }
 
-/** ログ用に機密値と極端に長い文字列を除去する。入力オブジェクトは変更しない。 */
+/** 画像の data URL (base64)。 ログには形式と大きさだけを書く (docs/in-context-vision-design.md §7) */
+const IMAGE_DATA_URL_PATTERN = /data:(image\/[A-Za-z0-9.+-]+);base64,([A-Za-z0-9+/]*={0,2})/g;
+
+/** 文字列の中の画像の data URL を `[image <mime> <bytes>B]` に置き換える */
+export function redactImageDataUrls(text: string): string {
+  if (!text.includes(";base64,")) return text;
+  return text.replace(IMAGE_DATA_URL_PATTERN, (_m, mime: string, b64: string) => {
+    const padding = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
+    const bytes = Math.max(0, Math.floor((b64.length * 3) / 4) - padding);
+    return `[image ${mime} ${bytes}B]`;
+  });
+}
+
+/** ログ用に機密値・画像の base64・極端に長い文字列を除去する。入力オブジェクトは変更しない。 */
 export function sanitizeLogValue(value: unknown, key = "", seen = new WeakSet<object>()): unknown {
   if (isSecretKey(key)) return "[REDACTED]";
   if (typeof value === "string") {
-    let sanitized = value;
+    let sanitized = redactImageDataUrls(value);
     for (const pattern of SECRET_VALUE_PATTERNS) sanitized = sanitized.replace(pattern, "[REDACTED]");
     return sanitized.length > MAX_STRING_CHARS
       ? `${sanitized.slice(0, MAX_STRING_CHARS)}\n... [log value truncated]`

@@ -66,6 +66,7 @@ Status の記載が無いものは `implemented`。
 | [handoff-design.md](handoff-design.md) | | `/handoff` (引き継ぎメモを残してリセット)・メモの形 |
 | [task-handoff-design.md](task-handoff-design.md) | in-progress | タスクごとの引き継ぎ文書 (正本)・別の依頼で前のタスクを 1 行に畳む (第 1 段 実装済み。 第 2 段 = 要約を文書の抜粋に置き換える は未実装) |
 | [context-inspector.md](context-inspector.md) | | `/context` のドリルダウン |
+| [in-context-vision-design.md](in-context-vision-design.md) | implemented | メインのモデルがツール結果の画像を自分で見る (`ToolResult.images`・`mainLLM.vision`・画像の退役・ログとセッションに base64 を残さない) |
 | [evaluation-loop.md](evaluation-loop.md) | | 評価ループ (書き込み後の Evaluator・`/try`) |
 | [tool-call-salvage-pipe-format-design.md](tool-call-salvage-pipe-format-design.md) | | ツール呼び出しのサルベージ (`<\|tool\|>call:` 形式) |
 | [input-compression-design.md](input-compression-design.md) | | opt-in 入力圧縮 (`/compress-input`) |
