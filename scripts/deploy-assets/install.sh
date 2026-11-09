@@ -7,7 +7,7 @@
 
 set -e
 
-SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="$HOME/.local/bin"
 SKILLS_DST="$HOME/.localllm/skills"
 AGENTS_DST="$INSTALL_DIR/agents"
@@ -22,10 +22,10 @@ echo
 
 # localllm.exe (Windows) または localllm (Unix) を探す
 EXE=""
-if [[ -f "$SRC_DIR/localllm.exe" ]]; then
+if [ -f "$SRC_DIR/localllm.exe" ]; then
   EXE="$SRC_DIR/localllm.exe"
   DST_NAME="localllm.exe"
-elif [[ -f "$SRC_DIR/localllm" ]]; then
+elif [ -f "$SRC_DIR/localllm" ]; then
   EXE="$SRC_DIR/localllm"
   DST_NAME="localllm"
 else
@@ -34,11 +34,11 @@ else
 fi
 
 mkdir -p "$INSTALL_DIR"
-cp "$EXE" "$INSTALL_DIR/$DST_NAME"
+cp -p "$EXE" "$INSTALL_DIR/$DST_NAME"
 chmod +x "$INSTALL_DIR/$DST_NAME" 2>/dev/null || true
 echo "[OK] copied $DST_NAME to $INSTALL_DIR"
 
-if [[ -d "$SRC_DIR/skills" ]]; then
+if [ -d "$SRC_DIR/skills" ]; then
   mkdir -p "$SKILLS_DST"
   cp -R "$SRC_DIR/skills/." "$SKILLS_DST/"
   echo "[OK] copied skills to $SKILLS_DST"
@@ -46,7 +46,7 @@ else
   echo "[WARN] skills folder not found, skipped"
 fi
 
-if [[ -d "$SRC_DIR/agents" ]]; then
+if [ -d "$SRC_DIR/agents" ]; then
   mkdir -p "$AGENTS_DST"
   cp -R "$SRC_DIR/agents/." "$AGENTS_DST/"
   echo "[OK] copied agents to $AGENTS_DST"

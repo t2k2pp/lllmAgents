@@ -14,7 +14,17 @@
 //  4. install スクリプトを流して導入済みの exe を更新するか尋ねる (対話できないときは知らせるだけ)
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, cpSync, rmSync, readdirSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  cpSync,
+  chmodSync,
+  rmSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
@@ -104,7 +114,7 @@ function runBuildExe() {
 function copyExe() {
   if (!existsSync(EXE_SRC)) throw new Error(`exe not found: ${EXE_SRC}`);
   mkdirSync(DEPLOY, { recursive: true });
-  cpSync(EXE_SRC, EXE_DST);
+  cpSync(EXE_SRC, EXE_DST, { preserveTimestamps: true });
   const sz = statSync(EXE_DST).size;
   log(`exe copied (${Math.round(sz / (1024 * 1024))}MB)`);
 }
@@ -134,12 +144,15 @@ function copyAgents() {
   log(`agents copied (${count} agents)`);
 }
 
-function copyAsset(src, dst, label) {
+function copyAsset(src, dst, label, executable = false) {
   if (!existsSync(src)) {
     log(`WARN: ${label} not found at ${src}`);
     return;
   }
   cpSync(src, dst);
+  if (executable && process.platform !== "win32") {
+    chmodSync(dst, 0o755);
+  }
 }
 
 function writeMeta() {
@@ -175,7 +188,7 @@ function main() {
   // install スクリプトと README は scripts/assets/ に予め配置済みのものをコピー
   const assetsDir = join(__dirname, "deploy-assets");
   copyAsset(join(assetsDir, "install.bat"), join(DEPLOY, "install.bat"), "install.bat");
-  copyAsset(join(assetsDir, "install.sh"), join(DEPLOY, "install.sh"), "install.sh");
+  copyAsset(join(assetsDir, "install.sh"), join(DEPLOY, "install.sh"), "install.sh", true);
   copyAsset(join(assetsDir, "README.md"), join(DEPLOY, "README.md"), "README.md");
 
   writeMeta();
@@ -239,7 +252,7 @@ async function offerInstall() {
   const r =
     process.platform === "win32"
       ? spawnSync("cmd.exe", ["/d", "/c", script], { cwd: DEPLOY, stdio: "inherit" })
-      : spawnSync("sh", [script], { cwd: DEPLOY, stdio: "inherit" });
+      : spawnSync("bash", [script], { cwd: DEPLOY, stdio: "inherit" });
   if (r.status !== 0) {
     log(`error: ${script} が失敗しました (code ${r.status ?? r.error?.message})`);
     return 1;
